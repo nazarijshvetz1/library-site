@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#173f35" />
+    <meta name="description" content="Каталог навчальних матеріалів бібліотеки ліцею: пошук, фільтри, кількість і розміщення примірників." />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Бібліотека Міжнародного ліцею МАУП" />
+    <meta property="og:description" content="Знайдіть потрібний навчальний матеріал за кілька секунд." />
+    <meta property="og:image" content="{{SITE_ORIGIN}}/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Бібліотека Міжнародного ліцею МАУП" />
+    <meta name="twitter:description" content="Каталог навчальних матеріалів для вчителів і бібліотекаря." />
+    <meta name="twitter:image" content="{{SITE_ORIGIN}}/og.png" />
+    <title>Бібліотека Міжнародного ліцею МАУП</title>
+    <link rel="icon" type="image/png" href="/library-logo.png" />
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/brand.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#catalog">Перейти до каталогу</a>
+
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="Єдина бібліотека ліцею — на головну">
+        <img class="brand-logo" src="/library-logo.png" alt="" />
+        <span><strong>Єдина бібліотека</strong><small>Міжнародний ліцей МАУП</small></span>
+      </a>
+      <nav aria-label="Головна навігація">
+        <a class="nav-active" href="#catalog">Каталог</a>
+        <a href="#how-it-works">Як користуватися</a>
+      </nav>
+      <button class="librarian-button" id="librarianButton" type="button"><span aria-hidden="true">↗</span> Для бібліотекаря</button>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-orbit hero-orbit-one" aria-hidden="true"></div>
+        <div class="hero-orbit hero-orbit-two" aria-hidden="true"></div>
+        <div class="hero-copy">
+          <p class="eyebrow"><span></span> Міжнародний ліцей МАУП · 1–11 класи</p>
+          <h1 id="hero-title">Потрібний посібник — <em>за кілька секунд</em></h1>
+          <p class="hero-lead">Знайдіть підручники, робочі зошити, атласи й матеріали іноземними мовами та одразу перевірте їх наявність.</p>
+          <form class="hero-search" id="heroSearchForm" role="search">
+            <label class="sr-only" for="heroSearch">Пошук у каталозі</label>
+            <span aria-hidden="true">⌕</span>
+            <input id="heroSearch" type="search" placeholder="Назва, автор, предмет або CAT-ID" autocomplete="off" />
+            <button type="submit">Знайти</button>
+          </form>
+          <div class="quick-links" aria-label="Швидкий пошук">
+            <span>Спробуйте:</span>
+            <button type="button" data-quick="Підручники">Підручники</button>
+            <button type="button" data-quick="Англійська мова">Англійська мова</button>
+            <button type="button" data-quick="Математика">Математика</button>
+          </div>
+        </div>
+
+        <aside class="hero-showcase" aria-label="Приклад матеріалів у каталозі">
+          <div class="showcase-label"><span>Добірка</span><strong>Для 7 класу</strong></div>
+          <div class="book-stack">
+            <img src="https://raw.githubusercontent.com/nazarijshvetz1/library-covers/main/covers/CAT-0446.jpg" alt="Обкладинка підручника з алгебри" />
+            <img src="https://raw.githubusercontent.com/nazarijshvetz1/library-covers/main/covers/CAT-0451.jpg" alt="Обкладинка підручника з фізики" />
+            <img src="https://raw.githubusercontent.com/nazarijshvetz1/library-covers/main/covers/CAT-0455.jpg" alt="Обкладинка підручника з біології" />
+          </div>
+          <div class="showcase-footer">
+            <span class="status-dot"></span>
+            <span><strong>3 матеріали</strong><small>є в наявності</small></span>
+            <button type="button" data-quick="7">Переглянути <span aria-hidden="true">→</span></button>
+          </div>
+        </aside>
+      </section>
+
+      <section class="stats" aria-label="Бібліотека у цифрах">
+        <div><strong id="materialStat">1 278</strong><span>матеріалів</span></div>
+        <div><strong id="copiesStat">18 825</strong><span>примірників</span></div>
+        <div><strong id="locationsStat">15</strong><span>місць зберігання</span></div>
+        <div><strong id="rubricsStat">12</strong><span>тематичних рубрик</span></div>
+      </section>
+
+      <section class="catalog-section" id="catalog" aria-labelledby="catalog-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow dark"><span></span> Каталог</p>
+            <h2 id="catalog-title">Навчальні матеріали</h2>
+            <p>Перша робоча версія на основі перевіреної службової бази.</p>
+            <div class="data-sync" id="dataSync" data-state="snapshot" role="status" aria-live="polite">
+              <span class="data-sync-dot" aria-hidden="true"></span>
+              <span id="dataSyncText">Показано перевірену копію бази</span>
+              <button id="syncRetry" type="button" hidden>Оновити</button>
+            </div>
+          </div>
+          <div class="catalog-actions">
+            <span class="prototype-badge">Попередній перегляд</span>
+            <button class="filter-toggle" id="filterToggle" type="button" aria-expanded="false" aria-controls="filters">Фільтри</button>
+          </div>
+        </div>
+
+        <div class="catalog-layout">
+          <aside class="filters" id="filters" aria-label="Фільтри каталогу">
+            <div class="filter-header"><strong>Фільтри</strong><button type="button" id="clearFilters">Очистити</button></div>
+            <label>Клас<select id="gradeFilter"><option value="">Усі класи</option></select></label>
+            <label>Рубрика<select id="rubricFilter"><option value="">Усі рубрики</option></select></label>
+            <label>Предмет<select id="subjectFilter"><option value="">Усі предмети</option></select></label>
+            <label>Тип видання<select id="typeFilter"><option value="">Усі типи</option></select></label>
+            <label class="availability-check">
+              <input id="availableFilter" type="checkbox" />
+              <span><strong>Лише в наявності</strong><small>Приховати матеріали з нульовим залишком</small></span>
+            </label>
+            <div class="filter-note"><span aria-hidden="true">i</span><p><strong>Дані захищені</strong>Каталог працює лише для перегляду й не змінює Google-таблицю.</p></div>
+          </aside>
+
+          <div class="results-panel">
+            <div class="results-toolbar">
+              <p id="resultsCount" aria-live="polite">Завантаження каталогу…</p>
+              <label>Сортування
+                <select id="sortSelect">
+                  <option value="recommended">Рекомендоване</option>
+                  <option value="title">За назвою</option>
+                  <option value="grade">За класом</option>
+                  <option value="quantity">За кількістю</option>
+                </select>
+              </label>
+            </div>
+            <div class="active-filters" id="activeFilters" aria-live="polite"></div>
+            <div class="material-grid" id="materialGrid"></div>
+            <div class="empty-state" id="emptyState" hidden>
+              <div aria-hidden="true">⌕</div><h3>Матеріалів не знайдено</h3><p>Спробуйте змінити пошуковий запит або очистити фільтри.</p><button type="button" data-clear>Очистити фільтри</button>
+            </div>
+            <button class="load-more" id="loadMore" type="button">Показати ще матеріали</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="how-it-works" id="how-it-works" aria-labelledby="how-title">
+        <div><p class="eyebrow light"><span></span> Простий пошук</p><h2 id="how-title">Від запиту до потрібної полиці</h2></div>
+        <ol>
+          <li><span>01</span><strong>Знайдіть</strong><p>Введіть назву, автора, предмет або CAT-ID.</p></li>
+          <li><span>02</span><strong>Уточніть</strong><p>Оберіть клас, рубрику та тип видання.</p></li>
+          <li><span>03</span><strong>Перевірте</strong><p>Відкрийте картку й перегляньте кількість та розміщення.</p></li>
+        </ol>
+      </section>
+    </main>
+
+    <footer>
+      <a class="brand footer-brand" href="#top"><img class="brand-logo" src="/library-logo.png" alt="" /><span><strong>Єдина бібліотека</strong><small>Міжнародний ліцей МАУП</small></span></a>
+      <p>Каталог навчальних матеріалів · Демонстраційна версія</p>
+    </footer>
+
+    <dialog class="material-dialog" id="materialDialog">
+      <button class="dialog-close" type="button" aria-label="Закрити">×</button>
+      <div id="dialogContent"></div>
+    </dialog>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/config.js"></script>
+    <script src="/catalog-data.js"></script>
+    <script src="/balance-data.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

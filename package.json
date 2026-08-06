@@ -1,0 +1,14 @@
+{
+  "name": "liceum-library-catalog",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare:data": "node scripts/prepare-data.mjs",
+    "configure:api": "node scripts/set-api-url.mjs",
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "build:pages": "node scripts/build-pages.mjs",
+    "test": "node scripts/build.mjs && node scripts/build-pages.mjs && node --test tests/site.test.mjs tests/apps-script-runtime.test.mjs"
+  }
+}
