@@ -28,6 +28,7 @@
       </a>
       <nav aria-label="Головна навігація">
         <a class="nav-active" href="#catalog">Каталог</a>
+        <a href="#collections">Добірки</a>
         <a href="#how-it-works">Як користуватися</a>
       </nav>
       <button class="librarian-button" id="librarianButton" type="button"><span aria-hidden="true">↗</span> Для бібліотекаря</button>
@@ -75,6 +76,17 @@
         <div><strong id="copiesStat">18 825</strong><span>примірників</span></div>
         <div><strong id="locationsStat">15</strong><span>місць зберігання</span></div>
         <div><strong id="rubricsStat">12</strong><span>тематичних рубрик</span></div>
+      </section>
+
+      <section class="collections-section" id="collections" aria-labelledby="collections-title">
+        <div class="collections-heading">
+          <div>
+            <p class="eyebrow dark"><span></span> Для вчителів</p>
+            <h2 id="collections-title">Швидкі добірки</h2>
+          </div>
+          <p>Оберіть готову добірку — каталог одразу покаже відповідні матеріали.</p>
+        </div>
+        <div class="collection-grid" id="collectionGrid" aria-live="polite"></div>
       </section>
 
       <section class="catalog-section" id="catalog" aria-labelledby="catalog-title">
@@ -154,6 +166,6 @@
     <script src="/config.js"></script>
     <script src="/catalog-data.js"></script>
     <script src="/balance-data.js"></script>
-    <script src="/app.js"></script>
+    <script type="module" src="/app.js"></script>
   </body>
 </html>
