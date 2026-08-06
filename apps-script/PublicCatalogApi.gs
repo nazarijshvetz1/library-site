@@ -8,7 +8,7 @@
 
 var PUBLIC_CATALOG_CONFIG = Object.freeze({
   spreadsheetId: "18SEyo-tAJ8uHoAFMrYbiaGMtmXjhiscQGcYTpJrNtEI",
-  cachePrefix: "public-catalog-v1",
+  cachePrefix: "public-catalog-v2",
   cacheSeconds: 300,
   cacheChunkCharacters: 40000,
   excludedLocationIds: ["LOC-007", "LOC-008"],
@@ -58,7 +58,7 @@ function buildPublicCatalogPayload_() {
   var covers = readCovers_(coversSheet);
   var locationDirectory = readLocations_(locationsSheet);
   var stock = readStock_(balancesSheet, locationDirectory);
-  var rows = readRows_(materialsSheet, 21);
+  var rows = readRows_(materialsSheet, 25);
   var materials = [];
   var rubrics = {};
   var copies = 0;
@@ -83,6 +83,7 @@ function buildPublicCatalogPayload_() {
       title: title,
       author: text_(row[7]),
       year: year_(row[8]),
+      isbn: isbn_(row[24] || row[9]),
       cover: covers[id] || "",
       quantity: itemStock.total,
       stock: itemStock,
@@ -206,6 +207,11 @@ function grade_(value) {
 function year_(value) {
   var match = text_(value).match(/(?:19|20)\d{2}/);
   return match ? Number(match[0]) : "";
+}
+
+function isbn_(value) {
+  var normalized = text_(value).toUpperCase().replace(/[\s-]+/g, "");
+  return /^(?:\d{13}|\d{9}[\dX])$/.test(normalized) ? normalized : "";
 }
 
 function positiveInteger_(value) {

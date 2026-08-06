@@ -1,0 +1,40 @@
+name: Verify library site
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-library-site-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run catalog and private Sites checks
+        run: npm test
+
+      - name: Preserve validated private Sites build
+        uses: actions/upload-artifact@v4
+        with:
+          name: private-sites-dist-${{ github.event.pull_request.number || github.run_number }}
+          path: dist
+          if-no-files-found: error
+          retention-days: 3
