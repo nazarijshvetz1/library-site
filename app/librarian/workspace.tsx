@@ -476,9 +476,2440 @@ export default function LibrarianWorkspace({
       setSubmitState({
         phase: "saving",
         message: action === "submit"
-          ? "–ù–∞–¥—Å–∏–ª–∞—î–º–æ —á–µ—Ä–Ω–µ—Ç–∫—É –Ω–∞ –ø–µ—Ä–µ–≤—ñ—Ä–∫—É‚Ä¶"ﬂç7“⁄$z{-ÆÈ‹j◊ù&WGW&‚GóVˆb&ˆGíÊW'&˜"””“'7G&ñÊr"Ú&ˆGíÊW'&˜"¢f∆∆&6≥∞ß–†¶gVÊ7Fñˆ‚f˜&÷DfñV∆DW'&˜'2áf«VS¢VÊ∂Ê˜v‚ì¢7G&ñÊr∞¢ñbÇó5&V6˜&Báf«VRíí&WGW&‚"#∞¢6ˆÁ7B÷W76vW2“ˆ&¶V7BÁf«VW2áf«VRíÊfñ«FW"ÇÜóFV“ì¢óFV“ó27G&ñÊr”‚GóVˆbóFV“””“'7G&ñÊr"ì∞¢&WGW&‚÷W76vW2Ê¶ˆñ‚Ç""ì∞ß–†¶gVÊ7Fñˆ‚&VDfñV∆DW'&˜'2áf«VS¢VÊ∂Ê˜v‚ì¢&V6˜&C«7G&ñÊr¬7G&ñÊs‚∞¢ñbÇó5&V6˜&Báf«VRíí&WGW&‚∑”∞¢&WGW&‚ˆ&¶V7BÊg&ˆ‘VÁG&ñW2Ä¢ˆ&¶V7BÊVÁG&ñW2áf«VRíÊfñ«FW"ÇÜVÁG'íì¢VÁG'íó2∑7G&ñÊr¬7G&ñÊu“”‚GóVˆbVÁG'ï≥“””“'7G&ñÊr"í¿¢ì∞ß–†¶gVÊ7Fñˆ‚ó5&V6˜&Báf«VS¢VÊ∂Ê˜v‚ì¢f«VRó2&V6˜&C«7G&ñÊr¬VÊ∂Ê˜v„‚∞¢&WGW&‚&ˆˆ∆V‚áf«VRíbbGóVˆbf«VR””“&ˆ&¶V7B"bb'&íÊó4'&íáf«VRì∞ß–†¶gVÊ7Fñˆ‚Ê˜&÷∆ó¶U&VfW&VÊ6TFFáf«VS¢&V6˜&C«7G&ñÊr¬VÊ∂Ê˜v„‚ì¢&VfW&VÊ6TFF∞¢6ˆÁ7BFV6ÜW'2“'&íÊó4'&íáf«VRÁFV6ÜW'2ê¢Úf«VRÁFV6ÜW'2Êf∆D÷ÇÜóFV“ì¢&VfW&VÊ6UFV6ÜW%µ“”‚∞¢ñbÇó5&V6˜&BÜóFV“íí&WGW&‚µ”∞¢6ˆÁ7BñB“&VEFWáBÜóFV“¬≤&ñB%“ì∞¢6ˆÁ7BÊ÷R“&VEFWáBÜóFV“¬≤&Ê÷R%“ì∞¢ñbÇıÂU5"’∆G≥2«“B˜RÁFW7BÜñBí«¬Ê÷Rí&WGW&‚µ”∞¢&WGW&‚∑≤ñB¬Ê÷R¬&ˆ∆S¢&VEFWáBÜóFV“¬≤'&ˆ∆R%“í¬7FGW3¢&VEFWáBÜóFV“¬≤'7FGW2%“í’”∞¢“ê¢¢µ”∞¢6ˆÁ7B∆ˆ6FñˆÁ2“'&íÊó4'&íáf«VRÊ∆ˆ6FñˆÁ2ê¢Úf«VRÊ∆ˆ6FñˆÁ2Êf∆D÷ÇÜóFV“ì¢&VfW&VÊ6T∆ˆ6FñˆÂµ“”‚∞¢ñbÇó5&V6˜&BÜóFV“íí&WGW&‚µ”∞¢6ˆÁ7BñB“&VEFWáBÜóFV“¬≤&ñB%“ì∞¢6ˆÁ7BÊ÷R“&VEFWáBÜóFV“¬≤&Ê÷R%“ì∞¢ñbÇı‰ƒÙ2’∆G≥2«“B˜RÁFW7BÜñBí«¬Ê÷R«¬ñB””“$ƒÙ2”r"«¬ñB””“$ƒÙ2”Ç"í&WGW&‚µ”∞¢&WGW&‚∑≤ñB¬Ê÷R¬GóS¢&VEFWáBÜóFV“¬≤'GóR%“í¬7FGW3¢&VEFWáBÜóFV“¬≤'7FGW2%“í’”∞¢“ê¢¢µ”∞¢6ˆÁ7B6FV÷ñ5ñV'2“'&íÊó4'&íáf«VRÊ6FV÷ñ5ñV'2ê¢Úf«VRÊ6FV÷ñ5ñV'2Êf∆D÷ÇÜóFV“ì¢&VfW&VÊ6T6FV÷ñ5ñV%µ“”‚∞¢ñbÇó5&V6˜&BÜóFV“íí&WGW&‚µ”∞¢6ˆÁ7BñB“&VEFWáBÜóFV“¬≤&ñB%“ì∞¢6ˆÁ7B∆&V¬“&VEFWáBÜóFV“¬≤&∆&V¬%“ì∞¢ñbÇıÂï"”#∆G≥'“”#∆G≥'“B˜RÁFW7BÜñBí«¬ı„#∆G≥'’¬Û#∆G≥'“B˜RÁFW7BÜ∆&V¬íí&WGW&‚µ”∞¢&WGW&‚∑∞¢ñB¿¢∆&V¬¿¢7F'DFFS¢&VEFWáBÜóFV“¬≤'7F'DFFR%“í¿¢VÊDFFS¢&VEFWáBÜóFV“¬≤&VÊDFFR%“í¿¢7FGW3¢&VEFWáBÜóFV“¬≤'7FGW2%“í¿¢Ê˜FW3¢&VEFWáBÜóFV“¬≤&Ê˜FW2%“í¿¢’”∞¢“ê¢¢µ”∞¢6ˆÁ7B6∆75ñV'2“'&íÊó4'&íáf«VRÊ6∆75ñV'2ê¢Úf«VRÊ6∆75ñV'2Êf∆D÷ÇÜóFV“ì¢&VfW&VÊ6T6∆75ñV%µ“”‚∞¢ñbÇó5&V6˜&BÜóFV“íí&WGW&‚µ”∞¢6ˆÁ7BñB“&VEFWáBÜóFV“¬≤&ñB%“ì∞¢6ˆÁ7B6FV÷ñ5ñV$ñB“&VEFWáBÜóFV“¬≤&6FV÷ñ5ñV$ñB%“ì∞¢ñbÇı‰5í”#∆G≥'“’∆G≥2«“B˜RÁFW7BÜñBí«¬ıÂï"”#∆G≥'“”#∆G≥'“B˜RÁFW7BÜ6FV÷ñ5ñV$ñBíí&WGW&‚µ”∞¢6ˆÁ7Bw&FR“&VDÁV÷&W"ÜóFV“¬≤&w&FR%“ì∞¢&WGW&‚∑∞¢ñB¿¢6FV÷ñ5ñV$ñB¿¢6FV÷ñ5ñV$∆&V√¢&VEFWáBÜóFV“¬≤&6FV÷ñ5ñV$∆&V¬%“í¿¢6ˆÜ˜'DñC¢&VEFWáBÜóFV“¬≤&6ˆÜ˜'DñB%“í¿¢6∆74Ê÷S¢&VEFWáBÜóFV“¬≤&6∆74Ê÷R%“í¿¢w&FR¿¢6ˆFS¢&VEFWáBÜóFV“¬≤&6ˆFR%“í¿¢FV6ÜW$Ê÷S¢&VEFWáBÜóFV“¬≤'FV6ÜW$Ê÷R%“í¿¢FV6ÜW%W6W$ñC¢&VEFWáBÜóFV“¬≤'FV6ÜW%W6W$ñB%“í¿¢∆ˆ6Fñˆ‰Ê÷S¢&VEFWáBÜóFV“¬≤&∆ˆ6Fñˆ‰Ê÷R%“í¿¢∆ˆ6Fñˆ‰ñC¢&VEFWáBÜóFV“¬≤&∆ˆ6Fñˆ‰ñB%“í¿¢7F'DFFS¢&VEFWáBÜóFV“¬≤'7F'DFFR%“í¿¢VÊDFFS¢&VEFWáBÜóFV“¬≤&VÊDFFR%“í¿¢7FGW3¢&VEFWáBÜóFV“¬≤'7FGW2%“í¿¢7GVƒ6∆˜6VDFFS¢&VEFWáBÜóFV“¬≤&7GVƒ6∆˜6VDFFR%“í¿¢Ê˜FW3¢&VEFWáBÜóFV“¬≤&Ê˜FW2%“í¿¢’”∞¢“ê¢¢µ”∞¢&WGW&‚≤FV6ÜW'2¬∆ˆ6FñˆÁ2¬6FV÷ñ5ñV'2¬6∆75ñV'2”∞ß–†¶gVÊ7Fñˆ‚&VEFWáBá&V6˜&C¢&V6˜&C«7G&ñÊr¬VÊ∂Ê˜v„‚¬∂Wó3¢7G&ñÊuµ“ì¢7G&ñÊr∞¢f˜"Ü6ˆÁ7B∂Wíˆb∂Wó2í∞¢6ˆÁ7Bf«VR“&V6˜&E∂∂Wï”∞¢ñbáGóVˆbf«VR””“'7G&ñÊr"bbf«VRÁG&ñ“Çíí&WGW&‚f«VRÁG&ñ“Çì∞¢ñbáGóVˆbf«VR””“&ÁV÷&W""í&WGW&‚7G&ñÊráf«VRì∞¢–¢&WGW&‚"#∞ß–†¶gVÊ7Fñˆ‚ñÊóFñƒfñV∆Báñ∆ˆC¢&V6˜&C«7G&ñÊr¬VÊ∂Ê˜v„‚¬∂Wì¢7G&ñÊrì¢7G&ñÊr∞¢6ˆÁ7Bf«VR“ñ∆ˆE∂∂Wï”∞¢&WGW&‚GóVˆbf«VR””“'7G&ñÊr"«¬GóVˆbf«VR””“&ÁV÷&W""Ú7G&ñÊráf«VRí¢"#∞ß–†¶gVÊ7Fñˆ‚ÊW7FVE&V6˜&Báñ∆ˆC¢&V6˜&C«7G&ñÊr¬VÊ∂Ê˜v„‚¬∂Wì¢7G&ñÊrì¢&V6˜&C«7G&ñÊr¬VÊ∂Ê˜v„‚∞¢&WGW&‚ó5&V6˜&Báñ∆ˆE∂∂Wï“íÚñ∆ˆE∂∂Wï“2&V6˜&C«7G&ñÊr¬VÊ∂Ê˜v„‚¢∑”∞ß–†¶gVÊ7Fñˆ‚ñÊóFñƒ&ˆˆ∆V‰fñV∆BÄ¢ñ∆ˆC¢&V6˜&C«7G&ñÊr¬VÊ∂Ê˜v„‚¿¢∂Wì¢7G&ñÊr¿¢f∆∆&6≥¢&ˆˆ∆V‚¿¢ì¢7G&ñÊr∞¢6ˆÁ7Bf«VR“ñ∆ˆE∂∂Wï”∞¢&WGW&‚f«VR””“G'VR«¬f«VR””“'G'VR ¢Ú'G'VR ¢¢f«VR””“f«6R«¬f«VR””“&f«6R ¢Ú&f«6R ¢¢f∆∆&6≤Ú'G'VR"¢&f«6R#∞ß–†¶gVÊ7Fñˆ‚ÁV∆∆&∆TFó&V7F˜'îñÊóFñ¬áñ∆ˆC¢&V6˜&C«7G&ñÊr¬VÊ∂Ê˜v„‚¬∂Wì¢7G&ñÊrì¢7G&ñÊr∞¢&WGW&‚ˆ&¶V7BÊÜ4˜v‚áñ∆ˆB¬∂Wííbbñ∆ˆE∂∂Wï“””“ÁV∆¿¢Ú%ıˆ6∆V%ıÚ ¢¢ñÊóFñƒfñV∆Báñ∆ˆB¬∂Wíì∞ß–†¶gVÊ7Fñˆ‚&˜FV7FVD∆ˆ6FñˆÁ2á&VfW&VÊ6TFF¢&VfW&VÊ6TFFì¢&VfW&VÊ6T∆ˆ6FñˆÂµ“∞¢&WGW&‚&VfW&VÊ6TFFÊ∆ˆ6FñˆÁ0¢Êfñ«FW"ÇÜ∆ˆ6Fñˆ‚í”‚Ä¢ı‰ƒÙ2’∆G≥2«“B˜RÁFW7BÜ∆ˆ6Fñˆ‚ÊñBê¢bb∆ˆ6Fñˆ‚ÊñB”“$ƒÙ2”r ¢bb∆ˆ6Fñˆ‚ÊñB”“$ƒÙ2”Ç ¢bb∆ˆ6Fñˆ‚ÊÊ÷RÁG&ñ“Çê¢íê¢Á6˜'BÇÜ∆VgB¬&ñváBí”‚∆VgBÊÊ÷RÊ∆ˆ6∆T6ˆ◊&Rá&ñváBÊÊ÷R¬'V≤"¬≤ÁV÷W&ñ3¢G'VR“íì∞ß–†¶gVÊ7Fñˆ‚VÊóVT6ˆÜ˜'G2Ü6∆75ñV'3¢&VfW&VÊ6T6∆75ñV%µ“ì¢'&ì«≤ñC¢7G&ñÊs≤∆&V√¢7G&ñÊr”‚∞¢6ˆÁ7B6ˆÜ˜'G2“ÊWr÷«7G&ñÊr¬7G&ñÊs‚Çì∞¢6∆75ñV'2Êf˜$V6ÇÇÜóFV“í”‚∞¢ñbÇı‰4ÙÇ’∆G≥2«“B˜RÁFW7BÜóFV“Ê6ˆÜ˜'DñBíí&WGW&„∞¢6ˆÁ7B∆&V¬“∂óFV“Ê6∆74Ê÷R¬óFV“Ê6FV÷ñ5ñV$∆&V≈“Êfñ«FW"Ñ&ˆˆ∆V‚íÊ¶ˆñ‚Ç"+r"í«¬óFV“Ê6ˆÜ˜'DñC∞¢6ˆÜ˜'G2Á6WBÜóFV“Ê6ˆÜ˜'DñB¬∆&V¬ì∞¢“ì∞¢&WGW&‚≤‚‚Ê6ˆÜ˜'G5“Ê÷ÇÖ∂ñB¬∆&V≈“í”‚á≤ñB¬∆&V¬“íê¢Á6˜'BÇÜ∆VgB¬&ñváBí”‚∆VgBÊ∆&V¬Ê∆ˆ6∆T6ˆ◊&Rá&ñváBÊ∆&V¬¬'V≤"¬≤ÁV÷W&ñ3¢G'VR“íì∞ß–†¶gVÊ7Fñˆ‚ÊWáD6FV÷ñ5ñV$ñBÄ¢6˜W&6UñV$ñC¢7G&ñÊr¿¢ñV'3¢&VfW&VÊ6T6FV÷ñ5ñV%µ“¿¢ì¢7G&ñÊr∞¢6ˆÁ7B÷F6Ç“6˜W&6UñV$ñBÊ÷F6ÇÇıÂï"“É#∆G≥'“í“É#∆G≥'“íB˜Rì∞¢ñbÇ÷F6Çí&WGW&‚"#∞¢6ˆÁ7BWáV7FVB“ï"“G¥ÁV÷&W"Ü÷F6Ö≥“í≤““G¥ÁV÷&W"Ü÷F6Ö≥%“í≤÷∞¢&WGW&‚ñV'2Á6ˆ÷RÇáñV"í”‚ñV"ÊñB””“WáV7FVBíÚWáV7FVB¢"#∞ß–†¶gVÊ7Fñˆ‚'Vñ∆E&ˆ∆∆˜fW%&˜w2Ä¢6˜W&6UñV$ñC¢7G&ñÊr¿¢&VfW&VÊ6TFF¢&VfW&VÊ6TFF¿¢ì¢&ˆ∆∆˜fW%&˜uµ“∞¢6ˆÁ7B6fT∆ˆ6FñˆÁ2“&˜FV7FVD∆ˆ6FñˆÁ2á&VfW&VÊ6TFFì∞¢&WGW&‚&VfW&VÊ6TFFÊ6∆75ñV'0¢Êfñ«FW"ÇÜóFV“í”‚Ä¢óFV“Ê6FV÷ñ5ñV$ñB””“6˜W&6UñV$ñ@¢bbı‰5í”#∆G≥'“’∆G≥2«“B˜RÁFW7BÜóFV“ÊñBê¢bbı‰4ÙÇ’∆G≥2«“B˜RÁFW7BÜóFV“Ê6ˆÜ˜'DñBê¢bbGóVˆbóFV“Êw&FR””“&ÁV÷&W" ¢bbóFV“Êw&FR„“¢bbóFV“Êw&FR√“¢bbóFV“Ê7GVƒ6∆˜6VDFFP¢bbˆ6∆˜6VGÕ}≠ç"ˆíÁFW7BÜóFV“Á7FGW2ê¢íê¢Á6˜'BÇÜ∆VgB¬&ñváBí”‚∆VgBÊ6∆74Ê÷RÊ∆ˆ6∆T6ˆ◊&Rá&ñváBÊ6∆74Ê÷R¬'V≤"¬≤ÁV÷W&ñ3¢G'VR“íê¢Ê÷ÇÜóFV“í”‚∞¢6ˆÁ7B∆ˆ6Fñˆ‚“6fT∆ˆ6FñˆÁ2ÊfñÊBÇÜ6ÊFñFFRí”‚6ÊFñFFRÊñB””“óFV“Ê∆ˆ6Fñˆ‰ñBì∞¢6ˆÁ7BFV6ÜW"“&VfW&VÊ6TFFÁFV6ÜW'2ÊfñÊBÇÜ6ÊFñFFRí”‚6ÊFñFFRÊñB””“óFV“ÁFV6ÜW%W6W$ñBì∞¢6ˆÁ7Bw&GVFR“óFV“Êw&FR””“∞¢&WGW&‚∞¢6˜W&6T6∆75ñV$ñC¢óFV“ÊñB¿¢6ˆÜ˜'DñC¢óFV“Ê6ˆÜ˜'DñB¿¢6˜W&6Tw&FS¢óFV“Êw&FR¿¢6∆74Ê÷S¢óFV“Ê6∆74Ê÷R«¬G∂óFV“Êw&FW““G∂óFV“Ê6ˆFW÷¿¢7Fñˆ„¢w&GVFRÚ&w&GVFR"¢'&ˆ÷˜FR"¿¢‚‚‚Üw&GVFRÚ∑“¢∞¢F&vWDw&FS¢óFV“Êw&FR≤¿¢F&vWD6ˆFS¢óFV“Ê6ˆFR«¬6∆746ˆFTg&ˆ‘Ê÷RÜóFV“Ê6∆74Ê÷Rí¿¢“í¿¢‚‚‚áFV6ÜW"Ú≤FV6ÜW%W6W$ñC¢FV6ÜW"ÊñB¬FV6ÜW$Ê÷S¢FV6ÜW"ÊÊ÷R“¢∑“í¿¢‚‚‚Ü∆ˆ6Fñˆ‚Ú≤∆ˆ6Fñˆ‰ñC¢∆ˆ6Fñˆ‚ÊñB¬∆ˆ6Fñˆ‰Ê÷S¢∆ˆ6Fñˆ‚ÊÊ÷R“¢∑“í¿¢“6Fó6fñW2&ˆ∆∆˜fW%&˜s∞¢“ì∞ß–†¶gVÊ7Fñˆ‚&ˆ∆∆˜fW%&˜w4g&ˆ’ñ∆ˆBÄ¢ñ∆ˆC¢&V6˜&C«7G&ñÊr¬VÊ∂Ê˜v„‚¿¢&VfW&VÊ6TFF¢&VfW&VÊ6TFF¿¢ì¢&ˆ∆∆˜fW%&˜uµ“∞¢ñbÇ'&íÊó4'&íáñ∆ˆBÊ6∆76W2íí&WGW&‚µ”∞¢&WGW&‚ñ∆ˆBÊ6∆76W2Êf∆D÷ÇÜóFV“ì¢&ˆ∆∆˜fW%&˜uµ“”‚∞¢ñbÇó5&V6˜&BÜóFV“íí&WGW&‚µ”∞¢6ˆÁ7B6˜W&6T6∆75ñV$ñB“&VEFWáBÜóFV“¬≤'6˜W&6T6∆75ñV$ñB%“ì∞¢6ˆÁ7B6ˆÜ˜'DñB“&VEFWáBÜóFV“¬≤&6ˆÜ˜'DñB%“ì∞¢6ˆÁ7B6˜W&6Tw&FR“&VDÁV÷&W"ÜóFV“¬≤'6˜W&6Tw&FR%“ì∞¢6ˆÁ7B7Fñˆ‚“&VEFWáBÜóFV“¬≤&7Fñˆ‚%“ì∞¢6ˆÁ7B6˜W&6T6∆72“&VfW&VÊ6TFFÊ6∆75ñV'2ÊfñÊBÇÜ6ÊFñFFRí”‚Ä¢6ÊFñFFRÊñB””“6˜W&6T6∆75ñV$ñ@¢íì∞¢ñbÄ¢ı‰5í”#∆G≥'“’∆G≥2«“B˜RÁFW7Bá6˜W&6T6∆75ñV$ñBê¢«¬ı‰4ÙÇ’∆G≥2«“B˜RÁFW7BÜ6ˆÜ˜'DñBê¢«¬6˜W&6Tw&FR””“ÁV∆¿¢«¬≤'&ˆ÷˜FR"¬&w&GVFR"¬&6∆˜6R"¬'6∂ó%“ÊñÊ6«VFW2Ü7Fñˆ‚ê¢í&WGW&‚µ”∞¢&WGW&‚∑∞¢6˜W&6T6∆75ñV$ñB¿¢6ˆÜ˜'DñB¿¢6˜W&6Tw&FR¿¢6∆74Ê÷S¢6˜W&6T6∆73ÚÊ6∆74Ê÷P¢«¬&VEFWáBÜóFV“¬≤&6∆74Ê÷R%“ê¢«¬G∑6˜W&6Tw&FW““G∑6˜W&6T6∆73ÚÊ6ˆFR«¬&VEFWáBÜóFV“¬≤'F&vWD6ˆFR%“í«¬#Ú'÷¿¢7Fñˆ„¢7Fñˆ‚2&ˆ∆∆˜fW%&˜u≤&7Fñˆ‚%“¿¢‚‚‚á&VDÁV÷&W"ÜóFV“¬≤'F&vWDw&FR%“í”“ÁV∆¬Ú≤F&vWDw&FS¢&VDÁV÷&W"ÜóFV“¬≤'F&vWDw&FR%“í“¢∑“í¿¢‚‚‚á&VEFWáBÜóFV“¬≤'F&vWD6ˆFR%“íÚ≤F&vWD6ˆFS¢&VEFWáBÜóFV“¬≤'F&vWD6ˆFR%“í“¢∑“í¿¢‚‚‚á&VEFWáBÜóFV“¬≤'FV6ÜW%W6W$ñB%“íÚ≤FV6ÜW%W6W$ñC¢&VEFWáBÜóFV“¬≤'FV6ÜW%W6W$ñB%“í¬FV6ÜW$Ê÷S¢&VEFWáBÜóFV“¬≤'FV6ÜW$Ê÷R%“í“¢∑“í¿¢‚‚‚á&VEFWáBÜóFV“¬≤&∆ˆ6Fñˆ‰ñB%“íÚ≤∆ˆ6Fñˆ‰ñC¢&VEFWáBÜóFV“¬≤&∆ˆ6Fñˆ‰ñB%“í¬∆ˆ6Fñˆ‰Ê÷S¢&VEFWáBÜóFV“¬≤&∆ˆ6Fñˆ‰Ê÷R%“í“¢∑“í¿¢‚‚‚á&VEFWáBÜóFV“¬≤&˜fW'&ñFU&V6ˆ‚%“íÚ≤˜fW'&ñFU&V6ˆ„¢&VEFWáBÜóFV“¬≤&˜fW'&ñFU&V6ˆ‚%“í“¢∑“í¿¢‚‚‚á&VEFWáBÜóFV“¬≤&Ê˜FW2%“íÚ≤Ê˜FW3¢&VEFWáBÜóFV“¬≤&Ê˜FW2%“í“¢∑“í¿¢’”∞¢“ì∞ß–†¶gVÊ7Fñˆ‚7G&ó&ˆ∆∆˜fW$Fó7∆îfñV∆G2á&˜s¢&ˆ∆∆˜fW%&˜rì¢&V6˜&C«7G&ñÊr¬VÊ∂Ê˜v„‚∞¢&WGW&‚∞¢6˜W&6T6∆75ñV$ñC¢&˜rÁ6˜W&6T6∆75ñV$ñB¿¢6ˆÜ˜'DñC¢&˜rÊ6ˆÜ˜'DñB¿¢6˜W&6Tw&FS¢&˜rÁ6˜W&6Tw&FR¿¢7Fñˆ„¢&˜rÊ7Fñˆ‚¿¢‚‚‚á&˜rÊ7Fñˆ‚””“'&ˆ÷˜FR"Ú∞¢F&vWDw&FS¢&˜rÁF&vWDw&FR¿¢F&vWD6ˆFS¢&˜rÁF&vWD6ˆFR¿¢‚‚‚á&˜rÁFV6ÜW%W6W$ñBbb&˜rÁFV6ÜW$Ê÷RÚ≤FV6ÜW%W6W$ñC¢&˜rÁFV6ÜW%W6W$ñB¬FV6ÜW$Ê÷S¢&˜rÁFV6ÜW$Ê÷R“¢∑“í¿¢‚‚‚á&˜rÊ∆ˆ6Fñˆ‰ñBbb&˜rÊ∆ˆ6Fñˆ‰Ê÷RÚ≤∆ˆ6Fñˆ‰ñC¢&˜rÊ∆ˆ6Fñˆ‰ñB¬∆ˆ6Fñˆ‰Ê÷S¢&˜rÊ∆ˆ6Fñˆ‰Ê÷R“¢∑“í¿¢“¢∑“í¿¢‚‚‚á&˜rÊ˜fW'&ñFU&V6ˆ‚Ú≤˜fW'&ñFU&V6ˆ„¢&˜rÊ˜fW'&ñFU&V6ˆ‚“¢∑“í¿¢‚‚‚á&˜rÊÊ˜FW2Ú≤Ê˜FW3¢&˜rÊÊ˜FW2“¢∑“í¿¢”∞ß–†¶gVÊ7Fñˆ‚6∆746ˆFTg&ˆ‘Ê÷Ráf«VS¢7G&ñÊrì¢7G&ñÊr∞¢&WGW&‚f«VRÊ÷F6ÇÇıÂ∆G≥√'““Ç‚≤íB˜RìÚÂ≥“ÛÚ"#∞ß–†¶gVÊ7Fñˆ‚∂ñÊDÊVVG4÷FW&ñ¬Ü∂ñÊC¢G&gD∂ñÊBì¢&ˆˆ∆V‚∞¢&WGW&‚∞¢&÷FW&ñ¬ÁWFFR"¿¢'&V6VóBÊ7&VFR"¿¢'G&Á6fW"Ê7&VFR"¿¢'w&óFVˆfbÊ7&VFR"¿¢'&Wfó6ñˆ‚Ê6˜VÁB"¿¢“ÊñÊ6«VFW2Ü∂ñÊBì∞ß–†¶gVÊ7Fñˆ‚ó5˜6óFófU&Wfó6ñˆ‚áf«VS¢VÊ∂Ê˜v‚ì¢f«VRó2ÁV÷&W"∞¢&WGW&‚GóVˆbf«VR””“&ÁV÷&W""bbÁV÷&W"Êó4ñÁFVvW"áf«VRíbbf«VR‚∞ß–†¶gVÊ7Fñˆ‚G&gE7FGW4∆&V¬á7FGW3¢7G&ñÊrì¢7G&ñÊr∞¢6ˆÁ7B∆&V«3¢&V6˜&C«7G&ñÊr¬7G&ñÊs‚“∞¢G&gC¢-
-}]›]-≠"¿¢&VGïˆf˜%˜&WfñWs¢-	Ì}m≠=B˝]]-m≠Ç"¿¢6Ê6V∆∆VC¢-
-≠Ì-›‚"¿¢&˜fVE˜VÊFñÊuˆ«ì¢-	˝Ì=ÌMm]›‚M‚-›]]››Ú"¿¢∆ñVC¢-	-›]]›‚"¿¢fñ∆VC¢-	˝ÌÕçΩ≠-›]]››Ú"¿¢”∞¢&WGW&‚∆&V«5∑7FGW5“ÛÚ7FGW3∞ß–†¶gVÊ7Fñˆ‚&VDÁV÷&W"á&V6˜&C¢&V6˜&C«7G&ñÊr¬VÊ∂Ê˜v„‚¬∂Wó3¢7G&ñÊuµ“ì¢ÁV÷&W"¬ÁV∆¬∞¢f˜"Ü6ˆÁ7B∂Wíˆb∂Wó2í∞¢6ˆÁ7B&r“&V6˜&E∂∂Wï”∞¢ñbá&r””“ÁV∆¬«¬&r””“VÊFVfñÊVB«¬&r””“""í6ˆÁFñÁVS∞¢6ˆÁ7Bf«VR“ÁV÷&W"á&rì∞¢ñbÑÁV÷&W"Êó4fñÊóFRáf«VRíí&WGW&‚f«VS∞¢–¢&WGW&‚ÁV∆√∞ß–†¶gVÊ7Fñˆ‚6F∆ˆu'V'&ñ72Ü6F∆ˆs¢6F∆ˆt÷FW&ñ≈µ“ì¢7G&ñÊuµ“∞¢6ˆÁ7Bf«VW2“ÊWr6WBÖ∞¢-	˝mM=}›ç≠Çb]]-ÌÕ-mr"¿¢-
-ÌÌ}b-≠Ì›-ÌΩÕ›b}Ìçç-Ç¬}m›ç≠Ç"¿¢-	MçM≠-ç}›bíMÌ-mM≠Ì-bÕ-]mΩÇ"¿¢-	Õ]-ÌMç}›Ωm-]-="¿¢-	}	›	‚b	›	Õ
-""¿¢“ì∞¢6F∆ˆrÊf˜$V6ÇÇÜ÷FW&ñ¬í”‚∞¢6ˆÁ7B'V'&ñ2“&VEFWáBÜ÷FW&ñ¬¬≤''V'&ñ2%“ì∞¢ñbá'V'&ñ2íf«VW2ÊFBá'V'&ñ2ì∞¢“ì∞¢&WGW&‚≤‚‚Áf«VW5“Á6˜'BÇÜ∆VgB¬&ñváBí”‚∆VgBÊ∆ˆ6∆T6ˆ◊&Rá&ñváB¬'V≤"íì∞ß–†¶gVÊ7Fñˆ‚6F∆ˆt∆ˆ6FñˆÁ2Ü6F∆ˆs¢6F∆ˆt÷FW&ñ≈µ“ì¢7G&ñÊuµ“∞¢6ˆÁ7Bf«VW2“ÊWr6WBÖ≤-	mΩmÌ-]≠%“ì∞¢6F∆ˆrÊf˜$V6ÇÇÜ÷FW&ñ¬í”‚∞¢6ˆÁ7B7Fˆ6≤“÷FW&ñ¬Á7Fˆ6≥∞¢ñbÇó5&V6˜&Bá7Fˆ6≤í«¬'&íÊó4'&íá7Fˆ6≤Ê∆ˆ6FñˆÁ2íí&WGW&„∞¢7Fˆ6≤Ê∆ˆ6FñˆÁ2Êf˜$V6ÇÇÜVÁG'íí”‚∞¢ñbÇó5&V6˜&BÜVÁG'ííí&WGW&„∞¢6ˆÁ7BÊ÷R“&VEFWáBÜVÁG'í¬≤&Ê÷R%“ì∞¢ñbÜÊ÷Ríf«VW2ÊFBÜÊ÷Rì∞¢“ì∞¢“ì∞¢&WGW&‚≤‚‚Áf«VW5“Á6˜'BÇÜ∆VgB¬&ñváBí”‚∆VgBÊ∆ˆ6∆T6ˆ◊&Rá&ñváB¬'V≤"¬≤ÁV÷W&ñ3¢G'VR“íì∞ß–†¶gVÊ7Fñˆ‚÷FW&ñƒñFVÁFñfñW"Ü÷FW&ñ√¢6F∆ˆt÷FW&ñ¬ì¢7G&ñÊr∞¢&WGW&‚&VEFWáBÜ÷FW&ñ¬¬≤&6DñB"¬&6EˆñB"¬&÷FW&ñƒñB"¬&÷FW&ñ≈ˆñB"¬&ñB"¬&ó6&‚%“ì∞ß–†¶gVÊ7Fñˆ‚÷FW&ñƒFó7∆ïFóF∆RÜ÷FW&ñ√¢6F∆ˆt÷FW&ñ¬ì¢7G&ñÊr∞¢&WGW&‚&VEFWáBÜ÷FW&ñ¬¬≤'FóF∆R"¬&Ê÷R%“í«¬-	Õ-]m≤]r›}-Ç#∞ß–†¶gVÊ7Fñˆ‚÷FW&ñƒ÷WFÜ÷FW&ñ√¢6F∆ˆt÷FW&ñ¬ì¢7G&ñÊr∞¢&WGW&‚∞¢&VEFWáBÜ÷FW&ñ¬¬≤&WFÜ˜""¬&WFÜ˜'2%“í¿¢÷FW&ñƒ6∆74∆&V¬Ü÷FW&ñ¬í¿¢&VEFWáBÜ÷FW&ñ¬¬≤&ó6&‚%“í¿¢“Êfñ«FW"Ñ&ˆˆ∆V‚íÊ¶ˆñ‚Ç"+r"í«¬-	MÌM-≠Ì-bM›b-mM=-›b#∞ß–†¶gVÊ7Fñˆ‚÷FW&ñƒ6∆74∆&V¬Ü÷FW&ñ√¢6F∆ˆt÷FW&ñ¬ì¢7G&ñÊr∞¢6ˆÁ7BWá∆ñ6óB“&VEFWáBÜ÷FW&ñ¬¬≤&w&FR"¬&6∆74Ê÷R"¬&6∆72%“ì∞¢ñbÜWá∆ñ6óBí&WGW&‚Wá∆ñ6óC∞¢6ˆÁ7B6∆74g&ˆ““&VDÁV÷&W"Ü÷FW&ñ¬¬≤&6∆74g&ˆ“%“ì∞¢6ˆÁ7B6∆75FÚ“&VDÁV÷&W"Ü÷FW&ñ¬¬≤&6∆75FÚ%“ì∞¢ñbÇ6∆74g&ˆ“í&WGW&‚"#∞¢ñbÇ6∆75FÚ«¬6∆75FÚ””“6∆74g&ˆ“í&WGW&‚G∂6∆74g&ˆ◊“≠Ω∞¢&WGW&‚G∂6∆74g&ˆ◊ﬁ(	2G∂6∆75F˜“≠ΩÜ∞ß–†¶gVÊ7Fñˆ‚÷FW&ñ≈6V&6ÖFWáBÜ÷FW&ñ√¢6F∆ˆt÷FW&ñ¬ì¢7G&ñÊr∞¢&WGW&‚Ê˜&÷∆ó¶U6V&6ÇÖ∞¢÷FW&ñƒñFVÁFñfñW"Ü÷FW&ñ¬í¿¢÷FW&ñƒFó7∆ïFóF∆RÜ÷FW&ñ¬í¿¢÷FW&ñƒ÷WFÜ÷FW&ñ¬í¿¢&VEFWáBÜ÷FW&ñ¬¬≤'7V&¶V7B"¬''V'&ñ2%“í¿¢“Ê¶ˆñ‚Ç""íì∞ß–†¶gVÊ7Fñˆ‚Ê˜&÷∆ó¶U6V&6Çáf«VS¢7G&ñÊrì¢7G&ñÊr∞¢&WGW&‚f«VRÁFÙ∆ˆ6∆T∆˜vW$66RÇ'V≤’T"íÁ&W∆6RÇıµ«5¬ﬁ(	>(	E“≤ˆwR¬""íÁG&ñ“Çì∞ß–†¶gVÊ7Fñˆ‚G&gE&ñ÷'ïFWáBÜG&gC¢6fVDG&gBì¢7G&ñÊr∞¢6ˆÁ7Bñ∆ˆB“ó5&V6˜&BÜG&gBÁñ∆ˆBíÚG&gBÁñ∆ˆB¢∑”∞¢&WGW&‚&VEFWáBáñ∆ˆB¬∞¢'FóF∆R"¿¢&÷FW&ñ≈FóF∆R"¿¢&÷FW&ñƒñB"¿¢&∆&V¬"¿¢&6∆75ñV$ñB"¿¢'F&vWEñV$ñB"¿¢&6FV÷ñ5ñV$ñB"¿¢“í«¬¥î‰EÙƒ$T≈5∂G&gBÊ∂ñÊE“«¬-
-}]›]-≠#∞ß–†¶gVÊ7Fñˆ‚6Ü˜'DG&gDñBáf«VS¢VÊ∂Ê˜v‚ì¢7G&ñÊr∞¢ñbáGóVˆbf«VR”“'7G&ñÊr"í&WGW&‚---Ì]›‚#∞¢&WGW&‚(IbG∑f«VRÁ6∆ñ6RÉ¬Çó÷∞ß–†¶gVÊ7Fñˆ‚f˜&÷DÁV÷&W"áf«VS¢ÁV÷&W"ì¢7G&ñÊr∞¢&WGW&‚ÊWrñÁF¬‰ÁV÷&W$f˜&÷BÇ'V≤’T"íÊf˜&÷Báf«VRì∞ß–†¶gVÊ7Fñˆ‚f˜&÷DFFUFñ÷Ráf«VS¢7G&ñÊrì¢7G&ñÊr∞¢6ˆÁ7BFFR“ÊWrFFRáf«VRì∞¢ñbÑÁV÷&W"Êó4Ê‚ÜFFRÊvWEFñ÷RÇííí&WGW&‚-ùÌù›‚#∞¢&WGW&‚ÊWrñÁF¬‰FFUFñ÷Tf˜&÷BÇ'V≤’T"¬≤Fì¢#"÷FñvóB"¬÷ˆÁFÉ¢#"÷FñvóB"¬Ü˜W#¢#"÷FñvóB"¬÷ñÁWFS¢#"÷FñvóB"“íÊf˜&÷BÜFFRì∞ß–†¶gVÊ7Fñˆ‚ó5FˆFíáf«VS¢7G&ñÊrì¢&ˆˆ∆V‚∞¢6ˆÁ7BFFR“ÊWrFFRáf«VRì∞¢6ˆÁ7BÊ˜r“ÊWrFFRÇì∞¢&WGW&‚FFRÊvWDgV∆≈ñV"Çí””“Ê˜rÊvWDgV∆≈ñV"Çê¢bbFFRÊvWD÷ˆÁFÇÇí””“Ê˜rÊvWD÷ˆÁFÇÇê¢bbFFRÊvWDFFRÇí””“Ê˜rÊvWDFFRÇì∞ß–†¶gVÊ7Fñˆ‚FˆFïf«VRÇì¢7G&ñÊr∞¢6ˆÁ7BÊ˜r“ÊWrFFRÇì∞¢6ˆÁ7B∆ˆ6ƒFFR“ÊWrFFRÜÊ˜rÊvWEFñ÷RÇí“Ê˜rÊvWEFñ÷W¶ˆÊTˆfg6WBÇí¢cÛì∞¢&WGW&‚∆ˆ6ƒFFRÁFÙï4ı7G&ñÊrÇíÁ6∆ñ6RÉ¬ì∞ß–
+          ? "–ù–∞–¥—Å–∏–ª–∞—î–º–æ —á–µ—Ä–Ω–µ—Ç–∫—É –Ω–∞ –ø–µ—Ä–µ–≤—ñ—Ä–∫—É‚Ä¶"
+          : "–°–∫–∞—Å–æ–≤—É—î–º–æ —á–µ—Ä–Ω–µ—Ç–∫—É‚Ä¶",
+      });
+
+      try {
+        const response = await fetch("/api/librarian/drafts", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, revision, action }),
+        });
+        const body = await response.json();
+        if (!response.ok || body.success !== true || !body.draft) {
+          const stale = response.status === 409 || response.status === 428;
+          setSubmitState({
+            phase: "error",
+            message: stale
+              ? "–°—Ç–∞–Ω —á–µ—Ä–Ω–µ—Ç–∫–∏ –≤–∂–µ –∑–º—ñ–Ω–∏–≤—Å—è. –î—ñ—é –Ω–µ –ø–æ–≤—Ç–æ—Ä–µ–Ω–æ ‚Äî –æ–Ω–æ–≤—ñ—Ç—å —Å–ø–∏—Å–æ–∫ –ø–µ—Ä–µ–¥ –Ω–∞—Å—Ç—É–ø–Ω–æ—é —Å–ø—Ä–æ–±–æ—é."
+              : readApiError(body, "–ù–µ –≤–¥–∞–ª–æ—Å—è –∑–º—ñ–Ω–∏—Ç–∏ —Å—Ç–∞–Ω —á–µ—Ä–Ω–µ—Ç–∫–∏"),
+          });
+          return {
+            draft: null,
+            fieldErrors: readFieldErrors(body.fieldErrors),
+            stale,
+          };
+        }
+
+        const updated = body.draft as SavedDraft;
+        setDrafts((current) => [updated, ...current.filter((item) => item.id !== updated.id)]);
+        setEditingDraft((current) => current?.id === updated.id ? updated : current);
+        setSubmitState({
+          phase: "success",
+          message: action === "submit"
+            ? "–ß–µ—Ä–Ω–µ—Ç–∫—É –Ω–∞–¥—ñ—Å–ª–∞–Ω–æ –Ω–∞ –ø–µ—Ä–µ–≤—ñ—Ä–∫—É. Google Sheets –Ω–µ –∑–º—ñ–Ω–µ–Ω–æ."
+            : "–ß–µ—Ä–Ω–µ—Ç–∫—É —Å–∫–∞—Å–æ–≤–∞–Ω–æ. Google Sheets –Ω–µ –∑–º—ñ–Ω–µ–Ω–æ.",
+        });
+        return { draft: updated, fieldErrors: {} };
+      } catch (error) {
+        setSubmitState({
+          phase: "error",
+          message: error instanceof Error ? error.message : "–ù–µ –≤–¥–∞–ª–æ—Å—è –∑–º—ñ–Ω–∏—Ç–∏ —Å—Ç–∞–Ω —á–µ—Ä–Ω–µ—Ç–∫–∏",
+        });
+        return { draft: null, fieldErrors: {} };
+      }
+    },
+    [],
+  );
+
+  const materialCount = readNumber(apiStats, ["materials", "materialCount", "totalMaterials"])
+    ?? catalog.length;
+  const draftCount = drafts.length;
+  const todayCount = drafts.filter((draft) => isToday(draft.createdAt)).length;
+  const activeScenario = SCENARIOS.find((item) => item.kind === activeKind) ?? SCENARIOS[0];
+
+  const confirmDiscardChanges = () => (
+    !formHasUnsavedChanges
+    || window.confirm("–Ñ –Ω–µ–∑–±–µ—Ä–µ–∂–µ–Ω—ñ –∑–º—ñ–Ω–∏. –í—ñ–¥–∫–∏–Ω—É—Ç–∏ —ó—Ö —ñ –ø–µ—Ä–µ–π—Ç–∏ –¥–∞–ª—ñ?")
+  );
+
+  const switchScenario = (kind: DraftKind): boolean => {
+    if (kind === activeKind && !editingDraft) return true;
+    if (!confirmDiscardChanges()) return false;
+    handleFormDirtyChange(false);
+    handleFormStaleChange(false);
+    setActiveKind(kind);
+    editingDraftRef.current = null;
+    setEditingDraft(null);
+    setFormOpenVersion((current) => current + 1);
+    setSubmitState({ phase: "idle", message: "" });
+    return true;
+  };
+
+  const openDraft = (draft: SavedDraft) => {
+    if (!confirmDiscardChanges()) return;
+    handleFormDirtyChange(false);
+    handleFormStaleChange(false);
+    setActiveKind(draft.kind);
+    editingDraftRef.current = draft;
+    setEditingDraft(draft);
+    setFormOpenVersion((current) => current + 1);
+    setSubmitState({ phase: "idle", message: "" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  return (
+    <main className="workspace-shell">
+      <header className="workspace-header">
+        <a className="brand-lockup compact" href="/" aria-label="–Ñ–¥–∏–Ω–∞ –±—ñ–±–ª—ñ–æ—Ç–µ–∫–∞ ‚Äî –≥–æ–ª–æ–≤–Ω–∞">
+          <img className="brand-logo" src={LOGO_URL} alt="" width="48" height="48" />
+          <span><strong>–Ñ–¥–∏–Ω–∞ –±—ñ–±–ª—ñ–æ—Ç–µ–∫–∞</strong><small>–ö–∞–±—ñ–Ω–µ—Ç –±—ñ–±–ª—ñ–æ—Ç–µ–∫–∞—Ä—è</small></span>
+        </a>
+
+        <div className="account-cluster">
+          <a className="catalog-link" href={PUBLIC_CATALOG_URL}>–ö–∞—Ç–∞–ª–æ–≥ <span aria-hidden="true">‚Üó</span></a>
+          <div className="account-copy">
+            <strong>{displayName}</strong>
+            <small>{role === "admin" ? "–ê–¥–º—ñ–Ω—ñ—Å—Ç—Ä–∞—Ç–æ—Ä" : "–ë—ñ–±–ª—ñ–æ—Ç–µ–∫–∞—Ä"}</small>
+          </div>
+          <a className="icon-button" href={signOutHref} aria-label="–í–∏–π—Ç–∏ –∑ –æ–±–ª—ñ–∫–æ–≤–æ–≥–æ –∑–∞–ø–∏—Å—É" title="–í–∏–π—Ç–∏">
+            ‚Üó
+          </a>
+        </div>
+      </header>
+
+      <div className="workspace-grid">
+        <aside className="workspace-sidebar" aria-label="–†–æ–±–æ—á—ñ –æ–ø–µ—Ä–∞—Ü—ñ—ó">
+          <p className="sidebar-label">–û–ø–µ—Ä–∞—Ü—ñ—ó</p>
+          <nav className="scenario-nav">
+            {SCENARIO_GROUPS.map((group) => (
+              <div className="scenario-group" key={group.id}>
+                <p>{group.label}</p>
+                {SCENARIOS.filter((scenario) => scenario.group === group.id).map((scenario) => (
+                  <button
+                    key={scenario.kind}
+                    type="button"
+                    className={scenario.kind === activeKind ? "scenario-button active" : "scenario-button"}
+                    onClick={() => switchScenario(scenario.kind)}
+                    aria-current={scenario.kind === activeKind ? "page" : undefined}
+                  >
+                    <span className="scenario-icon" aria-hidden="true">{scenario.icon}</span>
+                    <span><strong>{scenario.label}</strong><small>{scenario.description}</small></span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </nav>
+
+          <div className="sidebar-safety">
+            <span aria-hidden="true">‚óâ</span>
+            <div><strong>–ë–µ–∑–ø–µ—á–Ω–∏–π —Ä–µ–∂–∏–º</strong><p>–£—Å—ñ –¥—ñ—ó –∑–±–µ—Ä—ñ–≥–∞—é—Ç—å—Å—è —è–∫ —á–µ—Ä–Ω–µ—Ç–∫–∏.</p></div>
+          </div>
+        </aside>
+
+        <section className="workspace-main" aria-labelledby="workspace-title">
+          <div className="workspace-title-row">
+            <div>
+              <p className="eyebrow"><span aria-hidden="true" /> –†–æ–±–æ—á–∞ –æ–±–ª–∞—Å—Ç—å</p>
+              <h1 id="workspace-title">{activeScenario.label}</h1>
+              <p>{activeScenario.description}. –ü–µ—Ä–µ–≤—ñ—Ä—Ç–µ –¥–∞–Ω—ñ –ø–µ—Ä–µ–¥ –∑–±–µ—Ä–µ–∂–µ–Ω–Ω—è–º.</p>
+            </div>
+            <button className="refresh-button" type="button" onClick={() => void loadWorkspace()} disabled={loadState === "loading"}>
+              <span aria-hidden="true">‚Üª</span> {loadState === "loading" ? "–û–Ω–æ–≤–ª–µ–Ω–Ω—è‚Ä¶" : "–û–Ω–æ–≤–∏—Ç–∏ –¥–∞–Ω—ñ"}
+            </button>
+          </div>
+
+          <div className="draft-safety-banner" role="status">
+            <span className="safety-icon" aria-hidden="true">‚úé</span>
+            <div>
+              <strong>–†–µ–∂–∏–º —á–µ—Ä–Ω–µ—Ç–∫–∏ ¬∑ Google Sheets –Ω–µ –∑–º—ñ–Ω–µ–Ω–æ</strong>
+              <p>
+                –ó–±–µ—Ä–µ–∂–µ–Ω—ñ –∑–∞–ø–∏—Å–∏ –æ—á—ñ–∫—É—é—Ç—å –æ–∫—Ä–µ–º–æ—ó –ø–µ—Ä–µ–≤—ñ—Ä–∫–∏ —Ç–∞ –ø—ñ–¥—Ç–≤–µ—Ä–¥–∂–µ–Ω–Ω—è –±—ñ–±–ª—ñ–æ—Ç–µ–∫–∞—Ä–µ–º.
+                {writesEnabled ? " –ê–≤—Ç–æ–º–∞—Ç–∏—á–Ω–∏–π –∑–∞–ø–∏—Å —É —Ç–∞–±–ª–∏—Ü—é –¥–ª—è —Ü—ñ—î—ó —Ñ–æ—Ä–º–∏ –≤—Å–µ –æ–¥–Ω–æ –Ω–µ –≤–∏–∫–æ–Ω—É—î—Ç—å—Å—è." : ""}
+              </p>
+            </div>
+          </div>
+
+          <section className="summary-row" aria-label="–°—Ç–∞–Ω —Ä–æ–±–æ—á–∏—Ö –¥–∞–Ω–∏—Ö">
+            <article><span>–ú–∞—Ç–µ—Ä—ñ–∞–ª—ñ–≤ —É –∫–∞—Ç–∞–ª–æ–∑—ñ</span><strong>{formatNumber(materialCount)}</strong><small>{loadState === "ready" ? "–¥–∞–Ω—ñ –∑–∞–≤–∞–Ω—Ç–∞–∂–µ–Ω–æ" : loadMessage}</small></article>
+            <article><span>–ß–µ—Ä–Ω–µ—Ç–æ–∫</span><strong>{formatNumber(draftCount)}</strong><small>—â–µ –Ω–µ –≤–Ω–µ—Å–µ–Ω–æ –¥–æ Sheets</small></article>
+            <article><span>–°—Ç–≤–æ—Ä–µ–Ω–æ —Å—å–æ–≥–æ–¥–Ω—ñ</span><strong>{formatNumber(todayCount)}</strong><small>{generatedAt ? `–ö–∞—Ç–∞–ª–æ–≥: ${formatDateTime(generatedAt)}` : "–ø–æ—Ç–æ—á–Ω–∞ —Å–µ—Å—ñ—è"}</small></article>
+          </section>
+
+          {loadState === "error" ? (
+            <div className="inline-alert error" role="alert">
+              <span aria-hidden="true">!</span><div><strong>–î–∞–Ω—ñ —Ç–∏–º—á–∞—Å–æ–≤–æ –Ω–µ–¥–æ—Å—Ç—É–ø–Ω—ñ</strong><p>{loadMessage}</p></div>
+              <button type="button" onClick={() => void loadWorkspace()}>–°–ø—Ä–æ–±—É–≤–∞—Ç–∏ –∑–Ω–æ–≤—É</button>
+            </div>
+          ) : null}
+
+          {referenceState.phase === "error" && activeScenario.group === "classes" ? (
+            <div className="inline-alert warning" role="status">
+              <span aria-hidden="true">i</span>
+              <div>
+                <strong>–î–æ–≤—ñ–¥–Ω–∏–∫–∏ –∫–ª–∞—Å—ñ–≤ –ø–æ–∫–∏ –Ω–µ–¥–æ—Å—Ç—É–ø–Ω—ñ</strong>
+                <p>{referenceState.message}. –°–ø—Ä–æ–±—É–π—Ç–µ ¬´–û–Ω–æ–≤–∏—Ç–∏ –¥–∞–Ω—ñ¬ª; –Ω–µ–∑–±–µ—Ä–µ–∂–µ–Ω—ñ –¥–∞–Ω—ñ –Ω–µ –Ω–∞–¥—Å–∏–ª–∞—é—Ç—å—Å—è –¥–æ Sheets.</p>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="work-columns">
+            <section className="form-card" aria-label={`–§–æ—Ä–º–∞: ${activeScenario.label}`}>
+              <OperationForm
+                key={`${activeKind}:${editingDraft?.id ?? "new"}:${formOpenVersion}`}
+                kind={activeKind}
+                catalog={catalog}
+                catalogLoading={loadState === "loading"}
+                sourceGeneratedAt={generatedAt}
+                referenceData={referenceData}
+                referenceState={referenceState}
+                submitState={submitState}
+                onSave={saveDraft}
+                onTransition={transitionDraft}
+                initialDraft={editingDraft}
+                onDirtyChange={handleFormDirtyChange}
+                onStaleChange={handleFormStaleChange}
+                onReset={() => {
+                  handleFormDirtyChange(false);
+                  handleFormStaleChange(false);
+                  editingDraftRef.current = null;
+                  setEditingDraft(null);
+                  setSubmitState({ phase: "idle", message: "" });
+                }}
+              />
+            </section>
+
+            <aside className="drafts-card" aria-labelledby="drafts-heading">
+              <div className="card-heading">
+                <div><p className="mini-label">–ß–µ—Ä–≥–∞ –ø–µ—Ä–µ–≤—ñ—Ä–∫–∏</p><h2 id="drafts-heading">–û—Å—Ç–∞–Ω–Ω—ñ —á–µ—Ä–Ω–µ—Ç–∫–∏</h2></div>
+                <span className="count-badge">{draftCount}</span>
+              </div>
+
+              {loadState === "loading" ? (
+                <div className="draft-loading" aria-live="polite"><i /><i /><i /><span>–ó–∞–≤–∞–Ω—Ç–∞–∂–µ–Ω–Ω—è‚Ä¶</span></div>
+              ) : drafts.length === 0 ? (
+                <div className="empty-drafts"><span aria-hidden="true">‚ñ°</span><strong>–ß–µ—Ä–Ω–µ—Ç–æ–∫ —â–µ –Ω–µ–º–∞—î</strong><p>–ü–µ—Ä—à–∏–π –∑–±–µ—Ä–µ–∂–µ–Ω–∏–π –∑–∞–ø–∏—Å –∑‚Äô—è–≤–∏—Ç—å—Å—è —Ç—É—Ç.</p></div>
+              ) : (
+                <ol className="draft-list">
+                  {drafts.slice(0, 8).map((draft) => (
+                    <li key={draft.id}>
+                      <span className="draft-kind-icon" aria-hidden="true">{SCENARIOS.find((item) => item.kind === draft.kind)?.icon ?? "¬∑"}</span>
+                      <div><strong>{draftPrimaryText(draft)}</strong><small>{KIND_LABELS[draft.kind] ?? draft.kind} ¬∑ {formatDateTime(draft.updatedAt || draft.createdAt)}</small></div>
+                      <span className="draft-actions">
+                        <span className={`draft-state status-${draft.status}`}>{draftStatusLabel(draft.status)}</span>
+                        {draft.status === "draft" ? (
+                          <button
+                            className="draft-open"
+                            type="button"
+                            onClick={() => openDraft(draft)}
+                          >
+                            –í—ñ–¥–∫—Ä–∏—Ç–∏
+                          </button>
+                        ) : draft.status === "ready_for_review" ? (
+                          <button
+                            className="draft-open draft-cancel"
+                            type="button"
+                            disabled={!isPositiveRevision(draft.revision) || submitState.phase === "saving"}
+                            onClick={() => {
+                              if (!window.confirm("–°–∫–∞—Å—É–≤–∞—Ç–∏ —á–µ—Ä–Ω–µ—Ç–∫—É, –Ω–∞–¥—ñ—Å–ª–∞–Ω—É –Ω–∞ –ø–µ—Ä–µ–≤—ñ—Ä–∫—É?")) return;
+                              void transitionDraft(draft.id, draft.revision, "cancel");
+                            }}
+                          >
+                            –°–∫–∞—Å—É–≤–∞—Ç–∏
+                          </button>
+                        ) : null}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </aside>
+          </div>
+        </section>
+      </div>
+
+      <nav className="mobile-operation-nav" aria-label="–†–æ–±–æ—á—ñ –æ–ø–µ—Ä–∞—Ü—ñ—ó">
+        {SCENARIOS.map((scenario) => (
+          <button
+            key={scenario.kind}
+            type="button"
+            className={scenario.kind === activeKind ? "active" : ""}
+            onClick={() => {
+              if (switchScenario(scenario.kind)) {
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }
+            }}
+            aria-current={scenario.kind === activeKind ? "page" : undefined}
+          >
+            <span aria-hidden="true">{scenario.icon}</span>{scenario.shortLabel}
+          </button>
+        ))}
+      </nav>
+    </main>
+  );
+}
+
+function OperationForm({
+  kind,
+  catalog,
+  catalogLoading,
+  sourceGeneratedAt,
+  referenceData,
+  referenceState,
+  submitState,
+  onSave,
+  onTransition,
+  initialDraft,
+  onDirtyChange,
+  onStaleChange,
+  onReset,
+}: {
+  kind: DraftKind;
+  catalog: CatalogMaterial[];
+  catalogLoading: boolean;
+  sourceGeneratedAt: string | null;
+  referenceData: ReferenceData;
+  referenceState: ReferenceState;
+  submitState: SubmitState;
+  initialDraft: SavedDraft | null;
+  onSave: (
+    kind: DraftKind,
+    payload: Record<string, unknown>,
+    id?: string,
+    revision?: number,
+  ) => Promise<SaveDraftResult>;
+  onTransition: (
+    id: string,
+    revision: number,
+    action: DraftAction,
+  ) => Promise<SaveDraftResult>;
+  onDirtyChange: (dirty: boolean) => void;
+  onStaleChange: (stale: boolean) => void;
+  onReset: () => void;
+}) {
+  const formRef = useRef<HTMLFormElement>(null);
+  const [draftId, setDraftId] = useState<string | null>(initialDraft?.id ?? null);
+  const [draftRevision, setDraftRevision] = useState<number | null>(
+    isPositiveRevision(initialDraft?.revision) ? initialDraft!.revision : null,
+  );
+  const [draftStatus, setDraftStatus] = useState(initialDraft?.status ?? "draft");
+  const [stale, setStale] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [lastSavedPayload, setLastSavedPayload] = useState<Record<string, unknown> | null>(
+    initialDraft?.payload ?? null,
+  );
+  const [coverCleanupMessage, setCoverCleanupMessage] = useState("");
+  const requestIdRef = useRef(initialDraft?.id ?? crypto.randomUUID());
+  const [formVersion, setFormVersion] = useState(0);
+  const initialPayload = initialDraft?.payload ?? {};
+  const markDirty = useCallback(() => setHasUnsavedChanges(true), []);
+
+  useEffect(() => {
+    onDirtyChange(hasUnsavedChanges);
+  }, [hasUnsavedChanges, onDirtyChange]);
+
+  useEffect(() => {
+    onStaleChange(stale);
+  }, [onStaleChange, stale]);
+
+  useEffect(() => () => {
+    onDirtyChange(false);
+    onStaleChange(false);
+  }, [onDirtyChange, onStaleChange]);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+
+    if (form.querySelector('[data-cover-upload-pending="true"]')) {
+      setCoverCleanupMessage("–î–æ—á–µ–∫–∞–π—Ç–µ—Å—è –∑–∞–≤–µ—Ä—à–µ–Ω–Ω—è –∑–∞–≤–∞–Ω—Ç–∞–∂–µ–Ω–Ω—è —Ñ–æ—Ç–æ–≥—Ä–∞—Ñ—ñ—ó –ø–µ—Ä–µ–¥ –∑–±–µ—Ä–µ–∂–µ–Ω–Ω—è–º —á–µ—Ä–Ω–µ—Ç–∫–∏.");
+      return;
+    }
+
+    if (kindNeedsMaterial(kind)) {
+      const materialId = new FormData(form).get("materialId");
+      if (typeof materialId !== "string" || !materialId.trim()) {
+        const picker = form.querySelector<HTMLInputElement>("[data-material-picker-input]");
+        picker?.setCustomValidity("–û–±–µ—Ä—ñ—Ç—å –º–∞—Ç–µ—Ä—ñ–∞–ª –∑—ñ —Å–ø–∏—Å–∫—É —Ä–µ–∑—É–ª—å—Ç–∞—Ç—ñ–≤.");
+        picker?.reportValidity();
+        picker?.focus();
+        return;
+      }
+    }
+    if (!form.reportValidity()) return;
+
+    if (stale || draftStatus !== "draft") return;
+
+    const payload = formPayload(
+      new FormData(form),
+      kind,
+      referenceData,
+      sourceGeneratedAt,
+    );
+    const previousCoverPhotoKey = draftCoverPhotoKey(kind, lastSavedPayload);
+    const result = await onSave(
+      kind,
+      payload,
+      draftId ?? requestIdRef.current,
+      draftRevision ?? undefined,
+    );
+    if (result.draft) {
+      setDraftId(result.draft.id);
+      setDraftRevision(result.draft.revision);
+      setDraftStatus(result.draft.status);
+      setHasUnsavedChanges(false);
+      setStale(false);
+      setLastSavedPayload(result.draft.payload);
+      const savedCoverPhotoKey = draftCoverPhotoKey(kind, result.draft.payload);
+      if (previousCoverPhotoKey && previousCoverPhotoKey !== savedCoverPhotoKey) {
+        setCoverCleanupMessage("–í–∏–¥–∞–ª—è—î–º–æ –ø–æ–ø–µ—Ä–µ–¥–Ω—é –ø—Ä–∏–≤–∞—Ç–Ω—É —Ñ–æ—Ç–æ–≥—Ä–∞—Ñ—ñ—é‚Ä¶");
+        void deleteOwnedCoverPhoto(previousCoverPhotoKey).then((deleted) => {
+          setCoverCleanupMessage(deleted
+            ? "–ü–æ–ø–µ—Ä–µ–¥–Ω—é –ø—Ä–∏–≤–∞—Ç–Ω—É —Ñ–æ—Ç–æ–≥—Ä–∞—Ñ—ñ—é –±–µ–∑–ø–µ—á–Ω–æ –≤–∏–¥–∞–ª–µ–Ω–æ –ø—ñ—Å–ª—è –∑–±–µ—Ä–µ–∂–µ–Ω–Ω—è —á–µ—Ä–Ω–µ—Ç–∫–∏."
+            : "–ß–µ—Ä–Ω–µ—Ç–∫—É –∑–±–µ—Ä–µ–∂–µ–Ω–æ, –∞–ª–µ –ø–æ–ø–µ—Ä–µ–¥–Ω—é —Ñ–æ—Ç–æ–≥—Ä–∞—Ñ—ñ—é –Ω–µ –≤–∏–¥–∞–ª–µ–Ω–æ: –≤–æ–Ω–∞ –º–æ–∂–µ –≤–∏–∫–æ—Ä–∏—Å—Ç–æ–≤—É–≤–∞—Ç–∏—Å—è —ñ–Ω—à–æ—é —á–µ—Ä–Ω–µ—Ç–∫–æ—é.");
+        });
+      } else {
+        setCoverCleanupMessage("");
+      }
+      return;
+    }
+    if (result.stale) setStale(true);
+
+    const firstError = Object.entries(result.fieldErrors)[0];
+    if (firstError) {
+      const fieldName = firstError[0].replace(/^payload\./, "");
+      const field = form.elements.namedItem(fieldName);
+      if (
+        field instanceof HTMLInputElement
+        || field instanceof HTMLSelectElement
+        || field instanceof HTMLTextAreaElement
+      ) {
+        field.setCustomValidity(firstError[1]);
+        field.focus();
+        field.reportValidity();
+      }
+    }
+  };
+
+  const handleTransition = async (action: DraftAction) => {
+    if (!draftId || !isPositiveRevision(draftRevision) || stale) return;
+    if (action === "submit" && hasUnsavedChanges) return;
+    if (
+      action === "cancel"
+      && !window.confirm("–°–∫–∞—Å—É–≤–∞—Ç–∏ —Ü—é —á–µ—Ä–Ω–µ—Ç–∫—É? –î–∞–Ω—ñ –≤ Google Sheets –Ω–µ –∑–º—ñ–Ω—è—Ç—å—Å—è.")
+    ) return;
+
+    const result = await onTransition(draftId, draftRevision, action);
+    if (result.draft) {
+      setDraftRevision(result.draft.revision);
+      setDraftStatus(result.draft.status);
+      setHasUnsavedChanges(false);
+      setStale(false);
+    } else if (result.stale) {
+      setStale(true);
+    }
+  };
+
+  const startNewDraft = () => {
+    if (
+      hasUnsavedChanges
+      && !window.confirm("–Ñ –Ω–µ–∑–±–µ—Ä–µ–∂–µ–Ω—ñ –∑–º—ñ–Ω–∏. –í—ñ–¥–∫–∏–Ω—É—Ç–∏ —ó—Ö —ñ —Å—Ç–≤–æ—Ä–∏—Ç–∏ –Ω–æ–≤—É —á–µ—Ä–Ω–µ—Ç–∫—É?")
+    ) return;
+    formRef.current?.reset();
+    setDraftId(null);
+    setDraftRevision(null);
+    setDraftStatus("draft");
+    setStale(false);
+    setHasUnsavedChanges(false);
+    setLastSavedPayload(null);
+    setCoverCleanupMessage("");
+    requestIdRef.current = crypto.randomUUID();
+    setFormVersion((current) => current + 1);
+    onReset();
+  };
+
+  return (
+    <form
+      ref={formRef}
+      className="operation-form"
+      onSubmit={handleSubmit}
+      onInput={(event) => {
+        const target = event.target;
+        if (
+          target instanceof HTMLInputElement
+          || target instanceof HTMLSelectElement
+          || target instanceof HTMLTextAreaElement
+        ) {
+          target.setCustomValidity("");
+          markDirty();
+        }
+      }}
+    >
+      <div className="card-heading form-heading">
+        <div><p className="mini-label">–ö—Ä–æ–∫ 1</p><h2>{KIND_LABELS[kind]}</h2></div>
+        <span className={`draft-chip status-${draftStatus}`}><i /> {draftStatusLabel(draftStatus)}</span>
+      </div>
+
+      <fieldset className="operation-fields" key={formVersion} disabled={draftStatus !== "draft" || stale}>
+        {kind === "material.create" ? <NewMaterialFields catalog={catalog} initialPayload={initialPayload} savedCoverPhotoKey={draftCoverPhotoKey(kind, lastSavedPayload)} onDirty={markDirty} /> : null}
+        {kind === "material.update" ? <MaterialUpdateFields catalog={catalog} loading={catalogLoading} initialPayload={initialPayload} onDirty={markDirty} /> : null}
+        {kind === "receipt.create" ? <ReceiptFields catalog={catalog} loading={catalogLoading} initialPayload={initialPayload} referenceData={referenceData} onDirty={markDirty} /> : null}
+        {kind === "transfer.create" ? <TransferFields catalog={catalog} loading={catalogLoading} initialPayload={initialPayload} referenceData={referenceData} onDirty={markDirty} /> : null}
+        {kind === "writeoff.create" ? <WriteoffFields catalog={catalog} loading={catalogLoading} initialPayload={initialPayload} referenceData={referenceData} onDirty={markDirty} /> : null}
+        {kind === "revision.count" ? <RevisionFields catalog={catalog} loading={catalogLoading} initialPayload={initialPayload} referenceData={referenceData} onDirty={markDirty} /> : null}
+        {kind === "academic-year.create" ? <AcademicYearFields initialPayload={initialPayload} /> : null}
+        {kind === "class-year.create" ? <ClassYearCreateFields initialPayload={initialPayload} referenceData={referenceData} referenceState={referenceState} /> : null}
+        {kind === "class-year.update" ? <ClassYearUpdateFields initialPayload={initialPayload} referenceData={referenceData} referenceState={referenceState} /> : null}
+        {kind === "class-year.close" ? <ClassYearCloseFields initialPayload={initialPayload} referenceData={referenceData} referenceState={referenceState} /> : null}
+        {kind === "academic-year.rollover" ? <AcademicYearRolloverFields initialPayload={initialPayload} referenceData={referenceData} referenceState={referenceState} /> : null}
+      </fieldset>
+
+      {submitState.phase !== "idle" ? (
+        <div
+          className={`submit-message ${submitState.phase}`}
+          role={submitState.phase === "error" ? "alert" : "status"}
+          aria-live="polite"
+        >
+          <span aria-hidden="true">{submitState.phase === "success" ? "‚úì" : submitState.phase === "error" ? "!" : "‚ó∑"}</span>
+          {submitState.message}
+        </div>
+      ) : null}
+
+      {coverCleanupMessage ? (
+        <div className="submit-message saving" role="status" aria-live="polite">
+          <span aria-hidden="true">i</span>{coverCleanupMessage}
+        </div>
+      ) : null}
+
+      {stale ? (
+        <div className="stale-draft-warning" role="alert">
+          <strong>–†–µ–¥–∞–≥—É–≤–∞–Ω–Ω—è –∑—É–ø–∏–Ω–µ–Ω–æ, —â–æ–± –Ω–µ –ø–µ—Ä–µ–∑–∞–ø–∏—Å–∞—Ç–∏ –Ω–æ–≤—ñ—à—ñ –¥–∞–Ω—ñ.</strong>
+          <span>–ù–∞—Ç–∏—Å–Ω—ñ—Ç—å ¬´–û–Ω–æ–≤–∏—Ç–∏ –¥–∞–Ω—ñ¬ª –≤–≥–æ—Ä—ñ —Ç–∞ –≤—ñ–¥–∫—Ä–∏–π—Ç–µ –∞–∫—Ç—É–∞–ª—å–Ω—É —á–µ—Ä–Ω–µ—Ç–∫—É.</span>
+        </div>
+      ) : null}
+
+      <div className="form-footer">
+        <div>
+          <strong>Google Sheets –Ω–µ –∑–º—ñ–Ω–µ–Ω–æ</strong>
+          <small>{draftId ? `${draftStatusLabel(draftStatus)} ${shortDraftId(draftId)} ¬∑ —Ä–µ–≤—ñ–∑—ñ—è ${draftRevision ?? "‚Äî"}` : "–ó–±–µ—Ä—ñ–≥–∞—î—Ç—å—Å—è —Ç—ñ–ª—å–∫–∏ —Å–ª—É–∂–±–æ–≤–∞ —á–µ—Ä–Ω–µ—Ç–∫–∞"}</small>
+        </div>
+        <div className="form-footer-actions">
+          {draftId ? (
+            <button className="button button-quiet" type="button" onClick={startNewDraft}>
+              –ù–æ–≤–∞ —á–µ—Ä–Ω–µ—Ç–∫–∞
+            </button>
+          ) : null}
+          {draftId && draftStatus === "draft" ? (
+            <button
+              className="button button-danger"
+              type="button"
+              onClick={() => void handleTransition("cancel")}
+              disabled={submitState.phase === "saving" || stale}
+            >
+              –°–∫–∞—Å—É–≤–∞—Ç–∏
+            </button>
+          ) : null}
+          {draftId && draftStatus === "draft" ? (
+            <button
+              className="button button-secondary"
+              type="button"
+              onClick={() => void handleTransition("submit")}
+              disabled={submitState.phase === "saving" || stale || hasUnsavedChanges}
+              title={hasUnsavedChanges ? "–°–ø–æ—á–∞—Ç–∫—É –∑–±–µ—Ä–µ–∂—ñ—Ç—å –æ—Å—Ç–∞–Ω–Ω—ñ –∑–º—ñ–Ω–∏" : undefined}
+            >
+              –ù–∞–¥—ñ—Å–ª–∞—Ç–∏ –Ω–∞ –ø–µ—Ä–µ–≤—ñ—Ä–∫—É
+            </button>
+          ) : null}
+          {draftStatus === "draft" ? (
+            <button className="button button-primary save-button" type="submit" disabled={submitState.phase === "saving" || stale}>
+              {submitState.phase === "saving" ? "–ó–±–µ—Ä–µ–∂–µ–Ω–Ω—è‚Ä¶" : draftId ? "–û–Ω–æ–≤–∏—Ç–∏ —á–µ—Ä–Ω–µ—Ç–∫—É" : "–ó–±–µ—Ä–µ–≥—Ç–∏ —á–µ—Ä–Ω–µ—Ç–∫—É"}
+              <span aria-hidden="true">‚Üí</span>
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </form>
+  );
+}
+
+function NewMaterialFields({
+  catalog,
+  initialPayload,
+  savedCoverPhotoKey,
+  onDirty,
+}: {
+  catalog: CatalogMaterial[];
+  initialPayload: Record<string, unknown>;
+  savedCoverPhotoKey: string;
+  onDirty: () => void;
+}) {
+  const rubrics = catalogRubrics(catalog);
+  const maximumYear = new Date().getUTCFullYear() + 1;
+  const [isbn, setIsbn] = useState(initialField(initialPayload, "isbn"));
+  const [title, setTitle] = useState(initialField(initialPayload, "title"));
+  const [author, setAuthor] = useState(initialField(initialPayload, "author"));
+  const [publisher, setPublisher] = useState(initialField(initialPayload, "publisher"));
+  const [year, setYear] = useState(initialField(initialPayload, "year"));
+  const [coverSourceUrl, setCoverSourceUrl] = useState(initialField(initialPayload, "coverSourceUrl"));
+  const [coverPhotoKey, setCoverPhotoKey] = useState(initialField(initialPayload, "coverPhotoKey"));
+  const [coverPhotoName, setCoverPhotoName] = useState(initialField(initialPayload, "coverPhotoName"));
+  const [coverConfirmed, setCoverConfirmed] = useState(
+    initialPayload.coverConfirmed === true || initialPayload.coverConfirmed === "true",
+  );
+  const [lookupState, setLookupState] = useState<SubmitState>({ phase: "idle", message: "" });
+  const [lookupCandidates, setLookupCandidates] = useState<BookLookupCandidate[]>([]);
+  const [uploadState, setUploadState] = useState<SubmitState>({ phase: "idle", message: "" });
+  const [previewFailed, setPreviewFailed] = useState(false);
+  const lookupSequenceRef = useRef(0);
+  const lookupAbortRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+  const uploadRequestGenerationRef = useRef(0);
+  const coverPhotoKeyRef = useRef(coverPhotoKey);
+  const savedCoverPhotoKeyRef = useRef(savedCoverPhotoKey);
+  const manualFieldsRef = useRef({
+    title: Boolean(initialField(initialPayload, "title")),
+    author: Boolean(initialField(initialPayload, "author")),
+    publisher: Boolean(initialField(initialPayload, "publisher")),
+    year: Boolean(initialField(initialPayload, "year")),
+    coverSourceUrl: Boolean(initialField(initialPayload, "coverSourceUrl")),
+  });
+
+  useEffect(() => {
+    coverPhotoKeyRef.current = coverPhotoKey;
+  }, [coverPhotoKey]);
+
+  useEffect(() => {
+    savedCoverPhotoKeyRef.current = savedCoverPhotoKey;
+  }, [savedCoverPhotoKey]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      uploadRequestGenerationRef.current += 1;
+      lookupAbortRef.current?.abort();
+      const unsavedPhotoKey = coverPhotoKeyRef.current;
+      if (unsavedPhotoKey && unsavedPhotoKey !== savedCoverPhotoKeyRef.current) {
+        void deleteOwnedCoverPhoto(unsavedPhotoKey);
+      }
+    };
+  }, []);
+
+  const applyLookupCandidate = (candidate: BookLookupCandidate) => {
+    onDirty();
+    setIsbn((current) => current.trim() ? current : candidate.isbn);
+    if (candidate.title && !manualFieldsRef.current.title) setTitle(candidate.title);
+    if (candidate.authors.length && !manualFieldsRef.current.author) {
+      setAuthor(candidate.authors.join(", "));
+    }
+    if (candidate.publisher && !manualFieldsRef.current.publisher) {
+      setPublisher(candidate.publisher);
+    }
+    if (candidate.publishedYear && !manualFieldsRef.current.year) {
+      setYear(String(candidate.publishedYear));
+    }
+    if (
+      candidate.coverUrl
+      && !coverPhotoKeyRef.current
+      && !manualFieldsRef.current.coverSourceUrl
+    ) {
+      setCoverSourceUrl(candidate.coverUrl);
+      setPreviewFailed(false);
+      setCoverConfirmed(false);
+    }
+    setLookupState({
+      phase: "success",
+      message: "–î–∞–Ω—ñ –ø–æ–ø–µ—Ä–µ–¥–Ω—å–æ –∑–∞–ø–æ–≤–Ω–µ–Ω–æ. –û–±–æ–≤‚Äô—è–∑–∫–æ–≤–æ –∑–≤—ñ—Ä—Ç–µ —ó—Ö —ñ–∑ –ø—Ä–∏–º—ñ—Ä–Ω–∏–∫–æ–º.",
+    });
+  };
+
+  const lookupIsbn = async (value = isbn) => {
+    const query = value.trim();
+    if (!query) {
+      setLookupState({ phase: "error", message: "–°–ø–æ—á–∞—Ç–∫—É –≤–≤–µ–¥—ñ—Ç—å –∞–±–æ –≤—ñ–¥—Å–∫–∞–Ω—É–π—Ç–µ ISBN." });
+      return;
+    }
+    lookupAbortRef.current?.abort();
+    const controller = new AbortController();
+    const sequence = lookupSequenceRef.current + 1;
+    lookupSequenceRef.current = sequence;
+    lookupAbortRef.current = controller;
+    setLookupState({ phase: "saving", message: "–®—É–∫–∞—î–º–æ –Ω–∞–∑–≤—É –π –æ–±–∫–ª–∞–¥–∏–Ω–∫—É‚Ä¶" });
+    setLookupCandidates([]);
+    try {
+      const response = await fetch(`/api/librarian/isbn-lookup?isbn=${encodeURIComponent(query)}`, {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      const body: unknown = await response.json();
+      if (sequence !== lookupSequenceRef.current) return;
+      if (!response.ok || !isRecord(body) || body.success !== true) {
+        throw new Error(readApiError(body, "–ù–µ –≤–¥–∞–ª–æ—Å—è –≤–∏–∫–æ–Ω–∞—Ç–∏ –ø–æ—à—É–∫"));
+      }
+      const candidates = Array.isArray(body.candidates)
+        ? body.candidates.filter(isBookLookupCandidate)
+        : [];
+      setLookupCandidates(candidates);
+      if (!candidates.length) {
+        setLookupState({
+          phase: "error",
+          message: "–ó–∞ ISBN –Ω—ñ—á–æ–≥–æ –Ω–µ –∑–Ω–∞–π–¥–µ–Ω–æ. –í–≤–µ–¥—ñ—Ç—å –¥–∞–Ω—ñ –≤—Ä—É—á–Ω—É –∞–±–æ –¥–æ–¥–∞–π—Ç–µ –ø–æ—Å–∏–ª–∞–Ω–Ω—è —á–∏ —Ñ–æ—Ç–æ–≥—Ä–∞—Ñ—ñ—é.",
+        });
+        return;
+      }
+      applyLookupCandidate(candidates[0]);
+    } catch (error) {
+      if (controller.signal.aborted || sequence !== lookupSequenceRef.current) return;
+      setLookupState({
+        phase: "error",
+        message: error instanceof Error
+          ? error.message
+          : "–ü–æ—à—É–∫ —Ç–∏–º—á–∞—Å–æ–≤–æ –Ω–µ–¥–æ—Å—Ç—É–ø–Ω–∏–π. –î–∞–Ω—ñ –º–æ–∂–Ω–∞ –≤–≤–µ—Å—Ç–∏ –≤—Ä—É—á–Ω—É.",
+      });
+    } finally {
+      if (lookupAbortRef.current === controller) lookupAbortRef.current = null;
+    }
+  };
+
+  const changeIsbn = (value: string) => {
+    lookupSequenceRef.current += 1;
+    lookupAbortRef.current?.abort();
+    lookupAbortRef.current = null;
+    setLookupCandidates([]);
+    setLookupState({ phase: "idle", message: "" });
+    setIsbn(value);
+    onDirty();
+  };
+
+  const uploadPhoto = async (file: File) => {
+    if (file.size > 8 * 1024 * 1024) {
+      setUploadState({ phase: "error", message: "–§–æ—Ç–æ –º–∞—î –±—É—Ç–∏ –Ω–µ –±—ñ–ª—å—à–µ 8 –ú–ë." });
+      return;
+    }
+    onDirty();
+    const uploadGeneration = uploadRequestGenerationRef.current + 1;
+    uploadRequestGenerationRef.current = uploadGeneration;
+    const previousPhotoKey = coverPhotoKeyRef.current;
+    setUploadState({ phase: "saving", message: "–ó–∞–≤–∞–Ω—Ç–∞–∂—É—î–º–æ –ø—Ä–∏–≤–∞—Ç–Ω—É –∫–æ–ø—ñ—é —Ñ–æ—Ç–æ–≥—Ä–∞—Ñ—ñ—ó‚Ä¶" });
+    const data = new FormData();
+    data.set("photo", file);
+    try {
+      const response = await fetch("/api/librarian/cover-photo", { method: "POST", body: data });
+      const body: unknown = await response.json();
+      if (!response.ok || !isRecord(body) || body.success !== true || !isRecord(body.photo)) {
+        throw new Error(readApiError(body, "–ù–µ –≤–¥–∞–ª–æ—Å—è –∑–∞–≤–∞–Ω—Ç–∞–∂–∏—Ç–∏ —Ñ–æ—Ç–æ–≥—Ä–∞—Ñ—ñ—é"));
+      }
+      const key = readText(body.photo, ["key"]);
+      const name = readText(body.photo, ["name"]);
+      if (!key) throw new Error("–°—Ö–æ–≤–∏—â–µ –Ω–µ –ø–æ–≤–µ—Ä–Ω—É–ª–æ –∫–ª—é—á —Ñ–æ—Ç–æ–≥—Ä–∞—Ñ—ñ—ó");
+      if (!mountedRef.current || uploadGeneration !== uploadRequestGenerationRef.current) {
+        await deleteOwnedCoverPhoto(key);
+        return;
+      }
+      coverPhotoKeyRef.current = key;
+      setCoverPhotoKey(key);
+      onDirty();
+      setCoverPhotoName(name || file.name);
+      setCoverSourceUrl("");
+      setCoverConfirmed(false);
+      setPreviewFailed(false);
+      manualFieldsRef.current.coverSourceUrl = false;
+      const shouldDeletePrevious = previousPhotoKey
+        && previousPhotoKey !== key
+        && previousPhotoKey !== savedCoverPhotoKeyRef.current;
+      const previousDeleted = shouldDeletePrevious
+        ? await deleteOwnedCoverPhoto(previousPhotoKey)
+        : true;
+      if (!mountedRef.current || uploadGeneration !== uploadRequestGenerationRef.current) return;
+      setUploadState({
+        phase: "success",
+        message: previousDeleted
+          ? "–§–æ—Ç–æ –∑–±–µ—Ä–µ–∂–µ–Ω–æ —É –ø—Ä–∏–≤–∞—Ç–Ω—ñ–π —á–µ—Ä–Ω–µ—Ç—Ü—ñ. –ü–µ—Ä–µ–≤—ñ—Ä—Ç–µ –π–æ–≥–æ –π –ø—ñ–¥—Ç–≤–µ—Ä–¥—å—Ç–µ."
+          : "–ù–æ–≤–µ —Ñ–æ—Ç–æ –∑–±–µ—Ä–µ–∂–µ–Ω–æ, –∞–ª–µ –ø–æ–ø–µ—Ä–µ–¥–Ω—é –Ω–µ–∑–±–µ—Ä–µ–∂–µ–Ω—É –∫–æ–ø—ñ—é –Ω–µ –≤–¥–∞–ª–æ—Å—è –≤–∏–¥–∞–ª–∏—Ç–∏.",
+      });
+    } catch (error) {
+      if (!mountedRef.current || uploadGeneration !== uploadRequestGenerationRef.current) return;
+      setUploadState({
+        phase: "error",
+        message: error instanceof Error ? error.message : "–ù–µ –≤–¥–∞–ª–æ—Å—è –∑–∞–≤–∞–Ω—Ç–∞–∂–∏—Ç–∏ —Ñ–æ—Ç–æ–≥—Ä–∞—Ñ—ñ—é",
+      });
+    }
+  };
+
+  const removePhoto = async () => {
+    if (!coverPhotoKey) return;
+    if (coverPhotoKey === savedCoverPhotoKeyRef.current) {
+      coverPhotoKeyRef.current = "";
+      setCoverPhotoKey("");
+      setCoverPhotoName("");
+      setCoverConfirmed(false);
+      onDirty();
+      setUploadState({
+        phase: "success",
+        message: "–§–æ—Ç–æ –≤—ñ–¥‚Äô—î–¥–Ω–∞–Ω–æ —É —Ñ–æ—Ä–º—ñ. –ó–±–µ—Ä–µ–∂—ñ—Ç—å —á–µ—Ä–Ω–µ—Ç–∫—É ‚Äî –ª–∏—à–µ –ø—ñ—Å–ª—è —Ü—å–æ–≥–æ –ø–æ–ø–µ—Ä–µ–¥–Ω—ñ–π –ø—Ä–∏–≤–∞—Ç–Ω–∏–π —Ñ–∞–π–ª –±—É–¥–µ –≤–∏–¥–∞–ª–µ–Ω–æ.",
+      });
+      return;
+    }
+    setUploadState({ phase: "saving", message: "–í–∏–¥–∞–ª—è—î–º–æ —Ñ–æ—Ç–æ–≥—Ä–∞—Ñ—ñ—é –∑ —á–µ—Ä–Ω–µ—Ç–∫–∏‚Ä¶" });
+    try {
+      if (!await deleteOwnedCoverPhoto(coverPhotoKey)) {
+        throw new Error("–ù–µ –≤–¥–∞–ª–æ—Å—è –≤–∏–¥–∞–ª–∏—Ç–∏ —Ñ–æ—Ç–æ–≥—Ä–∞—Ñ—ñ—é");
+      }
+      coverPhotoKeyRef.current = "";
+      setCoverPhotoKey("");
+      onDirty();
+      setCoverPhotoName("");
+      setCoverConfirmed(false);
+      setUploadState({ phase: "idle", message: "" });
+    } catch (error) {
+      setUploadState({
+        phase: "error",
+        message: error instanceof Error ? error.message : "–ù–µ –≤–¥–∞–ª–æ—Å—è –≤–∏–¥–∞–ª–∏—Ç–∏ —Ñ–æ—Ç–æ–≥—Ä–∞—Ñ—ñ—é",
+      });
+    }
+  };
+
+  const uploadedPreviewUrl = coverPhotoKey
+    ? `/api/librarian/cover-photo?key=${encodeURIComponent(coverPhotoKey)}`
+    : "";
+  const hasCoverSource = Boolean(coverPhotoKey || coverSourceUrl.trim());
+
+  return (
+    <>
+      <section className="form-section" aria-labelledby="new-main-heading">
+        <div className="section-heading"><span>01</span><div><h3 id="new-main-heading">–û—Å–Ω–æ–≤–Ω—ñ –≤—ñ–¥–æ–º–æ—Å—Ç—ñ</h3><p>–ü–æ–ª—è –∑—ñ –∑—ñ—Ä–æ—á–∫–æ—é –æ–±–æ–≤‚Äô—è–∑–∫–æ–≤—ñ</p></div></div>
+        <div className="field-grid">
+          <BarcodeInput
+            name="isbn"
+            label="ISBN (—à—Ç—Ä–∏—Ö–∫–æ–¥ EAN-13)"
+            hint="–í–≤–µ–¥—ñ—Ç—å ISBN –∞–±–æ –≤—ñ–¥—Å–∫–∞–Ω—É–π—Ç–µ —à—Ç—Ä–∏—Ö–∫–æ–¥ ‚Äî –ø–æ—à—É–∫ –∑–∞–ø–æ–≤–Ω–∏—Ç—å –∫–∞—Ä—Ç–∫—É, –∞–ª–µ –Ω–µ –∑–±–µ—Ä–µ–∂–µ —ó—ó –±–µ–∑ –≤–∞—à–æ—ó –ø–µ—Ä–µ–≤—ñ—Ä–∫–∏"
+            value={isbn}
+            onValueChange={changeIsbn}
+            onLookup={(value) => void lookupIsbn(value)}
+            lookupPending={lookupState.phase === "saving"}
+          />
+          {lookupState.phase !== "idle" ? (
+            <div className={`lookup-status field-wide ${lookupState.phase}`} role={lookupState.phase === "error" ? "alert" : "status"}>
+              <span aria-hidden="true">{lookupState.phase === "success" ? "‚úì" : lookupState.phase === "error" ? "!" : "‚ó∑"}</span>
+              <p>{lookupState.message}</p>
+            </div>
+          ) : null}
+          {lookupCandidates.length > 1 ? (
+            <div className="lookup-candidates field-wide" aria-label="–ó–Ω–∞–π–¥–µ–Ω—ñ –≤–∏–¥–∞–Ω–Ω—è">
+              <strong>–ó–Ω–∞–π–¥–µ–Ω–æ –∫—ñ–ª—å–∫–∞ –≤–∞—Ä—ñ–∞–Ω—Ç—ñ–≤</strong>
+              {lookupCandidates.map((candidate, index) => (
+                <button type="button" key={`${candidate.provider}:${index}`} onClick={() => applyLookupCandidate(candidate)}>
+                  <span>{candidate.title}</span>
+                  <small>{candidate.authors.join(", ") || candidate.publisher || "–ë–µ–∑ –¥–æ–¥–∞—Ç–∫–æ–≤–∏—Ö –¥–∞–Ω–∏—Ö"}</small>
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <label className="field field-wide"><span>–ù–∞–∑–≤–∞ –º–∞—Ç–µ—Ä—ñ–∞–ª—É <b aria-hidden="true">*</b></span><input name="title" type="text" required autoComplete="off" value={title} onChange={(event) => { manualFieldsRef.current.title = true; setTitle(event.target.value); }} placeholder="–ù–∞–ø—Ä–∏–∫–ª–∞–¥, –ú–∞—Ç–µ–º–∞—Ç–∏–∫–∞. 5 –∫–ª–∞—Å" /></label>
+          <label className="field"><span>–ê–≤—Ç–æ—Ä / —É–∫–ª–∞–¥–∞—á</span><input name="author" type="text" autoComplete="off" value={author} onChange={(event) => { manualFieldsRef.current.author = true; setAuthor(event.target.value); }} placeholder="–ü—Ä—ñ–∑–≤–∏—â–µ —Ç–∞ —ñ–Ω—ñ—Ü—ñ–∞–ª–∏" /></label>
+          <label className="field"><span>–í–∏–¥–∞–≤–Ω–∏—Ü—Ç–≤–æ</span><input name="publisher" type="text" autoComplete="off" value={publisher} onChange={(event) => { manualFieldsRef.current.publisher = true; setPublisher(event.target.value); }} placeholder="–ù–∞–∑–≤–∞ –≤–∏–¥–∞–≤–Ω–∏—Ü—Ç–≤–∞" /></label>
+          <label className="field"><span>–†—ñ–∫ –≤–∏–¥–∞–Ω–Ω—è</span><input name="year" type="number" inputMode="numeric" min="1500" max={maximumYear} value={year} onChange={(event) => { manualFieldsRef.current.year = true; setYear(event.target.value); }} placeholder={String(new Date().getUTCFullYear())} /></label>
+        </div>
+      </section>
+
+      <section className="form-section" aria-labelledby="new-class-heading">
+        <div className="section-heading"><span>02</span><div><h3 id="new-class-heading">–ö–ª–∞—Å–∏—Ñ—ñ–∫–∞—Ü—ñ—è</h3><p>–î–æ–ø–æ–º–∞–≥–∞—î –∑–Ω–∞–π—Ç–∏ –º–∞—Ç–µ—Ä—ñ–∞–ª —É –∫–∞—Ç–∞–ª–æ–∑—ñ</p></div></div>
+        <div className="field-grid">
+          <label className="field"><span>–†—É–±—Ä–∏–∫–∞ <b aria-hidden="true">*</b></span><input name="rubric" type="text" list="rubrics-list" required autoComplete="off" defaultValue={initialField(initialPayload, "rubric")} placeholder="–û–±–µ—Ä—ñ—Ç—å –∞–±–æ –≤–≤–µ–¥—ñ—Ç—å –Ω–æ–≤—É" /><datalist id="rubrics-list">{rubrics.map((rubric) => <option key={rubric} value={rubric} />)}</datalist></label>
+          <label className="field"><span>–ó –∫–ª–∞—Å—É</span><select name="classFrom" defaultValue={initialField(initialPayload, "classFrom") || gradeFromLegacy(initialPayload)}><option value="">–ù–µ –∑–∞–∑–Ω–∞—á–µ–Ω–æ</option>{gradeOptions()}</select></label>
+          <label className="field"><span>–î–æ –∫–ª–∞—Å—É</span><select name="classTo" defaultValue={initialField(initialPayload, "classTo") || gradeFromLegacy(initialPayload)}><option value="">–Ø–∫ ¬´–ó –∫–ª–∞—Å—É¬ª</option>{gradeOptions()}</select></label>
+          <label className="field"><span>–ü—Ä–µ–¥–º–µ—Ç</span><input name="subject" type="text" autoComplete="off" defaultValue={initialField(initialPayload, "subject")} placeholder="–ù–∞–ø—Ä–∏–∫–ª–∞–¥, –º–∞—Ç–µ–º–∞—Ç–∏–∫–∞" /></label>
+          <label className="field"><span>–¢–∏–ø –≤–∏–¥–∞–Ω–Ω—è</span><select name="publicationType" defaultValue={initialField(initialPayload, "publicationType")}><option value="">–ù–µ –≤–∏–±—Ä–∞–Ω–æ</option><option>–ü—ñ–¥—Ä—É—á–Ω–∏–∫</option><option>–ü–æ—Å—ñ–±–Ω–∏–∫</option><option>–ó–æ—à–∏—Ç</option><option>–ó–±—ñ—Ä–Ω–∏–∫</option><option>–ê—Ç–ª–∞—Å</option><option>–°–ª–æ–≤–Ω–∏–∫</option><option>–Ü–Ω—à–µ</option></select></label>
+        </div>
+      </section>
+
+      <section className="form-section" aria-labelledby="new-extra-heading">
+        <div className="section-heading"><span>03</span><div><h3 id="new-extra-heading">–û–±–∫–ª–∞–¥–∏–Ω–∫–∞ —Ç–∞ –ø—Ä–∏–º—ñ—Ç–∫–∞</h3><p>–î–æ–¥–∞–π—Ç–µ –ø–æ—Å–∏–ª–∞–Ω–Ω—è –∞–±–æ —Ñ–æ—Ç–æ–≥—Ä–∞—Ñ—ñ—é, –ø–µ—Ä–µ–≥–ª—è–Ω—å—Ç–µ –π –ø—ñ–¥—Ç–≤–µ—Ä–¥—å—Ç–µ</p></div></div>
+        <div className="field-grid">
+          <label className="field field-wide"><span>–î–∂–µ—Ä–µ–ª–æ –æ–±–∫–ª–∞–¥–∏–Ω–∫–∏</span><input name="coverSourceUrl" type="url" inputMode="url" value={coverSourceUrl} disabled={Boolean(coverPhotoKey)} onChange={(event) => { manualFieldsRef.current.coverSourceUrl = true; setCoverSourceUrl(event.target.value); setCoverConfirmed(false); }} placeholder={coverPhotoKey ? "–°–ø–æ—á–∞—Ç–∫—É –ø—Ä–∏–±–µ—Ä—ñ—Ç—å –∑–∞–≤–∞–Ω—Ç–∞–∂–µ–Ω–µ —Ñ–æ—Ç–æ" : "https://‚Ä¶ —Å—Ç–æ—Ä—ñ–Ω–∫–∞ –≤–∏–¥–∞–Ω–Ω—è –∞–±–æ –∑–æ–±—Ä–∞–∂–µ–Ω–Ω—è"} /><small>{coverPhotoKey ? "–î–ª—è –∑–∞–º—ñ–Ω–∏ —Ñ–æ—Ç–æ –ø–æ—Å–∏–ª–∞–Ω–Ω—è–º —Å–ø–æ—á–∞—Ç–∫—É –Ω–∞—Ç–∏—Å–Ω—ñ—Ç—å ¬´–ü—Ä–∏–±—Ä–∞—Ç–∏ —Ñ–æ—Ç–æ¬ª." : "–ü–æ—Å–∏–ª–∞–Ω–Ω—è –Ω–µ –≤—ñ–¥–∫—Ä–∏–≤–∞—î—Ç—å—Å—è –±—Ä–∞—É–∑–µ—Ä–æ–º –∞–≤—Ç–æ–º–∞—Ç–∏—á–Ω–æ: –π–æ–≥–æ –±–µ–∑–ø–µ—á–Ω–æ –ø–µ—Ä–µ–≤—ñ—Ä–∏—Ç—å –æ–±—Ä–æ–±–Ω–∏–∫ –ø—ñ—Å–ª—è –∑–±–µ—Ä–µ–∂–µ–Ω–Ω—è."}</small></label>
+          <div className="cover-photo-field field-wide">
+            <label className="button button-secondary cover-upload-button">
+              <span aria-hidden="true">‚ñß</span>{uploadState.phase === "saving" ? "–ó–∞–≤–∞–Ω—Ç–∞–∂–µ–Ω–Ω—è‚Ä¶" : "–î–æ–¥–∞—Ç–∏ —Ñ–æ—Ç–æ –ø—Ä–∏–º—ñ—Ä–Ω–∏–∫–∞"}
+              <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" disabled={uploadState.phase === "saving"} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadPhoto(file); event.currentTarget.value = ""; }} />
+            </label>
+            <small>JPG, PNG –∞–±–æ WEBP –¥–æ 8 –ú–ë. –§–æ—Ç–æ –∑–±–µ—Ä—ñ–≥–∞—î—Ç—å—Å—è –ø—Ä–∏–≤–∞—Ç–Ω–æ –¥–æ –æ–ø—Ä–∞—Ü—é–≤–∞–Ω–Ω—è.</small>
+          </div>
+          {coverPhotoKey ? <input type="hidden" name="coverPhotoKey" value={coverPhotoKey} /> : null}
+          {coverPhotoName ? <input type="hidden" name="coverPhotoName" value={coverPhotoName} /> : null}
+          <input type="hidden" data-cover-upload-pending={uploadState.phase === "saving" ? "true" : "false"} />
+          {uploadState.phase !== "idle" ? (
+            <div className={`lookup-status field-wide ${uploadState.phase}`} role={uploadState.phase === "error" ? "alert" : "status"}>
+              <span aria-hidden="true">{uploadState.phase === "success" ? "‚úì" : uploadState.phase === "error" ? "!" : "‚ó∑"}</span>
+              <p>{uploadState.message}</p>
+            </div>
+          ) : null}
+          {uploadedPreviewUrl ? (
+            <div className="cover-preview field-wide">
+              <div className="cover-preview-image">
+                {!previewFailed ? <img src={uploadedPreviewUrl} alt="–ü–æ–ø–µ—Ä–µ–¥–Ω—ñ–π –ø–µ—Ä–µ–≥–ª—è–¥ –∑–∞–≤–∞–Ω—Ç–∞–∂–µ–Ω–æ—ó –æ–±–∫–ª–∞–¥–∏–Ω–∫–∏" onError={() => setPreviewFailed(true)} /> : <span aria-hidden="true">?</span>}
+              </div>
+              <div>
+                <strong>{previewFailed ? "–ó–æ–±—Ä–∞–∂–µ–Ω–Ω—è –Ω–µ –≤–¥–∞–ª–æ—Å—è –ø–æ–∫–∞–∑–∞—Ç–∏" : "–ü–µ—Ä–µ–≤—ñ—Ä—Ç–µ –æ–±–∫–ª–∞–¥–∏–Ω–∫—É"}</strong>
+                <p>{previewFailed ? "–ü—Ä–∏–≤–∞—Ç–Ω—É —Ñ–æ—Ç–æ–≥—Ä–∞—Ñ—ñ—é –Ω–µ –≤–¥–∞–ª–æ—Å—è –∑–∞–≤–∞–Ω—Ç–∞–∂–∏—Ç–∏ –¥–ª—è –ø–µ—Ä–µ–≥–ª—è–¥—É. –°–ø—Ä–æ–±—É–π—Ç–µ –¥–æ–¥–∞—Ç–∏ —ó—ó –ø–æ–≤—Ç–æ—Ä–Ω–æ." : coverPhotoName || "–ó–∞–≤–∞–Ω—Ç–∞–∂–µ–Ω–∞ –ø—Ä–∏–≤–∞—Ç–Ω–∞ —Ñ–æ—Ç–æ–≥—Ä–∞—Ñ—ñ—è"}</p>
+                {coverPhotoKey ? <button type="button" className="change-material" onClick={() => void removePhoto()}>–ü—Ä–∏–±—Ä–∞—Ç–∏ —Ñ–æ—Ç–æ</button> : null}
+              </div>
+            </div>
+          ) : coverSourceUrl.trim() ? (
+            <div className="cover-preview cover-link-preview field-wide" role="status">
+              <div className="cover-preview-image" aria-hidden="true">‚Üó</div>
+              <div>
+                <strong>–ü–æ—Å–∏–ª–∞–Ω–Ω—è –¥–æ–¥–∞–Ω–æ –±–µ–∑ –∞–≤—Ç–æ–º–∞—Ç–∏—á–Ω–æ–≥–æ –≤—ñ–¥–∫—Ä–∏—Ç—Ç—è</strong>
+                <p>–¶–µ –∑–∞—Ö–∏—â–∞—î –ª–æ–∫–∞–ª—å–Ω—É –º–µ—Ä–µ–∂—É. –û–±–∫–ª–∞–¥–∏–Ω–∫—É –±—É–¥–µ –∑–Ω–∞–π–¥–µ–Ω–æ –π –ø–µ—Ä–µ–≤—ñ—Ä–µ–Ω–æ –±–µ–∑–ø–µ—á–Ω–∏–º –æ–±—Ä–æ–±–Ω–∏–∫–æ–º –ø—ñ—Å–ª—è –∑–±–µ—Ä–µ–∂–µ–Ω–Ω—è —á–µ—Ä–Ω–µ—Ç–∫–∏.</p>
+              </div>
+            </div>
+          ) : null}
+          {hasCoverSource ? (
+            <label className="cover-confirm field-wide">
+              <input name="coverConfirmed" type="checkbox" value="true" required checked={coverConfirmed} onChange={(event) => setCoverConfirmed(event.target.checked)} />
+              <span><strong>–ü—ñ–¥—Ç–≤–µ—Ä–¥–∂—É—é —Ü—é –æ–±–∫–ª–∞–¥–∏–Ω–∫—É</strong><small>–§–∞–π–ª –±—É–¥–µ –æ–±—Ä–æ–±–ª–µ–Ω–æ –ª–∏—à–µ –ø—ñ—Å–ª—è –ø—ñ–¥—Ç–≤–µ—Ä–¥–∂–µ–Ω–Ω—è –±—ñ–±–ª—ñ–æ—Ç–µ–∫–∞—Ä–µ–º.</small></span>
+            </label>
+          ) : null}
+          <label className="field field-wide"><span>–ü—Ä–∏–º—ñ—Ç–∫–∞</span><textarea name="notes" rows={3} defaultValue={initialField(initialPayload, "notes")} placeholder="–î–æ–¥–∞—Ç–∫–æ–≤–∞ —ñ–Ω—Ñ–æ—Ä–º–∞—Ü—ñ—è –¥–ª—è –ø–µ—Ä–µ–≤—ñ—Ä–∫–∏" /></label>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function MaterialUpdateFields({
+  catalog,
+  loading,
+  initialPayload,
+  onDirty,
+}: {
+  catalog: CatalogMaterial[];
+  loading: boolean;
+  initialPayload: Record<string, unknown>;
+  onDirty: () => void;
+}) {
+  const changes = nestedRecord(initialPayload, "changes");
+  const rubrics = catalogRubrics(catalog);
+  const maximumYear = new Date().getUTCFullYear() + 1;
+  const [coverSourceUrl, setCoverSourceUrl] = useState(initialField(changes, "coverSourceUrl"));
+  const [coverConfirmed, setCoverConfirmed] = useState(
+    changes.coverConfirmed === true || changes.coverConfirmed === "true",
+  );
+
+  return (
+    <>
+      <MaterialSection catalog={catalog} loading={loading} heading="–Ø–∫–∏–π –º–∞—Ç–µ—Ä—ñ–∞–ª –∑–º—ñ–Ω—é—î—Ç—å—Å—è" initialPayload={initialPayload} onDirty={onDirty} />
+      <section className="form-section" aria-labelledby="material-update-heading">
+        <div className="section-heading"><span>02</span><div><h3 id="material-update-heading">–ù–æ–≤—ñ –∑–Ω–∞—á–µ–Ω–Ω—è</h3><p>–ó–∞–ø–æ–≤–Ω—ñ—Ç—å –ª–∏—à–µ –ø–æ–ª—è, —è–∫—ñ —Ç—Ä–µ–±–∞ –∑–º—ñ–Ω–∏—Ç–∏</p></div></div>
+        <div className="field-grid">
+          <label className="field field-wide"><span>–ù–æ–≤–∞ –Ω–∞–∑–≤–∞</span><input name="changes.title" type="text" maxLength={300} defaultValue={initialField(changes, "title")} placeholder="–ó–∞–ª–∏—à—Ç–µ –ø–æ—Ä–æ–∂–Ω—ñ–º –±–µ–∑ –∑–º—ñ–Ω–∏" /></label>
+          <label className="field"><span>–†—É–±—Ä–∏–∫–∞</span><input name="changes.rubric" type="text" list="update-rubrics-list" defaultValue={initialField(changes, "rubric")} placeholder="–ë–µ–∑ –∑–º—ñ–Ω–∏" /><datalist id="update-rubrics-list">{rubrics.map((rubric) => <option key={rubric} value={rubric} />)}</datalist></label>
+          <label className="field"><span>–¢–∏–ø –≤–∏–¥–∞–Ω–Ω—è</span><select name="changes.publicationType" defaultValue={initialField(changes, "publicationType")}><option value="">–ë–µ–∑ –∑–º—ñ–Ω–∏</option><option>–ü—ñ–¥—Ä—É—á–Ω–∏–∫</option><option>–ü–æ—Å—ñ–±–Ω–∏–∫</option><option>–ó–æ—à–∏—Ç</option><option>–ó–±—ñ—Ä–Ω–∏–∫</option><option>–ê—Ç–ª–∞—Å</option><option>–°–ª–æ–≤–Ω–∏–∫</option><option>–Ü–Ω—à–µ</option></select></label>
+          <label className="field"><span>–ü—Ä–µ–¥–º–µ—Ç</span><input name="changes.subject" type="text" defaultValue={initialField(changes, "subject")} placeholder="–ë–µ–∑ –∑–º—ñ–Ω–∏" /></label>
+          <label className="field"><span>–ê–≤—Ç–æ—Ä / —É–∫–ª–∞–¥–∞—á</span><input name="changes.author" type="text" defaultValue={initialField(changes, "author")} placeholder="–ë–µ–∑ –∑–º—ñ–Ω–∏" /></label>
+          <label className="field"><span>–í–∏–¥–∞–≤–Ω–∏—Ü—Ç–≤–æ</span><input name="changes.publisher" type="text" defaultValue={initialField(changes, "publisher")} placeholder="–ë–µ–∑ –∑–º—ñ–Ω–∏" /></label>
+          <label className="field"><span>–†—ñ–∫ –≤–∏–¥–∞–Ω–Ω—è</span><input name="changes.year" type="number" inputMode="numeric" min="1500" max={maximumYear} defaultValue={initialField(changes, "year")} placeholder="–ë–µ–∑ –∑–º—ñ–Ω–∏" /></label>
+          <label className="field"><span>–ó –∫–ª–∞—Å—É</span><select name="changes.classFrom" defaultValue={initialField(changes, "classFrom")}><option value="">–ë–µ–∑ –∑–º—ñ–Ω–∏</option>{gradeOptions()}</select></label>
+          <label className="field"><span>–î–æ –∫–ª–∞—Å—É</span><select name="changes.classTo" defaultValue={initialField(changes, "classTo")}><option value="">–ë–µ–∑ –∑–º—ñ–Ω–∏</option>{gradeOptions()}</select></label>
+          <label className="field"><span>ISBN</span><input name="changes.isbn" type="text" inputMode="numeric" defaultValue={initialField(changes, "isbn")} placeholder="–ë–µ–∑ –∑–º—ñ–Ω–∏" /></label>
+          <label className="field"><span>–ï–ª–µ–∫—Ç—Ä–æ–Ω–Ω–∞ –≤–µ—Ä—Å—ñ—è</span><input name="changes.electronicUrl" type="url" inputMode="url" defaultValue={initialField(changes, "electronicUrl")} placeholder="https://‚Ä¶" /></label>
+          <label className="field field-wide"><span>–ù–æ–≤–µ –¥–∂–µ—Ä–µ–ª–æ –æ–±–∫–ª–∞–¥–∏–Ω–∫–∏</span><input name="changes.coverSourceUrl" type="url" inputMode="url" value={coverSourceUrl} onChange={(event) => { setCoverSourceUrl(event.target.value); setCoverConfirmed(false); }} placeholder="https://‚Ä¶" /><small>–î–æ–¥–∞–≤–∞–π—Ç–µ –ª–∏—à–µ –∫–æ–ª–∏ –ø–æ—Ç—Ä—ñ–±–Ω–æ –∑–∞–º—ñ–Ω–∏—Ç–∏ –æ–±–∫–ª–∞–¥–∏–Ω–∫—É.</small></label>
+          {coverSourceUrl.trim() ? (
+            <label className="cover-confirm field-wide">
+              <input name="changes.coverConfirmed" type="checkbox" value="true" required checked={coverConfirmed} onChange={(event) => setCoverConfirmed(event.target.checked)} />
+              <span><strong>–ü—ñ–¥—Ç–≤–µ—Ä–¥–∂—É—é –Ω–æ–≤—É –æ–±–∫–ª–∞–¥–∏–Ω–∫—É</strong><small>–ó–º—ñ–Ω–∞ –±—É–¥–µ –ª–∏—à–µ —É —á–µ—Ä–Ω–µ—Ç—Ü—ñ –¥–æ –æ–∫—Ä–µ–º–æ—ó –ø–µ—Ä–µ–≤—ñ—Ä–∫–∏.</small></span>
+            </label>
+          ) : null}
+          <label className="field field-wide"><span>–ü—Ä–∏—á–∏–Ω–∞ –≤–∏–ø—Ä–∞–≤–ª–µ–Ω–Ω—è</span><textarea name="reason" rows={2} defaultValue={initialField(initialPayload, "reason")} placeholder="–©–æ —Å–∞–º–µ —Ç—Ä–µ–±–∞ –≤–∏–ø—Ä–∞–≤–∏—Ç–∏" /></label>
+          <label className="field field-wide"><span>–ù–æ–≤–∞ –ø—Ä–∏–º—ñ—Ç–∫–∞ –≤ –∫–∞—Ä—Ç—Ü—ñ</span><textarea name="changes.notes" rows={3} defaultValue={initialField(changes, "notes")} placeholder="–ë–µ–∑ –∑–º—ñ–Ω–∏" /></label>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function WriteoffFields({
+  catalog,
+  loading,
+  initialPayload,
+  referenceData,
+  onDirty,
+}: {
+  catalog: CatalogMaterial[];
+  loading: boolean;
+  initialPayload: Record<string, unknown>;
+  referenceData: ReferenceData;
+  onDirty: () => void;
+}) {
+  return (
+    <>
+      <MaterialSection catalog={catalog} loading={loading} heading="–©–æ —Å–ø–∏—Å—É—î—Ç—å—Å—è" initialPayload={initialPayload} onDirty={onDirty} />
+      <section className="form-section" aria-labelledby="writeoff-heading">
+        <div className="section-heading"><span>02</span><div><h3 id="writeoff-heading">–ê–∫—Ç —Å–ø–∏—Å–∞–Ω–Ω—è</h3><p>–í–∫–∞–∂—ñ—Ç—å –∑–≤—ñ–¥–∫–∏, —Å–∫—ñ–ª—å–∫–∏ —Ç–∞ –∑ —è–∫–æ—ó –ø—Ä–∏—á–∏–Ω–∏</p></div></div>
+        <div className="field-grid">
+          <ProtectedLocationSelect name="fromLocationId" label="–ó–≤—ñ–¥–∫–∏" required initialId={initialField(initialPayload, "fromLocationId")} referenceData={referenceData} />
+          <label className="field"><span>–ö—ñ–ª—å–∫—ñ—Å—Ç—å <b aria-hidden="true">*</b></span><input name="quantity" type="number" inputMode="numeric" min="1" step="1" required defaultValue={initialField(initialPayload, "quantity") || "1"} /></label>
+          <label className="field"><span>–°–ª—É–∂–±–æ–≤–µ –ø—Ä–∏–∑–Ω–∞—á–µ–Ω–Ω—è <b aria-hidden="true">*</b></span><select name="destination" required defaultValue={initialField(initialPayload, "destination") || "written_off"}><option value="written_off">–°–ø–∏—Å–∞–Ω–æ</option><option value="lost">–í—Ç—Ä–∞—á–µ–Ω–æ</option></select></label>
+          <label className="field"><span>–ü—Ä–∏—á–∏–Ω–∞ <b aria-hidden="true">*</b></span><select name="reason" required defaultValue={initialField(initialPayload, "reason") || "worn"}><option value="worn">–ó–Ω–æ—à–µ–Ω–æ</option><option value="obsolete">–ó–∞—Å—Ç–∞—Ä—ñ–ª–æ</option><option value="damaged">–ü–æ—à–∫–æ–¥–∂–µ–Ω–æ</option><option value="lost">–í—Ç—Ä–∞—á–µ–Ω–æ</option><option value="other">–Ü–Ω—à–∞ –ø—Ä–∏—á–∏–Ω–∞</option></select></label>
+          <label className="field"><span>–°—Ç–∞–Ω –ø—Ä–∏–º—ñ—Ä–Ω–∏–∫—ñ–≤</span><input name="condition" type="text" defaultValue={initialField(initialPayload, "condition")} placeholder="–ù–∞–ø—Ä–∏–∫–ª–∞–¥, –Ω–µ–ø—Ä–∏–¥–∞—Ç–Ω—ñ" /></label>
+          <label className="field"><span>–ù–æ–º–µ—Ä –∞–∫—Ç–∞</span><input name="actNumber" type="text" defaultValue={initialField(initialPayload, "actNumber")} placeholder="–ó–∞ –Ω–∞—è–≤–Ω–æ—Å—Ç—ñ" /></label>
+          <label className="field"><span>–î–∞—Ç–∞ <b aria-hidden="true">*</b></span><input name="date" type="date" required defaultValue={initialField(initialPayload, "date") || todayValue()} /></label>
+          <label className="field field-wide"><span>–ü—Ä–∏–º—ñ—Ç–∫–∞</span><textarea name="notes" rows={3} defaultValue={initialField(initialPayload, "notes")} placeholder="–î–ª—è —ñ–Ω—à–æ—ó –ø—Ä–∏—á–∏–Ω–∏ –æ–ø–∏—à—ñ—Ç—å —ó—ó —Ç—É—Ç" /></label>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function AcademicYearFields({ initialPayload }: { initialPayload: Record<string, unknown> }) {
+  return (
+    <section className="form-section first-section" aria-labelledby="academic-year-heading">
+      <div className="section-heading"><span>01</span><div><h3 id="academic-year-heading">–ù–∞–≤—á–∞–ª—å–Ω–∏–π –ø–µ—Ä—ñ–æ–¥</h3><p>–ù–æ–≤–∏–π —Ä—ñ–∫ —Å—Ç–≤–æ—Ä–∏—Ç—å—Å—è —è–∫ —á–µ—Ä–Ω–µ—Ç–∫–∞</p></div></div>
+      <div className="field-grid">
+        <label className="field"><span>–ù–∞–∑–≤–∞ <b aria-hidden="true">*</b></span><input name="label" type="text" required pattern="20[0-9]{2}/20[0-9]{2}" defaultValue={initialField(initialPayload, "label")} placeholder="2027/2028" /></label>
+        <span className="field field-note"><span>–§–æ—Ä–º–∞—Ç</span><small>–î—Ä—É–≥–∏–π —Ä—ñ–∫ –º–∞—î –π—Ç–∏ –æ–¥—Ä–∞–∑—É –ø—ñ—Å–ª—è –ø–µ—Ä—à–æ–≥–æ.</small></span>
+        <label className="field"><span>–ü–æ—á–∞—Ç–æ–∫ <b aria-hidden="true">*</b></span><input name="startDate" type="date" required defaultValue={initialField(initialPayload, "startDate")} /></label>
+        <label className="field"><span>–ó–∞–≤–µ—Ä—à–µ–Ω–Ω—è <b aria-hidden="true">*</b></span><input name="endDate" type="date" required defaultValue={initialField(initialPayload, "endDate")} /></label>
+        <label className="field field-wide"><span>–ü—Ä–∏–º—ñ—Ç–∫–∞</span><textarea name="notes" rows={3} defaultValue={initialField(initialPayload, "notes")} placeholder="–î–æ–¥–∞—Ç–∫–æ–≤–∞ —Å–ª—É–∂–±–æ–≤–∞ —ñ–Ω—Ñ–æ—Ä–º–∞—Ü—ñ—è" /></label>
+      </div>
+    </section>
+  );
+}
+
+function ClassYearCreateFields({
+  initialPayload,
+  referenceData,
+  referenceState,
+}: {
+  initialPayload: Record<string, unknown>;
+  referenceData: ReferenceData;
+  referenceState: ReferenceState;
+}) {
+  const [cohortMode, setCohortMode] = useState(initialField(initialPayload, "cohortMode") || "new");
+  const cohorts = uniqueCohorts(referenceData.classYears);
+  return (
+    <section className="form-section first-section" aria-labelledby="class-create-heading">
+      <div className="section-heading"><span>01</span><div><h3 id="class-create-heading">–ö–ª–∞—Å —É –Ω–∞–≤—á–∞–ª—å–Ω–æ–º—É —Ä–æ—Ü—ñ</h3><p>–ö–µ—Ä—ñ–≤–Ω–∏–∫ –æ–±–∏—Ä–∞—î—Ç—å—Å—è –∑–∞ —ñ–º‚Äô—è–º, –∫–∞–±—ñ–Ω–µ—Ç ‚Äî –∑–∞ –Ω–æ–º–µ—Ä–æ–º</p></div></div>
+      <ReferenceAvailability state={referenceState} />
+      <div className="field-grid">
+        <AcademicYearSelect name="academicYearId" label="–ù–∞–≤—á–∞–ª—å–Ω–∏–π —Ä—ñ–∫" required initialId={initialField(initialPayload, "academicYearId")} referenceData={referenceData} />
+        <label className="field"><span>–ö–ª–∞—Å–Ω–∞ –≥—Ä—É–ø–∞ <b aria-hidden="true">*</b></span><select name="cohortMode" required value={cohortMode} onChange={(event) => setCohortMode(event.target.value)}><option value="new">–ù–æ–≤–∞ –≥—Ä—É–ø–∞</option><option value="existing">–ü—Ä–æ–¥–æ–≤–∂–∏—Ç–∏ –Ω–∞—è–≤–Ω—É</option></select></label>
+        {cohortMode === "existing" ? (
+          <label className="field field-wide"><span>–ù–∞—è–≤–Ω–∞ –≥—Ä—É–ø–∞ <b aria-hidden="true">*</b></span><select name="cohortId" required defaultValue={initialField(initialPayload, "cohortId")}><option value="">–û–±–µ—Ä—ñ—Ç—å –∫–ª–∞—Å–Ω—É –≥—Ä—É–ø—É</option>{cohorts.map((cohort) => <option key={cohort.id} value={cohort.id}>{cohort.label}</option>)}</select></label>
+        ) : null}
+        <label className="field"><span>–ü–∞—Ä–∞–ª–µ–ª—å <b aria-hidden="true">*</b></span><select name="grade" required defaultValue={initialField(initialPayload, "grade")}><option value="">–û–±–µ—Ä—ñ—Ç—å –∫–ª–∞—Å</option>{gradeOptions()}</select></label>
+        <label className="field"><span>–ö–æ–¥ –ø—ñ—Å–ª—è –¥–µ—Ñ—ñ—Å–∞ <b aria-hidden="true">*</b></span><input name="code" type="text" required maxLength={16} defaultValue={initialField(initialPayload, "code")} placeholder="–ê, IT(1), ESA" /></label>
+        <TeacherSelect name="teacherUserId" label="–ö–ª–∞—Å–Ω–∏–π –∫–µ—Ä—ñ–≤–Ω–∏–∫" initialId={initialField(initialPayload, "teacherUserId")} referenceData={referenceData} />
+        <ProtectedLocationSelect name="locationId" label="–ö–∞–±—ñ–Ω–µ—Ç" initialId={initialField(initialPayload, "locationId")} referenceData={referenceData} />
+        <label className="field field-wide"><span>–ü—Ä–∏–º—ñ—Ç–∫–∞</span><textarea name="notes" rows={3} defaultValue={initialField(initialPayload, "notes")} /></label>
+      </div>
+    </section>
+  );
+}
+
+function ClassYearUpdateFields({
+  initialPayload,
+  referenceData,
+  referenceState,
+}: {
+  initialPayload: Record<string, unknown>;
+  referenceData: ReferenceData;
+  referenceState: ReferenceState;
+}) {
+  const changes = nestedRecord(initialPayload, "changes");
+  const [classYearId, setClassYearId] = useState(initialField(initialPayload, "classYearId"));
+  const selected = referenceData.classYears.find((item) => item.id === classYearId);
+  const academicYearId = initialField(initialPayload, "academicYearId") || selected?.academicYearId || "";
+  return (
+    <section className="form-section first-section" aria-labelledby="class-update-heading">
+      <div className="section-heading"><span>01</span><div><h3 id="class-update-heading">–ó–º—ñ–Ω–∏ –∫–ª–∞—Å—É</h3><p>–ü–æ—Ä–æ–∂–Ω—î –ø–æ–ª–µ –æ–∑–Ω–∞—á–∞—î ¬´–±–µ–∑ –∑–º—ñ–Ω–∏¬ª</p></div></div>
+      <ReferenceAvailability state={referenceState} />
+      <div className="field-grid">
+        <ClassYearSelect name="classYearId" label="–ö–ª–∞—Å" required initialId={classYearId} referenceData={referenceData} onChange={setClassYearId} />
+        <input name="academicYearId" type="hidden" value={academicYearId} />
+        <label className="field"><span>–ù–æ–≤–∞ –ø–∞—Ä–∞–ª–µ–ª—å</span><select name="changes.grade" defaultValue={initialField(changes, "grade")}><option value="">–ë–µ–∑ –∑–º—ñ–Ω–∏</option>{gradeOptions()}</select></label>
+        <label className="field"><span>–ù–æ–≤–∏–π –∫–æ–¥</span><input name="changes.code" type="text" maxLength={16} defaultValue={initialField(changes, "code")} placeholder="–ë–µ–∑ –∑–º—ñ–Ω–∏" /></label>
+        <TeacherSelect name="changes.teacherUserId" label="–ù–æ–≤–∏–π –∫–ª–∞—Å–Ω–∏–π –∫–µ—Ä—ñ–≤–Ω–∏–∫" initialId={nullableDirectoryInitial(changes, "teacherUserId")} referenceData={referenceData} allowClear />
+        <ProtectedLocationSelect name="changes.locationId" label="–ù–æ–≤–∏–π –∫–∞–±—ñ–Ω–µ—Ç" initialId={nullableDirectoryInitial(changes, "locationId")} referenceData={referenceData} allowClear />
+        <label className="field field-wide"><span>–ü—Ä–∏—á–∏–Ω–∞ –∑–º—ñ–Ω–∏</span><textarea name="reason" rows={2} defaultValue={initialField(initialPayload, "reason")} placeholder="–ù–∞–ø—Ä–∏–∫–ª–∞–¥, –∑–º—ñ–Ω–∞ –∫–∞–±—ñ–Ω–µ—Ç—É" /></label>
+        <label className="field field-wide"><span>–ù–æ–≤–∞ –ø—Ä–∏–º—ñ—Ç–∫–∞</span><textarea name="changes.notes" rows={3} defaultValue={initialField(changes, "notes")} placeholder="–ë–µ–∑ –∑–º—ñ–Ω–∏" /></label>
+      </div>
+    </section>
+  );
+}
+
+function ClassYearCloseFields({
+  initialPayload,
+  referenceData,
+  referenceState,
+}: {
+  initialPayload: Record<string, unknown>;
+  referenceData: ReferenceData;
+  referenceState: ReferenceState;
+}) {
+  return (
+    <section className="form-section first-section" aria-labelledby="class-close-heading">
+      <div className="section-heading"><span>01</span><div><h3 id="class-close-heading">–ó–∞–∫—Ä–∏—Ç—Ç—è –∫–ª–∞—Å—É</h3><p>–ó–∞–ø–∏—Å –∑–∞–ª–∏—à–∏—Ç—å—Å—è –≤ —ñ—Å—Ç–æ—Ä—ñ—ó</p></div></div>
+      <ReferenceAvailability state={referenceState} />
+      <div className="field-grid">
+        <ClassYearSelect name="classYearId" label="–ö–ª–∞—Å" required initialId={initialField(initialPayload, "classYearId")} referenceData={referenceData} />
+        <label className="field"><span>–§–∞–∫—Ç–∏—á–Ω–∞ –¥–∞—Ç–∞ –∑–∞–∫—Ä–∏—Ç—Ç—è <b aria-hidden="true">*</b></span><input name="actualClosedDate" type="date" required defaultValue={initialField(initialPayload, "actualClosedDate") || todayValue()} /></label>
+        <label className="field"><span>–ü—Ä–∏—á–∏–Ω–∞ <b aria-hidden="true">*</b></span><select name="reason" required defaultValue={initialField(initialPayload, "reason") || "closed"}><option value="closed">–ó–∞–∫—Ä–∏—Ç–æ</option><option value="merged">–û–±‚Äô—î–¥–Ω–∞–Ω–æ</option><option value="graduated">–í–∏–ø—É—Å–∫</option><option value="reorganized">–†–µ–æ—Ä–≥–∞–Ω—ñ–∑–∞—Ü—ñ—è</option><option value="other">–Ü–Ω—à–∞</option></select></label>
+        <label className="field"><span>–©–æ —Ä–æ–±–∏—Ç–∏ –∑ –≥—Ä—É–ø–æ—é <b aria-hidden="true">*</b></span><select name="closeCohort" required defaultValue={initialBooleanField(initialPayload, "closeCohort", true)}><option value="true">–ó–∞–∫—Ä–∏—Ç–∏ –∫–ª–∞—Å–Ω—É –≥—Ä—É–ø—É</option><option value="false">–ó–∞–ª–∏—à–∏—Ç–∏ –≥—Ä—É–ø—É –¥–ª—è —ñ–Ω—à–æ–≥–æ –∫–ª–∞—Å—É</option></select></label>
+        <label className="field field-wide"><span>–ü—Ä–∏–º—ñ—Ç–∫–∞</span><textarea name="notes" rows={3} defaultValue={initialField(initialPayload, "notes")} placeholder="–î–ª—è —ñ–Ω—à–æ—ó –ø—Ä–∏—á–∏–Ω–∏ –¥–æ–¥–∞–π—Ç–µ –ø–æ—è—Å–Ω–µ–Ω–Ω—è" /></label>
+      </div>
+    </section>
+  );
+}
+
+type RolloverRow = {
+  sourceClassYearId: string;
+  cohortId: string;
+  sourceGrade: number;
+  className: string;
+  action: "promote" | "graduate" | "close" | "skip";
+  targetGrade?: number;
+  targetCode?: string;
+  teacherUserId?: string;
+  teacherName?: string;
+  locationId?: string;
+  locationName?: string;
+  overrideReason?: string;
+  notes?: string;
+};
+
+function AcademicYearRolloverFields({
+  initialPayload,
+  referenceData,
+  referenceState,
+}: {
+  initialPayload: Record<string, unknown>;
+  referenceData: ReferenceData;
+  referenceState: ReferenceState;
+}) {
+  const defaultSource = initialField(initialPayload, "sourceYearId")
+    || referenceData.academicYears.find((year) => /active|–∞–∫—Ç–∏–≤/i.test(year.status))?.id
+    || referenceData.academicYears[0]?.id
+    || "";
+  const [sourceYearId, setSourceYearId] = useState(defaultSource);
+  const defaultTarget = initialField(initialPayload, "targetYearId")
+    || nextAcademicYearId(defaultSource, referenceData.academicYears);
+  const [targetYearId, setTargetYearId] = useState(defaultTarget);
+  const initialRows = rolloverRowsFromPayload(initialPayload, referenceData);
+  const [rows, setRows] = useState<RolloverRow[]>(
+    initialRows.length ? initialRows : buildRolloverRows(defaultSource, referenceData),
+  );
+
+  useEffect(() => {
+    if (sourceYearId || !referenceData.academicYears.length) return;
+    const source = referenceData.academicYears.find((year) => /active|–∞–∫—Ç–∏–≤/i.test(year.status))?.id
+      || referenceData.academicYears[0]?.id
+      || "";
+    setSourceYearId(source);
+    setTargetYearId(nextAcademicYearId(source, referenceData.academicYears));
+    setRows(buildRolloverRows(source, referenceData));
+  }, [referenceData, sourceYearId]);
+
+  const changeSource = (value: string) => {
+    setSourceYearId(value);
+    setTargetYearId(nextAcademicYearId(value, referenceData.academicYears));
+    setRows(buildRolloverRows(value, referenceData));
+  };
+  const updateRow = (index: number, change: Partial<RolloverRow>) => {
+    setRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, ...change } : row));
+  };
+  const safeLocations = protectedLocations(referenceData);
+
+  return (
+    <section className="form-section first-section" aria-labelledby="rollover-heading">
+      <div className="section-heading"><span>01</span><div><h3 id="rollover-heading">–ü–µ—Ä–µ—Ö—ñ–¥ –∫–ª–∞—Å—ñ–≤</h3><p>–î–ª—è –∫–æ–∂–Ω–æ–≥–æ –∫–ª–∞—Å—É –ø–µ—Ä–µ–≤—ñ—Ä—Ç–µ –Ω–æ–≤—É –Ω–∞–∑–≤—É, –∫–µ—Ä—ñ–≤–Ω–∏–∫–∞ –π –∫–∞–±—ñ–Ω–µ—Ç</p></div></div>
+      <ReferenceAvailability state={referenceState} />
+      <div className="field-grid">
+        <AcademicYearSelect name="sourceYearId" label="–ó –Ω–∞–≤—á–∞–ª—å–Ω–æ–≥–æ —Ä–æ–∫—É" required initialId={sourceYearId} value={sourceYearId} onChange={changeSource} referenceData={referenceData} />
+        <AcademicYearSelect name="targetYearId" label="–£ –Ω–∞–≤—á–∞–ª—å–Ω–∏–π —Ä—ñ–∫" required initialId={targetYearId} value={targetYearId} onChange={setTargetYearId} referenceData={referenceData} />
+        <label className="field"><span>–î–∞—Ç–∞ –ø–µ—Ä–µ—Ö–æ–¥—É <b aria-hidden="true">*</b></span><input name="effectiveDate" type="date" required defaultValue={initialField(initialPayload, "effectiveDate") || todayValue()} /></label>
+        <label className="field field-wide"><span>–ó–∞–≥–∞–ª—å–Ω–∞ –ø—Ä–∏–º—ñ—Ç–∫–∞</span><textarea name="notes" rows={2} defaultValue={initialField(initialPayload, "notes")} /></label>
+      </div>
+
+      <input name="rolloverClassesJson" type="hidden" value={JSON.stringify(rows.map(stripRolloverDisplayFields))} />
+      <div className="rollover-list" aria-label="–ö–ª–∞—Å–∏ –¥–ª—è –ø–µ—Ä–µ—Ö–æ–¥—É">
+        {rows.length ? rows.map((row, index) => (
+          <article className="rollover-row" key={row.sourceClassYearId}>
+            <div className="rollover-class"><strong>{row.className}</strong><small>{row.cohortId}</small></div>
+            <label className="field"><span>–î—ñ—è</span><select value={row.action} onChange={(event) => {
+              const action = event.target.value as RolloverRow["action"];
+              updateRow(index, {
+                action,
+                targetGrade: action === "promote" ? Math.min(row.sourceGrade + 1, 11) : undefined,
+                targetCode: action === "promote" ? row.targetCode || classCodeFromName(row.className) : undefined,
+              });
+            }}><option value="promote" disabled={row.sourceGrade === 11}>–ü–µ—Ä–µ–≤–µ—Å—Ç–∏</option><option value="graduate" disabled={row.sourceGrade !== 11}>–í–∏–ø—É—Å–∫</option><option value="close">–ó–∞–∫—Ä–∏—Ç–∏</option><option value="skip">–ü—Ä–æ–ø—É—Å—Ç–∏—Ç–∏</option></select></label>
+            {row.action === "promote" ? (
+              <>
+                <label className="field"><span>–ù–æ–≤–∞ –ø–∞—Ä–∞–ª–µ–ª—å</span><select value={row.targetGrade ?? ""} onChange={(event) => updateRow(index, { targetGrade: Number(event.target.value) })}>{gradeOptions()}</select></label>
+                <label className="field"><span>–ù–æ–≤–∏–π –∫–æ–¥ <b aria-hidden="true">*</b></span><input type="text" maxLength={16} required value={row.targetCode ?? ""} onChange={(event) => updateRow(index, { targetCode: event.target.value })} /></label>
+                <label className="field"><span>–ö–ª–∞—Å–Ω–∏–π –∫–µ—Ä—ñ–≤–Ω–∏–∫</span><select value={row.teacherUserId ?? ""} onChange={(event) => {
+                  const teacher = referenceData.teachers.find((item) => item.id === event.target.value);
+                  updateRow(index, { teacherUserId: teacher?.id, teacherName: teacher?.name });
+                }}><option value="">–ù–µ –ø—Ä–∏–∑–Ω–∞—á–µ–Ω–æ</option>{referenceData.teachers.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.name}</option>)}</select></label>
+                <label className="field"><span>–ö–∞–±—ñ–Ω–µ—Ç</span><select value={row.locationId ?? ""} onChange={(event) => {
+                  const location = safeLocations.find((item) => item.id === event.target.value);
+                  updateRow(index, { locationId: location?.id, locationName: location?.name });
+                }}><option value="">–ù–µ –ø—Ä–∏–∑–Ω–∞—á–µ–Ω–æ</option>{safeLocations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label>
+                {row.targetGrade !== row.sourceGrade + 1 ? (
+                  <label className="field field-wide"><span>–ü–æ—è—Å–Ω–µ–Ω–Ω—è –Ω–µ—Å—Ç–∞–Ω–¥–∞—Ä—Ç–Ω–æ–≥–æ –ø–µ—Ä–µ—Ö–æ–¥—É</span><input type="text" required value={row.overrideReason ?? ""} onChange={(event) => updateRow(index, { overrideReason: event.target.value })} /></label>
+                ) : null}
+              </>
+            ) : null}
+          </article>
+        )) : (
+          <div className="reference-empty" role="status">–î–ª—è –≤–∏–±—Ä–∞–Ω–æ–≥–æ —Ä–æ–∫—É –Ω–µ –∑–Ω–∞–π–¥–µ–Ω–æ –≤—ñ–¥–∫—Ä–∏—Ç–∏—Ö –∫–ª–∞—Å—ñ–≤ —ñ–∑ —á–∏–Ω–Ω–∏–º–∏ —Å–ª—É–∂–±–æ–≤–∏–º–∏ ID.</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ReceiptFields({
+  catalog,
+  loading,
+  initialPayload,
+  referenceData,
+  onDirty,
+}: {
+  catalog: CatalogMaterial[];
+  loading: boolean;
+  initialPayload: Record<string, unknown>;
+  referenceData: ReferenceData;
+  onDirty: () => void;
+}) {
+  const locations = catalogLocations(catalog);
+  return (
+    <>
+      <MaterialSection catalog={catalog} loading={loading} heading="–©–æ –Ω–∞–¥—ñ–π—à–ª–æ" initialPayload={initialPayload} onDirty={onDirty} />
+      <section className="form-section" aria-labelledby="receipt-details-heading">
+        <div className="section-heading"><span>02</span><div><h3 id="receipt-details-heading">–î–∞–Ω—ñ –Ω–∞–¥—Ö–æ–¥–∂–µ–Ω–Ω—è</h3><p>–ö—ñ–ª—å–∫—ñ—Å—Ç—å —ñ –Ω–æ–≤–µ –º—ñ—Å—Ü–µ –∑–±–µ—Ä—ñ–≥–∞–Ω–Ω—è</p></div></div>
+        <div className="field-grid">
+          <label className="field"><span>–ö—ñ–ª—å–∫—ñ—Å—Ç—å <b aria-hidden="true">*</b></span><input name="quantity" type="number" inputMode="numeric" min="1" step="1" required defaultValue={initialField(initialPayload, "quantity") || "1"} /></label>
+          <DirectoryLocationField
+            name="locationId"
+            legacyName="location"
+            label="–†–æ–∑–º—ñ—â–µ–Ω–Ω—è"
+            required
+            initialId={initialField(initialPayload, "locationId")}
+            initialLegacy={initialField(initialPayload, "location")}
+            referenceData={referenceData}
+            fallbackLocations={locations}
+          />
+          <label className="field"><span>–î–∞—Ç–∞ <b aria-hidden="true">*</b></span><input name="date" type="date" required defaultValue={initialField(initialPayload, "date") || todayValue()} /></label>
+          <label className="field"><span>–ù–æ–º–µ—Ä –¥–æ–∫—É–º–µ–Ω—Ç–∞</span><input name="documentNumber" type="text" autoComplete="off" defaultValue={initialField(initialPayload, "documentNumber")} placeholder="–ó–∞ –Ω–∞—è–≤–Ω–æ—Å—Ç—ñ" /></label>
+          <label className="field field-wide"><span>–ü—Ä–∏–º—ñ—Ç–∫–∞</span><textarea name="notes" rows={3} defaultValue={initialField(initialPayload, "notes")} placeholder="–î–∂–µ—Ä–µ–ª–æ –Ω–∞–¥—Ö–æ–¥–∂–µ–Ω–Ω—è –∞–±–æ —ñ–Ω—à–∞ —ñ–Ω—Ñ–æ—Ä–º–∞—Ü—ñ—è" /></label>
+        </div>
+        <datalist id="known-locations">{locations.map((location) => <option key={location} value={location} />)}</datalist>
+      </section>
+    </>
+  );
+}
+
+function TransferFields({
+  catalog,
+  loading,
+  initialPayload,
+  referenceData,
+  onDirty,
+}: {
+  catalog: CatalogMaterial[];
+  loading: boolean;
+  initialPayload: Record<string, unknown>;
+  referenceData: ReferenceData;
+  onDirty: () => void;
+}) {
+  const locations = catalogLocations(catalog);
+  return (
+    <>
+      <MaterialSection catalog={catalog} loading={loading} heading="–©–æ –ø–µ—Ä–µ–º—ñ—â—É—î—Ç—å—Å—è" initialPayload={initialPayload} onDirty={onDirty} />
+      <section className="form-section" aria-labelledby="transfer-details-heading">
+        <div className="section-heading"><span>02</span><div><h3 id="transfer-details-heading">–ú–∞—Ä—à—Ä—É—Ç –ø–µ—Ä–µ–º—ñ—â–µ–Ω–Ω—è</h3><p>–ó–≤—ñ–¥–∫–∏, –∫—É–¥–∏ —Ç–∞ —Å–∫—ñ–ª—å–∫–∏ –ø—Ä–∏–º—ñ—Ä–Ω–∏–∫—ñ–≤</p></div></div>
+        <div className="field-grid">
+          <DirectoryLocationField
+            name="fromLocationId"
+            legacyName="fromLocation"
+            label="–ó–≤—ñ–¥–∫–∏"
+            required
+            initialId={initialField(initialPayload, "fromLocationId")}
+            initialLegacy={initialField(initialPayload, "fromLocation")}
+            referenceData={referenceData}
+            fallbackLocations={locations}
+          />
+          <DirectoryLocationField
+            name="toLocationId"
+            legacyName="toLocation"
+            label="–ö—É–¥–∏"
+            required
+            initialId={initialField(initialPayload, "toLocationId")}
+            initialLegacy={initialField(initialPayload, "toLocation")}
+            referenceData={referenceData}
+            fallbackLocations={locations}
+          />
+          <label className="field"><span>–ö—ñ–ª—å–∫—ñ—Å—Ç—å <b aria-hidden="true">*</b></span><input name="quantity" type="number" inputMode="numeric" min="1" step="1" required defaultValue={initialField(initialPayload, "quantity") || "1"} /></label>
+          <label className="field"><span>–î–∞—Ç–∞ <b aria-hidden="true">*</b></span><input name="date" type="date" required defaultValue={initialField(initialPayload, "date") || todayValue()} /></label>
+          <label className="field field-wide"><span>–ü—Ä–∏–º—ñ—Ç–∫–∞</span><textarea name="notes" rows={3} defaultValue={initialField(initialPayload, "notes")} placeholder="–ü—Ä–∏—á–∏–Ω–∞ –∞–±–æ –≤—ñ–¥–ø–æ–≤—ñ–¥–∞–ª—å–Ω–∞ –æ—Å–æ–±–∞" /></label>
+        </div>
+        <datalist id="known-locations">{locations.map((location) => <option key={location} value={location} />)}</datalist>
+      </section>
+    </>
+  );
+}
+
+function RevisionFields({
+  catalog,
+  loading,
+  initialPayload,
+  referenceData,
+  onDirty,
+}: {
+  catalog: CatalogMaterial[];
+  loading: boolean;
+  initialPayload: Record<string, unknown>;
+  referenceData: ReferenceData;
+  onDirty: () => void;
+}) {
+  const locations = catalogLocations(catalog);
+  return (
+    <>
+      <MaterialSection catalog={catalog} loading={loading} heading="–©–æ –ø–µ—Ä–µ–≤—ñ—Ä—è—î—Ç—å—Å—è" initialPayload={initialPayload} onDirty={onDirty} />
+      <section className="form-section" aria-labelledby="revision-details-heading">
+        <div className="section-heading"><span>02</span><div><h3 id="revision-details-heading">–§–∞–∫—Ç–∏—á–Ω–∏–π –∑–∞–ª–∏—à–æ–∫</h3><p>–ó–∞–ø–∏—à—ñ—Ç—å —Ç–µ, —â–æ –ø–æ—Ä–∞—Ö–æ–≤–∞–Ω–æ –Ω–∞ –º—ñ—Å—Ü—ñ</p></div></div>
+        <div className="field-grid">
+          <DirectoryLocationField
+            name="locationId"
+            legacyName="location"
+            label="–†–æ–∑–º—ñ—â–µ–Ω–Ω—è"
+            required
+            initialId={initialField(initialPayload, "locationId")}
+            initialLegacy={initialField(initialPayload, "location")}
+            referenceData={referenceData}
+            fallbackLocations={locations}
+          />
+          <label className="field"><span>–ü–æ—Ä–∞—Ö–æ–≤–∞–Ω–æ –ø—Ä–∏–º—ñ—Ä–Ω–∏–∫—ñ–≤ <b aria-hidden="true">*</b></span><input name="countedQuantity" type="number" inputMode="numeric" min="0" step="1" required defaultValue={initialField(initialPayload, "countedQuantity")} /></label>
+          <label className="field"><span>–î–∞—Ç–∞ <b aria-hidden="true">*</b></span><input name="date" type="date" required defaultValue={initialField(initialPayload, "date") || todayValue()} /></label>
+          <label className="field field-wide"><span>–ü—Ä–∏–º—ñ—Ç–∫–∞</span><textarea name="notes" rows={3} defaultValue={initialField(initialPayload, "notes")} placeholder="–°—Ç–∞–Ω –ø—Ä–∏–º—ñ—Ä–Ω–∏–∫—ñ–≤, —Ä–æ–∑–±—ñ–∂–Ω–æ—Å—Ç—ñ –∞–±–æ –ø–æ—è—Å–Ω–µ–Ω–Ω—è" /></label>
+        </div>
+        <datalist id="known-locations">{locations.map((location) => <option key={location} value={location} />)}</datalist>
+      </section>
+    </>
+  );
+}
+
+function DirectoryLocationField({
+  name,
+  legacyName,
+  label,
+  required = false,
+  initialId,
+  initialLegacy,
+  referenceData,
+  fallbackLocations,
+}: {
+  name: string;
+  legacyName: string;
+  label: string;
+  required?: boolean;
+  initialId: string;
+  initialLegacy: string;
+  referenceData: ReferenceData;
+  fallbackLocations: string[];
+}) {
+  const locations = protectedLocations(referenceData);
+  const listId = useId();
+  if (locations.length) {
+    return (
+      <ProtectedLocationSelect
+        name={name}
+        label={label}
+        required={required}
+        initialId={initialId}
+        referenceData={referenceData}
+      />
+    );
+  }
+  return (
+    <label className="field">
+      <span>{label} {required ? <b aria-hidden="true">*</b> : null}</span>
+      <input name={legacyName} type="text" list={listId} required={required} autoComplete="off" defaultValue={initialLegacy} placeholder="–ë—ñ–±–ª—ñ–æ—Ç–µ–∫–∞ –∞–±–æ –∫–∞–±—ñ–Ω–µ—Ç ‚Ññ" />
+      <datalist id={listId}>{fallbackLocations.map((location) => <option key={location} value={location} />)}</datalist>
+      <small>–¢–∏–º—á–∞—Å–æ–≤–æ –≤–∏–∫–æ—Ä–∏—Å—Ç–æ–≤—É—î—Ç—å—Å—è –∫–∞—Ç–∞–ª–æ–≥; –∑–∞—Ö–∏—â–µ–Ω–∏–π –¥–æ–≤—ñ–¥–Ω–∏–∫ –Ω–µ –∑–∞–≤–∞–Ω—Ç–∞–∂–µ–Ω–æ.</small>
+    </label>
+  );
+}
+
+function ProtectedLocationSelect({
+  name,
+  label,
+  initialId,
+  referenceData,
+  required = false,
+  allowClear = false,
+}: {
+  name: string;
+  label: string;
+  initialId: string;
+  referenceData: ReferenceData;
+  required?: boolean;
+  allowClear?: boolean;
+}) {
+  const locations = protectedLocations(referenceData);
+  return (
+    <label className="field">
+      <span>{label} {required ? <b aria-hidden="true">*</b> : null}</span>
+      <select name={name} required={required} defaultValue={initialId} disabled={!locations.length}>
+        <option value="">{locations.length ? (allowClear ? "–ë–µ–∑ –∑–º—ñ–Ω–∏" : "–ù–µ –ø—Ä–∏–∑–Ω–∞—á–µ–Ω–æ") : "–î–æ–≤—ñ–¥–Ω–∏–∫ –Ω–µ–¥–æ—Å—Ç—É–ø–Ω–∏–π"}</option>
+        {allowClear ? <option value="__clear__">–û—á–∏—Å—Ç–∏—Ç–∏ –∑–Ω–∞—á–µ–Ω–Ω—è</option> : null}
+        {locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
+      </select>
+      <small>–£ —á–µ—Ä–Ω–µ—Ç—Ü—ñ –∑–±–µ—Ä–µ–∂–µ—Ç—å—Å—è —Å–ª—É–∂–±–æ–≤–∏–π ID —ñ —Ü—è –Ω–∞–∑–≤–∞ –∫–∞–±—ñ–Ω–µ—Ç—É.</small>
+    </label>
+  );
+}
+
+function TeacherSelect({
+  name,
+  label,
+  initialId,
+  referenceData,
+  required = false,
+  allowClear = false,
+}: {
+  name: string;
+  label: string;
+  initialId: string;
+  referenceData: ReferenceData;
+  required?: boolean;
+  allowClear?: boolean;
+}) {
+  const teachers = referenceData.teachers
+    .filter((teacher) => /^USR-\d{3,}$/u.test(teacher.id) && teacher.name.trim())
+    .sort((left, right) => left.name.localeCompare(right.name, "uk"));
+  return (
+    <label className="field">
+      <span>{label} {required ? <b aria-hidden="true">*</b> : null}</span>
+      <select name={name} required={required} defaultValue={initialId} disabled={!teachers.length}>
+        <option value="">{teachers.length ? (allowClear ? "–ë–µ–∑ –∑–º—ñ–Ω–∏" : "–ù–µ –ø—Ä–∏–∑–Ω–∞—á–µ–Ω–æ") : "–î–æ–≤—ñ–¥–Ω–∏–∫ –Ω–µ–¥–æ—Å—Ç—É–ø–Ω–∏–π"}</option>
+        {allowClear ? <option value="__clear__">–û—á–∏—Å—Ç–∏—Ç–∏ –∑–Ω–∞—á–µ–Ω–Ω—è</option> : null}
+        {teachers.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.name}</option>)}
+      </select>
+      <small>–ü–æ—à—É–∫ —ñ –≤–∏–±—ñ—Ä –≤—ñ–¥–±—É–≤–∞—é—Ç—å—Å—è –∑–∞ —ñ–º‚Äô—è–º; ID –¥–æ–¥–∞—î—Ç—å—Å—è –∞–≤—Ç–æ–º–∞—Ç–∏—á–Ω–æ.</small>
+    </label>
+  );
+}
+
+function AcademicYearSelect({
+  name,
+  label,
+  initialId,
+  referenceData,
+  required = false,
+  value,
+  onChange,
+}: {
+  name: string;
+  label: string;
+  initialId: string;
+  referenceData: ReferenceData;
+  required?: boolean;
+  value?: string;
+  onChange?: (value: string) => void;
+}) {
+  return (
+    <label className="field">
+      <span>{label} {required ? <b aria-hidden="true">*</b> : null}</span>
+      <select
+        name={name}
+        required={required}
+        value={value}
+        defaultValue={value === undefined ? initialId : undefined}
+        disabled={!referenceData.academicYears.length}
+        onChange={onChange ? (event) => onChange(event.target.value) : undefined}
+      >
+        <option value="">{referenceData.academicYears.length ? "–û–±–µ—Ä—ñ—Ç—å –Ω–∞–≤—á–∞–ª—å–Ω–∏–π —Ä—ñ–∫" : "–î–æ–≤—ñ–¥–Ω–∏–∫ –Ω–µ–¥–æ—Å—Ç—É–ø–Ω–∏–π"}</option>
+        {referenceData.academicYears.map((year) => <option key={year.id} value={year.id}>{year.label}{year.status ? ` ¬∑ ${year.status}` : ""}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function ClassYearSelect({
+  name,
+  label,
+  initialId,
+  referenceData,
+  required = false,
+  onChange,
+}: {
+  name: string;
+  label: string;
+  initialId: string;
+  referenceData: ReferenceData;
+  required?: boolean;
+  onChange?: (value: string) => void;
+}) {
+  const classYears = referenceData.classYears
+    .filter((item) => !item.actualClosedDate && !/closed|–∑–∞–∫—Ä–∏—Ç/i.test(item.status))
+    .sort((left, right) => `${left.academicYearLabel} ${left.className}`.localeCompare(`${right.academicYearLabel} ${right.className}`, "uk", { numeric: true }));
+  return (
+    <label className="field field-wide">
+      <span>{label} {required ? <b aria-hidden="true">*</b> : null}</span>
+      <select name={name} required={required} defaultValue={initialId} disabled={!classYears.length} onChange={onChange ? (event) => onChange(event.target.value) : undefined}>
+        <option value="">{classYears.length ? "–û–±–µ—Ä—ñ—Ç—å –∫–ª–∞—Å" : "–í—ñ–¥–∫—Ä–∏—Ç–∏—Ö –∫–ª–∞—Å—ñ–≤ –Ω–µ –∑–Ω–∞–π–¥–µ–Ω–æ"}</option>
+        {classYears.map((item) => <option key={item.id} value={item.id}>{item.academicYearLabel} ¬∑ {item.className}{item.teacherName ? ` ¬∑ ${item.teacherName}` : ""}{item.locationName ? ` ¬∑ ${item.locationName}` : ""}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function ReferenceAvailability({ state }: { state: ReferenceState }) {
+  return state.phase === "ready" ? (
+    <div className="reference-ready" role="status"><span aria-hidden="true">‚úì</span> –ó–∞—Ö–∏—â–µ–Ω—ñ –¥–æ–≤—ñ–¥–Ω–∏–∫–∏ –∞–∫—Ç—É–∞–ª—å–Ω—ñ{state.generatedAt ? ` —Å—Ç–∞–Ω–æ–º –Ω–∞ ${formatDateTime(state.generatedAt)}` : ""}.</div>
+  ) : (
+    <div className={`reference-ready ${state.phase}`} role={state.phase === "error" ? "alert" : "status"}><span aria-hidden="true">{state.phase === "loading" ? "‚ó∑" : "!"}</span> {state.message}</div>
+  );
+}
+
+function MaterialSection({
+  catalog,
+  loading,
+  heading,
+  initialPayload,
+  onDirty,
+}: {
+  catalog: CatalogMaterial[];
+  loading: boolean;
+  heading: string;
+  initialPayload: Record<string, unknown>;
+  onDirty: () => void;
+}) {
+  return (
+    <section className="form-section" aria-labelledby="material-lookup-heading">
+      <div className="section-heading"><span>01</span><div><h3 id="material-lookup-heading">{heading}</h3><p>–ó–Ω–∞–π–¥—ñ—Ç—å –∑–∞ CAT-ID, ISBN –∞–±–æ –Ω–∞–∑–≤–æ—é</p></div></div>
+      <MaterialPicker
+        catalog={catalog}
+        loading={loading}
+        initialId={initialField(initialPayload, "materialId")}
+        onDirty={onDirty}
+      />
+    </section>
+  );
+}
+
+function MaterialPicker({
+  catalog,
+  loading,
+  initialId,
+  onDirty,
+}: {
+  catalog: CatalogMaterial[];
+  loading: boolean;
+  initialId: string;
+  onDirty: () => void;
+}) {
+  const initialMaterial = catalog.find((material) => materialIdentifier(material) === initialId);
+  const [query, setQuery] = useState(initialMaterial ? materialDisplayTitle(initialMaterial) : initialId);
+  const [selectedId, setSelectedId] = useState(initialId);
+  const [showResults, setShowResults] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listId = useId();
+
+  const results = useMemo(() => {
+    const normalized = normalizeSearch(query);
+    if (!normalized || selectedId) return [];
+    return catalog
+      .filter((item) => materialSearchText(item).includes(normalized))
+      .slice(0, 8);
+  }, [catalog, query, selectedId]);
+
+  const selectMaterial = (material: CatalogMaterial) => {
+    setSelectedId(materialIdentifier(material));
+    setQuery(materialDisplayTitle(material));
+    setShowResults(false);
+    inputRef.current?.setCustomValidity("");
+    onDirty();
+  };
+
+  const handleScan = (value: string) => {
+    const match = catalog.find((item) => materialSearchText(item).includes(normalizeSearch(value)));
+    if (match) selectMaterial(match);
+    else {
+      setSelectedId("");
+      setQuery(value);
+      setShowResults(true);
+      onDirty();
+    }
+  };
+
+  return (
+    <div className="material-picker">
+      <input type="hidden" name="materialId" value={selectedId} required />
+      <label className="field field-wide" htmlFor={`${listId}-input`}>
+        <span>–ú–∞—Ç–µ—Ä—ñ–∞–ª <b aria-hidden="true">*</b></span>
+        <span className="search-control">
+          <span className="search-glyph" aria-hidden="true">‚åï</span>
+          <input
+            ref={inputRef}
+            id={`${listId}-input`}
+            type="search"
+            role="combobox"
+            required
+            data-material-picker-input
+            aria-expanded={showResults && results.length > 0}
+            aria-controls={`${listId}-results`}
+            aria-autocomplete="list"
+            autoComplete="off"
+            value={query}
+            onChange={(event) => {
+              event.currentTarget.setCustomValidity("");
+              setQuery(event.target.value);
+              setSelectedId("");
+              setShowResults(true);
+              onDirty();
+            }}
+            onFocus={() => setShowResults(true)}
+            onBlur={(event) => {
+              if (!selectedId) {
+                event.currentTarget.setCustomValidity("–û–±–µ—Ä—ñ—Ç—å –º–∞—Ç–µ—Ä—ñ–∞–ª –∑—ñ —Å–ø–∏—Å–∫—É —Ä–µ–∑—É–ª—å—Ç–∞—Ç—ñ–≤.");
+              }
+            }}
+            placeholder={loading ? "–ö–∞—Ç–∞–ª–æ–≥ –∑–∞–≤–∞–Ω—Ç–∞–∂—É—î—Ç—å—Å—è‚Ä¶" : "CAT-0001, ISBN –∞–±–æ –Ω–∞–∑–≤–∞"}
+          />
+          {selectedId ? <span className="selected-mark" aria-label="–ú–∞—Ç–µ—Ä—ñ–∞–ª –≤–∏–±—Ä–∞–Ω–æ">‚úì</span> : null}
+        </span>
+      </label>
+
+      <CameraScanner
+        compact
+        onDetected={handleScan}
+        onFallback={() => inputRef.current?.focus()}
+      />
+
+      {!selectedId && query.trim() && showResults ? (
+        <div className="material-results" id={`${listId}-results`} role="listbox">
+          {results.length > 0 ? results.map((material) => (
+            <button
+              key={materialIdentifier(material)}
+              type="button"
+              role="option"
+              aria-selected="false"
+              onClick={() => selectMaterial(material)}
+            >
+              <span className="result-cover" aria-hidden="true">‚ñ•</span>
+              <span><strong>{materialDisplayTitle(material)}</strong><small>{materialMeta(material)}</small></span>
+              <span className="result-id">{materialIdentifier(material)}</span>
+            </button>
+          )) : (
+            <p className="no-results">–ù—ñ—á–æ–≥–æ –Ω–µ –∑–Ω–∞–π–¥–µ–Ω–æ. –ü–µ—Ä–µ–≤—ñ—Ä—Ç–µ ISBN –∞–±–æ –≤–≤–µ–¥—ñ—Ç—å —á–∞—Å—Ç–∏–Ω—É –Ω–∞–∑–≤–∏.</p>
+          )}
+        </div>
+      ) : null}
+
+      {selectedId ? (
+        <button className="change-material" type="button" onClick={() => { setSelectedId(""); setQuery(""); inputRef.current?.setCustomValidity(""); inputRef.current?.focus(); onDirty(); }}>
+          –ó–º—ñ–Ω–∏—Ç–∏ –º–∞—Ç–µ—Ä—ñ–∞–ª
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function BarcodeInput({
+  name,
+  label,
+  hint,
+  value,
+  onValueChange,
+  onLookup,
+  lookupPending,
+}: {
+  name: string;
+  label: string;
+  hint: string;
+  value: string;
+  onValueChange: (value: string) => void;
+  onLookup: (value: string) => void;
+  lookupPending: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const id = useId();
+
+  const updateAndLookup = (detected: string) => {
+    onValueChange(detected);
+    onLookup(detected);
+  };
+
+  return (
+    <div className="barcode-field field-wide">
+      <div className="field">
+        <label htmlFor={id}>{label}</label>
+        <div className="barcode-control">
+          <input
+            ref={inputRef}
+            id={id}
+            name={name}
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            value={value}
+            onChange={(event) => onValueChange(event.target.value)}
+            placeholder="978‚Ä¶"
+            aria-describedby={`${id}-hint`}
+          />
+          <CameraScanner onDetected={updateAndLookup} onFallback={() => inputRef.current?.focus()} />
+          <button
+            className="isbn-lookup-button"
+            type="button"
+            disabled={lookupPending || !value.trim()}
+            onClick={() => onLookup(value)}
+          >
+            {lookupPending ? "–®—É–∫–∞—î–º–æ‚Ä¶" : "–ó–Ω–∞–π—Ç–∏ –∑–∞ ISBN"}
+          </button>
+        </div>
+        <small id={`${id}-hint`}>{hint}</small>
+      </div>
+    </div>
+  );
+}
+
+function CameraScanner({
+  onDetected,
+  onFallback,
+  compact = false,
+}: {
+  onDetected: (value: string) => void;
+  onFallback: () => void;
+  compact?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [message, setMessage] = useState("");
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const frameRef = useRef<number | null>(null);
+  const scanningRef = useRef(false);
+  const startingRef = useRef(false);
+  const mountedRef = useRef(true);
+  const focusScopeActiveRef = useRef(false);
+  const fallbackRequestedRef = useRef(false);
+  const onFallbackRef = useRef(onFallback);
+  onFallbackRef.current = onFallback;
+
+  const stop = useCallback(() => {
+    scanningRef.current = false;
+    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+    frameRef.current = null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setOpen(false);
+  }, []);
+
+  const requestFallbackFocus = useCallback(() => {
+    if (focusScopeActiveRef.current) {
+      fallbackRequestedRef.current = true;
+      stop();
+      return;
+    }
+    stop();
+    queueMicrotask(() => {
+      if (mountedRef.current) onFallbackRef.current();
+    });
+  }, [stop]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      stop();
+    };
+  }, [stop]);
+
+  useEffect(() => {
+    if (!open) return;
+    focusScopeActiveRef.current = true;
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const focusFrame = requestAnimationFrame(() => closeRef.current?.focus());
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        stop();
+        return;
+      }
+      if (event.key === "Tab") {
+        const dialog = closeRef.current?.closest(".scanner-dialog");
+        if (!(dialog instanceof HTMLElement)) return;
+        const focusable = [...dialog.querySelectorAll<HTMLElement>(
+          "button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
+        )].filter((element) => !element.hasAttribute("hidden"));
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (!first || !last) return;
+        if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      focusScopeActiveRef.current = false;
+      cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", handleKeyDown);
+      if (fallbackRequestedRef.current) {
+        fallbackRequestedRef.current = false;
+        queueMicrotask(() => {
+          if (mountedRef.current) onFallbackRef.current();
+        });
+      } else if (mountedRef.current) {
+        previouslyFocused?.focus();
+      }
+    };
+  }, [open, stop]);
+
+  const start = async () => {
+    setMessage("");
+
+    const BarcodeDetector = window.BarcodeDetector;
+    if (!BarcodeDetector || !navigator.mediaDevices?.getUserMedia) {
+      setMessage("–°–∫–∞–Ω—É–≤–∞–Ω–Ω—è –Ω–µ –ø—ñ–¥—Ç—Ä–∏–º—É—î—Ç—å—Å—è —Ü–∏–º –±—Ä–∞—É–∑–µ—Ä–æ–º. –í–≤–µ–¥—ñ—Ç—å ISBN –≤—Ä—É—á–Ω—É.");
+      requestFallbackFocus();
+      return;
+    }
+    if (startingRef.current || scanningRef.current) return;
+
+    startingRef.current = true;
+    setStarting(true);
+    setOpen(true);
+    scanningRef.current = true;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      });
+      if (!scanningRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      streamRef.current = stream;
+
+      const video = videoRef.current;
+      if (!video) throw new Error("–ö–∞–º–µ—Ä—É –Ω–µ –≤–¥–∞–ª–æ—Å—è –ø—ñ–¥–≥–æ—Ç—É–≤–∞—Ç–∏");
+      video.srcObject = stream;
+      await video.play();
+
+      const detector = new BarcodeDetector({
+        formats: ["ean_13"],
+      });
+
+      const inspectFrame = async () => {
+        if (!scanningRef.current || !videoRef.current) return;
+        try {
+          const results = await detector.detect(videoRef.current);
+          if (!scanningRef.current) return;
+          const value = results.find((result) => result.rawValue.trim())?.rawValue.trim();
+          if (value) {
+            onDetected(value);
+            setMessage(`–ö–æ–¥ ${value} —Ä–æ–∑–ø—ñ–∑–Ω–∞–Ω–æ.`);
+            stop();
+            return;
+          }
+        } catch {
+          // A frame can fail while the camera is focusing; keep scanning.
+        }
+        frameRef.current = requestAnimationFrame(inspectFrame);
+      };
+      frameRef.current = requestAnimationFrame(inspectFrame);
+    } catch {
+      setMessage("–ö–∞–º–µ—Ä–∞ –Ω–µ–¥–æ—Å—Ç—É–ø–Ω–∞. –î–æ–∑–≤–æ–ª—å—Ç–µ –¥–æ—Å—Ç—É–ø –∞–±–æ –≤–≤–µ–¥—ñ—Ç—å ISBN –≤—Ä—É—á–Ω—É.");
+      requestFallbackFocus();
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        className={compact ? "scan-button compact" : "scan-button"}
+        type="button"
+        onClick={() => void start()}
+        disabled={starting || open}
+        aria-busy={starting}
+        aria-label={compact ? "–°–∫–∞–Ω—É–≤–∞—Ç–∏ ISBN –∫–∞–º–µ—Ä–æ—é" : undefined}
+      >
+        <span aria-hidden="true">‚ñ£</span>{compact ? "" : starting ? "–í—ñ–¥–∫—Ä–∏–≤–∞—î–º–æ –∫–∞–º–µ—Ä—É‚Ä¶" : "–°–∫–∞–Ω—É–≤–∞—Ç–∏ –∫–∞–º–µ—Ä–æ—é"}
+      </button>
+      {message ? <small className="scanner-message" role="status">{message}</small> : null}
+      {open ? (
+        <div className="scanner-overlay" role="dialog" aria-modal="true" aria-labelledby="scanner-title">
+          <div className="scanner-dialog">
+            <div className="scanner-heading"><div><p>–°–∫–∞–Ω—É–≤–∞–Ω–Ω—è ISBN</p><h2 id="scanner-title">–ù–∞–≤–µ–¥—ñ—Ç—å –∫–∞–º–µ—Ä—É –Ω–∞ –∫–Ω–∏–∂–∫–æ–≤–∏–π —à—Ç—Ä–∏—Ö–∫–æ–¥ EAN-13</h2></div><button ref={closeRef} type="button" onClick={stop} aria-label="–ó–∞–∫—Ä–∏—Ç–∏ —Å–∫–∞–Ω–µ—Ä">√ó</button></div>
+            <div className="video-frame"><video ref={videoRef} muted playsInline /><span aria-hidden="true" /></div>
+            <p>–¢—Ä–∏–º–∞–π—Ç–µ —à—Ç—Ä–∏—Ö–∫–æ–¥ —É—Å–µ—Ä–µ–¥–∏–Ω—ñ —Ä–∞–º–∫–∏. –†–æ–∑–ø—ñ–∑–Ω–∞–≤–∞–Ω–Ω—è –≤—ñ–¥–±—É–¥–µ—Ç—å—Å—è –∞–≤—Ç–æ–º–∞—Ç–∏—á–Ω–æ.</p>
+            <button className="button button-secondary" type="button" onClick={requestFallbackFocus}>–í–≤–µ—Å—Ç–∏ ISBN –≤—Ä—É—á–Ω—É</button>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function isBookLookupCandidate(value: unknown): value is BookLookupCandidate {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.isbn === "string"
+    && typeof value.title === "string"
+    && Array.isArray(value.authors)
+    && value.authors.every((author) => typeof author === "string")
+    && typeof value.publisher === "string"
+    && (value.publishedYear === null || typeof value.publishedYear === "number")
+    && typeof value.coverUrl === "string"
+    && typeof value.sourceUrl === "string"
+    && (value.provider === "google_books" || value.provider === "open_library")
+  );
+}
+
+function gradeOptions() {
+  return Array.from({ length: 11 }, (_, index) => {
+    const grade = index + 1;
+    return <option key={grade} value={grade}>{grade} –∫–ª–∞—Å</option>;
+  });
+}
+
+function gradeFromLegacy(payload: Record<string, unknown>): string {
+  const legacy = initialField(payload, "grade");
+  const match = legacy.match(/\b(?:10|11|[1-9])\b/);
+  return match?.[0] ?? "";
+}
+
+function formPayload(
+  formData: FormData,
+  kind: DraftKind,
+  referenceData: ReferenceData,
+  sourceGeneratedAt: string | null,
+): Record<string, unknown> {
+  const flat: Record<string, unknown> = {};
+  const changes: Record<string, unknown> = {};
+  for (const [key, rawValue] of formData.entries()) {
+    if (typeof rawValue !== "string") continue;
+    const value = rawValue.trim();
+    if (!value) continue;
+    if (key.startsWith("changes.")) changes[key.slice("changes.".length)] = value;
+    else flat[key] = value;
+  }
+
+  if (typeof flat.coverConfirmed === "string") flat.coverConfirmed = flat.coverConfirmed === "true";
+  if (typeof changes.coverConfirmed === "string") changes.coverConfirmed = changes.coverConfirmed === "true";
+
+  const numericFields = kind === "material.create"
+    ? ["year", "classFrom", "classTo"]
+    : kind === "revision.count"
+      ? ["countedQuantity"]
+      : kind === "receipt.create" || kind === "transfer.create" || kind === "writeoff.create"
+        ? ["quantity"]
+        : kind === "class-year.create"
+          ? ["grade"]
+          : [];
+  numericFields.forEach((field) => convertNumericField(flat, field));
+  if (kind === "material.update") {
+    ["year", "classFrom", "classTo"].forEach((field) => convertNumericField(changes, field));
+  }
+  if (kind === "class-year.update") convertNumericField(changes, "grade");
+  if (kind === "class-year.close" && typeof flat.closeCohort === "string") {
+    flat.closeCohort = flat.closeCohort === "true";
+  }
+
+  appendDirectorySnapshot(flat, "locationId", "locationName", referenceData.locations);
+  appendDirectorySnapshot(flat, "fromLocationId", "fromLocationName", referenceData.locations);
+  appendDirectorySnapshot(flat, "toLocationId", "toLocationName", referenceData.locations);
+  appendDirectorySnapshot(flat, "teacherUserId", "teacherName", referenceData.teachers);
+  appendDirectorySnapshot(changes, "locationId", "locationName", referenceData.locations);
+  appendDirectorySnapshot(changes, "teacherUserId", "teacherName", referenceData.teachers);
+
+  if ([
+    "material.update",
+    "receipt.create",
+    "transfer.create",
+    "writeoff.create",
+    "revision.count",
+  ].includes(kind) && sourceGeneratedAt) {
+    flat.sourceGeneratedAt = sourceGeneratedAt;
+  }
+
+  if (kind === "material.update" || kind === "class-year.update") {
+    flat.changes = changes;
+  }
+
+  if (kind === "academic-year.rollover") {
+    const rawClasses = flat.rolloverClassesJson;
+    delete flat.rolloverClassesJson;
+    if (typeof rawClasses === "string") {
+      try {
+        const parsed: unknown = JSON.parse(rawClasses);
+        flat.classes = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        flat.classes = [];
+      }
+    }
+  }
+  return flat;
+}
+
+function draftCoverPhotoKey(
+  kind: DraftKind,
+  payload: Record<string, unknown> | null,
+): string {
+  if (!payload) return "";
+  const coverPayload = kind === "material.update"
+    ? nestedRecord(payload, "changes")
+    : payload;
+  return initialField(coverPayload, "coverPhotoKey");
+}
+
+async function deleteOwnedCoverPhoto(key: string): Promise<boolean> {
+  if (!key) return true;
+  try {
+    const response = await fetch(
+      `/api/librarian/cover-photo?key=${encodeURIComponent(key)}`,
+      { method: "DELETE" },
+    );
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+function convertNumericField(record: Record<string, unknown>, field: string) {
+  if (typeof record[field] === "string") record[field] = Number(record[field]);
+}
+
+function appendDirectorySnapshot(
+  payload: Record<string, unknown>,
+  idField: string,
+  nameField: string,
+  directory: Array<{ id: string; name: string }>,
+) {
+  const id = payload[idField];
+  if (id === "__clear__") {
+    payload[idField] = null;
+    payload[nameField] = null;
+    return;
+  }
+  if (typeof id !== "string") return;
+  const match = directory.find((item) => item.id === id);
+  if (match) payload[nameField] = match.name;
+}
+
+function readApiError(body: unknown, fallback: string): string {
+  if (!isRecord(body)) return fallback;
+  return typeof body.error === "string" ? body.error : fallback;
+}
+
+function formatFieldErrors(value: unknown): string {
+  if (!isRecord(value)) return "";
+  const messages = Object.values(value).filter((item): item is string => typeof item === "string");
+  return messages.join(" ");
+}
+
+function readFieldErrors(value: unknown): Record<string, string> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeReferenceData(value: Record<string, unknown>): ReferenceData {
+  const teachers = Array.isArray(value.teachers)
+    ? value.teachers.flatMap((item): ReferenceTeacher[] => {
+        if (!isRecord(item)) return [];
+        const id = readText(item, ["id"]);
+        const name = readText(item, ["name"]);
+        if (!/^USR-\d{3,}$/u.test(id) || !name) return [];
+        return [{ id, name, role: readText(item, ["role"]), status: readText(item, ["status"]) }];
+      })
+    : [];
+  const locations = Array.isArray(value.locations)
+    ? value.locations.flatMap((item): ReferenceLocation[] => {
+        if (!isRecord(item)) return [];
+        const id = readText(item, ["id"]);
+        const name = readText(item, ["name"]);
+        if (!/^LOC-\d{3,}$/u.test(id) || !name || id === "LOC-007" || id === "LOC-008") return [];
+        return [{ id, name, type: readText(item, ["type"]), status: readText(item, ["status"]) }];
+      })
+    : [];
+  const academicYears = Array.isArray(value.academicYears)
+    ? value.academicYears.flatMap((item): ReferenceAcademicYear[] => {
+        if (!isRecord(item)) return [];
+        const id = readText(item, ["id"]);
+        const label = readText(item, ["label"]);
+        if (!/^YR-20\d{2}-20\d{2}$/u.test(id) || !/^20\d{2}\/20\d{2}$/u.test(label)) return [];
+        return [{
+          id,
+          label,
+          startDate: readText(item, ["startDate"]),
+          endDate: readText(item, ["endDate"]),
+          status: readText(item, ["status"]),
+          notes: readText(item, ["notes"]),
+        }];
+      })
+    : [];
+  const classYears = Array.isArray(value.classYears)
+    ? value.classYears.flatMap((item): ReferenceClassYear[] => {
+        if (!isRecord(item)) return [];
+        const id = readText(item, ["id"]);
+        const academicYearId = readText(item, ["academicYearId"]);
+        if (!/^CY-20\d{2}-\d{3,}$/u.test(id) || !/^YR-20\d{2}-20\d{2}$/u.test(academicYearId)) return [];
+        const grade = readNumber(item, ["grade"]);
+        return [{
+          id,
+          academicYearId,
+          academicYearLabel: readText(item, ["academicYearLabel"]),
+          cohortId: readText(item, ["cohortId"]),
+          className: readText(item, ["className"]),
+          grade,
+          code: readText(item, ["code"]),
+          teacherName: readText(item, ["teacherName"]),
+          teacherUserId: readText(item, ["teacherUserId"]),
+          locationName: readText(item, ["locationName"]),
+          locationId: readText(item, ["locationId"]),
+          startDate: readText(item, ["startDate"]),
+          endDate: readText(item, ["endDate"]),
+          status: readText(item, ["status"]),
+          actualClosedDate: readText(item, ["actualClosedDate"]),
+          notes: readText(item, ["notes"]),
+        }];
+      })
+    : [];
+  return { teachers, locations, academicYears, classYears };
+}
+
+function readText(record: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number") return String(value);
+  }
+  return "";
+}
+
+function initialField(payload: Record<string, unknown>, key: string): string {
+  const value = payload[key];
+  return typeof value === "string" || typeof value === "number" ? String(value) : "";
+}
+
+function nestedRecord(payload: Record<string, unknown>, key: string): Record<string, unknown> {
+  return isRecord(payload[key]) ? payload[key] as Record<string, unknown> : {};
+}
+
+function initialBooleanField(
+  payload: Record<string, unknown>,
+  key: string,
+  fallback: boolean,
+): string {
+  const value = payload[key];
+  return value === true || value === "true"
+    ? "true"
+    : value === false || value === "false"
+      ? "false"
+      : fallback ? "true" : "false";
+}
+
+function nullableDirectoryInitial(payload: Record<string, unknown>, key: string): string {
+  return Object.hasOwn(payload, key) && payload[key] === null
+    ? "__clear__"
+    : initialField(payload, key);
+}
+
+function protectedLocations(referenceData: ReferenceData): ReferenceLocation[] {
+  return referenceData.locations
+    .filter((location) => (
+      /^LOC-\d{3,}$/u.test(location.id)
+      && location.id !== "LOC-007"
+      && location.id !== "LOC-008"
+      && location.name.trim()
+    ))
+    .sort((left, right) => left.name.localeCompare(right.name, "uk", { numeric: true }));
+}
+
+function uniqueCohorts(classYears: ReferenceClassYear[]): Array<{ id: string; label: string }> {
+  const cohorts = new Map<string, string>();
+  classYears.forEach((item) => {
+    if (!/^COH-\d{3,}$/u.test(item.cohortId)) return;
+    const label = [item.className, item.academicYearLabel].filter(Boolean).join(" ¬∑ ") || item.cohortId;
+    cohorts.set(item.cohortId, label);
+  });
+  return [...cohorts].map(([id, label]) => ({ id, label }))
+    .sort((left, right) => left.label.localeCompare(right.label, "uk", { numeric: true }));
+}
+
+function nextAcademicYearId(
+  sourceYearId: string,
+  years: ReferenceAcademicYear[],
+): string {
+  const match = sourceYearId.match(/^YR-(20\d{2})-(20\d{2})$/u);
+  if (!match) return "";
+  const expected = `YR-${Number(match[1]) + 1}-${Number(match[2]) + 1}`;
+  return years.some((year) => year.id === expected) ? expected : "";
+}
+
+function buildRolloverRows(
+  sourceYearId: string,
+  referenceData: ReferenceData,
+): RolloverRow[] {
+  const safeLocations = protectedLocations(referenceData);
+  return referenceData.classYears
+    .filter((item) => (
+      item.academicYearId === sourceYearId
+      && /^CY-20\d{2}-\d{3,}$/u.test(item.id)
+      && /^COH-\d{3,}$/u.test(item.cohortId)
+      && typeof item.grade === "number"
+      && item.grade >= 1
+      && item.grade <= 11
+      && !item.actualClosedDate
+      && !/closed|–∑–∞–∫—Ä–∏—Ç/i.test(item.status)
+    ))
+    .sort((left, right) => left.className.localeCompare(right.className, "uk", { numeric: true }))
+    .map((item) => {
+      const location = safeLocations.find((candidate) => candidate.id === item.locationId);
+      const teacher = referenceData.teachers.find((candidate) => candidate.id === item.teacherUserId);
+      const graduate = item.grade === 11;
+      return {
+        sourceClassYearId: item.id,
+        cohortId: item.cohortId,
+        sourceGrade: item.grade!,
+        className: item.className || `${item.grade}-${item.code}`,
+        action: graduate ? "graduate" : "promote",
+        ...(graduate ? {} : {
+          targetGrade: item.grade! + 1,
+          targetCode: item.code || classCodeFromName(item.className),
+        }),
+        ...(teacher ? { teacherUserId: teacher.id, teacherName: teacher.name } : {}),
+        ...(location ? { locationId: location.id, locationName: location.name } : {}),
+      } satisfies RolloverRow;
+    });
+}
+
+function rolloverRowsFromPayload(
+  payload: Record<string, unknown>,
+  referenceData: ReferenceData,
+): RolloverRow[] {
+  if (!Array.isArray(payload.classes)) return [];
+  return payload.classes.flatMap((item): RolloverRow[] => {
+    if (!isRecord(item)) return [];
+    const sourceClassYearId = readText(item, ["sourceClassYearId"]);
+    const cohortId = readText(item, ["cohortId"]);
+    const sourceGrade = readNumber(item, ["sourceGrade"]);
+    const action = readText(item, ["action"]);
+    const sourceClass = referenceData.classYears.find((candidate) => (
+      candidate.id === sourceClassYearId
+    ));
+    if (
+      !/^CY-20\d{2}-\d{3,}$/u.test(sourceClassYearId)
+      || !/^COH-\d{3,}$/u.test(cohortId)
+      || sourceGrade === null
+      || !["promote", "graduate", "close", "skip"].includes(action)
+    ) return [];
+    return [{
+      sourceClassYearId,
+      cohortId,
+      sourceGrade,
+      className: sourceClass?.className
+        || readText(item, ["className"])
+        || `${sourceGrade}-${sourceClass?.code || readText(item, ["targetCode"]) || "?"}`,
+      action: action as RolloverRow["action"],
+      ...(readNumber(item, ["targetGrade"]) !== null ? { targetGrade: readNumber(item, ["targetGrade"])! } : {}),
+      ...(readText(item, ["targetCode"]) ? { targetCode: readText(item, ["targetCode"]) } : {}),
+      ...(readText(item, ["teacherUserId"]) ? { teacherUserId: readText(item, ["teacherUserId"]), teacherName: readText(item, ["teacherName"]) } : {}),
+      ...(readText(item, ["locationId"]) ? { locationId: readText(item, ["locationId"]), locationName: readText(item, ["locationName"]) } : {}),
+      ...(readText(item, ["overrideReason"]) ? { overrideReason: readText(item, ["overrideReason"]) } : {}),
+      ...(readText(item, ["notes"]) ? { notes: readText(item, ["notes"]) } : {}),
+    }];
+  });
+}
+
+function stripRolloverDisplayFields(row: RolloverRow): Record<string, unknown> {
+  return {
+    sourceClassYearId: row.sourceClassYearId,
+    cohortId: row.cohortId,
+    sourceGrade: row.sourceGrade,
+    action: row.action,
+    ...(row.action === "promote" ? {
+      targetGrade: row.targetGrade,
+      targetCode: row.targetCode,
+      ...(row.teacherUserId && row.teacherName ? { teacherUserId: row.teacherUserId, teacherName: row.teacherName } : {}),
+      ...(row.locationId && row.locationName ? { locationId: row.locationId, locationName: row.locationName } : {}),
+    } : {}),
+    ...(row.overrideReason ? { overrideReason: row.overrideReason } : {}),
+    ...(row.notes ? { notes: row.notes } : {}),
+  };
+}
+
+function classCodeFromName(value: string): string {
+  return value.match(/^\d{1,2}-(.+)$/u)?.[1] ?? "";
+}
+
+function kindNeedsMaterial(kind: DraftKind): boolean {
+  return [
+    "material.update",
+    "receipt.create",
+    "transfer.create",
+    "writeoff.create",
+    "revision.count",
+  ].includes(kind);
+}
+
+function isPositiveRevision(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function draftStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    draft: "–ß–µ—Ä–Ω–µ—Ç–∫–∞",
+    ready_for_review: "–û—á—ñ–∫—É—î –ø–µ—Ä–µ–≤—ñ—Ä–∫–∏",
+    cancelled: "–°–∫–∞—Å–æ–≤–∞–Ω–æ",
+    approved_pending_apply: "–ü–æ–≥–æ–¥–∂–µ–Ω–æ –¥–æ –≤–Ω–µ—Å–µ–Ω–Ω—è",
+    applied: "–í–Ω–µ—Å–µ–Ω–æ",
+    failed: "–ü–æ–º–∏–ª–∫–∞ –≤–Ω–µ—Å–µ–Ω–Ω—è",
+  };
+  return labels[status] ?? status;
+}
+
+function readNumber(record: Record<string, unknown>, keys: string[]): number | null {
+  for (const key of keys) {
+    const raw = record[key];
+    if (raw === null || raw === undefined || raw === "") continue;
+    const value = Number(raw);
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
+function catalogRubrics(catalog: CatalogMaterial[]): string[] {
+  const values = new Set([
+    "–ü—ñ–¥—Ä—É—á–Ω–∏–∫–∏ —ñ —Ö—Ä–µ—Å—Ç–æ–º–∞—Ç—ñ—ó",
+    "–†–æ–±–æ—á—ñ —Ç–∞ –∫–æ–Ω—Ç—Ä–æ–ª—å–Ω—ñ –∑–æ—à–∏—Ç–∏, –∑–±—ñ—Ä–Ω–∏–∫–∏",
+    "–î–∏–¥–∞–∫—Ç–∏—á–Ω—ñ –π –¥–æ–≤—ñ–¥–∫–æ–≤—ñ –º–∞—Ç–µ—Ä—ñ–∞–ª–∏",
+    "–ú–µ—Ç–æ–¥–∏—á–Ω–∞ –ª—ñ—Ç–µ—Ä–∞—Ç—É—Ä–∞",
+    "–ó–ù–û —ñ –ù–ú–¢",
+  ]);
+  catalog.forEach((material) => {
+    const rubric = readText(material, ["rubric"]);
+    if (rubric) values.add(rubric);
+  });
+  return [...values].sort((left, right) => left.localeCompare(right, "uk"));
+}
+
+function catalogLocations(catalog: CatalogMaterial[]): string[] {
+  const values = new Set(["–ë—ñ–±–ª—ñ–æ—Ç–µ–∫–∞"]);
+  catalog.forEach((material) => {
+    const stock = material.stock;
+    if (!isRecord(stock) || !Array.isArray(stock.locations)) return;
+    stock.locations.forEach((entry) => {
+      if (!isRecord(entry)) return;
+      const name = readText(entry, ["name"]);
+      if (name) values.add(name);
+    });
+  });
+  return [...values].sort((left, right) => left.localeCompare(right, "uk", { numeric: true }));
+}
+
+function materialIdentifier(material: CatalogMaterial): string {
+  return readText(material, ["catId", "cat_id", "materialId", "material_id", "id", "isbn"]);
+}
+
+function materialDisplayTitle(material: CatalogMaterial): string {
+  return readText(material, ["title", "name"]) || "–ú–∞—Ç–µ—Ä—ñ–∞–ª –±–µ–∑ –Ω–∞–∑–≤–∏";
+}
+
+function materialMeta(material: CatalogMaterial): string {
+  return [
+    readText(material, ["author", "authors"]),
+    materialClassLabel(material),
+    readText(material, ["isbn"]),
+  ].filter(Boolean).join(" ¬∑ ") || "–î–æ–¥–∞—Ç–∫–æ–≤—ñ –¥–∞–Ω—ñ –≤—ñ–¥—Å—É—Ç–Ω—ñ";
+}
+
+function materialClassLabel(material: CatalogMaterial): string {
+  const explicit = readText(material, ["grade", "className", "class"]);
+  if (explicit) return explicit;
+  const classFrom = readNumber(material, ["classFrom"]);
+  const classTo = readNumber(material, ["classTo"]);
+  if (!classFrom) return "";
+  if (!classTo || classTo === classFrom) return `${classFrom} –∫–ª–∞—Å`;
+  return `${classFrom}‚Äì${classTo} –∫–ª–∞—Å–∏`;
+}
+
+function materialSearchText(material: CatalogMaterial): string {
+  return normalizeSearch([
+    materialIdentifier(material),
+    materialDisplayTitle(material),
+    materialMeta(material),
+    readText(material, ["subject", "rubric"]),
+  ].join(" "));
+}
+
+function normalizeSearch(value: string): string {
+  return value.toLocaleLowerCase("uk-UA").replace(/[\s\-‚Äì‚Äî]+/gu, "").trim();
+}
+
+function draftPrimaryText(draft: SavedDraft): string {
+  const payload = isRecord(draft.payload) ? draft.payload : {};
+  return readText(payload, [
+    "title",
+    "materialTitle",
+    "materialId",
+    "label",
+    "classYearId",
+    "targetYearId",
+    "academicYearId",
+  ]) || KIND_LABELS[draft.kind] || "–ß–µ—Ä–Ω–µ—Ç–∫–∞";
+}
+
+function shortDraftId(value: unknown): string {
+  if (typeof value !== "string") return "—Å—Ç–≤–æ—Ä–µ–Ω–æ";
+  return `‚Ññ ${value.slice(0, 8)}`;
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat("uk-UA").format(value);
+}
+
+function formatDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—â–æ–π–Ω–æ";
+  return new Intl.DateTimeFormat("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
+}
+
+function isToday(value: string): boolean {
+  const date = new Date(value);
+  const now = new Date();
+  return date.getFullYear() === now.getFullYear()
+    && date.getMonth() === now.getMonth()
+    && date.getDate() === now.getDate();
+}
+
+function todayValue(): string {
+  const now = new Date();
+  const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return localDate.toISOString().slice(0, 10);
+}

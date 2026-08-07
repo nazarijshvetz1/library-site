@@ -462,6 +462,829 @@ function validateMaterial(
     "year",
     1500,
     new Date().getUTCFullYear() + 1,
-  ïMw¶‰ËkºwµçE‘”€„ôôÕ¹‘•™¥¹•¤¹½Éµ…±¥é•¹É…‘”€ôÉ…‘”ì(€¥˜€¡½‘”¤¹½Éµ…±¥é•¹½‘”€ô½‘”ì(€=‰©•Ğ¹…ÍÍ¥¸¡¹½Éµ…±¥é•°Ñ•…¡•È°±½…Ñ¥½¸¤ì(€¥˜€¡¹½Ñ•Ì¤¹½Éµ…±¥é•¹¹½Ñ•Ì€ô¹½Ñ•Ìì(€É•ÑÕÉ¸¹½Éµ…±¥é•ì)ô()™Õ¹Ñ¥½¸Ù…±¥‘…Ñ•±…ÍÍe•…ÉUÁ‘…Ñ” (€Á…å±½…èI•½ÉñÍÑÉ¥¹œ°Õ¹­¹½İ¸ø°(€•ÉÉ½ÉÌèI•½ÉñÍÑÉ¥¹œ°ÍÑÉ¥¹œø°(¤èI•½ÉñÍÑÉ¥¹œ°Õ¹­¹½İ¸øì(€½¹ÍĞ…±±½İ•€ô¹•ÜM•Ğ¡l‰±…ÍÍe•…É%ˆ°€‰……‘•µ¥e•…É%ˆ°€‰¡…¹•Ìˆ°€‰É•…Í½¸‰t¤ì(€…‘‘U¹­¹½İ¹¥•±‘ÉÉ½ÉÌ¡Á…å±½…°…±±½İ•°€‰Á…å±½…¸ˆ°•ÉÉ½ÉÌ¤ì(€½¹ÍĞ¹½Éµ…±¥é•èI•½ÉñÍÑÉ¥¹œ°Õ¹­¹½İ¸ø€ôíôì(€½¹ÍĞ±…ÍÍe•…É%€ô¥‘•¹Ñ¥™¥•ÉY…±Õ” (€€€Á…å±½…°€‰±…ÍÍe•…É%ˆ°1MM}eI}%}AQQI8°€‰d´ÈÀÈØ´ÀÀÄˆ°ÑÉÕ”°•ÉÉ½ÉÌ°(€€¤ì(€½¹ÍĞ……‘•µ¥e•…É%€ôÙ…±¥‘…Ñ•…‘•µ¥e•…É% (€€€Á…å±½…°€‰……‘•µ¥e•…É%ˆ°ÑÉÕ”°•ÉÉ½ÉÌ°(€€¤ì(€½¹ÍĞÉ•…Í½¸€ôÍÑÉ¥¹Y…±Õ”¡Á…å±½…°€‰É•…Í½¸ˆ°ìµ…àè€Å|ÀÀÀô°•ÉÉ½ÉÌ¤ì(€½¹ÍĞ¡…¹•Ì€ôÉ•½É‘Y…±Õ”¡Á…å±½…°€‰¡…¹•Ìˆ°ÑÉÕ”°•ÉÉ½ÉÌ¤ì(€¥˜€¡±…ÍÍe•…É%¤¹½Éµ…±¥é•¹±…ÍÍe•…É%€ô±…ÍÍe•…É%ì(€¥˜€¡……‘•µ¥e•…É%¤¹½Éµ…±¥é•¹……‘•µ¥e•…É%€ô……‘•µ¥e•…É%ì(€¥˜€¡É•…Í½¸¤¹½Éµ…±¥é•¹É•…Í½¸€ôÉ•…Í½¸ì(€¥˜€ …¡…¹•Ì¤É•ÑÕÉ¸¹½Éµ…±¥é•ì((€½¹ÍĞ¹•ÍÑ•‘ÉÉ½ÉÌèI•½ÉñÍÑÉ¥¹œ°ÍÑÉ¥¹œø€ôíôì(€…‘‘U¹­¹½İ¹¥•±‘ÉÉ½ÉÌ (€€€¡…¹•Ì°(€€€¹•ÜM•Ğ¡l(€€€€€€‰É…‘”ˆ°€‰½‘”ˆ°€‰Ñ•…¡•ÉUÍ•É%ˆ°€‰Ñ•…¡•É9…µ”ˆ°€‰±½…Ñ¥½¹%ˆ°(€€€€€€‰±½…Ñ¥½¹9…µ”ˆ°€‰¹½Ñ•Ìˆ°(€€€t¤°(€€€€‰Á…å±½…¸ˆ°(€€€¹•ÍÑ•‘ÉÉ½ÉÌ°(€€¤ì(€¥˜€¡=‰©•Ğ¹­•åÌ¡¡…¹•Ì¤¹±•¹Ñ €ôôô€À¤¹•ÍÑ•‘ÉÉ½ÉÌ¹Á…å±½…€ô€‹BKBëBÃBÛF[FF0ƒFBûFBÀƒBÄƒBûBÓB÷FƒBßBóF[B÷F¸ˆì(€½¹ÍĞÉ•ÍÕ±ĞèI•½ÉñÍÑÉ¥¹œ°Õ¹­¹½İ¸ø€ôíôì(€½¹ÍĞÉ…‘”€ô¥¹Ñ••ÉY…±Õ”¡¡…¹•Ì°€‰É…‘”ˆ°€Ä°€ÄÄ°™…±Í”°¹•ÍÑ•‘ÉÉ½ÉÌ¤ì(€½¹ÍĞ½‘”€ôÙ…±¥‘…Ñ•±…ÍÍ½‘”¡¡…¹•Ì°€‰½‘”ˆ°™…±Í”°¹•ÍÑ•‘ÉÉ½ÉÌ¤ì(€½¹ÍĞÑ•…¡•È€ô‘¥É•Ñ½ÉåA…¥È (€€€¡…¹•Ì°€‰Ñ•…¡•ÉUÍ•É%ˆ°€‰Ñ•…¡•É9…µ”ˆ°UMI}%}AQQI8°€‰UMH´ÀÀÄˆ°(€€€™…±Í”°ÑÉÕ”°¹•ÍÑ•‘ÉÉ½ÉÌ°(€€¤ì(€½¹ÍĞ±½…Ñ¥½¸€ô‘¥É•Ñ½ÉåA…¥È (€€€¡…¹•Ì°€‰±½…Ñ¥½¹%ˆ°€‰±½…Ñ¥½¹9…µ”ˆ°1=Q%=9}%}AQQI8°€‰1=´ÀÀÄˆ°(€€€™…±Í”°ÑÉÕ”°¹•ÍÑ•‘ÉÉ½ÉÌ°(€€¤ì(€½¹ÍĞ¹½Ñ•Ì€ôÍÑÉ¥¹Y…±Õ”¡¡…¹•Ì°€‰¹½Ñ•Ìˆ°ìµ…àè€É|ÀÀÀô°¹•ÍÑ•‘ÉÉ½ÉÌ¤ì(€¥˜€¡±½…Ñ¥½¸¹±½…Ñ¥½¹%€ôôô€‰1=´ÀÀÜˆñğ±½…Ñ¥½¸¹±½…Ñ¥½¹%€ôôô€‰1=´ÀÀàˆ¤ì(€€€¹•ÍÑ•‘ÉÉ½ÉÍl‰Á…å±½…¹±½…Ñ¥½¹%‰t€ô€‹B‡BïFBÛBÇBûBËBÔƒBóF[FFBÔƒB÷BÔƒBóBûBÛBÔƒBÇFFBàƒBëBÃBÇF[B÷B×FBûBğƒBëBïBÃFF¸ˆì(€ô(€¥˜€¡É…‘”€„ôôÕ¹‘•™¥¹•¤É•ÍÕ±Ğ¹É…‘”€ôÉ…‘”ì(€¥˜€¡½‘”¤É•ÍÕ±Ğ¹½‘”€ô½‘”ì(€=‰©•Ğ¹…ÍÍ¥¸¡É•ÍÕ±Ğ°Ñ•…¡•È°±½…Ñ¥½¸¤ì(€¥˜€¡¹½Ñ•Ì¤É•ÍÕ±Ğ¹¹½Ñ•Ì€ô¹½Ñ•Ìì(€¥˜€¡=‰©•Ğ¹­•åÌ¡É•ÍÕ±Ğ¤¹±•¹Ñ €ôôô€À€˜˜=‰©•Ğ¹­•åÌ¡¹•ÍÑ•‘ÉÉ½ÉÌ¤¹±•¹Ñ €ôôô€À¤ì(€€€¹•ÍÑ•‘ÉÉ½ÉÌ¹Á…å±½…€ô€‹BKBëBÃBÛF[FF0ƒFBûFBÀƒBÄƒBûBÓB÷FƒB÷B×BÿBûFBûBÛB÷F8ƒBßBóF[B÷F¸ˆì(€ô(€½Áå9•ÍÑ•‘ÉÉ½ÉÌ¡¹•ÍÑ•‘ÉÉ½ÉÌ°€‰¡…¹•Ìˆ°•ÉÉ½ÉÌ¤ì(€¹½Éµ…±¥é•¹¡…¹•Ì€ôÉ•ÍÕ±Ğì(€É•ÑÕÉ¸¹½Éµ…±¥é•ì)ô()™Õ¹Ñ¥½¸Ù…±¥‘…Ñ•±…ÍÍe•…É±½Í” (€Á…å±½…èI•½ÉñÍÑÉ¥¹œ°Õ¹­¹½İ¸ø°(€•ÉÉ½ÉÌèI•½ÉñÍÑÉ¥¹œ°ÍÑÉ¥¹œø°(¤èI•½ÉñÍÑÉ¥¹œ°Õ¹­¹½İ¸øì(€½¹ÍĞ…±±½İ•€ô¹•ÜM•Ğ¡l(€€€€‰±…ÍÍe•…É%ˆ°€‰…ÑÕ…±±½Í•‘…Ñ”ˆ°€‰É•…Í½¸ˆ°€‰±½Í•½¡½ÉĞˆ°€‰¹½Ñ•Ìˆ°(€t¤ì(€…‘‘U¹­¹½İ¹¥•±‘ÉÉ½ÉÌ¡Á…å±½…°…±±½İ•°€‰Á…å±½…¸ˆ°•ÉÉ½ÉÌ¤ì(€½¹ÍĞ¹½Éµ…±¥é•èI•½ÉñÍÑÉ¥¹œ°Õ¹­¹½İ¸ø€ôíôì(€½¹ÍĞ±…ÍÍe•…É%€ô¥‘•¹Ñ¥™¥•ÉY…±Õ” (€€€Á…å±½…°€‰±…ÍÍe•…É%ˆ°1MM}eI}%}AQQI8°€‰d´ÈÀÈØ´ÀÀÄˆ°ÑÉÕ”°•ÉÉ½ÉÌ°(€€¤ì(€½¹ÍĞ…ÑÕ…±±½Í•‘…Ñ”€ô¹½Éµ…±¥é•‘…Ñ” (€€€Á…å±½…°€‰…ÑÕ…±±½Í•‘…Ñ”ˆ°•ÉÉ½ÉÌ°ÑÉÕ”°(€€¤ì(€½¹ÍĞÉ•…Í½¸€ô•¹ÕµY…±Õ” (€€€Á…å±½…°(€€€€‰É•…Í½¸ˆ°(€€€l‰±½Í•ˆ°€‰µ•É•ˆ°€‰É…‘Õ…Ñ•ˆ°€‰É•½É…¹¥é•ˆ°€‰½Ñ¡•È‰t…Ì½¹ÍĞ°(€€€ÑÉÕ”°(€€€•ÉÉ½ÉÌ°(€€¤ì(€½¹ÍĞ±½Í•½¡½ÉĞ€ô‰½½±•…¹Y…±Õ”¡Á…å±½…°€‰±½Í•½¡½ÉĞˆ°ÑÉÕ”°•ÉÉ½ÉÌ¤ì(€½¹ÍĞ¹½Ñ•Ì€ôÍÑÉ¥¹Y…±Õ”¡Á…å±½…°€‰¹½Ñ•Ìˆ°ìµ…àè€É|ÀÀÀô°•ÉÉ½ÉÌ¤ì(€¥˜€¡É•…Í½¸€ôôô€‰½Ñ¡•Èˆ€˜˜€…¹½Ñ•Ì¤ì(€€€•ÉÉ½ÉÍl‰Á…å±½…¹¹½Ñ•Ì‰t€ô€‹B{BÿBãF#F[FF0ƒF[B÷F#FƒBÿFBãFBãB÷FƒBßBÃBëFBãFFF<ƒBëBïBÃFF¸ˆì(€ô(€¥˜€¡±…ÍÍe•…É%¤¹½Éµ…±¥é•¹±…ÍÍe•…É%€ô±…ÍÍe•…É%ì(€¥˜€¡…ÑÕ…±±½Í•‘…Ñ”¤¹½Éµ…±¥é•¹…ÑÕ…±±½Í•‘…Ñ”€ô…ÑÕ…±±½Í•‘…Ñ”ì(€¥˜€¡É•…Í½¸¤¹½Éµ…±¥é•¹É•…Í½¸€ôÉ•…Í½¸ì(€¥˜€¡±½Í•½¡½ÉĞ€„ôôÕ¹‘•™¥¹•¤¹½Éµ…±¥é•¹±½Í•½¡½ÉĞ€ô±½Í•½¡½ÉĞì(€¥˜€¡¹½Ñ•Ì¤¹½Éµ…±¥é•¹¹½Ñ•Ì€ô¹½Ñ•Ìì(€É•ÑÕÉ¸¹½Éµ…±¥é•ì)ô()™Õ¹Ñ¥½¸Ù…±¥‘…Ñ•I½±±½Ù•É±…ÍÌ (€¥Ñ•´èI•½ÉñÍÑÉ¥¹œ°Õ¹­¹½İ¸ø°(€•ÉÉ½ÉÌèI•½ÉñÍÑÉ¥¹œ°ÍÑÉ¥¹œø°(¤èI•½ÉñÍÑÉ¥¹œ°Õ¹­¹½İ¸øì(€½¹ÍĞ…±±½İ•€ô¹•ÜM•Ğ¡l(€€€€‰Í½ÕÉ•±…ÍÍe•…É%ˆ°€‰½¡½ÉÑ%ˆ°€‰Í½ÕÉ•É…‘”ˆ°€‰…Ñ¥½¸ˆ°€‰Ñ…É•ÑÉ…‘”ˆ°(€€€€‰Ñ…É•Ñ½‘”ˆ°€‰Ñ•…¡•ÉUÍ•É%ˆ°€‰Ñ•…¡•É9…µ”ˆ°€‰±½…Ñ¥½¹%ˆ°€‰±½…Ñ¥½¹9…µ”ˆ°(€€€€‰½Ù•ÉÉ¥‘•I•…Í½¸ˆ°€‰¹½Ñ•Ìˆ°(€t¤ì(€…‘‘U¹­¹½İ¹¥•±‘ÉÉ½ÉÌ¡¥Ñ•´°…±±½İ•°€‰Á…å±½…¸ˆ°•ÉÉ½ÉÌ¤ì(€½¹ÍĞÉ•ÍÕ±ĞèI•½ÉñÍÑÉ¥¹œ°Õ¹­¹½İ¸ø€ôíôì(€½¹ÍĞÍ½ÕÉ•±…ÍÍe•…É%€ô¥‘•¹Ñ¥™¥•ÉY…±Õ” (€€€¥Ñ•´°€‰Í½ÕÉ•±…ÍÍe•…É%ˆ°1MM}eI}%}AQQI8°€‰d´ÈÀÈØ´ÀÀÄˆ°ÑÉÕ”°•ÉÉ½ÉÌ°(€€¤ì(€½¹ÍĞ½¡½ÉÑ%€ô¥‘•¹Ñ¥™¥•ÉY…±Õ” (€€€¥Ñ•´°€‰½¡½ÉÑ%ˆ°=!=IQ}%}AQQI8°€‰= ´ÀÀÄˆ°ÑÉÕ”°•ÉÉ½ÉÌ°(€€¤ì(€½¹ÍĞÍ½ÕÉ•É…‘”€ô¥¹Ñ••ÉY…±Õ”¡¥Ñ•´°€‰Í½ÕÉ•É…‘”ˆ°€Ä°€ÄÄ°ÑÉÕ”°•ÉÉ½ÉÌ¤ì(€½¹ÍĞ…Ñ¥½¸€ô•¹ÕµY…±Õ” (€€€¥Ñ•´°€‰…Ñ¥½¸ˆ°l‰ÁÉ½µ½Ñ”ˆ°€‰É…‘Õ…Ñ”ˆ°€‰±½Í”ˆ°€‰Í­¥À‰t…Ì½¹ÍĞ°ÑÉÕ”°•ÉÉ½ÉÌ°(€€¤ì(€½¹ÍĞÑ…É•ÑÉ…‘”€ô¥¹Ñ••ÉY…±Õ”¡¥Ñ•´°€‰Ñ…É•ÑÉ…‘”ˆ°€Ä°€ÄÄ°™…±Í”°•ÉÉ½ÉÌ¤ì(€½¹ÍĞÑ…É•Ñ½‘”€ôÙ…±¥‘…Ñ•±…ÍÍ½‘”¡¥Ñ•´°€‰Ñ…É•Ñ½‘”ˆ°™…±Í”°•ÉÉ½ÉÌ¤ì(€½¹ÍĞÑ•…¡•È€ô‘¥É•Ñ½ÉåA…¥È (€€€¥Ñ•´°€‰Ñ•…¡•ÉUÍ•É%ˆ°€‰Ñ•…¡•É9…µ”ˆ°UMI}%}AQQI8°€‰UMH´ÀÀÄˆ°(€€€™…±Í”°™…±Í”°•ÉÉ½ÉÌ°(€€¤ì(€½¹ÍĞ±½…Ñ¥½¸€ô‘¥É•Ñ½ÉåA…¥È (€€€¥Ñ•´°€‰±½…Ñ¥½¹%ˆ°€‰±½…Ñ¥½¹9…µ”ˆ°1=Q%=9}%}AQQI8°€‰1=´ÀÀÄˆ°(€€€™…±Í”°™…±Í”°•ÉÉ½ÉÌ°(€€¤ì(€½¹ÍĞ½Ù•ÉÉ¥‘•I•…Í½¸€ôÍÑÉ¥¹Y…±Õ”¡¥Ñ•´°€‰½Ù•ÉÉ¥‘•I•…Í½¸ˆ°ìµ…àè€Å|ÀÀÀô°•ÉÉ½ÉÌ¤ì(€½¹ÍĞ¹½Ñ•Ì€ôÍÑÉ¥¹Y…±Õ”¡¥Ñ•´°€‰¹½Ñ•Ìˆ°ìµ…àè€É|ÀÀÀô°•ÉÉ½ÉÌ¤ì((€¥˜€¡…Ñ¥½¸€ôôô€‰ÁÉ½µ½Ñ”ˆ¤ì(€€€¥˜€¡Í½ÕÉ•É…‘”€ôôô€ÄÄ¤ì(€€€€€•ÉÉ½ÉÍl‰Á…å±½…¹…Ñ¥½¸‰t€ô€ˆÄÄƒBëBïBÃFƒB÷BÔƒBóBûBÛB÷BÀƒBÿB×FB×BËBûBÓBãFBàƒBÓBø€ÄÈƒBëBïBÃFF¸ˆì(€€€ô(€€€¥˜€¡Ñ…É•ÑÉ…‘”€ôôôÕ¹‘•™¥¹•¤•ÉÉ½ÉÍl‰Á…å±½…¹Ñ…É•ÑÉ…‘”‰t€ô€‹BKBëBÃBÛF[FF0ƒB÷BûBËFƒBÿBÃFBÃBïB×BïF0¸ˆì(€€€¥˜€ …Ñ…É•Ñ½‘”¤•ÉÉ½ÉÍl‰Á…å±½…¹Ñ…É•Ñ½‘”‰t€ô€‹BKBëBÃBÛF[FF0ƒBëBûBĞƒB÷BûBËBûBÏBøƒBëBïBÃFF¸ˆì(€€€¥˜€ (€€€€€Í½ÕÉ•É…‘”€„ôôÕ¹‘•™¥¹•€˜˜Ñ…É•ÑÉ…‘”€„ôôÕ¹‘•™¥¹•€˜˜(€€€€€Ñ…É•ÑÉ…‘”€„ôôÍ½ÕÉ•É…‘”€¬€Ä€˜˜€…½Ù•ÉÉ¥‘•I•…Í½¸(€€€€¤ì(€€€€€•ÉÉ½ÉÍl‰Á…å±½…¹½Ù•ÉÉ¥‘•I•…Í½¸‰t€ô(€€€€€€€€‹BBûF?FB÷F[FF0ƒBÿB×FB×FF[BĞƒB÷BÔƒBÓBøƒB÷BÃFFFBÿB÷BûF\ƒBÿBÃFBÃBïB×BïFX¸ˆì(€€€ô(€ô•±Í”¥˜€¡Ñ…É•ÑÉ…‘”€„ôôÕ¹‘•™¥¹•ñğÑ…É•Ñ½‘”¤ì(€€€•ÉÉ½ÉÍl‰Á…å±½…¹Ñ…É•ÑÉ…‘”‰t€ô(€€€€€€‹B›F[BïF3BûBËBãBäƒBëBïBÃFƒBßBÃBÓBÃFSFF3FF<ƒBïBãF#BÔƒBÓBïF<ƒBÓF[F\ƒ
-¯BB×FB×BËB×FFBã
-ì¸ˆì(€ô(€¥˜€¡…Ñ¥½¸€ôôô€‰É…‘Õ…Ñ”ˆ€˜˜Í½ÕÉ•É…‘”€„ôôÕ¹‘•™¥¹•€˜˜Í½ÕÉ•É…‘”€„ôô€ÄÄ¤ì(€€€•ÉÉ½ÉÍl‰Á…å±½…¹…Ñ¥½¸‰t€ô€‹BKBãBÿFFBèƒBßBÃFFBûFBûBËFFSFF3FF<ƒBïBãF#BÔƒBÓBø€ÄÄƒBëBïBÃFF¸ˆì(€ô(€¥˜€¡±½…Ñ¥½¸¹±½…Ñ¥½¹%€ôôô€‰1=´ÀÀÜˆñğ±½…Ñ¥½¸¹±½…Ñ¥½¹%€ôôô€‰1=´ÀÀàˆ¤ì(€€€•ÉÉ½ÉÍl‰Á…å±½…¹±½…Ñ¥½¹%‰t€ô€‹B‡BïFBÛBÇBûBËBÔƒBóF[FFBÔƒB÷BÔƒBóBûBÛBÔƒBÇFFBàƒBëBÃBÇF[B÷B×FBûBğƒBëBïBÃFF¸ˆì(€ô((€¥˜€¡Í½ÕÉ•±…ÍÍe•…É%¤É•ÍÕ±Ğ¹Í½ÕÉ•±…ÍÍe•…É%€ôÍ½ÕÉ•±…ÍÍe•…É%ì(€¥˜€¡½¡½ÉÑ%¤É•ÍÕ±Ğ¹½¡½ÉÑ%€ô½¡½ÉÑ%ì(€¥˜€¡Í½ÕÉ•É…‘”€„ôôÕ¹‘•™¥¹•¤É•ÍÕ±Ğ¹Í½ÕÉ•É…‘”€ôÍ½ÕÉ•É…‘”ì(€¥˜€¡…Ñ¥½¸¤É•ÍÕ±Ğ¹…Ñ¥½¸€ô…Ñ¥½¸ì(€¥˜€¡Ñ…É•ÑÉ…‘”€„ôôÕ¹‘•™¥¹•¤É•ÍÕ±Ğ¹Ñ…É•ÑÉ…‘”€ôÑ…É•ÑÉ…‘”ì(€¥˜€¡Ñ…É•Ñ½‘”¤É•ÍÕ±Ğ¹Ñ…É•Ñ½‘”€ôÑ…É•Ñ½‘”ì(€=‰©•Ğ¹…ÍÍ¥¸¡É•ÍÕ±Ğ°Ñ•…¡•È°±½…Ñ¥½¸¤ì(€¥˜€¡½Ù•ÉÉ¥‘•I•…Í½¸¤É•ÍÕ±Ğ¹½Ù•ÉÉ¥‘•I•…Í½¸€ô½Ù•ÉÉ¥‘•I•…Í½¸ì(€¥˜€¡¹½Ñ•Ì¤É•ÍÕ±Ğ¹¹½Ñ•Ì€ô¹½Ñ•Ìì(€É•ÑÕÉ¸É•ÍÕ±Ğì)ô()™Õ¹Ñ¥½¸Ù…±¥‘…Ñ•…‘•µ¥e•…ÉI½±±½Ù•È (€Á…å±½…èI•½ÉñÍÑÉ¥¹œ°Õ¹­¹½İ¸ø°(€•ÉÉ½ÉÌèI•½ÉñÍÑÉ¥¹œ°ÍÑÉ¥¹œø°(¤èI•½ÉñÍÑÉ¥¹œ°Õ¹­¹½İ¸øì(€½¹ÍĞ…±±½İ•€ô¹•ÜM•Ğ¡l(€€€€‰Í½ÕÉ•e•…É%ˆ°€‰Ñ…É•Ñe•…É%ˆ°€‰•™™•Ñ¥Ù•…Ñ”ˆ°€‰±…ÍÍ•Ìˆ°€‰¹½Ñ•Ìˆ°(€t¤ì(€…‘‘U¹­¹½İ¹¥•±‘ÉÉ½ÉÌ¡Á…å±½…°…±±½İ•°€‰Á…å±½…¸ˆ°•ÉÉ½ÉÌ¤ì(€½¹ÍĞ¹½Éµ…±¥é•èI•½ÉñÍÑÉ¥¹œ°Õ¹­¹½İ¸ø€ôíôì(€½¹ÍĞÍ½ÕÉ•e•…É%€ôÙ…±¥‘…Ñ•…‘•µ¥e•…É%¡Á…å±½…°€‰Í½ÕÉ•e•…É%ˆ°ÑÉÕ”°•ÉÉ½ÉÌ¤ì(€½¹ÍĞÑ…É•Ñe•…É%€ôÙ…±¥‘…Ñ•…‘•µ¥e•…É%¡Á…å±½…°€‰Ñ…É•Ñe•…É%ˆ°ÑÉÕ”°•ÉÉ½ÉÌ¤ì(€½¹ÍĞ•™™•Ñ¥Ù•…Ñ”€ô¹½Éµ…±¥é•‘…Ñ”¡Á…å±½…°€‰•™™•Ñ¥Ù•…Ñ”ˆ°•ÉÉ½ÉÌ°ÑÉÕ”¤ì(€½¹ÍĞ¹½Ñ•Ì€ôÍÑÉ¥¹Y…±Õ”¡Á…å±½…°€‰¹½Ñ•Ìˆ°ìµ…àè€É|ÀÀÀô°•ÉÉ½ÉÌ¤ì(€½¹ÍĞÉ…İ±…ÍÍ•Ì€ôÁ…å±½…¹±…ÍÍ•Ìì(€½¹ÍĞ±…ÍÍ•ÌèI•½ÉñÍÑÉ¥¹œ°Õ¹­¹½İ¸ùmt€ômtì((€¥˜€ …ÉÉ…ä¹¥ÍÉÉ…ä¡É…İ±…ÍÍ•Ì¤ñğÉ…İ±…ÍÍ•Ì¹±•¹Ñ €ôôô€ÀñğÉ…İ±…ÍÍ•Ì¹±•¹Ñ €ø€ÄÀÀ¤ì(€€€•ÉÉ½ÉÍl‰Á…å±½…¹±…ÍÍ•Ì‰t€ô€‹BSBûBÓBÃBçFBÔƒBËF[BĞ€ÄƒBÓBø€ÄÀÀƒBëBïBÃFF[BÈƒBÓBïF<ƒBÿB×FB×FBûBÓF¸ˆì(€ô•±Í”ì(€€€½¹ÍĞÍ½ÕÉ•%‘Ì€ô¹•ÜM•ĞñÍÑÉ¥¹œø ¤ì(€€€½¹ÍĞ½¡½ÉÑÌ€ô¹•ÜM•ĞñÍÑÉ¥¹œø ¤ì(€€€½¹ÍĞÑ…É•Ñ9…µ•Ì€ô¹•ÜM•ĞñÍÑÉ¥¹œø ¤ì(€€€É…İ±…ÍÍ•Ì¹™½É…  ¡É…Ü°¥¹‘•à¤€ôøì(€€€€€¥˜€ …¥ÍI•½É¡É…Ü¤¤ì(€€€€€€€•ÉÉ½ÉÍmÁ…å±½…¹±…ÍÍ•Ì¸‘í¥¹‘•áõt€ô€‹B{FF[BëFFSFF3FF<)M=8·BûBÇŠgFSBëF¸ˆì(€€€€€€€É•ÑÕÉ¸ì(€€€€€ô(€€€€€½¹ÍĞ¹•ÍÑ•‘ÉÉ½ÉÌèI•½ÉñÍÑÉ¥¹œ°ÍÑÉ¥¹œø€ôíôì(€€€€€½¹ÍĞ¥Ñ•´€ôÙ…±¥‘…Ñ•I½±±½Ù•É±…ÍÌ¡É…Ü°¹•ÍÑ•‘ÉÉ½ÉÌ¤ì(€€€€€½¹ÍĞÍ½ÕÉ•%€ô¥Ñ•´¹Í½ÕÉ•±…ÍÍe•…É%ì(€€€€€½¹ÍĞ½¡½ÉÑ%€ô¥Ñ•´¹½¡½ÉÑ%ì(€€€€€¥˜€¡ÑåÁ•½˜Í½ÕÉ•%€ôôô€‰ÍÑÉ¥¹œˆ¤ì(€€€€€€€¥˜€¡Í½ÕÉ•%‘Ì¹¡…Ì¡Í½ÕÉ•%¤¤¹•ÍÑ•‘ÉÉ½ÉÍl‰Á…å±½…¹Í½ÕÉ•±…ÍÍe•…É%‰t€ô€‹BkBïBÃFƒBÿBûBËFBûFF;FSFF3FF<¸ˆì(€€€€€€€Í½ÕÉ•%‘Ì¹…‘¡Í½ÕÉ•%¤ì(€€€€€ô(€€€€€¥˜€¡ÑåÁ•½˜½¡½ÉÑ%€ôôô€‰ÍÑÉ¥¹œˆ¤ì(€€€€€€€¥˜€¡½¡½ÉÑÌ¹¡…Ì¡½¡½ÉÑ%¤¤¹•ÍÑ•‘ÉÉ½ÉÍl‰Á…å±½…¹½¡½ÉÑ%‰t€ô€‹BkBïBÃFB÷BÀƒBÏFFBÿBÀƒBÿBûBËFBûFF;FSFF3FF<¸ˆì(€€€€€€€½¡½ÉÑÌ¹…‘¡½¡½ÉÑ%¤ì(€€€€€ô(€€€€€¥˜€¡¥Ñ•´¹…Ñ¥½¸€ôôô€‰ÁÉ½µ½Ñ”ˆ¤ì(€€€€€€€½¹ÍĞÑ…É•Ñ9…µ”€ô€‘í¥Ñ•´¹Ñ…É•ÑÉ…‘•ô´‘íMÑÉ¥¹œ¡¥Ñ•´¹Ñ…É•Ñ½‘”¤¹Ñ½1½…±•UÁÁ•É…Í” ‰Õ¬µUˆ¥õ€ì(€€€€€€€¥˜€¡Ñ…É•Ñ9…µ•Ì¹¡…Ì¡Ñ…É•Ñ9…µ”¤¤¹•ÍÑ•‘ÉÉ½ÉÍl‰Á…å±½…¹Ñ…É•Ñ½‘”‰t€ô€‹B›F[BïF3BûBËBÀƒB÷BÃBßBËBÀƒBëBïBÃFFƒBÿBûBËFBûFF;FSFF3FF<¸ˆì(€€€€€€€Ñ…É•Ñ9…µ•Ì¹…‘¡Ñ…É•Ñ9…µ”¤ì(€€€€€ô(€€€€€½Áå9•ÍÑ•‘ÉÉ½ÉÌ¡¹•ÍÑ•‘ÉÉ½ÉÌ°±…ÍÍ•Ì¸‘í¥¹‘•áõ€°•ÉÉ½ÉÌ¤ì(€€€€€±…ÍÍ•Ì¹ÁÕÍ ¡¥Ñ•´¤ì(€€€ô¤ì(€ô((€¥˜€¡Í½ÕÉ•e•…É%€˜˜Ñ…É•Ñe•…É%€˜˜Í½ÕÉ•e•…É%€ôôôÑ…É•Ñe•…É%¤ì(€€€•ÉÉ½ÉÍl‰Á…å±½…¹Ñ…É•Ñe•…É%‰t€ô€‹B›F[BïF3BûBËBãBäƒB÷BÃBËFBÃBïF3B÷BãBäƒFF[BèƒBóBÃFPƒBËF[BÓFF[BßB÷F?FBãFF<¸ˆì(€ô(€½¹ÍĞÍ½ÕÉ•5…Ñ €ôÍ½ÕÉ•e•…É%ü¹µ…Ñ ¡5%}eI}%}AQQI8¤ì(€½¹ÍĞÑ…É•Ñ5…Ñ €ôÑ…É•Ñe•…É%ü¹µ…Ñ ¡5%}eI}%}AQQI8¤ì(€¥˜€¡Í½ÕÉ•5…Ñ €˜˜Ñ…É•Ñ5…Ñ €˜˜9Õµ‰•È¡Ñ…É•Ñ5…Ñ¡lÅt¤€„ôô9Õµ‰•È¡Í½ÕÉ•5…Ñ¡lÅt¤€¬€Ä¤ì(€€€•ÉÉ½ÉÍl‰Á…å±½…¹Ñ…É•Ñe•…É%‰t€ô€‹B›F[BïF3BûBËBãBäƒB÷BÃBËFBÃBïF3B÷BãBäƒFF[BèƒBóBÃFPƒBÇFFBàƒB÷BÃFFFBÿB÷BãBğ¸ˆì(€ô((€¥˜€¡Í½ÕÉ•e•…É%¤¹½Éµ…±¥é•¹Í½ÕÉ•e•…É%€ôÍ½ÕÉ•e•…É%ì(€¥˜€¡Ñ…É•Ñe•…É%¤¹½Éµ…±¥é•¹Ñ…É•Ñe•…É%€ôÑ…É•Ñe•…É%ì(€¥˜€¡•™™•Ñ¥Ù•…Ñ”¤¹½Éµ…±¥é•¹•™™•Ñ¥Ù•…Ñ”€ô•™™•Ñ¥Ù•…Ñ”ì(€¥˜€¡±…ÍÍ•Ì¹±•¹Ñ €ø€À¤¹½Éµ…±¥é•¹±…ÍÍ•Ì€ô±…ÍÍ•Ìì(€¥˜€¡¹½Ñ•Ì¤¹½Éµ…±¥é•¹¹½Ñ•Ì€ô¹½Ñ•Ìì(€É•ÑÕÉ¸¹½Éµ…±¥é•ì)ô()•áÁ½ÉĞ™Õ¹Ñ¥½¸Ù…±¥‘…Ñ•É…™Ñ%¹ÁÕĞ (€¥¹ÁÕĞèI•½ÉñÍÑÉ¥¹œ°Õ¹­¹½İ¸ø°(¤èÉ…™ÑY…±¥‘…Ñ¥½¹I•ÍÕ±Ğì(€½¹ÍĞ•ÉÉ½ÉÌèI•½ÉñÍÑÉ¥¹œ°ÍÑÉ¥¹œø€ôíôì(€…‘‘U¹­¹½İ¹¥•±‘ÉÉ½ÉÌ (€€€¥¹ÁÕĞ°(€€€¹•ÜM•Ğ¡l‰¥ˆ°€‰É•Ù¥Í¥½¸ˆ°€‰É½ÕÁ%ˆ°€‰­¥¹ˆ°€‰Á…å±½…‰t¤°(€€€€ˆˆ°(€€€•ÉÉ½ÉÌ°(€€¤ì((€½¹ÍĞ¥€ô¥¹ÁÕĞ¹¥ì(€¥˜€¡¥€„ôôÕ¹‘•™¥¹•€˜˜€¡ÑåÁ•½˜¥€„ôô€‰ÍÑÉ¥¹œˆñğ€…¥ÍÉ…™Ñ%¡¥¤¤¤ì(€€€•ÉÉ½ÉÌ¹¥€ô€‹BwB×BëBûFB×BëFB÷BãBäƒF[BÓB×B÷FBãFF[BëBÃFBûF ƒFB×FB÷B×FBëBà¸ˆì(€ô((€½¹ÍĞÉ•Ù¥Í¥½¸€ô¥¹ÁÕĞ¹É•Ù¥Í¥½¸ì(€¥˜€ (€€€É•Ù¥Í¥½¸€„ôôÕ¹‘•™¥¹•€˜˜(€€€€¡ÑåÁ•½˜É•Ù¥Í¥½¸€„ôô€‰¹Õµ‰•Èˆñğ€…9Õµ‰•È¹¥Í%¹Ñ••È¡É•Ù¥Í¥½¸¤ñğÉ•Ù¥Í¥½¸€ğ€Äñğ(€€€€€É•Ù¥Í¥½¸€ø€É|ÄĞİ|ĞàÍ|ØĞÜ¤(€€¤ì(€€€•ÉÉ½ÉÌ¹É•Ù¥Í¥½¸€ô€‹BƒB×BËF[BßF[F<ƒFB×FB÷B×FBëBàƒBóBÃFPƒBÇFFBàƒBÓBûBÓBÃFB÷BãBğƒFF[BïBãBğƒFBãFBïBûBğ¸ˆì(€ô(€¥˜€¡É•Ù¥Í¥½¸€„ôôÕ¹‘•™¥¹•€˜˜¥€ôôôÕ¹‘•™¥¹•¤ì(€€€•ÉÉ½ÉÌ¹É•Ù¥Í¥½¸€ô€‹BƒB×BËF[BßF[F8ƒBóBûBÛB÷BÀƒBÿB×FB×BÓBÃFBàƒBïBãF#BÔƒBÓBïF<ƒB÷BÃF?BËB÷BûF\ƒFB×FB÷B×FBëBà¸ˆì(€ô((€½¹ÍĞÉ½ÕÁ%€ô¥¹ÁÕĞ¹É½ÕÁ%ì(€¥˜€¡É½ÕÁ%€„ôôÕ¹‘•™¥¹•€˜˜€¡ÑåÁ•½˜É½ÕÁ%€„ôô€‰ÍÑÉ¥¹œˆñğ€…¥ÍÉ…™Ñ%¡É½ÕÁ%¤¤¤ì(€€€•ÉÉ½ÉÌ¹É½ÕÁ%€ô€‹BwB×BëBûFB×BëFB÷BãBäƒF[BÓB×B÷FBãFF[BëBÃFBûF ƒBÏFFBÿBàƒFB×FB÷B×FBûBè¸ˆì(€ô((€½¹ÍĞ­¥¹€ô¥¹ÁÕĞ¹­¥¹ì(€¥˜€¡ÑåÁ•½˜­¥¹€„ôô€‰ÍÑÉ¥¹œˆñğ€…IQ}-%9L¹¥¹±Õ‘•Ì¡­¥¹…ÌÉ…™Ñ-¥¹¤¤ì(€€€•ÉÉ½ÉÌ¹­¥¹€ô€‹B{BÇB×FF[FF0ƒBÿF[BÓFFBãBóFBËBÃB÷BãBäƒFBãBüƒBûBÿB×FBÃFF[F\¸ˆì(€ô((€¥˜€ …¥ÍI•½É¡¥¹ÁÕĞ¹Á…å±½…¤¤ì(€€€•ÉÉ½ÉÌ¹Á…å±½…€ô€‹BSBÃB÷FXƒFB×FB÷B×FBëBàƒBóBÃF;FF0ƒBÇFFBà)M=8·BûBÇŠgFSBëFBûBğ¸ˆì(€ô(€¥˜€¡=‰©•Ğ¹­•åÌ¡•ÉÉ½ÉÌ¤¹±•¹Ñ €ø€Àñğ€…¥ÍI•½É¡¥¹ÁÕĞ¹Á…å±½…¤ñğ(€€€€€ÑåÁ•½˜­¥¹€„ôô€‰ÍÑÉ¥¹œˆñğ€…IQ}-%9L¹¥¹±Õ‘•Ì¡­¥¹…ÌÉ…™Ñ-¥¹¤¤ì(€€€É•ÑÕÉ¸ì½¬è™…±Í”°™¥•±‘ÉÉ½ÉÌè•ÉÉ½ÉÌôì(€ô((€½¹ÍĞ™½ÉµÕ±…A…Ñ €ô™¥¹‘½ÉµÕ±…%¹©•Ñ¥½¸¡¥¹ÁÕĞ¹Á…å±½…¤ì(€¥˜€¡™½ÉµÕ±…A…Ñ ¤ì(€€€•ÉÉ½ÉÍm™½ÉµÕ±…A…Ñ¡t€ô(€€€€€€‹B_B÷BÃFB×B÷B÷F<ƒB÷BÔƒBóBûBÛBÔƒBÿBûFBãB÷BÃFBãFF<ƒF[BÜƒFBãBóBËBûBïFƒFBûFBóFBïBà€ ô°€¬°€´° ¤¸ˆì(€ô((€±•ĞÁ…å±½…èI•½ÉñÍÑÉ¥¹œ°Õ¹­¹½İ¸ø€ôíôì(€Íİ¥Ñ €¡­¥¹…ÌÉ…™Ñ-¥¹¤ì(€€€…Í”€‰µ…Ñ•É¥…°¹É•…Ñ”ˆè(€€€€€Á…å±½…€ôÙ…±¥‘…Ñ•5…Ñ•É¥…°¡¥¹ÁÕĞ¹Á…å±½…°•ÉÉ½ÉÌ¤ì(€€€€€‰É•…¬ì(€€€…Í”€‰µ…Ñ•É¥…°¹ÕÁ‘…Ñ”ˆè(€€€€€Á…å±½…€ôÙ…±¥‘…Ñ•5…Ñ•É¥…±UÁ‘…Ñ”¡¥¹ÁÕĞ¹Á…å±½…°•ÉÉ½ÉÌ¤ì(€€€€€‰É•…¬ì(€€€…Í”€‰É••¥ÁĞ¹É•…Ñ”ˆè(€€€€€Á…å±½…€ôÙ…±¥‘…Ñ•I••¥ÁĞ¡¥¹ÁÕĞ¹Á…å±½…°•ÉÉ½ÉÌ¤ì(€€€€€‰É•…¬ì(€€€…Í”€‰ÑÉ…¹Í™•È¹É•…Ñ”ˆè(€€€€€Á…å±½…€ôÙ…±¥‘…Ñ•QÉ…¹Í™•È¡¥¹ÁÕĞ¹Á…å±½…°•ÉÉ½ÉÌ¤ì(€€€€€‰É•…¬ì(€€€…Í”€‰İÉ¥Ñ•½™˜¹É•…Ñ”ˆè(€€€€€Á…å±½…€ôÙ…±¥‘…Ñ•]É¥Ñ•½™˜¡¥¹ÁÕĞ¹Á…å±½…°•ÉÉ½ÉÌ¤ì(€€€€€‰É•…¬ì(€€€…Í”€‰É•Ù¥Í¥½¸¹½Õ¹Ğˆè(€€€€€Á…å±½…€ôÙ…±¥‘…Ñ•I•Ù¥Í¥½¸¡¥¹ÁÕĞ¹Á…å±½…°•ÉÉ½ÉÌ¤ì(€€€€€‰É•…¬ì(€€€…Í”€‰……‘•µ¥Œµå•…È¹É•…Ñ”ˆè(€€€€€Á…å±½…€ôÙ…±¥‘…Ñ•…‘•µ¥e•…È¡¥¹ÁÕĞ¹Á…å±½…°•ÉÉ½ÉÌ¤ì(€€€€€‰É•…¬ì(€€€…Í”€‰±…ÍÌµå•…È¹É•…Ñ”ˆè(€€€€€Á…å±½…€ôÙ…±¥‘…Ñ•±…ÍÍe•…ÉÉ•…Ñ”¡¥¹ÁÕĞ¹Á…å±½…°•ÉÉ½ÉÌ¤ì(€€€€€‰É•…¬ì(€€€…Í”€‰±…ÍÌµå•…È¹ÕÁ‘…Ñ”ˆè(€€€€€Á…å±½…€ôÙ…±¥‘…Ñ•±…ÍÍe•…ÉUÁ‘…Ñ”¡¥¹ÁÕĞ¹Á…å±½…°•ÉÉ½ÉÌ¤ì(€€€€€‰É•…¬ì(€€€…Í”€‰±…ÍÌµå•…È¹±½Í”ˆè(€€€€€Á…å±½…€ôÙ…±¥‘…Ñ•±…ÍÍe•…É±½Í”¡¥¹ÁÕĞ¹Á…å±½…°•ÉÉ½ÉÌ¤ì(€€€€€‰É•…¬ì(€€€…Í”€‰……‘•µ¥Œµå•…È¹É½±±½Ù•Èˆè(€€€€€Á…å±½…€ôÙ…±¥‘…Ñ•…‘•µ¥e•…ÉI½±±½Ù•È¡¥¹ÁÕĞ¹Á…å±½…°•ÉÉ½ÉÌ¤ì(€€€€€‰É•…¬ì(€ô((€¥˜€¡=‰©•Ğ¹­•åÌ¡•ÉÉ½ÉÌ¤¹±•¹Ñ €ø€À¤ì(€€€É•ÑÕÉ¸ì½¬è™…±Í”°™¥•±‘ÉÉ½ÉÌè•ÉÉ½ÉÌôì(€ô((€É•ÑÕÉ¸ì(€€€½¬èÑÉÕ”°(€€€Ù…±Õ”èì(€€€€€€¸¸¸¡ÑåÁ•½˜¥€ôôô€‰ÍÑÉ¥¹œˆ€üì¥ô€èíô¤°(€€€€€€¸¸¸¡ÑåÁ•½˜É•Ù¥Í¥½¸€ôôô€‰¹Õµ‰•Èˆ€üìÉ•Ù¥Í¥½¸ô€èíô¤°(€€€€€€¸¸¸¡ÑåÁ•½˜É½ÕÁ%€ôôô€‰ÍÑÉ¥¹œˆ€üìÉ½ÕÁ%ô€èíô¤°(€€€€€­¥¹è­¥¹…ÌÉ…™Ñ-¥¹°(€€€€€Á…å±½…°(€€€ô°(€ôì)ô()•áÁ½ÉĞ™Õ¹Ñ¥½¸Ù…±¥‘…Ñ•É…™ÑÑ¥½¹%¹ÁÕĞ (€¥¹ÁÕĞèI•½ÉñÍÑÉ¥¹œ°Õ¹­¹½İ¸ø°(¤èÉ…™ÑÑ¥½¹Y…±¥‘…Ñ¥½¹I•ÍÕ±Ğì(€½¹ÍĞ•ÉÉ½ÉÌèI•½ÉñÍÑÉ¥¹œ°ÍÑÉ¥¹œø€ôíôì(€…‘‘U¹­¹½İ¹¥•±‘ÉÉ½ÉÌ¡¥¹ÁÕĞ°¹•ÜM•Ğ¡l‰¥ˆ°€‰É•Ù¥Í¥½¸ˆ°€‰…Ñ¥½¸‰t¤°€ˆˆ°•ÉÉ½ÉÌ¤ì((€½¹ÍĞ¥€ô¥¹ÁÕĞ¹¥ì(€¥˜€¡ÑåÁ•½˜¥€„ôô€‰ÍÑÉ¥¹œˆñğ€…¥ÍÉ…™Ñ%¡¥¤¤ì(€€€•ÉÉ½ÉÌ¹¥€ô€‹BwB×BëBûFB×BëFB÷BãBäƒF[BÓB×B÷FBãFF[BëBÃFBûF ƒFB×FB÷B×FBëBà¸ˆì(€ô(€½¹ÍĞÉ•Ù¥Í¥½¸€ô¥¹ÁÕĞ¹É•Ù¥Í¥½¸ì(€¥˜€ (€€€ÑåÁ•½˜É•Ù¥Í¥½¸€„ôô€‰¹Õµ‰•Èˆñğ€…9Õµ‰•È¹¥Í%¹Ñ••È¡É•Ù¥Í¥½¸¤ñğÉ•Ù¥Í¥½¸€ğ€Äñğ(€€€É•Ù¥Í¥½¸€ø€É|ÄĞİ|ĞàÍ|ØĞÜ(€€¤ì(€€€•ÉÉ½ÉÌ¹É•Ù¥Í¥½¸€ô€‹BƒB×BËF[BßF[F<ƒFB×FB÷B×FBëBàƒBóBÃFPƒBÇFFBàƒBÓBûBÓBÃFB÷BãBğƒFF[BïBãBğƒFBãFBïBûBğ¸ˆì(€ô(€½¹ÍĞ…Ñ¥½¸€ô¥¹ÁÕĞ¹…Ñ¥½¸ì(€¥˜€¡ÑåÁ•½˜…Ñ¥½¸€„ôô€‰ÍÑÉ¥¹œˆñğ€…IQ}Q%=9L¹¥¹±Õ‘•Ì¡…Ñ¥½¸…ÌÉ…™ÑÑ¥½¸¤¤ì(€€€•ÉÉ½ÉÌ¹…Ñ¥½¸€ô€‹BF[BÓFFBãBóFF;FF3FF<ƒBïBãF#BÔƒBÓF[F\ÍÕ‰µ¥ĞƒFX…¹•°¸ˆì(€ô((€¥˜€¡=‰©•Ğ¹­•åÌ¡•ÉÉ½ÉÌ¤¹±•¹Ñ €ø€À¤É•ÑÕÉ¸ì½¬è™…±Í”°™¥•±‘ÉÉ½ÉÌè•ÉÉ½ÉÌôì(€É•ÑÕÉ¸ì(€€€½¬èÑÉÕ”°(€€€Ù…±Õ”èì(€€€€€¥è¥…ÌÍÑÉ¥¹œ°(€€€€€É•Ù¥Í¥½¸èÉ•Ù¥Í¥½¸…Ì¹Õµ‰•È°(€€€€€…Ñ¥½¸è…Ñ¥½¸…ÌÉ…™ÑÑ¥½¸°(€€€ô°(€ôì)ô(
+    false,
+    errors,
+  );
+  const isbn = normalizedIsbn(payload, "isbn", errors);
+  const electronicUrl = httpUrl(payload, "electronicUrl", errors);
+  const coverFields = normalizeCoverFields(payload, errors);
+
+  if (classFrom !== undefined && classTo === undefined) classTo = classFrom;
+  if (classFrom === undefined && classTo !== undefined) {
+    errors["payload.classFrom"] = "Ğ¡Ğ¿Ğ¾Ñ‡Ğ°Ñ‚ĞºÑƒ Ğ²ĞºĞ°Ğ¶Ñ–Ñ‚ÑŒ Ğ¿Ğ¾Ñ‡Ğ°Ñ‚ĞºĞ¾Ğ²Ğ¸Ğ¹ ĞºĞ»Ğ°Ñ.";
+  }
+  if (classFrom !== undefined && classTo !== undefined && classFrom > classTo) {
+    errors["payload.classTo"] = "ĞšÑ–Ğ½Ñ†ĞµĞ²Ğ¸Ğ¹ ĞºĞ»Ğ°Ñ Ğ½Ğµ Ğ¼Ğ¾Ğ¶Ğµ Ğ±ÑƒÑ‚Ğ¸ Ğ¼ĞµĞ½ÑˆĞ¸Ğ¼ Ğ·Ğ° Ğ¿Ğ¾Ñ‡Ğ°Ñ‚ĞºĞ¾Ğ²Ğ¸Ğ¹.";
+  }
+  if (grade && (classFrom !== undefined || classTo !== undefined)) {
+    errors["payload.grade"] =
+      "Ğ¡Ñ‚Ğ°Ñ€Ğµ Ğ¿Ğ¾Ğ»Ğµ Â«ĞšĞ»Ğ°ÑÂ» Ğ½Ğµ Ğ¼Ğ¾Ğ¶Ğ½Ğ° Ğ¿Ğ¾Ñ”Ğ´Ğ½ÑƒĞ²Ğ°Ñ‚Ğ¸ Ğ· Ğ¿Ğ¾Ğ»ÑĞ¼Ğ¸ Â«ĞšĞ»Ğ°Ñ Ğ²Ñ–Ğ´/Ğ´Ğ¾Â».";
+  }
+
+  if (title) normalized.title = title;
+  if (rubric) normalized.rubric = rubric;
+  if (isbn) normalized.isbn = isbn;
+  if (author) normalized.author = author;
+  if (year !== undefined) normalized.year = year;
+  if (grade) normalized.grade = grade;
+  if (classFrom !== undefined) normalized.classFrom = classFrom;
+  if (classTo !== undefined) normalized.classTo = classTo;
+  if (subject) normalized.subject = subject;
+  if (publicationType) normalized.publicationType = publicationType;
+  if (publisher) normalized.publisher = publisher;
+  if (electronicUrl) normalized.electronicUrl = electronicUrl;
+  Object.assign(normalized, coverFields);
+  if (notes) normalized.notes = notes;
+  return normalized;
+}
+
+function validateMaterialUpdate(
+  payload: Record<string, unknown>,
+  errors: Record<string, string>,
+): Record<string, unknown> {
+  const allowed = new Set([
+    "materialId", "sourceGeneratedAt", "changes", "reason",
+  ]);
+  addUnknownFieldErrors(payload, allowed, "payload.", errors);
+
+  const normalized: Record<string, unknown> = {};
+  const materialId = identifierValue(
+    payload, "materialId", CAT_ID_PATTERN, "CAT-0001", true, errors,
+  );
+  const sourceGeneratedAt = normalizedDateTime(payload, "sourceGeneratedAt", errors);
+  const reason = stringValue(payload, "reason", { max: 1_000 }, errors);
+  const changes = recordValue(payload, "changes", true, errors);
+
+  if (materialId) normalized.materialId = materialId;
+  if (sourceGeneratedAt) normalized.sourceGeneratedAt = sourceGeneratedAt;
+  if (reason) normalized.reason = reason;
+  if (!changes) return normalized;
+
+  const allowedChanges = new Set([
+    "title", "rubric", "publicationType", "subject", "classFrom", "classTo",
+    "author", "year", "isbn", "publisher", "electronicUrl",
+    "coverSourceUrl", "coverPhotoKey", "coverPhotoName", "coverConfirmed",
+    "notes",
+  ]);
+  const nestedErrors: Record<string, string> = {};
+  addUnknownFieldErrors(changes, allowedChanges, "payload.", nestedErrors);
+  if (Object.keys(changes).length === 0) {
+    nestedErrors.payload = "Ğ’ĞºĞ°Ğ¶Ñ–Ñ‚ÑŒ Ñ…Ğ¾Ñ‡Ğ° Ğ± Ğ¾Ğ´Ğ½Ñƒ Ğ·Ğ¼Ñ–Ğ½Ñƒ.";
+  }
+
+  const result: Record<string, unknown> = {};
+  const title = stringValue(changes, "title", { max: 300 }, nestedErrors);
+  const rubric = stringValue(changes, "rubric", { max: 160 }, nestedErrors);
+  const publicationType = stringValue(
+    changes, "publicationType", { max: 160 }, nestedErrors,
+  );
+  const subject = stringValue(changes, "subject", { max: 160 }, nestedErrors);
+  const author = stringValue(changes, "author", { max: 240 }, nestedErrors);
+  const publisher = stringValue(changes, "publisher", { max: 240 }, nestedErrors);
+  const notes = stringValue(changes, "notes", { max: 2_000 }, nestedErrors);
+  const classFrom = integerValue(changes, "classFrom", 1, 11, false, nestedErrors);
+  const classTo = integerValue(changes, "classTo", 1, 11, false, nestedErrors);
+  const year = integerValue(
+    changes, "year", 1500, new Date().getUTCFullYear() + 1, false, nestedErrors,
+  );
+  const isbn = normalizedIsbn(changes, "isbn", nestedErrors);
+  const electronicUrl = httpUrl(changes, "electronicUrl", nestedErrors);
+  const hasCoverChange = [
+    "coverSourceUrl", "coverPhotoKey", "coverPhotoName", "coverConfirmed",
+  ].some((field) => Object.hasOwn(changes, field));
+  const coverFields = hasCoverChange
+    ? normalizeCoverFields(changes, nestedErrors)
+    : {};
+
+  if ((classFrom === undefined) !== (classTo === undefined)) {
+    nestedErrors[classFrom === undefined ? "payload.classFrom" : "payload.classTo"] =
+      "Ğ—Ğ¼Ñ–Ğ½ÑĞ¹Ñ‚Ğµ Ğ¾Ğ±Ğ¸Ğ´Ğ²Ñ– Ğ¼ĞµĞ¶Ñ– ĞºĞ»Ğ°ÑÑ–Ğ² Ñ€Ğ°Ğ·Ğ¾Ğ¼.";
+  }
+  if (classFrom !== undefined && classTo !== undefined && classFrom > classTo) {
+    nestedErrors["payload.classTo"] =
+      "ĞšÑ–Ğ½Ñ†ĞµĞ²Ğ¸Ğ¹ ĞºĞ»Ğ°Ñ Ğ½Ğµ Ğ¼Ğ¾Ğ¶Ğµ Ğ±ÑƒÑ‚Ğ¸ Ğ¼ĞµĞ½ÑˆĞ¸Ğ¼ Ğ·Ğ° Ğ¿Ğ¾Ñ‡Ğ°Ñ‚ĞºĞ¾Ğ²Ğ¸Ğ¹.";
+  }
+
+  if (title) result.title = title;
+  if (rubric) result.rubric = rubric;
+  if (publicationType) result.publicationType = publicationType;
+  if (subject) result.subject = subject;
+  if (author) result.author = author;
+  if (publisher) result.publisher = publisher;
+  if (notes) result.notes = notes;
+  if (classFrom !== undefined) result.classFrom = classFrom;
+  if (classTo !== undefined) result.classTo = classTo;
+  if (year !== undefined) result.year = year;
+  if (isbn) result.isbn = isbn;
+  if (electronicUrl) result.electronicUrl = electronicUrl;
+  Object.assign(result, coverFields);
+
+  if (Object.keys(result).length === 0 && Object.keys(nestedErrors).length === 0) {
+    nestedErrors.payload = "Ğ’ĞºĞ°Ğ¶Ñ–Ñ‚ÑŒ Ñ…Ğ¾Ñ‡Ğ° Ğ± Ğ¾Ğ´Ğ½Ñƒ Ğ½ĞµĞ¿Ğ¾Ñ€Ğ¾Ğ¶Ğ½Ñ Ğ·Ğ¼Ñ–Ğ½Ñƒ.";
+  }
+  copyNestedErrors(nestedErrors, "changes", errors);
+  normalized.changes = result;
+  return normalized;
+}
+
+function validateReceipt(
+  payload: Record<string, unknown>,
+  errors: Record<string, string>,
+): Record<string, unknown> {
+  const allowed = new Set([
+    "materialId", "quantity", "location", "locationId", "locationName",
+    "condition", "documentNumber", "date", "notes", "sourceGeneratedAt",
+  ]);
+  addUnknownFieldErrors(payload, allowed, "payload.", errors);
+  const normalized: Record<string, unknown> = {};
+  const materialId = stringValue(payload, "materialId", { required: true, max: 32 }, errors);
+  const quantity = integerValue(payload, "quantity", 1, 100_000, true, errors);
+  const location = stringValue(payload, "location", { max: 160 }, errors);
+  const locationId = identifierValue(
+    payload, "locationId", LOCATION_ID_PATTERN, "LOC-001", false, errors,
+  );
+  const locationName = stringValue(payload, "locationName", { max: 160 }, errors);
+  const condition = stringValue(payload, "condition", { max: 80 }, errors);
+  const documentNumber = stringValue(payload, "documentNumber", { max: 100 }, errors);
+  const date = normalizedDate(payload, "date", errors, true);
+  const notes = stringValue(payload, "notes", { max: 2_000 }, errors);
+  const sourceGeneratedAt = normalizedDateTime(payload, "sourceGeneratedAt", errors);
+  if (!location && (!locationId || !locationName)) {
+    errors["payload.locationId"] =
+      "ĞĞ±ĞµÑ€Ñ–Ñ‚ÑŒ Ñ€Ğ¾Ğ·Ğ¼Ñ–Ñ‰ĞµĞ½Ğ½Ñ Ğ·Ñ– ÑĞ»ÑƒĞ¶Ğ±Ğ¾Ğ²Ğ¾Ğ³Ğ¾ Ğ´Ğ¾Ğ²Ñ–Ğ´Ğ½Ğ¸ĞºĞ°.";
+  }
+  if (materialId && !CAT_ID_PATTERN.test(materialId)) {
+    errors["payload.materialId"] = "ĞÑ‡Ñ–ĞºÑƒÑ”Ñ‚ÑŒÑÑ CAT-ID Ñƒ Ñ„Ğ¾Ñ€Ğ¼Ğ°Ñ‚Ñ– CAT-0001.";
+  } else if (materialId) normalized.materialId = materialId;
+  if (quantity !== undefined) normalized.quantity = quantity;
+  if (location) normalized.location = location;
+  if (locationId) normalized.locationId = locationId;
+  if (locationName) normalized.locationName = locationName;
+  if (condition) normalized.condition = condition;
+  if (documentNumber) normalized.documentNumber = documentNumber;
+  if (date) normalized.date = date;
+  if (notes) normalized.notes = notes;
+  if (sourceGeneratedAt) normalized.sourceGeneratedAt = sourceGeneratedAt;
+  return normalized;
+}
+
+function validateTransfer(
+  payload: Record<string, unknown>,
+  errors: Record<string, string>,
+): Record<string, unknown> {
+  const allowed = new Set([
+    "materialId", "quantity", "fromLocation", "toLocation", "fromLocationId",
+    "fromLocationName", "toLocationId", "toLocationName", "condition", "date",
+    "notes", "sourceGeneratedAt", "observedAvailableQuantity",
+  ]);
+  addUnknownFieldErrors(payload, allowed, "payload.", errors);
+  const normalized: Record<string, unknown> = {};
+  const materialId = stringValue(payload, "materialId", { required: true, max: 32 }, errors);
+  const quantity = integerValue(payload, "quantity", 1, 100_000, true, errors);
+  const from = stringValue(payload, "fromLocation", { max: 160 }, errors);
+  const to = stringValue(payload, "toLocation", { max: 160 }, errors);
+  const fromLocationId = identifierValue(
+    payload, "fromLocationId", LOCATION_ID_PATTERN, "LOC-001", false, errors,
+  );
+  const fromLocationName = stringValue(payload, "fromLocationName", { max: 160 }, errors);
+  const toLocationId = identifierValue(
+    payload, "toLocationId", LOCATION_ID_PATTERN, "LOC-001", false, errors,
+  );
+  const toLocationName = stringValue(payload, "toLocationName", { max: 160 }, errors);
+  const condition = stringValue(payload, "condition", { max: 80 }, errors);
+  const date = normalizedDate(payload, "date", errors, true);
+  const notes = stringValue(payload, "notes", { max: 2_000 }, errors);
+  const sourceGeneratedAt = normalizedDateTime(payload, "sourceGeneratedAt", errors);
+  const observedAvailableQuantity = integerValue(
+    payload, "observedAvailableQuantity", 0, 100_000, false, errors,
+  );
+  if (!from && (!fromLocationId || !fromLocationName)) {
+    errors["payload.fromLocationId"] =
+      "ĞĞ±ĞµÑ€Ñ–Ñ‚ÑŒ Ğ¿Ğ¾Ñ‚Ğ¾Ñ‡Ğ½Ğµ Ñ€Ğ¾Ğ·Ğ¼Ñ–Ñ‰ĞµĞ½Ğ½Ñ Ğ·Ñ– ÑĞ»ÑƒĞ¶Ğ±Ğ¾Ğ²Ğ¾Ğ³Ğ¾ Ğ´Ğ¾Ğ²Ñ–Ğ´Ğ½Ğ¸ĞºĞ°.";
+  }
+  if (!to && (!toLocationId || !toLocationName)) {
+    errors["payload.toLocationId"] =
+      "ĞĞ±ĞµÑ€Ñ–Ñ‚ÑŒ Ğ½Ğ¾Ğ²Ğµ Ñ€Ğ¾Ğ·Ğ¼Ñ–Ñ‰ĞµĞ½Ğ½Ñ Ğ·Ñ– ÑĞ»ÑƒĞ¶Ğ±Ğ¾Ğ²Ğ¾Ğ³Ğ¾ Ğ´Ğ¾Ğ²Ñ–Ğ´Ğ½Ğ¸ĞºĞ°.";
+  }
+  if (materialId && !CAT_ID_PATTERN.test(materialId)) {
+    errors["payload.materialId"] = "ĞÑ‡Ñ–ĞºÑƒÑ”Ñ‚ÑŒÑÑ CAT-ID Ñƒ Ñ„Ğ¾Ñ€Ğ¼Ğ°Ñ‚Ñ– CAT-0001.";
+  } else if (materialId) normalized.materialId = materialId;
+  if (quantity !== undefined) normalized.quantity = quantity;
+  if (from) normalized.fromLocation = from;
+  if (to) normalized.toLocation = to;
+  if (fromLocationId) normalized.fromLocationId = fromLocationId;
+  if (fromLocationName) normalized.fromLocationName = fromLocationName;
+  if (toLocationId) normalized.toLocationId = toLocationId;
+  if (toLocationName) normalized.toLocationName = toLocationName;
+  if (condition) normalized.condition = condition;
+  if (from && to && from.toLowerCase() === to.toLowerCase()) {
+    errors["payload.toLocation"] = "ĞĞ¾Ğ²Ğµ Ñ€Ğ¾Ğ·Ğ¼Ñ–Ñ‰ĞµĞ½Ğ½Ñ Ğ¼Ğ°Ñ” Ğ²Ñ–Ğ´Ñ€Ñ–Ğ·Ğ½ÑÑ‚Ğ¸ÑÑ Ğ²Ñ–Ğ´ Ğ¿Ğ¾Ğ¿ĞµÑ€ĞµĞ´Ğ½ÑŒĞ¾Ğ³Ğ¾.";
+  }
+  if (fromLocationId && toLocationId && fromLocationId === toLocationId) {
+    errors["payload.toLocationId"] =
+      "ĞĞ¾Ğ²Ğµ Ñ€Ğ¾Ğ·Ğ¼Ñ–Ñ‰ĞµĞ½Ğ½Ñ Ğ¼Ğ°Ñ” Ğ²Ñ–Ğ´Ñ€Ñ–Ğ·Ğ½ÑÑ‚Ğ¸ÑÑ Ğ²Ñ–Ğ´ Ğ¿Ğ¾Ğ¿ĞµÑ€ĞµĞ´Ğ½ÑŒĞ¾Ğ³Ğ¾.";
+  }
+  if (date) normalized.date = date;
+  if (notes) normalized.notes = notes;
+  if (sourceGeneratedAt) normalized.sourceGeneratedAt = sourceGeneratedAt;
+  if (observedAvailableQuantity !== undefined) {
+    normalized.observedAvailableQuantity = observedAvailableQuantity;
+  }
+  return normalized;
+}
+
+function validateRevision(
+  payload: Record<string, unknown>,
+  errors: Record<string, string>,
+): Record<string, unknown> {
+  const allowed = new Set([
+    "materialId", "location", "locationId", "locationName", "countedQuantity",
+    "expectedQuantity", "sessionId", "date", "notes", "sourceGeneratedAt",
+  ]);
+  addUnknownFieldErrors(payload, allowed, "payload.", errors);
+  const normalized: Record<string, unknown> = {};
+  const materialId = stringValue(payload, "materialId", { required: true, max: 32 }, errors);
+  const location = stringValue(payload, "location", { max: 160 }, errors);
+  const locationId = identifierValue(
+    payload, "locationId", LOCATION_ID_PATTERN, "LOC-001", false, errors,
+  );
+  const locationName = stringValue(payload, "locationName", { max: 160 }, errors);
+  const count = integerValue(payload, "countedQuantity", 0, 100_000, true, errors);
+  const expectedQuantity = integerValue(
+    payload, "expectedQuantity", 0, 100_000, false, errors,
+  );
+  const sessionId = stringValue(payload, "sessionId", { max: 80 }, errors);
+  const date = normalizedDate(payload, "date", errors, true);
+  const notes = stringValue(payload, "notes", { max: 2_000 }, errors);
+  const sourceGeneratedAt = normalizedDateTime(payload, "sourceGeneratedAt", errors);
+  if (!location && (!locationId || !locationName)) {
+    errors["payload.locationId"] =
+      "ĞĞ±ĞµÑ€Ñ–Ñ‚ÑŒ Ñ€Ğ¾Ğ·Ğ¼Ñ–Ñ‰ĞµĞ½Ğ½Ñ Ğ·Ñ– ÑĞ»ÑƒĞ¶Ğ±Ğ¾Ğ²Ğ¾Ğ³Ğ¾ Ğ´Ğ¾Ğ²Ñ–Ğ´Ğ½Ğ¸ĞºĞ°.";
+  }
+  if (materialId && !CAT_ID_PATTERN.test(materialId)) {
+    errors["payload.materialId"] = "ĞÑ‡Ñ–ĞºÑƒÑ”Ñ‚ÑŒÑÑ CAT-ID Ñƒ Ñ„Ğ¾Ñ€Ğ¼Ğ°Ñ‚Ñ– CAT-0001.";
+  } else if (materialId) normalized.materialId = materialId;
+  if (location) normalized.location = location;
+  if (locationId) normalized.locationId = locationId;
+  if (locationName) normalized.locationName = locationName;
+  if (count !== undefined) normalized.countedQuantity = count;
+  if (expectedQuantity !== undefined) normalized.expectedQuantity = expectedQuantity;
+  if (sessionId) normalized.sessionId = sessionId;
+  if (date) normalized.date = date;
+  if (notes) normalized.notes = notes;
+  if (sourceGeneratedAt) normalized.sourceGeneratedAt = sourceGeneratedAt;
+  return normalized;
+}
+
+function validateWriteoff(
+  payload: Record<string, unknown>,
+  errors: Record<string, string>,
+): Record<string, unknown> {
+  const allowed = new Set([
+    "materialId", "fromLocationId", "fromLocationName", "quantity",
+    "destination", "reason", "condition", "actNumber", "date", "notes",
+    "sourceGeneratedAt", "observedAvailableQuantity",
+  ]);
+  addUnknownFieldErrors(payload, allowed, "payload.", errors);
+  const normalized: Record<string, unknown> = {};
+  const materialId = identifierValue(
+    payload, "materialId", CAT_ID_PATTERN, "CAT-0001", true, errors,
+  );
+  const location = directoryPair(
+    payload, "fromLocationId", "fromLocationName", LOCATION_ID_PATTERN,
+    "LOC-001", true, false, errors,
+  );
+  const quantity = integerValue(payload, "quantity", 1, 100_000, true, errors);
+  const destination = enumValue(
+    payload, "destination", ["written_off", "lost"] as const, true, errors,
+  );
+  const reason = enumValue(
+    payload,
+    "reason",
+    ["worn", "obsolete", "damaged", "lost", "other"] as const,
+    true,
+    errors,
+  );
+  const condition = stringValue(payload, "condition", { max: 80 }, errors);
+  const actNumber = stringValue(payload, "actNumber", { max: 100 }, errors);
+  const date = normalizedDate(payload, "date", errors, true);
+  const notes = stringValue(payload, "notes", { max: 2_000 }, errors);
+  const sourceGeneratedAt = normalizedDateTime(payload, "sourceGeneratedAt", errors);
+  const observedAvailableQuantity = integerValue(
+    payload, "observedAvailableQuantity", 0, 100_000, false, errors,
+  );
+
+  if (location.fromLocationId === "LOC-007" || location.fromLocationId === "LOC-008") {
+    errors["payload.fromLocationId"] =
+      "ĞĞµ Ğ¼Ğ¾Ğ¶Ğ½Ğ° ÑĞ¿Ğ¸ÑÑƒĞ²Ğ°Ñ‚Ğ¸ Ğ¼Ğ°Ñ‚ĞµÑ€Ñ–Ğ°Ğ» Ğ·Ñ– ÑĞ»ÑƒĞ¶Ğ±Ğ¾Ğ²Ğ¾Ğ³Ğ¾ Ğ¼Ñ–ÑÑ†Ñ Â«Ğ¡Ğ¿Ğ¸ÑĞ°Ğ½Ğ¾Â» Ğ°Ğ±Ğ¾ Â«Ğ’Ñ‚Ñ€Ğ°Ñ‡ĞµĞ½Ğ¾Â».";
+  }
+  if (reason === "lost" && destination && destination !== "lost") {
+    errors["payload.destination"] =
+      "Ğ”Ğ»Ñ Ğ²Ñ‚Ñ€Ğ°Ñ‚Ğ¸ Ğ¾Ğ±ĞµÑ€Ñ–Ñ‚ÑŒ ÑĞ»ÑƒĞ¶Ğ±Ğ¾Ğ²Ğµ Ğ¿Ñ€Ğ¸Ğ·Ğ½Ğ°Ñ‡ĞµĞ½Ğ½Ñ Â«Ğ’Ñ‚Ñ€Ğ°Ñ‡ĞµĞ½Ğ¾Â».";
+  }
+  if (destination === "lost" && reason && reason !== "lost") {
+    errors["payload.reason"] = "Ğ”Ğ»Ñ Ğ¿Ñ€Ğ¸Ğ·Ğ½Ğ°Ñ‡ĞµĞ½Ğ½Ñ Â«Ğ’Ñ‚Ñ€Ğ°Ñ‡ĞµĞ½Ğ¾Â» Ğ²ĞºĞ°Ğ¶Ñ–Ñ‚ÑŒ Ğ¿Ñ€Ğ¸Ñ‡Ğ¸Ğ½Ñƒ Â«Ğ’Ñ‚Ñ€Ğ°Ñ‡ĞµĞ½Ğ¾Â».";
+  }
+  if (reason === "other" && !notes) {
+    errors["payload.notes"] = "ĞĞ¿Ğ¸ÑˆÑ–Ñ‚ÑŒ Ñ–Ğ½ÑˆÑƒ Ğ¿Ñ€Ğ¸Ñ‡Ğ¸Ğ½Ñƒ ÑĞ¿Ğ¸ÑĞ°Ğ½Ğ½Ñ.";
+  }
+
+  if (materialId) normalized.materialId = materialId;
+  Object.assign(normalized, location);
+  if (quantity !== undefined) normalized.quantity = quantity;
+  if (destination) normalized.destination = destination;
+  if (reason) normalized.reason = reason;
+  if (condition) normalized.condition = condition;
+  if (actNumber) normalized.actNumber = actNumber;
+  if (date) normalized.date = date;
+  if (notes) normalized.notes = notes;
+  if (sourceGeneratedAt) normalized.sourceGeneratedAt = sourceGeneratedAt;
+  if (observedAvailableQuantity !== undefined) {
+    normalized.observedAvailableQuantity = observedAvailableQuantity;
+  }
+  return normalized;
+}
+
+function validateAcademicYear(
+  payload: Record<string, unknown>,
+  errors: Record<string, string>,
+): Record<string, unknown> {
+  const allowed = new Set(["label", "startDate", "endDate", "notes"]);
+  addUnknownFieldErrors(payload, allowed, "payload.", errors);
+  const normalized: Record<string, unknown> = {};
+  const label = stringValue(payload, "label", { required: true, max: 9 }, errors);
+  const startDate = normalizedDate(payload, "startDate", errors, true);
+  const endDate = normalizedDate(payload, "endDate", errors, true);
+  const notes = stringValue(payload, "notes", { max: 2_000 }, errors);
+
+  const match = label?.match(ACADEMIC_YEAR_LABEL_PATTERN);
+  if (label && (!match || Number(match[2]) !== Number(match[1]) + 1)) {
+    errors["payload.label"] = "ĞĞ°Ğ²Ñ‡Ğ°Ğ»ÑŒĞ½Ğ¸Ğ¹ Ñ€Ñ–Ğº Ğ¼Ğ°Ñ” Ñ„Ğ¾Ñ€Ğ¼Ğ°Ñ‚ 2026/2027.";
+  }
+  if (startDate && endDate && startDate >= endDate) {
+    errors["payload.endDate"] = "Ğ”Ğ°Ñ‚Ğ° Ğ·Ğ°Ğ²ĞµÑ€ÑˆĞµĞ½Ğ½Ñ Ğ¼Ğ°Ñ” Ğ±ÑƒÑ‚Ğ¸ Ğ¿Ñ–Ğ·Ğ½Ñ–ÑˆĞ¾Ñ Ğ·Ğ° Ğ´Ğ°Ñ‚Ñƒ Ğ¿Ğ¾Ñ‡Ğ°Ñ‚ĞºÑƒ.";
+  }
+  if (match && startDate && !startDate.startsWith(match[1])) {
+    errors["payload.startDate"] = "Ğ”Ğ°Ñ‚Ğ° Ğ¿Ğ¾Ñ‡Ğ°Ñ‚ĞºÑƒ Ğ¼Ğ°Ñ” Ğ½Ğ°Ğ»ĞµĞ¶Ğ°Ñ‚Ğ¸ Ğ¿ĞµÑ€ÑˆĞ¾Ğ¼Ñƒ Ñ€Ğ¾ĞºÑƒ Ğ² Ğ½Ğ°Ğ·Ğ²Ñ–.";
+  }
+  if (match && endDate && !endDate.startsWith(match[2])) {
+    errors["payload.endDate"] = "Ğ”Ğ°Ñ‚Ğ° Ğ·Ğ°Ğ²ĞµÑ€ÑˆĞµĞ½Ğ½Ñ Ğ¼Ğ°Ñ” Ğ½Ğ°Ğ»ĞµĞ¶Ğ°Ñ‚Ğ¸ Ğ´Ñ€ÑƒĞ³Ğ¾Ğ¼Ñƒ Ñ€Ğ¾ĞºÑƒ Ğ² Ğ½Ğ°Ğ·Ğ²Ñ–.";
+  }
+
+  if (label && match) normalized.label = label;
+  if (startDate) normalized.startDate = startDate;
+  if (endDate) normalized.endDate = endDate;
+  if (notes) normalized.notes = notes;
+  return normalized;
+}
+
+function validateClassCode(
+  payload: Record<string, unknown>,
+  field: string,
+  required: boolean,
+  errors: Record<string, string>,
+): string | undefined {
+  const code = stringValue(payload, field, { required, max: 16 }, errors);
+  if (!code) return undefined;
+  if (!CLASS_CODE_PATTERN.test(code)) {
+    errors[`payload.${field}`] =
+      "ĞšĞ¾Ğ´ ĞºĞ»Ğ°ÑÑƒ Ğ¼Ğ¾Ğ¶Ğµ Ğ¼Ñ–ÑÑ‚Ğ¸Ñ‚Ğ¸ Ğ»Ñ–Ñ‚ĞµÑ€Ğ¸, Ñ†Ğ¸Ñ„Ñ€Ğ¸, Ğ´ÑƒĞ¶ĞºĞ¸, ĞºÑ€Ğ°Ğ¿ĞºÑƒ, Ğ°Ğ¿Ğ¾ÑÑ‚Ñ€Ğ¾Ñ„, Ğ´ĞµÑ„Ñ–Ñ Ğ°Ğ±Ğ¾ Ğ¿Ñ–Ğ´ĞºÑ€ĞµÑĞ»ĞµĞ½Ğ½Ñ.";
+    return undefined;
+  }
+  return code;
+}
+
+function validateAcademicYearId(
+  payload: Record<string, unknown>,
+  field: string,
+  required: boolean,
+  errors: Record<string, string>,
+): string | undefined {
+  const id = identifierValue(
+    payload, field, ACADEMIC_YEAR_ID_PATTERN, "YR-2026-2027", required, errors,
+  );
+  const match = id?.match(ACADEMIC_YEAR_ID_PATTERN);
+  if (match && Number(match[2]) !== Number(match[1]) + 1) {
+    errors[`payload.${field}`] = "Ğ Ğ¾ĞºĞ¸ Ğ² ID Ğ¼Ğ°ÑÑ‚ÑŒ Ğ±ÑƒÑ‚Ğ¸ Ğ¿Ğ¾ÑĞ»Ñ–Ğ´Ğ¾Ğ²Ğ½Ğ¸Ğ¼Ğ¸.";
+    return undefined;
+  }
+  return id;
+}
+
+function validateClassYearCreate(
+  payload: Record<string, unknown>,
+  errors: Record<string, string>,
+): Record<string, unknown> {
+  const allowed = new Set([
+    "academicYearId", "cohortMode", "cohortId", "grade", "code",
+    "teacherUserId", "teacherName", "locationId", "locationName", "notes",
+  ]);
+  addUnknownFieldErrors(payload, allowed, "payload.", errors);
+  const normalized: Record<string, unknown> = {};
+  const academicYearId = validateAcademicYearId(
+    payload, "academicYearId", true, errors,
+  );
+  const cohortMode = enumValue(
+    payload, "cohortMode", ["existing", "new"] as const, true, errors,
+  );
+  const cohortId = identifierValue(
+    payload, "cohortId", COHORT_ID_PATTERN, "COH-001", false, errors,
+  );
+  const grade = integerValue(payload, "grade", 1, 11, true, errors);
+  const code = validateClassCode(payload, "code", true, errors);
+  const teacher = directoryPair(
+    payload, "teacherUserId", "teacherName", USER_ID_PATTERN, "USR-001",
+    false, false, errors,
+  );
+  const location = directoryPair(
+    payload, "locationId", "locationName", LOCATION_ID_PATTERN, "LOC-001",
+    false, false, errors,
+  );
+  const notes = stringValue(payload, "notes", { max: 2_000 }, errors);
+
+  if (cohortMode === "existing" && !cohortId) {
+    errors["payload.cohortId"] = "ĞĞ±ĞµÑ€Ñ–Ñ‚ÑŒ Ğ½Ğ°ÑĞ²Ğ½Ñƒ ĞºĞ»Ğ°ÑĞ½Ñƒ Ğ³Ñ€ÑƒĞ¿Ñƒ.";
+  }
+  if (cohortMode === "new" && cohortId) {
+    errors["payload.cohortId"] = "ID Ğ½Ğ¾Ğ²Ğ¾Ñ— Ğ³Ñ€ÑƒĞ¿Ğ¸ Ğ¿Ñ€Ğ¸Ğ·Ğ½Ğ°Ñ‡Ğ°Ñ” ÑĞ¸ÑÑ‚ĞµĞ¼Ğ°.";
+  }
+  if (location.locationId === "LOC-007" || location.locationId === "LOC-008") {
+    errors["payload.locationId"] = "Ğ¡Ğ»ÑƒĞ¶Ğ±Ğ¾Ğ²Ğµ Ğ¼Ñ–ÑÑ†Ğµ Ğ½Ğµ Ğ¼Ğ¾Ğ¶Ğµ Ğ±ÑƒÑ‚Ğ¸ ĞºĞ°Ğ±Ñ–Ğ½ĞµÑ‚Ğ¾Ğ¼ ĞºĞ»Ğ°ÑÑƒ.";
+  }
+
+  if (academicYearId) normalized.academicYearId = academicYearId;
+  if (cohortMode) normalized.cohortMode = cohortMode;
+  if (cohortId) normalized.cohortId = cohortId;
+  if (grade !== undefined) normalized.grade = grade;
+  if (code) normalized.code = code;
+  Object.assign(normalized, teacher, location);
+  if (notes) normalized.notes = notes;
+  return normalized;
+}
+
+function validateClassYearUpdate(
+  payload: Record<string, unknown>,
+  errors: Record<string, string>,
+): Record<string, unknown> {
+  const allowed = new Set(["classYearId", "academicYearId", "changes", "reason"]);
+  addUnknownFieldErrors(payload, allowed, "payload.", errors);
+  const normalized: Record<string, unknown> = {};
+  const classYearId = identifierValue(
+    payload, "classYearId", CLASS_YEAR_ID_PATTERN, "CY-2026-001", true, errors,
+  );
+  const academicYearId = validateAcademicYearId(
+    payload, "academicYearId", true, errors,
+  );
+  const reason = stringValue(payload, "reason", { max: 1_000 }, errors);
+  const changes = recordValue(payload, "changes", true, errors);
+  if (classYearId) normalized.classYearId = classYearId;
+  if (academicYearId) normalized.academicYearId = academicYearId;
+  if (reason) normalized.reason = reason;
+  if (!changes) return normalized;
+
+  const nestedErrors: Record<string, string> = {};
+  addUnknownFieldErrors(
+    changes,
+    new Set([
+      "grade", "code", "teacherUserId", "teacherName", "locationId",
+      "locationName", "notes",
+    ]),
+    "payload.",
+    nestedErrors,
+  );
+  if (Object.keys(changes).length === 0) nestedErrors.payload = "Ğ’ĞºĞ°Ğ¶Ñ–Ñ‚ÑŒ Ñ…Ğ¾Ñ‡Ğ° Ğ± Ğ¾Ğ´Ğ½Ñƒ Ğ·Ğ¼Ñ–Ğ½Ñƒ.";
+  const result: Record<string, unknown> = {};
+  const grade = integerValue(changes, "grade", 1, 11, false, nestedErrors);
+  const code = validateClassCode(changes, "code", false, nestedErrors);
+  const teacher = directoryPair(
+    changes, "teacherUserId", "teacherName", USER_ID_PATTERN, "USR-001",
+    false, true, nestedErrors,
+  );
+  const location = directoryPair(
+    changes, "locationId", "locationName", LOCATION_ID_PATTERN, "LOC-001",
+    false, true, nestedErrors,
+  );
+  const notes = stringValue(changes, "notes", { max: 2_000 }, nestedErrors);
+  if (location.locationId === "LOC-007" || location.locationId === "LOC-008") {
+    nestedErrors["payload.locationId"] = "Ğ¡Ğ»ÑƒĞ¶Ğ±Ğ¾Ğ²Ğµ Ğ¼Ñ–ÑÑ†Ğµ Ğ½Ğµ Ğ¼Ğ¾Ğ¶Ğµ Ğ±ÑƒÑ‚Ğ¸ ĞºĞ°Ğ±Ñ–Ğ½ĞµÑ‚Ğ¾Ğ¼ ĞºĞ»Ğ°ÑÑƒ.";
+  }
+  if (grade !== undefined) result.grade = grade;
+  if (code) result.code = code;
+  Object.assign(result, teacher, location);
+  if (notes) result.notes = notes;
+  if (Object.keys(result).length === 0 && Object.keys(nestedErrors).length === 0) {
+    nestedErrors.payload = "Ğ’ĞºĞ°Ğ¶Ñ–Ñ‚ÑŒ Ñ…Ğ¾Ñ‡Ğ° Ğ± Ğ¾Ğ´Ğ½Ñƒ Ğ½ĞµĞ¿Ğ¾Ñ€Ğ¾Ğ¶Ğ½Ñ Ğ·Ğ¼Ñ–Ğ½Ñƒ.";
+  }
+  copyNestedErrors(nestedErrors, "changes", errors);
+  normalized.changes = result;
+  return normalized;
+}
+
+function validateClassYearClose(
+  payload: Record<string, unknown>,
+  errors: Record<string, string>,
+): Record<string, unknown> {
+  const allowed = new Set([
+    "classYearId", "actualClosedDate", "reason", "closeCohort", "notes",
+  ]);
+  addUnknownFieldErrors(payload, allowed, "payload.", errors);
+  const normalized: Record<string, unknown> = {};
+  const classYearId = identifierValue(
+    payload, "classYearId", CLASS_YEAR_ID_PATTERN, "CY-2026-001", true, errors,
+  );
+  const actualClosedDate = normalizedDate(
+    payload, "actualClosedDate", errors, true,
+  );
+  const reason = enumValue(
+    payload,
+    "reason",
+    ["closed", "merged", "graduated", "reorganized", "other"] as const,
+    true,
+    errors,
+  );
+  const closeCohort = booleanValue(payload, "closeCohort", true, errors);
+  const notes = stringValue(payload, "notes", { max: 2_000 }, errors);
+  if (reason === "other" && !notes) {
+    errors["payload.notes"] = "ĞĞ¿Ğ¸ÑˆÑ–Ñ‚ÑŒ Ñ–Ğ½ÑˆÑƒ Ğ¿Ñ€Ğ¸Ñ‡Ğ¸Ğ½Ñƒ Ğ·Ğ°ĞºÑ€Ğ¸Ñ‚Ñ‚Ñ ĞºĞ»Ğ°ÑÑƒ.";
+  }
+  if (classYearId) normalized.classYearId = classYearId;
+  if (actualClosedDate) normalized.actualClosedDate = actualClosedDate;
+  if (reason) normalized.reason = reason;
+  if (closeCohort !== undefined) normalized.closeCohort = closeCohort;
+  if (notes) normalized.notes = notes;
+  return normalized;
+}
+
+function validateRolloverClass(
+  item: Record<string, unknown>,
+  errors: Record<string, string>,
+): Record<string, unknown> {
+  const allowed = new Set([
+    "sourceClassYearId", "cohortId", "sourceGrade", "action", "targetGrade",
+    "targetCode", "teacherUserId", "teacherName", "locationId", "locationName",
+    "overrideReason", "notes",
+  ]);
+  addUnknownFieldErrors(item, allowed, "payload.", errors);
+  const result: Record<string, unknown> = {};
+  const sourceClassYearId = identifierValue(
+    item, "sourceClassYearId", CLASS_YEAR_ID_PATTERN, "CY-2026-001", true, errors,
+  );
+  const cohortId = identifierValue(
+    item, "cohortId", COHORT_ID_PATTERN, "COH-001", true, errors,
+  );
+  const sourceGrade = integerValue(item, "sourceGrade", 1, 11, true, errors);
+  const action = enumValue(
+    item, "action", ["promote", "graduate", "close", "skip"] as const, true, errors,
+  );
+  const targetGrade = integerValue(item, "targetGrade", 1, 11, false, errors);
+  const targetCode = validateClassCode(item, "targetCode", false, errors);
+  const teacher = directoryPair(
+    item, "teacherUserId", "teacherName", USER_ID_PATTERN, "USR-001",
+    false, false, errors,
+  );
+  const location = directoryPair(
+    item, "locationId", "locationName", LOCATION_ID_PATTERN, "LOC-001",
+    false, false, errors,
+  );
+  const overrideReason = stringValue(item, "overrideReason", { max: 1_000 }, errors);
+  const notes = stringValue(item, "notes", { max: 2_000 }, errors);
+
+  if (action === "promote") {
+    if (sourceGrade === 11) {
+      errors["payload.action"] = "11 ĞºĞ»Ğ°Ñ Ğ½Ğµ Ğ¼Ğ¾Ğ¶Ğ½Ğ° Ğ¿ĞµÑ€ĞµĞ²Ğ¾Ğ´Ğ¸Ñ‚Ğ¸ Ğ´Ğ¾ 12 ĞºĞ»Ğ°ÑÑƒ.";
+    }
+    if (targetGrade === undefined) errors["payload.targetGrade"] = "Ğ’ĞºĞ°Ğ¶Ñ–Ñ‚ÑŒ Ğ½Ğ¾Ğ²Ñƒ Ğ¿Ğ°Ñ€Ğ°Ğ»ĞµĞ»ÑŒ.";
+    if (!targetCode) errors["payload.targetCode"] = "Ğ’ĞºĞ°Ğ¶Ñ–Ñ‚ÑŒ ĞºĞ¾Ğ´ Ğ½Ğ¾Ğ²Ğ¾Ğ³Ğ¾ ĞºĞ»Ğ°ÑÑƒ.";
+    if (
+      sourceGrade !== undefined && targetGrade !== undefined &&
+      targetGrade !== sourceGrade + 1 && !overrideReason
+    ) {
+      errors["payload.overrideReason"] =
+        "ĞŸĞ¾ÑÑĞ½Ñ–Ñ‚ÑŒ Ğ¿ĞµÑ€ĞµÑ…Ñ–Ğ´ Ğ½Ğµ Ğ´Ğ¾ Ğ½Ğ°ÑÑ‚ÑƒĞ¿Ğ½Ğ¾Ñ— Ğ¿Ğ°Ñ€Ğ°Ğ»ĞµĞ»Ñ–.";
+    }
+  } else if (targetGrade !== undefined || targetCode) {
+    errors["payload.targetGrade"] =
+      "Ğ¦Ñ–Ğ»ÑŒĞ¾Ğ²Ğ¸Ğ¹ ĞºĞ»Ğ°Ñ Ğ·Ğ°Ğ´Ğ°Ñ”Ñ‚ÑŒÑÑ Ğ»Ğ¸ÑˆĞµ Ğ´Ğ»Ñ Ğ´Ñ–Ñ— Â«ĞŸĞµÑ€ĞµĞ²ĞµÑÑ‚Ğ¸Â».";
+  }
+  if (action === "graduate" && sourceGrade !== undefined && sourceGrade !== 11) {
+    errors["payload.action"] = "Ğ’Ğ¸Ğ¿ÑƒÑĞº Ğ·Ğ°ÑÑ‚Ğ¾ÑĞ¾Ğ²ÑƒÑ”Ñ‚ÑŒÑÑ Ğ»Ğ¸ÑˆĞµ Ğ´Ğ¾ 11 ĞºĞ»Ğ°ÑÑƒ.";
+  }
+  if (location.locationId === "LOC-007" || location.locationId === "LOC-008") {
+    errors["payload.locationId"] = "Ğ¡Ğ»ÑƒĞ¶Ğ±Ğ¾Ğ²Ğµ Ğ¼Ñ–ÑÑ†Ğµ Ğ½Ğµ Ğ¼Ğ¾Ğ¶Ğµ Ğ±ÑƒÑ‚Ğ¸ ĞºĞ°Ğ±Ñ–Ğ½ĞµÑ‚Ğ¾Ğ¼ ĞºĞ»Ğ°ÑÑƒ.";
+  }
+
+  if (sourceClassYearId) result.sourceClassYearId = sourceClassYearId;
+  if (cohortId) result.cohortId = cohortId;
+  if (sourceGrade !== undefined) result.sourceGrade = sourceGrade;
+  if (action) result.action = action;
+  if (targetGrade !== undefined) result.targetGrade = targetGrade;
+  if (targetCode) result.targetCode = targetCode;
+  Object.assign(result, teacher, location);
+  if (overrideReason) result.overrideReason = overrideReason;
+  if (notes) result.notes = notes;
+  return result;
+}
+
+function validateAcademicYearRollover(
+  payload: Record<string, unknown>,
+  errors: Record<string, string>,
+): Record<string, unknown> {
+  const allowed = new Set([
+    "sourceYearId", "targetYearId", "effectiveDate", "classes", "notes",
+  ]);
+  addUnknownFieldErrors(payload, allowed, "payload.", errors);
+  const normalized: Record<string, unknown> = {};
+  const sourceYearId = validateAcademicYearId(payload, "sourceYearId", true, errors);
+  const targetYearId = validateAcademicYearId(payload, "targetYearId", true, errors);
+  const effectiveDate = normalizedDate(payload, "effectiveDate", errors, true);
+  const notes = stringValue(payload, "notes", { max: 2_000 }, errors);
+  const rawClasses = payload.classes;
+  const classes: Record<string, unknown>[] = [];
+
+  if (!Array.isArray(rawClasses) || rawClasses.length === 0 || rawClasses.length > 100) {
+    errors["payload.classes"] = "Ğ”Ğ¾Ğ´Ğ°Ğ¹Ñ‚Ğµ Ğ²Ñ–Ğ´ 1 Ğ´Ğ¾ 100 ĞºĞ»Ğ°ÑÑ–Ğ² Ğ´Ğ»Ñ Ğ¿ĞµÑ€ĞµÑ…Ğ¾Ğ´Ñƒ.";
+  } else {
+    const sourceIds = new Set<string>();
+    const cohorts = new Set<string>();
+    const targetNames = new Set<string>();
+    rawClasses.forEach((raw, index) => {
+      if (!isRecord(raw)) {
+        errors[`payload.classes.${index}`] = "ĞÑ‡Ñ–ĞºÑƒÑ”Ñ‚ÑŒÑÑ JSON-Ğ¾Ğ±â€™Ñ”ĞºÑ‚.";
+        return;
+      }
+      const nestedErrors: Record<string, string> = {};
+      const item = validateRolloverClass(raw, nestedErrors);
+      const sourceId = item.sourceClassYearId;
+      const cohortId = item.cohortId;
+      if (typeof sourceId === "string") {
+        if (sourceIds.has(sourceId)) nestedErrors["payload.sourceClassYearId"] = "ĞšĞ»Ğ°Ñ Ğ¿Ğ¾Ğ²Ñ‚Ğ¾Ñ€ÑÑ”Ñ‚ÑŒÑÑ.";
+        sourceIds.add(sourceId);
+      }
+      if (typeof cohortId === "string") {
+        if (cohorts.has(cohortId)) nestedErrors["payload.cohortId"] = "ĞšĞ»Ğ°ÑĞ½Ğ° Ğ³Ñ€ÑƒĞ¿Ğ° Ğ¿Ğ¾Ğ²Ñ‚Ğ¾Ñ€ÑÑ”Ñ‚ÑŒÑÑ.";
+        cohorts.add(cohortId);
+      }
+      if (item.action === "promote") {
+        const targetName = `${item.targetGrade}-${String(item.targetCode).toLocaleUpperCase("uk-UA")}`;
+        if (targetNames.has(targetName)) nestedErrors["payload.targetCode"] = "Ğ¦Ñ–Ğ»ÑŒĞ¾Ğ²Ğ° Ğ½Ğ°Ğ·Ğ²Ğ° ĞºĞ»Ğ°ÑÑƒ Ğ¿Ğ¾Ğ²Ñ‚Ğ¾Ñ€ÑÑ”Ñ‚ÑŒÑÑ.";
+        targetNames.add(targetName);
+      }
+      copyNestedErrors(nestedErrors, `classes.${index}`, errors);
+      classes.push(item);
+    });
+  }
+
+  if (sourceYearId && targetYearId && sourceYearId === targetYearId) {
+    errors["payload.targetYearId"] = "Ğ¦Ñ–Ğ»ÑŒĞ¾Ğ²Ğ¸Ğ¹ Ğ½Ğ°Ğ²Ñ‡Ğ°Ğ»ÑŒĞ½Ğ¸Ğ¹ Ñ€Ñ–Ğº Ğ¼Ğ°Ñ” Ğ²Ñ–Ğ´Ñ€Ñ–Ğ·Ğ½ÑÑ‚Ğ¸ÑÑ.";
+  }
+  const sourceMatch = sourceYearId?.match(ACADEMIC_YEAR_ID_PATTERN);
+  const targetMatch = targetYearId?.match(ACADEMIC_YEAR_ID_PATTERN);
+  if (sourceMatch && targetMatch && Number(targetMatch[1]) !== Number(sourceMatch[1]) + 1) {
+    errors["payload.targetYearId"] = "Ğ¦Ñ–Ğ»ÑŒĞ¾Ğ²Ğ¸Ğ¹ Ğ½Ğ°Ğ²Ñ‡Ğ°Ğ»ÑŒĞ½Ğ¸Ğ¹ Ñ€Ñ–Ğº Ğ¼Ğ°Ñ” Ğ±ÑƒÑ‚Ğ¸ Ğ½Ğ°ÑÑ‚ÑƒĞ¿Ğ½Ğ¸Ğ¼.";
+  }
+
+  if (sourceYearId) normalized.sourceYearId = sourceYearId;
+  if (targetYearId) normalized.targetYearId = targetYearId;
+  if (effectiveDate) normalized.effectiveDate = effectiveDate;
+  if (classes.length > 0) normalized.classes = classes;
+  if (notes) normalized.notes = notes;
+  return normalized;
+}
+
+export function validateDraftInput(
+  input: Record<string, unknown>,
+): DraftValidationResult {
+  const errors: Record<string, string> = {};
+  addUnknownFieldErrors(
+    input,
+    new Set(["id", "revision", "groupId", "kind", "payload"]),
+    "",
+    errors,
+  );
+
+  const id = input.id;
+  if (id !== undefined && (typeof id !== "string" || !isDraftId(id))) {
+    errors.id = "ĞĞµĞºĞ¾Ñ€ĞµĞºÑ‚Ğ½Ğ¸Ğ¹ Ñ–Ğ´ĞµĞ½Ñ‚Ğ¸Ñ„Ñ–ĞºĞ°Ñ‚Ğ¾Ñ€ Ñ‡ĞµÑ€Ğ½ĞµÑ‚ĞºĞ¸.";
+  }
+
+  const revision = input.revision;
+  if (
+    revision !== undefined &&
+    (typeof revision !== "number" || !Number.isInteger(revision) || revision < 1 ||
+      revision > 2_147_483_647)
+  ) {
+    errors.revision = "Ğ ĞµĞ²Ñ–Ğ·Ñ–Ñ Ñ‡ĞµÑ€Ğ½ĞµÑ‚ĞºĞ¸ Ğ¼Ğ°Ñ” Ğ±ÑƒÑ‚Ğ¸ Ğ´Ğ¾Ğ´Ğ°Ñ‚Ğ½Ğ¸Ğ¼ Ñ†Ñ–Ğ»Ğ¸Ğ¼ Ñ‡Ğ¸ÑĞ»Ğ¾Ğ¼.";
+  }
+  if (revision !== undefined && id === undefined) {
+    errors.revision = "Ğ ĞµĞ²Ñ–Ğ·Ñ–Ñ Ğ¼Ğ¾Ğ¶Ğ½Ğ° Ğ¿ĞµÑ€ĞµĞ´Ğ°Ñ‚Ğ¸ Ğ»Ğ¸ÑˆĞµ Ğ´Ğ»Ñ Ğ½Ğ°ÑĞ²Ğ½Ğ¾Ñ— Ñ‡ĞµÑ€Ğ½ĞµÑ‚ĞºĞ¸.";
+  }
+
+  const groupId = input.groupId;
+  if (groupId !== undefined && (typeof groupId !== "string" || !isDraftId(groupId))) {
+    errors.groupId = "ĞĞµĞºĞ¾Ñ€ĞµĞºÑ‚Ğ½Ğ¸Ğ¹ Ñ–Ğ´ĞµĞ½Ñ‚Ğ¸Ñ„Ñ–ĞºĞ°Ñ‚Ğ¾Ñ€ Ğ³Ñ€ÑƒĞ¿Ğ¸ Ñ‡ĞµÑ€Ğ½ĞµÑ‚Ğ¾Ğº.";
+  }
+
+  const kind = input.kind;
+  if (typeof kind !== "string" || !DRAFT_KINDS.includes(kind as DraftKind)) {
+    errors.kind = "ĞĞ±ĞµÑ€Ñ–Ñ‚ÑŒ Ğ¿Ñ–Ğ´Ñ‚Ñ€Ğ¸Ğ¼ÑƒĞ²Ğ°Ğ½Ğ¸Ğ¹ Ñ‚Ğ¸Ğ¿ Ğ¾Ğ¿ĞµÑ€Ğ°Ñ†Ñ–Ñ—.";
+  }
+
+  if (!isRecord(input.payload)) {
+    errors.payload = "Ğ”Ğ°Ğ½Ñ– Ñ‡ĞµÑ€Ğ½ĞµÑ‚ĞºĞ¸ Ğ¼Ğ°ÑÑ‚ÑŒ Ğ±ÑƒÑ‚Ğ¸ JSON-Ğ¾Ğ±â€™Ñ”ĞºÑ‚Ğ¾Ğ¼.";
+  }
+  if (Object.keys(errors).length > 0 || !isRecord(input.payload) ||
+      typeof kind !== "string" || !DRAFT_KINDS.includes(kind as DraftKind)) {
+    return { ok: false, fieldErrors: errors };
+  }
+
+  const formulaPath = findFormulaInjection(input.payload);
+  if (formulaPath) {
+    errors[formulaPath] =
+      "Ğ—Ğ½Ğ°Ñ‡ĞµĞ½Ğ½Ñ Ğ½Ğµ Ğ¼Ğ¾Ğ¶Ğµ Ğ¿Ğ¾Ñ‡Ğ¸Ğ½Ğ°Ñ‚Ğ¸ÑÑ Ñ–Ğ· ÑĞ¸Ğ¼Ğ²Ğ¾Ğ»Ñƒ Ñ„Ğ¾Ñ€Ğ¼ÑƒĞ»Ğ¸ (=, +, -, @).";
+  }
+
+  let payload: Record<string, unknown> = {};
+  switch (kind as DraftKind) {
+    case "material.create":
+      payload = validateMaterial(input.payload, errors);
+      break;
+    case "material.update":
+      payload = validateMaterialUpdate(input.payload, errors);
+      break;
+    case "receipt.create":
+      payload = validateReceipt(input.payload, errors);
+      break;
+    case "transfer.create":
+      payload = validateTransfer(input.payload, errors);
+      break;
+    case "writeoff.create":
+      payload = validateWriteoff(input.payload, errors);
+      break;
+    case "revision.count":
+      payload = validateRevision(input.payload, errors);
+      break;
+    case "academic-year.create":
+      payload = validateAcademicYear(input.payload, errors);
+      break;
+    case "class-year.create":
+      payload = validateClassYearCreate(input.payload, errors);
+      break;
+    case "class-year.update":
+      payload = validateClassYearUpdate(input.payload, errors);
+      break;
+    case "class-year.close":
+      payload = validateClassYearClose(input.payload, errors);
+      break;
+    case "academic-year.rollover":
+      payload = validateAcademicYearRollover(input.payload, errors);
+      break;
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return { ok: false, fieldErrors: errors };
+  }
+
+  return {
+    ok: true,
+    value: {
+      ...(typeof id === "string" ? { id } : {}),
+      ...(typeof revision === "number" ? { revision } : {}),
+      ...(typeof groupId === "string" ? { groupId } : {}),
+      kind: kind as DraftKind,
+      payload,
+    },
+  };
+}
+
+export function validateDraftActionInput(
+  input: Record<string, unknown>,
+): DraftActionValidationResult {
+  const errors: Record<string, string> = {};
+  addUnknownFieldErrors(input, new Set(["id", "revision", "action"]), "", errors);
+
+  const id = input.id;
+  if (typeof id !== "string" || !isDraftId(id)) {
+    errors.id = "ĞĞµĞºĞ¾Ñ€ĞµĞºÑ‚Ğ½Ğ¸Ğ¹ Ñ–Ğ´ĞµĞ½Ñ‚Ğ¸Ñ„Ñ–ĞºĞ°Ñ‚Ğ¾Ñ€ Ñ‡ĞµÑ€Ğ½ĞµÑ‚ĞºĞ¸.";
+  }
+  const revision = input.revision;
+  if (
+    typeof revision !== "number" || !Number.isInteger(revision) || revision < 1 ||
+    revision > 2_147_483_647
+  ) {
+    errors.revision = "Ğ ĞµĞ²Ñ–Ğ·Ñ–Ñ Ñ‡ĞµÑ€Ğ½ĞµÑ‚ĞºĞ¸ Ğ¼Ğ°Ñ” Ğ±ÑƒÑ‚Ğ¸ Ğ´Ğ¾Ğ´Ğ°Ñ‚Ğ½Ğ¸Ğ¼ Ñ†Ñ–Ğ»Ğ¸Ğ¼ Ñ‡Ğ¸ÑĞ»Ğ¾Ğ¼.";
+  }
+  const action = input.action;
+  if (typeof action !== "string" || !DRAFT_ACTIONS.includes(action as DraftAction)) {
+    errors.action = "ĞŸÑ–Ğ´Ñ‚Ñ€Ğ¸Ğ¼ÑƒÑÑ‚ÑŒÑÑ Ğ»Ğ¸ÑˆĞµ Ğ´Ñ–Ñ— submit Ñ– cancel.";
+  }
+
+  if (Object.keys(errors).length > 0) return { ok: false, fieldErrors: errors };
+  return {
+    ok: true,
+    value: {
+      id: id as string,
+      revision: revision as number,
+      action: action as DraftAction,
+    },
+  };
+}
