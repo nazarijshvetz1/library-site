@@ -62,7 +62,7 @@ export default {
 };
 `;
 
-await rm(new URL("../dist/", import.meta.url), { recursive: true, force: true });
-await mkdir(new URL("../dist/server/", import.meta.url), { recursive: true });
-await writeFile(new URL("../dist/server/index.js", import.meta.url), worker, "utf8");
-console.log("Static Sites build created.");
+await rm(new URL("../dist-catalog/", import.meta.url), { recursive: true, force: true });
+await mkdir(new URL("../dist-catalog/server/", import.meta.url), { recursive: true });
+await writeFile(new URL("../dist-catalog/server/index.js", import.meta.url), worker, "utf8");
+console.log("Static catalog build created in dist-catalog/.");

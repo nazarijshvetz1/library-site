@@ -14,10 +14,11 @@ function sheet(rows) {
 
 test("Apps Script creates a sanitized catalog and excludes service balances", async () => {
   const source = await readFile(new URL("../apps-script/PublicCatalogApi.gs", import.meta.url), "utf8");
-  const material = Array(21).fill("");
+  const material = Array(25).fill("");
   Object.assign(material, {
     0: "CAT-0112", 1: "Стара рубрика", 2: "Підручник", 3: "Математика",
-    4: 2, 5: 2, 6: "Математика — 2 клас", 7: "Автор", 8: 2024, 20: "Підручники і хрестоматії",
+    4: 2, 5: 2, 6: "Математика — 2 клас", 7: "Автор", 8: 2024,
+    9: 9780306406157, 20: "Підручники і хрестоматії", 24: "978-0-306-40615-7",
   });
   const sheets = {
     "Матеріали": sheet([material]),
@@ -55,6 +56,7 @@ test("Apps Script creates a sanitized catalog and excludes service balances", as
   assert.equal(payload.materials[0].quantity, 3);
   assert.equal(payload.materials[0].stock.library, 3);
   assert.equal(payload.materials[0].cover, rawCover);
+  assert.equal(payload.materials[0].isbn, "9780306406157");
   assert.deepEqual(JSON.parse(JSON.stringify(payload.materials[0].stock.locations)), [{ name: "Бібліотека", quantity: 3 }]);
 
   const jsonp = context.jsonResponse_(payload, "safe.callback");
