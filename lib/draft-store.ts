@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 
 import type { ChatGPTUser } from "@/app/chatgpt-auth";
 import { getDb } from "@/db";
@@ -143,7 +143,10 @@ export async function activeDraftReferencesCoverPhoto(
           "ready_for_review",
           "approved_pending_apply",
         ]),
-        sql`json_extract(${librarianDrafts.payloadJson}, '$.coverPhotoKey') = ${coverPhotoKey}`,
+        or(
+          sql`json_extract(${librarianDrafts.payloadJson}, '$.coverPhotoKey') = ${coverPhotoKey}`,
+          sql`json_extract(${librarianDrafts.payloadJson}, '$.changes.coverPhotoKey') = ${coverPhotoKey}`,
+        ),
       ),
     )
     .limit(1);

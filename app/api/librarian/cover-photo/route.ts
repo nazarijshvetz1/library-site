@@ -191,7 +191,14 @@ export async function DELETE(request: Request) {
 }
 
 function safeOriginalName(value: string): string {
-  const cleaned = value.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 180) || "cover";
+  const cleaned = [...value]
+    .filter((character) => {
+      const code = character.charCodeAt(0);
+      return code >= 0x20 && code !== 0x7f;
+    })
+    .join("")
+    .trim()
+    .slice(0, 180) || "cover";
   return /^[=+\-@]/.test(cleaned) ? `_${cleaned}` : cleaned;
 }
 

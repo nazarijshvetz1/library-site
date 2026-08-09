@@ -5,6 +5,10 @@ import { getDb } from "@/db";
 import { librarianDraftEvents, librarianDrafts } from "@/db/schema";
 import { guardedDraftEventValues } from "@/lib/draft-event";
 import {
+  draftApplyClaimDecision,
+  draftApplyReturnDecision,
+} from "@/lib/draft-apply-state";
+import {
   DraftConflictError,
   DraftLockedError,
   DraftNotFoundError,
@@ -19,7 +23,7 @@ type ApplyMetadata = {
   sourceRevision: number;
   requestedAt: string;
   completedAt?: string;
-  outcome?: "applied" | "failed";
+  outcome?: "applied" | "failed" | "returned_for_changes";
   code?: string;
   message?: string;
   result?: Record<string, unknown>;
@@ -30,6 +34,7 @@ export type DraftApplyClaim = {
   requestId: string;
   sourceRevision: number;
   alreadyApplied: boolean;
+  persistedResult: Record<string, unknown> | null;
 };
 
 export class DraftApplyRequestConflictError extends Error {
@@ -99,6 +104,58 @@ async function ownedDraftRow(user: ChatGPTUser, id: string): Promise<DraftRow> {
   return row;
 }
 
+function existingClaimOrThrow(
+  row: DraftRow,
+  metadata: ApplyMetadata | null,
+  expectedRevision: number,
+  requestedId?: string,
+): DraftApplyClaim | null {
+  const decision = draftApplyClaimDecision({
+    status: row.status,
+    currentRevision: row.revision,
+    expectedRevision,
+    requestedId,
+    metadata,
+  });
+  if (decision === "revision_conflict") throw new DraftConflictError(row.revision);
+  if (decision === "request_conflict") throw new DraftApplyRequestConflictError();
+  if (decision === "locked") throw new DraftLockedError(row.status);
+  if (decision === "claim") return null;
+  if (!metadata) throw new DraftApplyRequestConflictError();
+  return {
+    draft: presentDraft(row),
+    requestId: metadata.requestId,
+    sourceRevision: metadata.sourceRevision,
+    alreadyApplied: decision === "already_applied",
+    persistedResult:
+      decision === "already_applied"
+      && typeof metadata.result === "object"
+      && metadata.result !== null
+      && !Array.isArray(metadata.result)
+        ? metadata.result
+        : null,
+  };
+}
+
+function returnDecisionOrThrow(
+  row: DraftRow,
+  metadata: ApplyMetadata | null,
+  expectedRevision: number,
+  requestId: string,
+): "return_for_changes" | "already_returned" {
+  const decision = draftApplyReturnDecision({
+    status: row.status,
+    currentRevision: row.revision,
+    expectedRevision,
+    requestId,
+    metadata,
+  });
+  if (decision === "revision_conflict") throw new DraftConflictError(row.revision);
+  if (decision === "request_conflict") throw new DraftApplyRequestConflictError();
+  if (decision === "locked") throw new DraftLockedError(row.status);
+  return decision;
+}
+
 export async function beginDraftApply(
   user: ChatGPTUser,
   id: string,
@@ -116,33 +173,13 @@ export async function beginDraftApply(
   };
   const existing = await ownedDraftRow(user, id);
   const existingMetadata = parseApplyMetadata(existing.reviewNote);
-  if (existingMetadata &&
-      (existing.status === "approved_pending_apply" || existing.status === "applied")) {
-    const isIdempotentRevision =
-      expectedRevision === existing.revision ||
-      expectedRevision === existingMetadata.sourceRevision;
-    if (!isIdempotentRevision) throw new DraftConflictError(existing.revision);
-    if (requestedId && requestedId !== existingMetadata.requestId) {
-      throw new DraftApplyRequestConflictError();
-    }
-    if (existing.status === "approved_pending_apply" || existing.status === "applied") {
-      return {
-        draft: presentDraft(existing),
-        requestId: existingMetadata.requestId,
-        sourceRevision: existingMetadata.sourceRevision,
-        alreadyApplied: existing.status === "applied",
-      };
-    }
-  }
-  if (existing.status === "approved_pending_apply") {
-    throw new DraftApplyRequestConflictError();
-  }
-  if (existing.revision !== expectedRevision) {
-    throw new DraftConflictError(existing.revision);
-  }
-  if (existing.status !== "ready_for_review") {
-    throw new DraftLockedError(existing.status);
-  }
+  const existingClaim = existingClaimOrThrow(
+    existing,
+    existingMetadata,
+    expectedRevision,
+    requestedId,
+  );
+  if (existingClaim) return existingClaim;
 
   let batchError: unknown;
   try {
@@ -188,6 +225,7 @@ export async function beginDraftApply(
       requestId,
       sourceRevision: expectedRevision,
       alreadyApplied: false,
+      persistedResult: null,
     };
   } catch (error) {
     batchError = error;
@@ -195,31 +233,13 @@ export async function beginDraftApply(
 
   const current = await ownedDraftRow(user, id);
   const currentMetadata = parseApplyMetadata(current.reviewNote);
-  if (currentMetadata &&
-      (current.status === "approved_pending_apply" || current.status === "applied")) {
-    const isIdempotentRevision =
-      expectedRevision === current.revision ||
-      expectedRevision === currentMetadata.sourceRevision;
-    if (!isIdempotentRevision) throw new DraftConflictError(current.revision);
-    if (requestedId && requestedId !== currentMetadata.requestId) {
-      throw new DraftApplyRequestConflictError();
-    }
-    return {
-      draft: presentDraft(current),
-      requestId: currentMetadata.requestId,
-      sourceRevision: currentMetadata.sourceRevision,
-      alreadyApplied: current.status === "applied",
-    };
-  }
-  if (current.status === "approved_pending_apply") {
-    throw new DraftApplyRequestConflictError();
-  }
-  if (current.revision !== expectedRevision) {
-    throw new DraftConflictError(current.revision);
-  }
-  if (current.status !== "ready_for_review") {
-    throw new DraftLockedError(current.status);
-  }
+  const currentClaim = existingClaimOrThrow(
+    current,
+    currentMetadata,
+    expectedRevision,
+    requestedId,
+  );
+  if (currentClaim) return currentClaim;
   throw batchError;
 }
 
@@ -256,6 +276,93 @@ export async function failDraftApply(
     "failed",
     { code: code.slice(0, 80), message: message.slice(0, 500) },
   );
+}
+
+export async function returnDraftApplyForChanges(
+  user: ChatGPTUser,
+  id: string,
+  expectedRevision: number,
+  requestId: string,
+  code: string,
+  message: string,
+): Promise<LibrarianDraft> {
+  const db = getDb();
+  const existing = await ownedDraftRow(user, id);
+  const metadata = parseApplyMetadata(existing.reviewNote);
+  const decision = returnDecisionOrThrow(
+    existing,
+    metadata,
+    expectedRevision,
+    requestId,
+  );
+  if (decision === "already_returned") return presentDraft(existing);
+  if (!metadata) throw new DraftApplyRequestConflictError();
+
+  const now = new Date().toISOString();
+  const reviewNote = encodeApplyMetadata({
+    ...metadata,
+    completedAt: now,
+    outcome: "returned_for_changes",
+    code: code.slice(0, 80),
+    message: message.slice(0, 500),
+  });
+  let batchError: unknown;
+  try {
+    const [updatedRows] = await db.batch([
+      db
+        .update(librarianDrafts)
+        .set({
+          status: "draft",
+          revision: sql`${librarianDrafts.revision} + 1`,
+          submittedAt: null,
+          reviewedAt: null,
+          reviewedByUserId: null,
+          reviewedByEmail: null,
+          reviewNote,
+          updatedByUserId: user.userId,
+          updatedByEmail: user.email,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(librarianDrafts.id, id),
+            eq(librarianDrafts.ownerUserId, user.userId),
+            eq(librarianDrafts.status, "approved_pending_apply"),
+            eq(librarianDrafts.revision, expectedRevision),
+            eq(librarianDrafts.reviewNote, existing.reviewNote!),
+          ),
+        )
+        .returning(),
+      db.insert(librarianDraftEvents).values(
+        guardedDraftEventValues({
+          draftId: id,
+          user,
+          action: "returned_for_changes",
+          fromStatus: "approved_pending_apply",
+          toStatus: "draft",
+          revision: expectedRevision + 1,
+          createdAt: now,
+        }),
+      ),
+    ]);
+    const updated = updatedRows[0];
+    if (!updated) throw new Error("Returned draft did not return a row");
+    return presentDraft(updated);
+  } catch (error) {
+    batchError = error;
+  }
+
+  const current = await ownedDraftRow(user, id);
+  const currentMetadata = parseApplyMetadata(current.reviewNote);
+  const currentDecision = returnDecisionOrThrow(
+    current,
+    currentMetadata,
+    expectedRevision,
+    requestId,
+  );
+  if (currentDecision === "already_returned") return presentDraft(current);
+  if (current.reviewNote !== existing.reviewNote) throw new DraftApplyRequestConflictError();
+  throw batchError;
 }
 
 async function finishDraftApply(

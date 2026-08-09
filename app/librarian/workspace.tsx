@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   FormEvent,
   useCallback,
@@ -11,12 +12,20 @@ import {
 } from "react";
 
 import {
-  academicYearApplyConfirmation,
   classifyDraftApplyResponse,
+  draftApplyConfirmation,
   draftApplyDisabledReason,
   draftApplyUiAction,
   refreshedDraftApplyOutcome,
 } from "@/lib/draft-apply-ui";
+import { normalizeCoverPhotoForUpload } from "@/lib/cover-client";
+import {
+  entityVersionIsCurrent,
+  findEntityVersion,
+  isSnapshotVersion,
+  materialLocationQuantity,
+  type EntityVersionSnapshot,
+} from "@/lib/stale-snapshots";
 
 type DraftKind =
   | "material.create"
@@ -118,6 +127,8 @@ type ReferenceClassYear = {
 };
 
 type ReferenceData = {
+  materialVersions: EntityVersionSnapshot[];
+  classYearVersions: EntityVersionSnapshot[];
   teachers: ReferenceTeacher[];
   locations: ReferenceLocation[];
   academicYears: ReferenceAcademicYear[];
@@ -286,6 +297,8 @@ const SCENARIO_GROUPS = [
 ];
 
 const EMPTY_REFERENCE_DATA: ReferenceData = {
+  materialVersions: [],
+  classYearVersions: [],
   teachers: [],
   locations: [],
   academicYears: [],
@@ -413,7 +426,9 @@ export default function LibrarianWorkspace({
 
   useEffect(() => {
     const controller = new AbortController();
-    void loadWorkspace(controller.signal);
+    queueMicrotask(() => {
+      if (!controller.signal.aborted) void loadWorkspace(controller.signal);
+    });
     return () => controller.abort();
   }, [loadWorkspace]);
 
@@ -568,7 +583,7 @@ export default function LibrarianWorkspace({
         return;
       }
       if (applyInFlightRef.current) return;
-      if (!window.confirm(academicYearApplyConfirmation(draft.payload, action))) return;
+      if (!window.confirm(draftApplyConfirmation(draft.kind, draft.payload, action))) return;
 
       applyInFlightRef.current = draft.id;
       setApplyState({
@@ -576,7 +591,7 @@ export default function LibrarianWorkspace({
         draftId: draft.id,
         message: action === "resume"
           ? "Перевіряємо результат попереднього запиту…"
-          : "Вносимо навчальний рік до Google Sheets…",
+          : `Вносимо операцію «${KIND_LABELS[draft.kind]}» до Google Sheets…`,
       });
 
       try {
@@ -690,10 +705,10 @@ export default function LibrarianWorkspace({
   return (
     <main className="workspace-shell">
       <header className="workspace-header">
-        <a className="brand-lockup compact" href="/" aria-label="Єдина бібліотека — головна">
+        <Link className="brand-lockup compact" href="/" aria-label="Єдина бібліотека — головна">
           <img className="brand-logo" src={LOGO_URL} alt="" width="48" height="48" />
           <span><strong>Єдина бібліотека</strong><small>Кабінет бібліотекаря</small></span>
-        </a>
+        </Link>
 
         <div className="account-cluster">
           <a className="catalog-link" href={PUBLIC_CATALOG_URL}>Каталог <span aria-hidden="true">↗</span></a>
@@ -974,6 +989,7 @@ function OperationForm({
     initialDraft?.payload ?? null,
   );
   const [coverCleanupMessage, setCoverCleanupMessage] = useState("");
+  const [snapshotErrorMessage, setSnapshotErrorMessage] = useState("");
   const requestIdRef = useRef(initialDraft?.id ?? crypto.randomUUID());
   const [formVersion, setFormVersion] = useState(0);
   const initialPayload = initialDraft?.payload ?? {};
@@ -1001,6 +1017,25 @@ function OperationForm({
       setCoverCleanupMessage("Дочекайтеся завершення завантаження фотографії перед збереженням чернетки.");
       return;
     }
+
+    const missingSnapshot = form.querySelector<HTMLElement>(
+      '[data-required-snapshot="missing"]',
+    );
+    if (missingSnapshot) {
+      const message = missingSnapshot.dataset.snapshotMessage
+        || "Оновіть дані та повторно оберіть запис перед збереженням.";
+      setSnapshotErrorMessage(message);
+      missingSnapshot.scrollIntoView({ block: "center", behavior: "smooth" });
+      const focusName = missingSnapshot.dataset.snapshotFocus;
+      const focusTarget = focusName === "materialId"
+        ? form.querySelector<HTMLElement>("[data-material-picker-input]")
+        : focusName
+          ? form.elements.namedItem(focusName)
+          : null;
+      if (focusTarget instanceof HTMLElement) focusTarget.focus();
+      return;
+    }
+    setSnapshotErrorMessage("");
 
     if (kindNeedsMaterial(kind)) {
       const materialId = new FormData(form).get("materialId");
@@ -1070,6 +1105,19 @@ function OperationForm({
   const handleTransition = async (action: DraftAction) => {
     if (!draftId || !isPositiveRevision(draftRevision) || stale || operationBusy) return;
     if (action === "submit" && hasUnsavedChanges) return;
+    if (action === "submit") {
+      const missingSnapshot = formRef.current?.querySelector<HTMLElement>(
+        '[data-required-snapshot="missing"]',
+      );
+      if (missingSnapshot) {
+        setSnapshotErrorMessage(
+          missingSnapshot.dataset.snapshotMessage
+            || "Оновіть дані та повторно оберіть запис перед надсиланням.",
+        );
+        missingSnapshot.scrollIntoView({ block: "center", behavior: "smooth" });
+        return;
+      }
+    }
     if (
       action === "cancel"
       && !window.confirm("Скасувати цю чернетку? Дані в Google Sheets не зміняться.")
@@ -1099,6 +1147,7 @@ function OperationForm({
     setHasUnsavedChanges(false);
     setLastSavedPayload(null);
     setCoverCleanupMessage("");
+    setSnapshotErrorMessage("");
     requestIdRef.current = crypto.randomUUID();
     setFormVersion((current) => current + 1);
     onReset();
@@ -1119,6 +1168,7 @@ function OperationForm({
           || target instanceof HTMLTextAreaElement
         ) {
           target.setCustomValidity("");
+          setSnapshotErrorMessage("");
           markDirty();
         }
       }}
@@ -1129,8 +1179,8 @@ function OperationForm({
       </div>
 
       <fieldset className="operation-fields" key={formVersion} disabled={draftStatus !== "draft" || stale || operationBusy}>
-        {kind === "material.create" ? <NewMaterialFields catalog={catalog} initialPayload={initialPayload} savedCoverPhotoKey={draftCoverPhotoKey(kind, lastSavedPayload)} onDirty={markDirty} /> : null}
-        {kind === "material.update" ? <MaterialUpdateFields catalog={catalog} loading={catalogLoading} initialPayload={initialPayload} onDirty={markDirty} /> : null}
+        {kind === "material.create" ? <NewMaterialFields catalog={catalog} initialPayload={initialPayload} savedCoverPhotoKey={draftCoverPhotoKey(kind, lastSavedPayload)} referenceData={referenceData} onDirty={markDirty} /> : null}
+        {kind === "material.update" ? <MaterialUpdateFields catalog={catalog} loading={catalogLoading} initialPayload={initialPayload} referenceData={referenceData} onDirty={markDirty} /> : null}
         {kind === "receipt.create" ? <ReceiptFields catalog={catalog} loading={catalogLoading} initialPayload={initialPayload} referenceData={referenceData} onDirty={markDirty} /> : null}
         {kind === "transfer.create" ? <TransferFields catalog={catalog} loading={catalogLoading} initialPayload={initialPayload} referenceData={referenceData} onDirty={markDirty} /> : null}
         {kind === "writeoff.create" ? <WriteoffFields catalog={catalog} loading={catalogLoading} initialPayload={initialPayload} referenceData={referenceData} onDirty={markDirty} /> : null}
@@ -1139,7 +1189,7 @@ function OperationForm({
         {kind === "class-year.create" ? <ClassYearCreateFields initialPayload={initialPayload} referenceData={referenceData} referenceState={referenceState} /> : null}
         {kind === "class-year.update" ? <ClassYearUpdateFields initialPayload={initialPayload} referenceData={referenceData} referenceState={referenceState} /> : null}
         {kind === "class-year.close" ? <ClassYearCloseFields initialPayload={initialPayload} referenceData={referenceData} referenceState={referenceState} /> : null}
-        {kind === "academic-year.rollover" ? <AcademicYearRolloverFields initialPayload={initialPayload} referenceData={referenceData} referenceState={referenceState} /> : null}
+        {kind === "academic-year.rollover" ? <AcademicYearRolloverFields initialPayload={initialPayload} referenceData={referenceData} referenceState={referenceState} onDirty={markDirty} /> : null}
       </fieldset>
 
       {submitState.phase !== "idle" ? (
@@ -1156,6 +1206,12 @@ function OperationForm({
       {coverCleanupMessage ? (
         <div className="submit-message saving" role="status" aria-live="polite">
           <span aria-hidden="true">i</span>{coverCleanupMessage}
+        </div>
+      ) : null}
+
+      {snapshotErrorMessage ? (
+        <div className="submit-message error" role="alert" aria-live="assertive">
+          <span aria-hidden="true">!</span>{snapshotErrorMessage}
         </div>
       ) : null}
 
@@ -1216,11 +1272,13 @@ function NewMaterialFields({
   catalog,
   initialPayload,
   savedCoverPhotoKey,
+  referenceData,
   onDirty,
 }: {
   catalog: CatalogMaterial[];
   initialPayload: Record<string, unknown>;
   savedCoverPhotoKey: string;
+  referenceData: ReferenceData;
   onDirty: () => void;
 }) {
   const rubrics = catalogRubrics(catalog);
@@ -1240,6 +1298,13 @@ function NewMaterialFields({
   const [lookupCandidates, setLookupCandidates] = useState<BookLookupCandidate[]>([]);
   const [uploadState, setUploadState] = useState<SubmitState>({ phase: "idle", message: "" });
   const [previewFailed, setPreviewFailed] = useState(false);
+  const initialReceipt = nestedRecord(initialPayload, "initialReceipt");
+  const [includeInitialReceipt, setIncludeInitialReceipt] = useState(
+    Object.keys(initialReceipt).length > 0,
+  );
+  const initialReceiptLocationId = initialField(initialReceipt, "locationId")
+    || preferredInitialReceiptLocation(referenceData)?.id
+    || "";
   const lookupSequenceRef = useRef(0);
   const lookupAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
@@ -1362,18 +1427,16 @@ function NewMaterialFields({
   };
 
   const uploadPhoto = async (file: File) => {
-    if (file.size > 8 * 1024 * 1024) {
-      setUploadState({ phase: "error", message: "Фото має бути не більше 8 МБ." });
-      return;
-    }
     onDirty();
     const uploadGeneration = uploadRequestGenerationRef.current + 1;
     uploadRequestGenerationRef.current = uploadGeneration;
     const previousPhotoKey = coverPhotoKeyRef.current;
-    setUploadState({ phase: "saving", message: "Завантажуємо приватну копію фотографії…" });
-    const data = new FormData();
-    data.set("photo", file);
+    setUploadState({ phase: "saving", message: "Оптимізуємо й завантажуємо приватну копію фотографії…" });
     try {
+      const preparedFile = await normalizeCoverPhotoForUpload(file);
+      if (!mountedRef.current || uploadGeneration !== uploadRequestGenerationRef.current) return;
+      const data = new FormData();
+      data.set("photo", preparedFile);
       const response = await fetch("/api/librarian/cover-photo", { method: "POST", body: data });
       const body: unknown = await response.json();
       if (!response.ok || !isRecord(body) || body.success !== true || !isRecord(body.photo)) {
@@ -1389,7 +1452,7 @@ function NewMaterialFields({
       coverPhotoKeyRef.current = key;
       setCoverPhotoKey(key);
       onDirty();
-      setCoverPhotoName(name || file.name);
+      setCoverPhotoName(name || preparedFile.name);
       setCoverSourceUrl("");
       setCoverConfirmed(false);
       setPreviewFailed(false);
@@ -1512,7 +1575,7 @@ function NewMaterialFields({
               <span aria-hidden="true">▧</span>{uploadState.phase === "saving" ? "Завантаження…" : "Додати фото примірника"}
               <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" disabled={uploadState.phase === "saving"} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadPhoto(file); event.currentTarget.value = ""; }} />
             </label>
-            <small>JPG, PNG або WEBP до 8 МБ. Фото зберігається приватно до опрацювання.</small>
+            <small>JPG, PNG або WEBP до 24 МБ. Браузер перетворить фото на білий JPEG до 600 × 900 пікселів і 900 КіБ.</small>
           </div>
           {coverPhotoKey ? <input type="hidden" name="coverPhotoKey" value={coverPhotoKey} /> : null}
           {coverPhotoName ? <input type="hidden" name="coverPhotoName" value={coverPhotoName} /> : null}
@@ -1544,13 +1607,43 @@ function NewMaterialFields({
             </div>
           ) : null}
           {hasCoverSource ? (
-            <label className="cover-confirm field-wide">
-              <input name="coverConfirmed" type="checkbox" value="true" required checked={coverConfirmed} onChange={(event) => setCoverConfirmed(event.target.checked)} />
+            <label className="cover-confirm field-wide" htmlFor="new-material-cover-confirmed">
+              <input id="new-material-cover-confirmed" name="coverConfirmed" type="checkbox" value="true" required aria-label="Підтверджую цю обкладинку" checked={coverConfirmed} onChange={(event) => setCoverConfirmed(event.target.checked)} />
               <span><strong>Підтверджую цю обкладинку</strong><small>Файл буде оброблено лише після підтвердження бібліотекарем.</small></span>
             </label>
           ) : null}
           <label className="field field-wide"><span>Примітка</span><textarea name="notes" rows={3} defaultValue={initialField(initialPayload, "notes")} placeholder="Додаткова інформація для перевірки" /></label>
         </div>
+      </section>
+
+      <section className="form-section" aria-labelledby="new-receipt-heading">
+        <div className="section-heading"><span>04</span><div><h3 id="new-receipt-heading">Початкове надходження</h3><p>За бажанням одразу додайте примірники нового матеріалу на баланс</p></div></div>
+        <label className="cover-confirm field-wide" htmlFor="new-material-initial-receipt">
+          <input
+            id="new-material-initial-receipt"
+            type="checkbox"
+            aria-label="Одразу зареєструвати надходження"
+            checked={includeInitialReceipt}
+            onChange={(event) => {
+              setIncludeInitialReceipt(event.target.checked);
+              onDirty();
+            }}
+          />
+          <span>
+            <strong>Одразу зареєструвати надходження</strong>
+            <small>CAT-ID призначить система, а надходження буде створено лише після підтвердження всієї чернетки.</small>
+          </span>
+        </label>
+        {includeInitialReceipt ? (
+          <div className="field-grid">
+            <label className="field"><span>Кількість <b aria-hidden="true">*</b></span><input name="initialReceipt.quantity" type="number" inputMode="numeric" min="1" step="1" required defaultValue={initialField(initialReceipt, "quantity") || "1"} /></label>
+            <ProtectedLocationSelect name="initialReceipt.locationId" label="Місце надходження" required initialId={initialReceiptLocationId} referenceData={referenceData} />
+            <label className="field"><span>Стан <b aria-hidden="true">*</b></span><select name="initialReceipt.condition" required defaultValue={initialField(initialReceipt, "condition") || "Придатний"}><option>Придатний</option><option>Пошкоджений</option><option>Не перевірено</option></select></label>
+            <label className="field"><span>Дата <b aria-hidden="true">*</b></span><input name="initialReceipt.date" type="date" required defaultValue={initialField(initialReceipt, "date") || todayValue()} /></label>
+            <label className="field"><span>Номер документа</span><input name="initialReceipt.documentNumber" type="text" maxLength={100} defaultValue={initialField(initialReceipt, "documentNumber")} placeholder="Накладна, акт або інший документ" /></label>
+            <label className="field field-wide"><span>Примітка до надходження</span><textarea name="initialReceipt.notes" rows={2} defaultValue={initialField(initialReceipt, "notes")} placeholder="Необов’язково" /></label>
+          </div>
+        ) : null}
       </section>
     </>
   );
@@ -1560,11 +1653,13 @@ function MaterialUpdateFields({
   catalog,
   loading,
   initialPayload,
+  referenceData,
   onDirty,
 }: {
   catalog: CatalogMaterial[];
   loading: boolean;
   initialPayload: Record<string, unknown>;
+  referenceData: ReferenceData;
   onDirty: () => void;
 }) {
   const changes = nestedRecord(initialPayload, "changes");
@@ -1574,10 +1669,33 @@ function MaterialUpdateFields({
   const [coverConfirmed, setCoverConfirmed] = useState(
     changes.coverConfirmed === true || changes.coverConfirmed === "true",
   );
+  const retainedCoverPhotoKey = initialField(changes, "coverPhotoKey");
+  const retainedCoverPhotoName = initialField(changes, "coverPhotoName");
+  const retainUploadedPhoto = Boolean(retainedCoverPhotoKey && !coverSourceUrl.trim());
+  const [expectedVersion, setExpectedVersion] = useState(
+    initialField(initialPayload, "expectedVersion"),
+  );
+
+  const selectVersionedMaterial = (material: CatalogMaterial | null) => {
+    const materialId = material ? materialIdentifier(material) : "";
+    setExpectedVersion(
+      materialId
+        ? findEntityVersion(referenceData.materialVersions, materialId) ?? ""
+        : "",
+    );
+  };
 
   return (
     <>
-      <MaterialSection catalog={catalog} loading={loading} heading="Який матеріал змінюється" initialPayload={initialPayload} onDirty={onDirty} />
+      <MaterialSection catalog={catalog} loading={loading} heading="Який матеріал змінюється" initialPayload={initialPayload} onDirty={onDirty} onMaterialChange={selectVersionedMaterial} />
+      <SnapshotGuard
+        name="expectedVersion"
+        value={expectedVersion}
+        ready={isSnapshotVersion(expectedVersion)}
+        focusName="materialId"
+        readyMessage="Версію картки зафіксовано для безпечного оновлення."
+        missingMessage="Оновіть дані й повторно оберіть матеріал: без актуальної версії картку не можна змінювати."
+      />
       <section className="form-section" aria-labelledby="material-update-heading">
         <div className="section-heading"><span>02</span><div><h3 id="material-update-heading">Нові значення</h3><p>Заповніть лише поля, які треба змінити</p></div></div>
         <div className="field-grid">
@@ -1593,9 +1711,20 @@ function MaterialUpdateFields({
           <label className="field"><span>ISBN</span><input name="changes.isbn" type="text" inputMode="numeric" defaultValue={initialField(changes, "isbn")} placeholder="Без зміни" /></label>
           <label className="field"><span>Електронна версія</span><input name="changes.electronicUrl" type="url" inputMode="url" defaultValue={initialField(changes, "electronicUrl")} placeholder="https://…" /></label>
           <label className="field field-wide"><span>Нове джерело обкладинки</span><input name="changes.coverSourceUrl" type="url" inputMode="url" value={coverSourceUrl} onChange={(event) => { setCoverSourceUrl(event.target.value); setCoverConfirmed(false); }} placeholder="https://…" /><small>Додавайте лише коли потрібно замінити обкладинку.</small></label>
+          {retainUploadedPhoto ? (
+            <>
+              <input type="hidden" name="changes.coverPhotoKey" value={retainedCoverPhotoKey} />
+              {retainedCoverPhotoName ? <input type="hidden" name="changes.coverPhotoName" value={retainedCoverPhotoName} /> : null}
+              <input type="hidden" name="changes.coverConfirmed" value="true" />
+              <div className="lookup-status field-wide success" role="status">
+                <span aria-hidden="true">✓</span>
+                <p>Завантажене фото обкладинки збережено в цій чернетці.</p>
+              </div>
+            </>
+          ) : null}
           {coverSourceUrl.trim() ? (
-            <label className="cover-confirm field-wide">
-              <input name="changes.coverConfirmed" type="checkbox" value="true" required checked={coverConfirmed} onChange={(event) => setCoverConfirmed(event.target.checked)} />
+            <label className="cover-confirm field-wide" htmlFor="material-update-cover-confirmed">
+              <input id="material-update-cover-confirmed" name="changes.coverConfirmed" type="checkbox" value="true" required aria-label="Підтверджую нову обкладинку" checked={coverConfirmed} onChange={(event) => setCoverConfirmed(event.target.checked)} />
               <span><strong>Підтверджую нову обкладинку</strong><small>Зміна буде лише у чернетці до окремої перевірки.</small></span>
             </label>
           ) : null}
@@ -1620,13 +1749,29 @@ function WriteoffFields({
   referenceData: ReferenceData;
   onDirty: () => void;
 }) {
+  const stockSnapshot = useFrozenStockSnapshot(
+    catalog,
+    initialPayload,
+    referenceData,
+    "observedAvailableQuantity",
+    "fromLocationId",
+    "fromLocation",
+  );
   return (
     <>
-      <MaterialSection catalog={catalog} loading={loading} heading="Що списується" initialPayload={initialPayload} onDirty={onDirty} />
+      <MaterialSection catalog={catalog} loading={loading} heading="Що списується" initialPayload={initialPayload} onDirty={onDirty} onMaterialChange={stockSnapshot.onMaterialChange} />
+      <SnapshotGuard
+        name="observedAvailableQuantity"
+        value={stockSnapshot.snapshot}
+        ready={isQuantitySnapshot(stockSnapshot.snapshot)}
+        focusName="fromLocationId"
+        readyMessage={`Перевірений залишок у вибраному місці: ${stockSnapshot.snapshot}.`}
+        missingMessage="Оберіть матеріал і місце з актуального каталогу, щоб зафіксувати залишок перед списанням."
+      />
       <section className="form-section" aria-labelledby="writeoff-heading">
         <div className="section-heading"><span>02</span><div><h3 id="writeoff-heading">Акт списання</h3><p>Вкажіть звідки, скільки та з якої причини</p></div></div>
         <div className="field-grid">
-          <ProtectedLocationSelect name="fromLocationId" label="Звідки" required initialId={initialField(initialPayload, "fromLocationId")} referenceData={referenceData} />
+          <ProtectedLocationSelect name="fromLocationId" label="Звідки" required initialId={initialField(initialPayload, "fromLocationId")} referenceData={referenceData} onLocationChange={stockSnapshot.onLocationChange} />
           <label className="field"><span>Кількість <b aria-hidden="true">*</b></span><input name="quantity" type="number" inputMode="numeric" min="1" step="1" required defaultValue={initialField(initialPayload, "quantity") || "1"} /></label>
           <label className="field"><span>Службове призначення <b aria-hidden="true">*</b></span><select name="destination" required defaultValue={initialField(initialPayload, "destination") || "written_off"}><option value="written_off">Списано</option><option value="lost">Втрачено</option></select></label>
           <label className="field"><span>Причина <b aria-hidden="true">*</b></span><select name="reason" required defaultValue={initialField(initialPayload, "reason") || "worn"}><option value="worn">Зношено</option><option value="obsolete">Застаріло</option><option value="damaged">Пошкоджено</option><option value="lost">Втрачено</option><option value="other">Інша причина</option></select></label>
@@ -1697,15 +1842,32 @@ function ClassYearUpdateFields({
 }) {
   const changes = nestedRecord(initialPayload, "changes");
   const [classYearId, setClassYearId] = useState(initialField(initialPayload, "classYearId"));
+  const [expectedVersion, setExpectedVersion] = useState(
+    initialField(initialPayload, "expectedVersion"),
+  );
   const selected = referenceData.classYears.find((item) => item.id === classYearId);
-  const academicYearId = initialField(initialPayload, "academicYearId") || selected?.academicYearId || "";
+  const academicYearId = selected?.academicYearId || initialField(initialPayload, "academicYearId") || "";
+  const selectClassYear = (value: string) => {
+    setClassYearId(value);
+    setExpectedVersion(
+      value ? findEntityVersion(referenceData.classYearVersions, value) ?? "" : "",
+    );
+  };
   return (
     <section className="form-section first-section" aria-labelledby="class-update-heading">
       <div className="section-heading"><span>01</span><div><h3 id="class-update-heading">Зміни класу</h3><p>Порожнє поле означає «без зміни»</p></div></div>
       <ReferenceAvailability state={referenceState} />
       <div className="field-grid">
-        <ClassYearSelect name="classYearId" label="Клас" required initialId={classYearId} referenceData={referenceData} onChange={setClassYearId} />
+        <ClassYearSelect name="classYearId" label="Клас" required initialId={classYearId} referenceData={referenceData} onChange={selectClassYear} />
         <input name="academicYearId" type="hidden" value={academicYearId} />
+        <SnapshotGuard
+          name="expectedVersion"
+          value={expectedVersion}
+          ready={isSnapshotVersion(expectedVersion)}
+          focusName="classYearId"
+          readyMessage="Версію запису класу зафіксовано для безпечного оновлення."
+          missingMessage="Оновіть довідники й повторно оберіть клас: без актуальної версії його не можна змінювати."
+        />
         <label className="field"><span>Нова паралель</span><select name="changes.grade" defaultValue={initialField(changes, "grade")}><option value="">Без зміни</option>{gradeOptions()}</select></label>
         <label className="field"><span>Новий код</span><input name="changes.code" type="text" maxLength={16} defaultValue={initialField(changes, "code")} placeholder="Без зміни" /></label>
         <TeacherSelect name="changes.teacherUserId" label="Новий класний керівник" initialId={nullableDirectoryInitial(changes, "teacherUserId")} referenceData={referenceData} allowClear />
@@ -1726,12 +1888,24 @@ function ClassYearCloseFields({
   referenceData: ReferenceData;
   referenceState: ReferenceState;
 }) {
+  const initialClassYearId = initialField(initialPayload, "classYearId");
+  const [expectedVersion, setExpectedVersion] = useState(
+    initialField(initialPayload, "expectedVersion"),
+  );
   return (
     <section className="form-section first-section" aria-labelledby="class-close-heading">
       <div className="section-heading"><span>01</span><div><h3 id="class-close-heading">Закриття класу</h3><p>Запис залишиться в історії</p></div></div>
       <ReferenceAvailability state={referenceState} />
       <div className="field-grid">
-        <ClassYearSelect name="classYearId" label="Клас" required initialId={initialField(initialPayload, "classYearId")} referenceData={referenceData} />
+        <ClassYearSelect name="classYearId" label="Клас" required initialId={initialClassYearId} referenceData={referenceData} onChange={(value) => setExpectedVersion(value ? findEntityVersion(referenceData.classYearVersions, value) ?? "" : "")} />
+        <SnapshotGuard
+          name="expectedVersion"
+          value={expectedVersion}
+          ready={isSnapshotVersion(expectedVersion)}
+          focusName="classYearId"
+          readyMessage="Версію запису класу зафіксовано для безпечного закриття."
+          missingMessage="Оновіть довідники й повторно оберіть клас: без актуальної версії його не можна закрити."
+        />
         <label className="field"><span>Фактична дата закриття <b aria-hidden="true">*</b></span><input name="actualClosedDate" type="date" required defaultValue={initialField(initialPayload, "actualClosedDate") || todayValue()} /></label>
         <label className="field"><span>Причина <b aria-hidden="true">*</b></span><select name="reason" required defaultValue={initialField(initialPayload, "reason") || "closed"}><option value="closed">Закрито</option><option value="merged">Об’єднано</option><option value="graduated">Випуск</option><option value="reorganized">Реорганізація</option><option value="other">Інша</option></select></label>
         <label className="field"><span>Що робити з групою <b aria-hidden="true">*</b></span><select name="closeCohort" required defaultValue={initialBooleanField(initialPayload, "closeCohort", true)}><option value="true">Закрити класну групу</option><option value="false">Залишити групу для іншого класу</option></select></label>
@@ -1743,9 +1917,12 @@ function ClassYearCloseFields({
 
 type RolloverRow = {
   sourceClassYearId: string;
+  expectedVersion: string;
   cohortId: string;
   sourceGrade: number;
   className: string;
+  // "skip" is retained only while reopening a legacy unsafe draft. It has no
+  // option in the UI and blocks save/submit until the librarian replaces it.
   action: "promote" | "graduate" | "close" | "skip";
   targetGrade?: number;
   targetCode?: string;
@@ -1761,10 +1938,12 @@ function AcademicYearRolloverFields({
   initialPayload,
   referenceData,
   referenceState,
+  onDirty,
 }: {
   initialPayload: Record<string, unknown>;
   referenceData: ReferenceData;
   referenceState: ReferenceState;
+  onDirty: () => void;
 }) {
   const defaultSource = initialField(initialPayload, "sourceYearId")
     || referenceData.academicYears.find((year) => /active|актив/i.test(year.status))?.id
@@ -1781,12 +1960,19 @@ function AcademicYearRolloverFields({
 
   useEffect(() => {
     if (sourceYearId || !referenceData.academicYears.length) return;
+    let cancelled = false;
     const source = referenceData.academicYears.find((year) => /active|актив/i.test(year.status))?.id
       || referenceData.academicYears[0]?.id
       || "";
-    setSourceYearId(source);
-    setTargetYearId(nextAcademicYearId(source, referenceData.academicYears));
-    setRows(buildRolloverRows(source, referenceData));
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setSourceYearId(source);
+      setTargetYearId(nextAcademicYearId(source, referenceData.academicYears));
+      setRows(buildRolloverRows(source, referenceData));
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [referenceData, sourceYearId]);
 
   const changeSource = (value: string) => {
@@ -1798,6 +1984,18 @@ function AcademicYearRolloverFields({
     setRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, ...change } : row));
   };
   const safeLocations = protectedLocations(referenceData);
+  const rolloverSnapshotsReady = Boolean(rows.length) && rows.every((row) => (
+    row.action !== "skip"
+    && entityVersionIsCurrent(
+      referenceData.classYearVersions,
+      row.sourceClassYearId,
+      row.expectedVersion,
+    )
+  ));
+  const rebuildPlan = () => {
+    setRows(buildRolloverRows(sourceYearId, referenceData));
+    onDirty();
+  };
 
   return (
     <section className="form-section first-section" aria-labelledby="rollover-heading">
@@ -1811,6 +2009,23 @@ function AcademicYearRolloverFields({
       </div>
 
       <input name="rolloverClassesJson" type="hidden" value={JSON.stringify(rows.map(stripRolloverDisplayFields))} />
+      <SnapshotGuard
+        value={rolloverSnapshotsReady ? "ready" : ""}
+        ready={rolloverSnapshotsReady}
+        focusName="sourceYearId"
+        readyMessage="Версії всіх вихідних класів зафіксовано для безпечного переходу."
+        missingMessage="Оновіть довідники й перевірте дію кожного класу: «Пропустити» заборонено, а всі версії мають бути актуальними."
+      />
+      {!rolloverSnapshotsReady ? (
+        <button
+          className="button button-secondary"
+          type="button"
+          onClick={rebuildPlan}
+          disabled={referenceState.phase !== "ready" || !sourceYearId}
+        >
+          Оновити версії та перебудувати план
+        </button>
+      ) : null}
       <div className="rollover-list" aria-label="Класи для переходу">
         {rows.length ? rows.map((row, index) => (
           <article className="rollover-row" key={row.sourceClassYearId}>
@@ -1822,7 +2037,7 @@ function AcademicYearRolloverFields({
                 targetGrade: action === "promote" ? Math.min(row.sourceGrade + 1, 11) : undefined,
                 targetCode: action === "promote" ? row.targetCode || classCodeFromName(row.className) : undefined,
               });
-            }}><option value="promote" disabled={row.sourceGrade === 11}>Перевести</option><option value="graduate" disabled={row.sourceGrade !== 11}>Випуск</option><option value="close">Закрити</option><option value="skip">Пропустити</option></select></label>
+            }}><option value="promote" disabled={row.sourceGrade === 11}>Перевести</option><option value="graduate" disabled={row.sourceGrade !== 11}>Випуск</option><option value="close">Закрити</option></select></label>
             {row.action === "promote" ? (
               <>
                 <label className="field"><span>Нова паралель</span><select value={row.targetGrade ?? ""} onChange={(event) => updateRow(index, { targetGrade: Number(event.target.value) })}>{gradeOptions()}</select></label>
@@ -1904,9 +2119,25 @@ function TransferFields({
   onDirty: () => void;
 }) {
   const locations = catalogLocations(catalog);
+  const stockSnapshot = useFrozenStockSnapshot(
+    catalog,
+    initialPayload,
+    referenceData,
+    "observedAvailableQuantity",
+    "fromLocationId",
+    "fromLocation",
+  );
   return (
     <>
-      <MaterialSection catalog={catalog} loading={loading} heading="Що переміщується" initialPayload={initialPayload} onDirty={onDirty} />
+      <MaterialSection catalog={catalog} loading={loading} heading="Що переміщується" initialPayload={initialPayload} onDirty={onDirty} onMaterialChange={stockSnapshot.onMaterialChange} />
+      <SnapshotGuard
+        name="observedAvailableQuantity"
+        value={stockSnapshot.snapshot}
+        ready={isQuantitySnapshot(stockSnapshot.snapshot)}
+        focusName="fromLocationId"
+        readyMessage={`Перевірений залишок у початковому місці: ${stockSnapshot.snapshot}.`}
+        missingMessage="Оберіть матеріал і початкове місце з актуального каталогу, щоб зафіксувати залишок перед переміщенням."
+      />
       <section className="form-section" aria-labelledby="transfer-details-heading">
         <div className="section-heading"><span>02</span><div><h3 id="transfer-details-heading">Маршрут переміщення</h3><p>Звідки, куди та скільки примірників</p></div></div>
         <div className="field-grid">
@@ -1919,6 +2150,7 @@ function TransferFields({
             initialLegacy={initialField(initialPayload, "fromLocation")}
             referenceData={referenceData}
             fallbackLocations={locations}
+            onLocationChange={stockSnapshot.onLocationChange}
           />
           <DirectoryLocationField
             name="toLocationId"
@@ -1954,9 +2186,25 @@ function RevisionFields({
   onDirty: () => void;
 }) {
   const locations = catalogLocations(catalog);
+  const stockSnapshot = useFrozenStockSnapshot(
+    catalog,
+    initialPayload,
+    referenceData,
+    "expectedQuantity",
+    "locationId",
+    "location",
+  );
   return (
     <>
-      <MaterialSection catalog={catalog} loading={loading} heading="Що перевіряється" initialPayload={initialPayload} onDirty={onDirty} />
+      <MaterialSection catalog={catalog} loading={loading} heading="Що перевіряється" initialPayload={initialPayload} onDirty={onDirty} onMaterialChange={stockSnapshot.onMaterialChange} />
+      <SnapshotGuard
+        name="expectedQuantity"
+        value={stockSnapshot.snapshot}
+        ready={isQuantitySnapshot(stockSnapshot.snapshot)}
+        focusName="locationId"
+        readyMessage={`Очікуваний залишок у вибраному місці: ${stockSnapshot.snapshot}.`}
+        missingMessage="Оберіть матеріал і місце з актуального каталогу, щоб зафіксувати очікуваний залишок ревізії."
+      />
       <section className="form-section" aria-labelledby="revision-details-heading">
         <div className="section-heading"><span>02</span><div><h3 id="revision-details-heading">Фактичний залишок</h3><p>Запишіть те, що пораховано на місці</p></div></div>
         <div className="field-grid">
@@ -1969,6 +2217,7 @@ function RevisionFields({
             initialLegacy={initialField(initialPayload, "location")}
             referenceData={referenceData}
             fallbackLocations={locations}
+            onLocationChange={stockSnapshot.onLocationChange}
           />
           <label className="field"><span>Пораховано примірників <b aria-hidden="true">*</b></span><input name="countedQuantity" type="number" inputMode="numeric" min="0" step="1" required defaultValue={initialField(initialPayload, "countedQuantity")} /></label>
           <label className="field"><span>Дата <b aria-hidden="true">*</b></span><input name="date" type="date" required defaultValue={initialField(initialPayload, "date") || todayValue()} /></label>
@@ -1989,6 +2238,7 @@ function DirectoryLocationField({
   initialLegacy,
   referenceData,
   fallbackLocations,
+  onLocationChange,
 }: {
   name: string;
   legacyName: string;
@@ -1998,6 +2248,7 @@ function DirectoryLocationField({
   initialLegacy: string;
   referenceData: ReferenceData;
   fallbackLocations: string[];
+  onLocationChange?: (locationId: string, locationName: string) => void;
 }) {
   const locations = protectedLocations(referenceData);
   const listId = useId();
@@ -2009,13 +2260,14 @@ function DirectoryLocationField({
         required={required}
         initialId={initialId}
         referenceData={referenceData}
+        onLocationChange={onLocationChange}
       />
     );
   }
   return (
     <label className="field">
       <span>{label} {required ? <b aria-hidden="true">*</b> : null}</span>
-      <input name={legacyName} type="text" list={listId} required={required} autoComplete="off" defaultValue={initialLegacy} placeholder="Бібліотека або кабінет №" />
+      <input name={legacyName} type="text" list={listId} required={required} autoComplete="off" defaultValue={initialLegacy} onChange={onLocationChange ? (event) => onLocationChange("", event.target.value) : undefined} placeholder="Бібліотека або кабінет №" />
       <datalist id={listId}>{fallbackLocations.map((location) => <option key={location} value={location} />)}</datalist>
       <small>Тимчасово використовується каталог; захищений довідник не завантажено.</small>
     </label>
@@ -2029,6 +2281,7 @@ function ProtectedLocationSelect({
   referenceData,
   required = false,
   allowClear = false,
+  onLocationChange,
 }: {
   name: string;
   label: string;
@@ -2036,12 +2289,22 @@ function ProtectedLocationSelect({
   referenceData: ReferenceData;
   required?: boolean;
   allowClear?: boolean;
+  onLocationChange?: (locationId: string, locationName: string) => void;
 }) {
   const locations = protectedLocations(referenceData);
   return (
     <label className="field">
       <span>{label} {required ? <b aria-hidden="true">*</b> : null}</span>
-      <select name={name} required={required} defaultValue={initialId} disabled={!locations.length}>
+      <select
+        name={name}
+        required={required}
+        defaultValue={initialId}
+        disabled={!locations.length}
+        onChange={onLocationChange ? (event) => {
+          const location = locations.find((item) => item.id === event.target.value);
+          onLocationChange(location?.id ?? "", location?.name ?? "");
+        } : undefined}
+      >
         <option value="">{locations.length ? (allowClear ? "Без зміни" : "Не призначено") : "Довідник недоступний"}</option>
         {allowClear ? <option value="__clear__">Очистити значення</option> : null}
         {locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
@@ -2067,7 +2330,11 @@ function TeacherSelect({
   allowClear?: boolean;
 }) {
   const teachers = referenceData.teachers
-    .filter((teacher) => /^USR-\d{3,}$/u.test(teacher.id) && teacher.name.trim())
+    .filter((teacher) => (
+      /^USR-\d{3,}$/u.test(teacher.id)
+      && teacher.name.trim()
+      && isActiveReferenceStatus(teacher.status)
+    ))
     .sort((left, right) => left.name.localeCompare(right.name, "uk"));
   return (
     <label className="field">
@@ -2154,18 +2421,119 @@ function ReferenceAvailability({ state }: { state: ReferenceState }) {
   );
 }
 
+function SnapshotGuard({
+  name,
+  value,
+  ready,
+  focusName,
+  readyMessage,
+  missingMessage,
+}: {
+  name?: string;
+  value: string;
+  ready: boolean;
+  focusName: string;
+  readyMessage: string;
+  missingMessage: string;
+}) {
+  return (
+    <>
+      {name ? <input type="hidden" name={name} value={value} /> : null}
+      <div
+        className={`reference-ready ${ready ? "" : "error"}`.trim()}
+        role={ready ? "status" : "alert"}
+        data-required-snapshot={ready ? "ready" : "missing"}
+        data-snapshot-focus={focusName}
+        data-snapshot-message={missingMessage}
+      >
+        <span aria-hidden="true">{ready ? "✓" : "!"}</span>
+        {ready ? readyMessage : missingMessage}
+      </div>
+    </>
+  );
+}
+
+function isQuantitySnapshot(value: string): boolean {
+  const quantity = Number(value);
+  return value !== ""
+    && Number.isInteger(quantity)
+    && quantity >= 0
+    && quantity <= 100_000;
+}
+
+function useFrozenStockSnapshot(
+  catalog: CatalogMaterial[],
+  initialPayload: Record<string, unknown>,
+  referenceData: ReferenceData,
+  snapshotField: "observedAvailableQuantity" | "expectedQuantity",
+  locationIdField: "fromLocationId" | "locationId",
+  legacyLocationField: "fromLocation" | "location",
+) {
+  const initialMaterialId = initialField(initialPayload, "materialId");
+  const initialMaterial = catalog.find(
+    (material) => materialIdentifier(material) === initialMaterialId,
+  ) ?? null;
+  const initialLocationId = initialField(initialPayload, locationIdField);
+  const initialLegacyLocation = initialField(initialPayload, legacyLocationField);
+  const selectableLocations = protectedLocations(referenceData);
+  const initialLocationName = selectableLocations.find(
+    (location) => location.id === initialLocationId,
+  )?.name ?? initialLegacyLocation;
+  const [selectedMaterial, setSelectedMaterial] = useState<CatalogMaterial | null>(
+    initialMaterial,
+  );
+  const [selectedLocationId, setSelectedLocationId] = useState(initialLocationId);
+  const [selectedLocationName, setSelectedLocationName] = useState(initialLocationName);
+  const [snapshot, setSnapshot] = useState(
+    initialField(initialPayload, snapshotField),
+  );
+
+  const calculate = (
+    material: CatalogMaterial | null,
+    locationId: string,
+    locationName: string,
+  ) => {
+    const resolvedName = protectedLocations(referenceData).find(
+      (location) => location.id === locationId,
+    )?.name ?? locationName;
+    const quantity = materialLocationQuantity(
+      material,
+      resolvedName,
+      [
+        ...protectedLocations(referenceData).map((location) => location.name),
+        ...catalogLocations(catalog),
+      ],
+    );
+    setSnapshot(quantity === null ? "" : String(quantity));
+  };
+
+  const onMaterialChange = (material: CatalogMaterial | null) => {
+    setSelectedMaterial(material);
+    calculate(material, selectedLocationId, selectedLocationName);
+  };
+  const onLocationChange = (locationId: string, locationName: string) => {
+    setSelectedLocationId(locationId);
+    setSelectedLocationName(locationName);
+    calculate(selectedMaterial, locationId, locationName);
+  };
+
+  return { snapshot, onMaterialChange, onLocationChange };
+}
+
 function MaterialSection({
   catalog,
   loading,
   heading,
   initialPayload,
   onDirty,
+  onMaterialChange,
 }: {
   catalog: CatalogMaterial[];
   loading: boolean;
   heading: string;
   initialPayload: Record<string, unknown>;
   onDirty: () => void;
+  onMaterialChange?: (material: CatalogMaterial | null) => void;
 }) {
   return (
     <section className="form-section" aria-labelledby="material-lookup-heading">
@@ -2175,6 +2543,7 @@ function MaterialSection({
         loading={loading}
         initialId={initialField(initialPayload, "materialId")}
         onDirty={onDirty}
+        onMaterialChange={onMaterialChange}
       />
     </section>
   );
@@ -2185,11 +2554,13 @@ function MaterialPicker({
   loading,
   initialId,
   onDirty,
+  onMaterialChange,
 }: {
   catalog: CatalogMaterial[];
   loading: boolean;
   initialId: string;
   onDirty: () => void;
+  onMaterialChange?: (material: CatalogMaterial | null) => void;
 }) {
   const initialMaterial = catalog.find((material) => materialIdentifier(material) === initialId);
   const [query, setQuery] = useState(initialMaterial ? materialDisplayTitle(initialMaterial) : initialId);
@@ -2211,6 +2582,7 @@ function MaterialPicker({
     setQuery(materialDisplayTitle(material));
     setShowResults(false);
     inputRef.current?.setCustomValidity("");
+    onMaterialChange?.(material);
     onDirty();
   };
 
@@ -2221,6 +2593,7 @@ function MaterialPicker({
       setSelectedId("");
       setQuery(value);
       setShowResults(true);
+      onMaterialChange?.(null);
       onDirty();
     }
   };
@@ -2249,6 +2622,7 @@ function MaterialPicker({
               setQuery(event.target.value);
               setSelectedId("");
               setShowResults(true);
+              onMaterialChange?.(null);
               onDirty();
             }}
             onFocus={() => setShowResults(true)}
@@ -2290,7 +2664,7 @@ function MaterialPicker({
       ) : null}
 
       {selectedId ? (
-        <button className="change-material" type="button" onClick={() => { setSelectedId(""); setQuery(""); inputRef.current?.setCustomValidity(""); inputRef.current?.focus(); onDirty(); }}>
+        <button className="change-material" type="button" onClick={() => { setSelectedId(""); setQuery(""); inputRef.current?.setCustomValidity(""); inputRef.current?.focus(); onMaterialChange?.(null); onDirty(); }}>
           Змінити матеріал
         </button>
       ) : null}
@@ -2379,7 +2753,10 @@ function CameraScanner({
   const focusScopeActiveRef = useRef(false);
   const fallbackRequestedRef = useRef(false);
   const onFallbackRef = useRef(onFallback);
-  onFallbackRef.current = onFallback;
+
+  useEffect(() => {
+    onFallbackRef.current = onFallback;
+  }, [onFallback]);
 
   const stop = useCallback(() => {
     scanningRef.current = false;
@@ -2585,11 +2962,15 @@ function formPayload(
 ): Record<string, unknown> {
   const flat: Record<string, unknown> = {};
   const changes: Record<string, unknown> = {};
+  const initialReceipt: Record<string, unknown> = {};
   for (const [key, rawValue] of formData.entries()) {
     if (typeof rawValue !== "string") continue;
     const value = rawValue.trim();
     if (!value) continue;
     if (key.startsWith("changes.")) changes[key.slice("changes.".length)] = value;
+    else if (key.startsWith("initialReceipt.")) {
+      initialReceipt[key.slice("initialReceipt.".length)] = value;
+    }
     else flat[key] = value;
   }
 
@@ -2599,15 +2980,27 @@ function formPayload(
   const numericFields = kind === "material.create"
     ? ["year", "classFrom", "classTo"]
     : kind === "revision.count"
-      ? ["countedQuantity"]
-      : kind === "receipt.create" || kind === "transfer.create" || kind === "writeoff.create"
-        ? ["quantity"]
+      ? ["countedQuantity", "expectedQuantity"]
+      : kind === "transfer.create" || kind === "writeoff.create"
+        ? ["quantity", "observedAvailableQuantity"]
+        : kind === "receipt.create"
+          ? ["quantity"]
         : kind === "class-year.create"
           ? ["grade"]
           : [];
   numericFields.forEach((field) => convertNumericField(flat, field));
   if (kind === "material.update") {
     ["year", "classFrom", "classTo"].forEach((field) => convertNumericField(changes, field));
+  }
+  if (kind === "material.create" && Object.keys(initialReceipt).length > 0) {
+    convertNumericField(initialReceipt, "quantity");
+    appendDirectorySnapshot(
+      initialReceipt,
+      "locationId",
+      "locationName",
+      referenceData.locations,
+    );
+    flat.initialReceipt = initialReceipt;
   }
   if (kind === "class-year.update") convertNumericField(changes, "grade");
   if (kind === "class-year.close" && typeof flat.closeCohort === "string") {
@@ -2744,6 +3137,8 @@ function readSavedDraft(value: unknown): SavedDraft | null {
 }
 
 function normalizeReferenceData(value: Record<string, unknown>): ReferenceData {
+  const materialVersions = normalizeEntityVersions(value.materialVersions, /^CAT-\d{4,}$/u);
+  const classYearVersions = normalizeEntityVersions(value.classYearVersions, /^CY-20\d{2}-\d{3,}$/u);
   const teachers = Array.isArray(value.teachers)
     ? value.teachers.flatMap((item): ReferenceTeacher[] => {
         if (!isRecord(item)) return [];
@@ -2805,7 +3200,29 @@ function normalizeReferenceData(value: Record<string, unknown>): ReferenceData {
         }];
       })
     : [];
-  return { teachers, locations, academicYears, classYears };
+  return {
+    materialVersions,
+    classYearVersions,
+    teachers,
+    locations,
+    academicYears,
+    classYears,
+  };
+}
+
+function normalizeEntityVersions(
+  value: unknown,
+  idPattern: RegExp,
+): EntityVersionSnapshot[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): EntityVersionSnapshot[] => {
+    if (!isRecord(item)) return [];
+    const id = readText(item, ["id"]);
+    const version = readText(item, ["version"]);
+    return idPattern.test(id) && isSnapshotVersion(version)
+      ? [{ id, version }]
+      : [];
+  });
 }
 
 function readText(record: Record<string, unknown>, keys: string[]): string {
@@ -2852,8 +3269,22 @@ function protectedLocations(referenceData: ReferenceData): ReferenceLocation[] {
       && location.id !== "LOC-007"
       && location.id !== "LOC-008"
       && location.name.trim()
+      && isActiveReferenceStatus(location.status)
     ))
     .sort((left, right) => left.name.localeCompare(right.name, "uk", { numeric: true }));
+}
+
+function isActiveReferenceStatus(status: string): boolean {
+  return /^(?:active|актив)/iu.test(status.trim());
+}
+
+function preferredInitialReceiptLocation(
+  referenceData: ReferenceData,
+): ReferenceLocation | undefined {
+  const locations = protectedLocations(referenceData);
+  return locations.find((location) => location.id === "LOC-001")
+    ?? locations.find((location) => /бібліотек/i.test(location.name))
+    ?? locations[0];
 }
 
 function uniqueCohorts(classYears: ReferenceClassYear[]): Array<{ id: string; label: string }> {
@@ -2890,8 +3321,8 @@ function buildRolloverRows(
       && typeof item.grade === "number"
       && item.grade >= 1
       && item.grade <= 11
+      && isActiveReferenceStatus(item.status)
       && !item.actualClosedDate
-      && !/closed|закрит/i.test(item.status)
     ))
     .sort((left, right) => left.className.localeCompare(right.className, "uk", { numeric: true }))
     .map((item) => {
@@ -2900,6 +3331,7 @@ function buildRolloverRows(
       const graduate = item.grade === 11;
       return {
         sourceClassYearId: item.id,
+        expectedVersion: findEntityVersion(referenceData.classYearVersions, item.id) ?? "",
         cohortId: item.cohortId,
         sourceGrade: item.grade!,
         className: item.className || `${item.grade}-${item.code}`,
@@ -2922,6 +3354,7 @@ function rolloverRowsFromPayload(
   return payload.classes.flatMap((item): RolloverRow[] => {
     if (!isRecord(item)) return [];
     const sourceClassYearId = readText(item, ["sourceClassYearId"]);
+    const expectedVersion = readText(item, ["expectedVersion"]);
     const cohortId = readText(item, ["cohortId"]);
     const sourceGrade = readNumber(item, ["sourceGrade"]);
     const action = readText(item, ["action"]);
@@ -2936,6 +3369,7 @@ function rolloverRowsFromPayload(
     ) return [];
     return [{
       sourceClassYearId,
+      expectedVersion,
       cohortId,
       sourceGrade,
       className: sourceClass?.className
@@ -2955,6 +3389,7 @@ function rolloverRowsFromPayload(
 function stripRolloverDisplayFields(row: RolloverRow): Record<string, unknown> {
   return {
     sourceClassYearId: row.sourceClassYearId,
+    expectedVersion: row.expectedVersion,
     cohortId: row.cohortId,
     sourceGrade: row.sourceGrade,
     action: row.action,

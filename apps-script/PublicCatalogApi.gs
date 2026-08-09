@@ -14,6 +14,24 @@ var PUBLIC_CATALOG_CONFIG = Object.freeze({
   excludedLocationIds: ["LOC-007", "LOC-008"],
 });
 
+function publicCatalogSpreadsheetId_() {
+  var rawConfiguredId = PropertiesService.getScriptProperties()
+    .getProperty("PUBLIC_CATALOG_SPREADSHEET_ID");
+  if (rawConfiguredId === null || typeof rawConfiguredId === "undefined") {
+    return PUBLIC_CATALOG_CONFIG.spreadsheetId;
+  }
+
+  var configuredId = String(rawConfiguredId).trim();
+  if (!/^[A-Za-z0-9_-]{20,}$/.test(configuredId)) {
+    throw new Error("Некоректний PUBLIC_CATALOG_SPREADSHEET_ID у властивостях скрипту.");
+  }
+  return configuredId;
+}
+
+function publicCatalogCachePrefix_(spreadsheetId) {
+  return PUBLIC_CATALOG_CONFIG.cachePrefix + ":" + spreadsheetId;
+}
+
 function doGet(e) {
   try {
     var payload = getPublicCatalogPayload_();
@@ -30,26 +48,29 @@ function doGet(e) {
 }
 
 function getPublicCatalogPayload_() {
-  var cached = readCachedPayload_();
+  var spreadsheetId = publicCatalogSpreadsheetId_();
+  var cachePrefix = publicCatalogCachePrefix_(spreadsheetId);
+  var cached = readCachedPayload_(cachePrefix);
   if (cached) return cached;
 
   var lock = LockService.getScriptLock();
   var hasLock = lock.tryLock(5000);
   try {
     if (hasLock) {
-      cached = readCachedPayload_();
+      cached = readCachedPayload_(cachePrefix);
       if (cached) return cached;
     }
-    var payload = buildPublicCatalogPayload_();
-    if (hasLock) writeCachedPayload_(payload);
+    var payload = buildPublicCatalogPayload_(spreadsheetId);
+    if (hasLock) writeCachedPayload_(payload, cachePrefix);
     return payload;
   } finally {
     if (hasLock) lock.releaseLock();
   }
 }
 
-function buildPublicCatalogPayload_() {
-  var spreadsheet = SpreadsheetApp.openById(PUBLIC_CATALOG_CONFIG.spreadsheetId);
+function buildPublicCatalogPayload_(spreadsheetId) {
+  var targetSpreadsheetId = spreadsheetId || publicCatalogSpreadsheetId_();
+  var spreadsheet = SpreadsheetApp.openById(targetSpreadsheetId);
   var materialsSheet = requiredSheet_(spreadsheet, "Матеріали");
   var coversSheet = requiredSheet_(spreadsheet, "Обкладинки");
   var balancesSheet = requiredSheet_(spreadsheet, "Баланс");
@@ -219,15 +240,16 @@ function positiveInteger_(value) {
   return Number.isFinite(number) && number > 0 ? number : 0;
 }
 
-function readCachedPayload_() {
+function readCachedPayload_(cachePrefix) {
   var cache = CacheService.getScriptCache();
-  var metaText = cache.get(PUBLIC_CATALOG_CONFIG.cachePrefix + ":meta");
+  var prefix = cachePrefix || publicCatalogCachePrefix_(publicCatalogSpreadsheetId_());
+  var metaText = cache.get(prefix + ":meta");
   if (!metaText) return null;
   try {
     var meta = JSON.parse(metaText);
     if (!meta || !Number.isInteger(meta.chunks) || meta.chunks < 1 || meta.chunks > 100) return null;
     var keys = [];
-    for (var index = 0; index < meta.chunks; index += 1) keys.push(PUBLIC_CATALOG_CONFIG.cachePrefix + ":" + index);
+    for (var index = 0; index < meta.chunks; index += 1) keys.push(prefix + ":" + index);
     var values = cache.getAll(keys);
     var json = keys.map(function (key) { return values[key] || ""; }).join("");
     if (json.length !== meta.length) return null;
@@ -237,16 +259,17 @@ function readCachedPayload_() {
   }
 }
 
-function writeCachedPayload_(payload) {
+function writeCachedPayload_(payload, cachePrefix) {
   var cache = CacheService.getScriptCache();
+  var prefix = cachePrefix || publicCatalogCachePrefix_(publicCatalogSpreadsheetId_());
   var json = JSON.stringify(payload);
   var chunkSize = PUBLIC_CATALOG_CONFIG.cacheChunkCharacters;
   var chunks = [];
   for (var start = 0; start < json.length; start += chunkSize) chunks.push(json.slice(start, start + chunkSize));
   chunks.forEach(function (chunk, index) {
-    cache.put(PUBLIC_CATALOG_CONFIG.cachePrefix + ":" + index, chunk, PUBLIC_CATALOG_CONFIG.cacheSeconds);
+    cache.put(prefix + ":" + index, chunk, PUBLIC_CATALOG_CONFIG.cacheSeconds);
   });
-  cache.put(PUBLIC_CATALOG_CONFIG.cachePrefix + ":meta", JSON.stringify({ chunks: chunks.length, length: json.length }), PUBLIC_CATALOG_CONFIG.cacheSeconds);
+  cache.put(prefix + ":meta", JSON.stringify({ chunks: chunks.length, length: json.length }), PUBLIC_CATALOG_CONFIG.cacheSeconds);
 }
 
 function jsonResponse_(payload, callback) {

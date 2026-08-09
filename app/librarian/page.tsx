@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { chatGPTSignOutPath, requireChatGPTUser } from "@/app/chatgpt-auth";
 import { getLibrarianAccess } from "@/lib/librarian-access";
 import { isSheetsGatewayConfigured } from "@/lib/sheets-gateway";
@@ -50,7 +51,7 @@ export default async function LibrarianPage() {
           </dl>
 
           <div className="access-actions">
-            <a className="button button-primary" href="/">Повернутися на головну</a>
+            <Link className="button button-primary" href="/">Повернутися на головну</Link>
             <a className="button button-secondary" href={chatGPTSignOutPath("/")}>Вийти з облікового запису</a>
           </div>
         </section>
