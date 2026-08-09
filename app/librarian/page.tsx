@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { chatGPTSignOutPath, requireChatGPTUser } from "@/app/chatgpt-auth";
 import { getLibrarianAccess } from "@/lib/librarian-access";
+import { isSheetsGatewayConfigured } from "@/lib/sheets-gateway";
 import LibrarianWorkspace from "./workspace";
 
 export const dynamic = "force-dynamic";
@@ -62,6 +63,7 @@ export default async function LibrarianPage() {
       displayName={user.displayName}
       role={access.role ?? "librarian"}
       writesEnabled={access.writesEnabled}
+      gatewayConfigured={isSheetsGatewayConfigured()}
       signOutHref={chatGPTSignOutPath("/")}
     />
   );

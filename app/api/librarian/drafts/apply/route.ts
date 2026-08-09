@@ -151,7 +151,7 @@ export async function POST(request: Request) {
         {
           success: false,
           code: "apply_outcome_unknown",
-          error: "Не вдалося підтвердити відповідь Google Sheets. Запит можна безпечно повторити з тим самим requestId після оновлення ревізії.",
+          error: "Не вдалося підтвердити відповідь Google Sheets. Оновіть дані й натисніть «Перевірити результат» — система повторно використає попередній запит.",
           draft: claim.draft,
           currentRevision: claim.draft.revision,
           requestId: claim.requestId,
