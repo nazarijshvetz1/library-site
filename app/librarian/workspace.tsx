@@ -10,6 +10,14 @@ import {
   useState,
 } from "react";
 
+import {
+  academicYearApplyConfirmation,
+  classifyDraftApplyResponse,
+  draftApplyDisabledReason,
+  draftApplyUiAction,
+  refreshedDraftApplyOutcome,
+} from "@/lib/draft-apply-ui";
+
 type DraftKind =
   | "material.create"
   | "material.update"
@@ -50,6 +58,12 @@ type LoadState = "loading" | "ready" | "error";
 
 type SubmitState = {
   phase: "idle" | "saving" | "success" | "error";
+  message: string;
+};
+
+type ApplyState = {
+  phase: "idle" | "applying" | "success" | "error" | "unknown";
+  draftId: string | null;
   message: string;
 };
 
@@ -131,6 +145,7 @@ type WorkspaceProps = {
   displayName: string;
   role: "librarian" | "admin";
   writesEnabled: boolean;
+  gatewayConfigured: boolean;
   signOutHref: string;
 };
 
@@ -281,6 +296,7 @@ export default function LibrarianWorkspace({
   displayName,
   role,
   writesEnabled,
+  gatewayConfigured,
   signOutHref,
 }: WorkspaceProps) {
   const [activeKind, setActiveKind] = useState<DraftKind>("material.create");
@@ -305,6 +321,12 @@ export default function LibrarianWorkspace({
     phase: "idle",
     message: "",
   });
+  const [applyState, setApplyState] = useState<ApplyState>({
+    phase: "idle",
+    draftId: null,
+    message: "",
+  });
+  const applyInFlightRef = useRef<string | null>(null);
 
   const loadWorkspace = useCallback(async (signal?: AbortSignal) => {
     setLoadState("loading");
@@ -380,10 +402,12 @@ export default function LibrarianWorkspace({
       }
       setLoadState("ready");
       setLoadMessage("Дані готові до роботи");
+      return loadedDrafts;
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (error instanceof DOMException && error.name === "AbortError") return [];
       setLoadState("error");
       setLoadMessage(error instanceof Error ? error.message : "Сталася помилка завантаження");
+      return [];
     }
   }, []);
 
@@ -523,10 +547,114 @@ export default function LibrarianWorkspace({
     [],
   );
 
+  const applyDraft = useCallback(
+    async (draft: SavedDraft) => {
+      const action = draftApplyUiAction(draft.kind, draft.status);
+      if (!action || !isPositiveRevision(draft.revision)) return;
+      if (!writesEnabled) {
+        setApplyState({
+          phase: "error",
+          draftId: draft.id,
+          message: "Запис у Google Sheets вимкнено. Чернетку не змінено.",
+        });
+        return;
+      }
+      if (!gatewayConfigured) {
+        setApplyState({
+          phase: "error",
+          draftId: draft.id,
+          message: "Захищений шлюз Google Sheets ще не налаштовано. Чернетку не змінено.",
+        });
+        return;
+      }
+      if (applyInFlightRef.current) return;
+      if (!window.confirm(academicYearApplyConfirmation(draft.payload, action))) return;
+
+      applyInFlightRef.current = draft.id;
+      setApplyState({
+        phase: "applying",
+        draftId: draft.id,
+        message: action === "resume"
+          ? "Перевіряємо результат попереднього запиту…"
+          : "Вносимо навчальний рік до Google Sheets…",
+      });
+
+      try {
+        const response = await fetch("/api/librarian/drafts/apply", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: draft.id, revision: draft.revision }),
+        });
+        const body: unknown = await response.json().catch(() => null);
+        const updated = readSavedDraft(isRecord(body) ? body.draft : null);
+        if (updated) {
+          setDrafts((current) => [
+            updated,
+            ...current.filter((item) => item.id !== updated.id),
+          ]);
+          if (
+            editingDraftRef.current?.id === updated.id
+            && !formStateRef.current.dirty
+          ) {
+            editingDraftRef.current = updated;
+            setEditingDraft(updated);
+            setFormOpenVersion((current) => current + 1);
+          }
+        }
+
+        const outcome = classifyDraftApplyResponse(response.status, body);
+        setApplyState({
+          phase: outcome.phase,
+          draftId: draft.id,
+          message: outcome.message,
+        });
+        if (outcome.phase === "success" || outcome.phase === "unknown" || outcome.stale) {
+          const refreshedDrafts = await loadWorkspace();
+          if (outcome.phase === "unknown" || outcome.stale) {
+            const refreshed = refreshedDrafts.find((item) => item.id === draft.id);
+            const reconciled = refreshedDraftApplyOutcome(refreshed?.status ?? "");
+            if (reconciled) {
+              setApplyState({
+                phase: reconciled.phase,
+                draftId: draft.id,
+                message: reconciled.message,
+              });
+            }
+          }
+        }
+      } catch {
+        const outcome = classifyDraftApplyResponse(0, null);
+        setApplyState({
+          phase: outcome.phase,
+          draftId: draft.id,
+          message: outcome.message,
+        });
+        const refreshedDrafts = await loadWorkspace();
+        const refreshed = refreshedDrafts.find((item) => item.id === draft.id);
+        const reconciled = refreshedDraftApplyOutcome(refreshed?.status ?? "");
+        if (reconciled) {
+          setApplyState({
+            phase: reconciled.phase,
+            draftId: draft.id,
+            message: reconciled.message,
+          });
+        }
+      } finally {
+        applyInFlightRef.current = null;
+      }
+    },
+    [gatewayConfigured, loadWorkspace, writesEnabled],
+  );
+
   const materialCount = readNumber(apiStats, ["materials", "materialCount", "totalMaterials"])
     ?? catalog.length;
   const draftCount = drafts.length;
   const todayCount = drafts.filter((draft) => isToday(draft.createdAt)).length;
+  const visibleDrafts = useMemo(() => {
+    const recoverable = drafts.filter((draft) => draftApplyUiAction(draft.kind, draft.status));
+    const remaining = drafts.filter((draft) => !draftApplyUiAction(draft.kind, draft.status));
+    return [...recoverable, ...remaining].slice(0, 8);
+  }, [drafts]);
   const activeScenario = SCENARIOS.find((item) => item.kind === activeKind) ?? SCENARIOS[0];
 
   const confirmDiscardChanges = () => (
@@ -604,7 +732,10 @@ export default function LibrarianWorkspace({
 
           <div className="sidebar-safety">
             <span aria-hidden="true">◉</span>
-            <div><strong>Безпечний режим</strong><p>Усі дії зберігаються як чернетки.</p></div>
+            <div>
+              <strong>{writesEnabled ? "Контрольований режим" : "Безпечний режим"}</strong>
+              <p>{writesEnabled ? "Запис потребує окремого підтвердження." : "Усі дії зберігаються як чернетки."}</p>
+            </div>
           </div>
         </aside>
 
@@ -615,25 +746,26 @@ export default function LibrarianWorkspace({
               <h1 id="workspace-title">{activeScenario.label}</h1>
               <p>{activeScenario.description}. Перевірте дані перед збереженням.</p>
             </div>
-            <button className="refresh-button" type="button" onClick={() => void loadWorkspace()} disabled={loadState === "loading"}>
-              <span aria-hidden="true">↻</span> {loadState === "loading" ? "Оновлення…" : "Оновити дані"}
+            <button className="refresh-button" type="button" onClick={() => void loadWorkspace()} disabled={loadState === "loading" || applyState.phase === "applying"}>
+              <span aria-hidden="true">↻</span> {applyState.phase === "applying" ? "Обробка…" : loadState === "loading" ? "Оновлення…" : "Оновити дані"}
             </button>
           </div>
 
           <div className="draft-safety-banner" role="status">
             <span className="safety-icon" aria-hidden="true">✎</span>
             <div>
-              <strong>Режим чернетки · Google Sheets не змінено</strong>
-              <p>
-                Збережені записи очікують окремої перевірки та підтвердження бібліотекарем.
-                {writesEnabled ? " Автоматичний запис у таблицю для цієї форми все одно не виконується." : ""}
-              </p>
+              <strong>{writesEnabled ? "Контрольований запис увімкнено" : "Безпечний режим · Google Sheets не змінюється"}</strong>
+              <p>{writesEnabled
+                ? gatewayConfigured
+                  ? "Автоматично нічого не вноситься. Після перевірки можна окремо підтвердити лише створення навчального року; інші операції залишаються чернетками."
+                  : "Запис дозволено, але захищений шлюз ще не налаштовано. Жодна чернетка не може бути внесена до Google Sheets."
+                : "Збережені записи очікують окремої перевірки. Застосування до Google Sheets вимкнено на сервері."}</p>
             </div>
           </div>
 
           <section className="summary-row" aria-label="Стан робочих даних">
             <article><span>Матеріалів у каталозі</span><strong>{formatNumber(materialCount)}</strong><small>{loadState === "ready" ? "дані завантажено" : loadMessage}</small></article>
-            <article><span>Чернеток</span><strong>{formatNumber(draftCount)}</strong><small>ще не внесено до Sheets</small></article>
+            <article><span>Службових записів</span><strong>{formatNumber(draftCount)}</strong><small>чернетки та історія станів</small></article>
             <article><span>Створено сьогодні</span><strong>{formatNumber(todayCount)}</strong><small>{generatedAt ? `Каталог: ${formatDateTime(generatedAt)}` : "поточна сесія"}</small></article>
           </section>
 
@@ -665,6 +797,7 @@ export default function LibrarianWorkspace({
                 referenceData={referenceData}
                 referenceState={referenceState}
                 submitState={submitState}
+                operationBusy={applyState.phase === "applying"}
                 onSave={saveDraft}
                 onTransition={transitionDraft}
                 initialDraft={editingDraft}
@@ -686,42 +819,81 @@ export default function LibrarianWorkspace({
                 <span className="count-badge">{draftCount}</span>
               </div>
 
+              {applyState.phase !== "idle" ? (
+                <div
+                  className={`submit-message ${applyState.phase === "applying" ? "saving" : applyState.phase}`}
+                  role={applyState.phase === "error" || applyState.phase === "unknown" ? "alert" : "status"}
+                  aria-live="polite"
+                >
+                  <span aria-hidden="true">{applyState.phase === "success" ? "✓" : applyState.phase === "error" ? "!" : "◷"}</span>
+                  {applyState.message}
+                </div>
+              ) : null}
+
               {loadState === "loading" ? (
                 <div className="draft-loading" aria-live="polite"><i /><i /><i /><span>Завантаження…</span></div>
               ) : drafts.length === 0 ? (
                 <div className="empty-drafts"><span aria-hidden="true">□</span><strong>Чернеток ще немає</strong><p>Перший збережений запис з’явиться тут.</p></div>
               ) : (
                 <ol className="draft-list">
-                  {drafts.slice(0, 8).map((draft) => (
-                    <li key={draft.id}>
-                      <span className="draft-kind-icon" aria-hidden="true">{SCENARIOS.find((item) => item.kind === draft.kind)?.icon ?? "·"}</span>
-                      <div><strong>{draftPrimaryText(draft)}</strong><small>{KIND_LABELS[draft.kind] ?? draft.kind} · {formatDateTime(draft.updatedAt || draft.createdAt)}</small></div>
-                      <span className="draft-actions">
-                        <span className={`draft-state status-${draft.status}`}>{draftStatusLabel(draft.status)}</span>
-                        {draft.status === "draft" ? (
-                          <button
-                            className="draft-open"
-                            type="button"
-                            onClick={() => openDraft(draft)}
-                          >
-                            Відкрити
-                          </button>
-                        ) : draft.status === "ready_for_review" ? (
-                          <button
-                            className="draft-open draft-cancel"
-                            type="button"
-                            disabled={!isPositiveRevision(draft.revision) || submitState.phase === "saving"}
-                            onClick={() => {
-                              if (!window.confirm("Скасувати чернетку, надіслану на перевірку?")) return;
-                              void transitionDraft(draft.id, draft.revision, "cancel");
-                            }}
-                          >
-                            Скасувати
-                          </button>
-                        ) : null}
-                      </span>
-                    </li>
-                  ))}
+                  {visibleDrafts.map((draft) => {
+                    const applyAction = draftApplyUiAction(draft.kind, draft.status);
+                    const applying = applyState.phase === "applying";
+                    const applyingThisDraft = applying && applyState.draftId === draft.id;
+                    const applyDisabledReason = draftApplyDisabledReason(
+                      writesEnabled,
+                      gatewayConfigured,
+                      draft.revision,
+                    ) ?? undefined;
+                    return (
+                      <li key={draft.id}>
+                        <span className="draft-kind-icon" aria-hidden="true">{SCENARIOS.find((item) => item.kind === draft.kind)?.icon ?? "·"}</span>
+                        <div><strong>{draftPrimaryText(draft)}</strong><small>{KIND_LABELS[draft.kind] ?? draft.kind} · {formatDateTime(draft.updatedAt || draft.createdAt)}</small></div>
+                        <span className="draft-actions">
+                          <span className={`draft-state status-${draft.status}`}>{draftStatusLabel(draft.status)}</span>
+                          {draft.status === "draft" || applyAction ? (
+                            <button
+                              className="draft-open"
+                              type="button"
+                              disabled={applying}
+                              onClick={() => openDraft(draft)}
+                            >
+                              {draft.status === "draft" ? "Відкрити" : "Переглянути"}
+                            </button>
+                          ) : null}
+                          {applyAction ? (
+                            <button
+                              className="draft-open draft-apply"
+                              type="button"
+                              aria-busy={applyingThisDraft}
+                              disabled={Boolean(applyDisabledReason) || applying || submitState.phase === "saving"}
+                              title={applyDisabledReason}
+                              onClick={() => void applyDraft(draft)}
+                            >
+                              {applyingThisDraft
+                                ? "Обробляється…"
+                                : applyAction === "resume"
+                                  ? "Перевірити результат"
+                                  : "Застосувати до Sheets"}
+                            </button>
+                          ) : null}
+                          {draft.status === "ready_for_review" ? (
+                            <button
+                              className="draft-open draft-cancel"
+                              type="button"
+                              disabled={!isPositiveRevision(draft.revision) || submitState.phase === "saving" || applying}
+                              onClick={() => {
+                                if (!window.confirm("Скасувати чернетку, надіслану на перевірку?")) return;
+                                void transitionDraft(draft.id, draft.revision, "cancel");
+                              }}
+                            >
+                              Скасувати
+                            </button>
+                          ) : null}
+                        </span>
+                      </li>
+                    );
+                  })}
                 </ol>
               )}
             </aside>
@@ -758,6 +930,7 @@ function OperationForm({
   referenceData,
   referenceState,
   submitState,
+  operationBusy,
   onSave,
   onTransition,
   initialDraft,
@@ -772,6 +945,7 @@ function OperationForm({
   referenceData: ReferenceData;
   referenceState: ReferenceState;
   submitState: SubmitState;
+  operationBusy: boolean;
   initialDraft: SavedDraft | null;
   onSave: (
     kind: DraftKind,
@@ -820,6 +994,7 @@ function OperationForm({
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (operationBusy) return;
     const form = event.currentTarget;
 
     if (form.querySelector('[data-cover-upload-pending="true"]')) {
@@ -893,7 +1068,7 @@ function OperationForm({
   };
 
   const handleTransition = async (action: DraftAction) => {
-    if (!draftId || !isPositiveRevision(draftRevision) || stale) return;
+    if (!draftId || !isPositiveRevision(draftRevision) || stale || operationBusy) return;
     if (action === "submit" && hasUnsavedChanges) return;
     if (
       action === "cancel"
@@ -929,6 +1104,8 @@ function OperationForm({
     onReset();
   };
 
+  const sheetState = draftSheetState(draftStatus);
+
   return (
     <form
       ref={formRef}
@@ -951,7 +1128,7 @@ function OperationForm({
         <span className={`draft-chip status-${draftStatus}`}><i /> {draftStatusLabel(draftStatus)}</span>
       </div>
 
-      <fieldset className="operation-fields" key={formVersion} disabled={draftStatus !== "draft" || stale}>
+      <fieldset className="operation-fields" key={formVersion} disabled={draftStatus !== "draft" || stale || operationBusy}>
         {kind === "material.create" ? <NewMaterialFields catalog={catalog} initialPayload={initialPayload} savedCoverPhotoKey={draftCoverPhotoKey(kind, lastSavedPayload)} onDirty={markDirty} /> : null}
         {kind === "material.update" ? <MaterialUpdateFields catalog={catalog} loading={catalogLoading} initialPayload={initialPayload} onDirty={markDirty} /> : null}
         {kind === "receipt.create" ? <ReceiptFields catalog={catalog} loading={catalogLoading} initialPayload={initialPayload} referenceData={referenceData} onDirty={markDirty} /> : null}
@@ -991,8 +1168,10 @@ function OperationForm({
 
       <div className="form-footer">
         <div>
-          <strong>Google Sheets не змінено</strong>
-          <small>{draftId ? `${draftStatusLabel(draftStatus)} ${shortDraftId(draftId)} · ревізія ${draftRevision ?? "—"}` : "Зберігається тільки службова чернетка"}</small>
+          <strong>{sheetState.title}</strong>
+          <small>{draftId
+            ? `${sheetState.detail} · ${shortDraftId(draftId)} · ревізія ${draftRevision ?? "—"}`
+            : sheetState.detail}</small>
         </div>
         <div className="form-footer-actions">
           {draftId ? (
@@ -1005,7 +1184,7 @@ function OperationForm({
               className="button button-danger"
               type="button"
               onClick={() => void handleTransition("cancel")}
-              disabled={submitState.phase === "saving" || stale}
+              disabled={submitState.phase === "saving" || stale || operationBusy}
             >
               Скасувати
             </button>
@@ -1015,14 +1194,14 @@ function OperationForm({
               className="button button-secondary"
               type="button"
               onClick={() => void handleTransition("submit")}
-              disabled={submitState.phase === "saving" || stale || hasUnsavedChanges}
+              disabled={submitState.phase === "saving" || stale || hasUnsavedChanges || operationBusy}
               title={hasUnsavedChanges ? "Спочатку збережіть останні зміни" : undefined}
             >
               Надіслати на перевірку
             </button>
           ) : null}
           {draftStatus === "draft" ? (
-            <button className="button button-primary save-button" type="submit" disabled={submitState.phase === "saving" || stale}>
+            <button className="button button-primary save-button" type="submit" disabled={submitState.phase === "saving" || stale || operationBusy}>
               {submitState.phase === "saving" ? "Збереження…" : draftId ? "Оновити чернетку" : "Зберегти чернетку"}
               <span aria-hidden="true">→</span>
             </button>
@@ -2538,6 +2717,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function readSavedDraft(value: unknown): SavedDraft | null {
+  if (!isRecord(value) || !isRecord(value.payload)) return null;
+  const id = typeof value.id === "string" ? value.id : "";
+  const kind = typeof value.kind === "string" ? value.kind : "";
+  const status = typeof value.status === "string" ? value.status : "";
+  const createdAt = typeof value.createdAt === "string" ? value.createdAt : "";
+  const updatedAt = typeof value.updatedAt === "string" ? value.updatedAt : "";
+  if (
+    !id
+    || !(kind in KIND_LABELS)
+    || !status
+    || !isPositiveRevision(value.revision)
+    || !createdAt
+    || !updatedAt
+  ) return null;
+  return {
+    id,
+    kind: kind as DraftKind,
+    payload: value.payload,
+    revision: value.revision,
+    status,
+    createdAt,
+    updatedAt,
+  };
+}
+
 function normalizeReferenceData(value: Record<string, unknown>): ReferenceData {
   const teachers = Array.isArray(value.teachers)
     ? value.teachers.flatMap((item): ReferenceTeacher[] => {
@@ -2787,11 +2992,44 @@ function draftStatusLabel(status: string): string {
     draft: "Чернетка",
     ready_for_review: "Очікує перевірки",
     cancelled: "Скасовано",
-    approved_pending_apply: "Погоджено до внесення",
+    approved_pending_apply: "Внесення триває",
     applied: "Внесено",
     failed: "Помилка внесення",
   };
   return labels[status] ?? status;
+}
+
+function draftSheetState(status: string): { title: string; detail: string } {
+  if (status === "approved_pending_apply") {
+    return {
+      title: "Результат запису ще перевіряється",
+      detail: "Оновіть дані або скористайтеся дією «Перевірити результат»",
+    };
+  }
+  if (status === "applied") {
+    return {
+      title: "Запис у Google Sheets підтверджено",
+      detail: "Чернетку успішно внесено",
+    };
+  }
+  if (status === "failed") {
+    return {
+      title: "Застосування завершилося помилкою",
+      detail: "Успішний запис не підтверджено",
+    };
+  }
+  if (status === "ready_for_review") {
+    return {
+      title: "Google Sheets не змінено",
+      detail: "Чернетка очікує окремого підтвердження",
+    };
+  }
+  return {
+    title: "Google Sheets не змінено",
+    detail: status === "cancelled"
+      ? "Чернетку скасовано"
+      : "Зберігається тільки службова чернетка",
+  };
 }
 
 function readNumber(record: Record<string, unknown>, keys: string[]): number | null {

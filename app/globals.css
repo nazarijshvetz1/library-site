@@ -283,6 +283,7 @@ button { color: inherit; }
 .submit-message.saving { background: #eef1ed; color: var(--muted); }
 .submit-message.success { background: var(--green-50); color: var(--green-700); }
 .submit-message.error { background: #fff0ed; color: var(--danger); }
+.submit-message.unknown { background: #fff9e8; color: #775d16; }
 .stale-draft-warning { margin-top: 13px; padding: 12px 14px; display: grid; gap: 3px; border: 1px solid #e7c8c1; border-radius: 10px; background: #fff0ed; color: var(--danger); font-size: 10px; }
 .stale-draft-warning span { color: #8c5e55; font-size: 9px; }
 .form-footer { margin-top: 28px; padding-top: 20px; border-top: 1px solid #e9ede7; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
@@ -307,6 +308,7 @@ button { color: inherit; }
 .draft-actions { display: grid; justify-items: end; gap: 5px; }
 .draft-open { border: 0; padding: 2px 0; background: transparent; color: var(--green-700); cursor: pointer; font-size: 8px; font-weight: 800; text-decoration: underline; text-underline-offset: 2px; }
 .draft-open:hover { color: var(--green-950); }
+.draft-open.draft-apply { color: #31578d; }
 .draft-open.draft-cancel { color: var(--danger); }
 .draft-open:disabled { opacity: .5; cursor: not-allowed; }
 .empty-drafts { min-height: 240px; display: grid; align-content: center; justify-items: center; text-align: center; color: var(--muted); }
