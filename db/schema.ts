@@ -1,4 +1,10 @@
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 const draftKinds = [
   "material.create",
@@ -93,6 +99,10 @@ export const librarianDraftEvents = sqliteTable(
     index("idx_librarian_draft_events_draft_created").on(
       table.draftId,
       table.createdAt,
+    ),
+    uniqueIndex("idx_librarian_draft_events_draft_revision").on(
+      table.draftId,
+      table.revision,
     ),
   ],
 );

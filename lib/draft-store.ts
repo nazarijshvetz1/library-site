@@ -2,7 +2,8 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import type { ChatGPTUser } from "@/app/chatgpt-auth";
 import { getDb } from "@/db";
-import { librarianDrafts } from "@/db/schema";
+import { librarianDraftEvents, librarianDrafts } from "@/db/schema";
+import { guardedDraftEventValues } from "@/lib/draft-event";
 import type {
   DraftAction,
   DraftKind,
@@ -190,30 +191,50 @@ export async function saveDraft(
     }
 
     if (existing) {
-      const [updated] = await db
-        .update(librarianDrafts)
-        .set({
-          ownerEmail: user.email,
-          kind: input.kind,
-          payloadJson,
-          schemaVersion: CURRENT_DRAFT_SCHEMA_VERSION,
-          revision: sql`${librarianDrafts.revision} + 1`,
-          groupId: input.groupId ?? null,
-          targetKey,
-          updatedByUserId: user.userId,
-          updatedByEmail: user.email,
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(librarianDrafts.id, input.id),
-            eq(librarianDrafts.ownerUserId, user.userId),
-            eq(librarianDrafts.status, "draft"),
-            eq(librarianDrafts.revision, input.revision!),
+      let batchError: unknown;
+      try {
+        const [updatedRows] = await db.batch([
+          db
+            .update(librarianDrafts)
+            .set({
+              ownerEmail: user.email,
+              kind: input.kind,
+              payloadJson,
+              schemaVersion: CURRENT_DRAFT_SCHEMA_VERSION,
+              revision: sql`${librarianDrafts.revision} + 1`,
+              groupId: input.groupId ?? null,
+              targetKey,
+              updatedByUserId: user.userId,
+              updatedByEmail: user.email,
+              updatedAt: now,
+            })
+            .where(
+              and(
+                eq(librarianDrafts.id, input.id),
+                eq(librarianDrafts.ownerUserId, user.userId),
+                eq(librarianDrafts.status, "draft"),
+                eq(librarianDrafts.revision, input.revision!),
+              ),
+            )
+            .returning(),
+          db.insert(librarianDraftEvents).values(
+            guardedDraftEventValues({
+              draftId: input.id,
+              user,
+              action: "updated",
+              fromStatus: "draft",
+              toStatus: "draft",
+              revision: input.revision! + 1,
+              createdAt: now,
+            }),
           ),
-        )
-        .returning();
-      if (updated) return { draft: presentDraft(updated), created: false };
+        ]);
+        const updated = updatedRows[0];
+        if (!updated) throw new Error("Draft update did not return a row");
+        return { draft: presentDraft(updated), created: false };
+      } catch (error) {
+        batchError = error;
+      }
 
       const [current] = await db
         .select({
@@ -228,29 +249,46 @@ export async function saveDraft(
         throw new DraftNotFoundError();
       }
       if (current.status !== "draft") throw new DraftLockedError(current.status);
-      throw new DraftConflictError(current.revision);
+      if (current.revision !== input.revision) {
+        throw new DraftConflictError(current.revision);
+      }
+      throw batchError;
     }
 
     try {
-      const [createdWithClientId] = await db
-        .insert(librarianDrafts)
-        .values({
-          id: input.id,
-          ownerUserId: user.userId,
-          ownerEmail: user.email,
-          kind: input.kind,
-          payloadJson,
-          schemaVersion: CURRENT_DRAFT_SCHEMA_VERSION,
-          revision: 1,
-          status: "draft",
-          groupId: input.groupId ?? null,
-          targetKey,
-          updatedByUserId: user.userId,
-          updatedByEmail: user.email,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .returning();
+      const [createdRows] = await db.batch([
+        db
+          .insert(librarianDrafts)
+          .values({
+            id: input.id,
+            ownerUserId: user.userId,
+            ownerEmail: user.email,
+            kind: input.kind,
+            payloadJson,
+            schemaVersion: CURRENT_DRAFT_SCHEMA_VERSION,
+            revision: 1,
+            status: "draft",
+            groupId: input.groupId ?? null,
+            targetKey,
+            updatedByUserId: user.userId,
+            updatedByEmail: user.email,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning(),
+        db.insert(librarianDraftEvents).values(
+          guardedDraftEventValues({
+            draftId: input.id,
+            user,
+            action: "created",
+            fromStatus: null,
+            toStatus: "draft",
+            revision: 1,
+            createdAt: now,
+          }),
+        ),
+      ]);
+      const createdWithClientId = createdRows[0];
       if (!createdWithClientId) {
         throw new Error("Draft insert did not return a row");
       }
@@ -277,25 +315,40 @@ export async function saveDraft(
     }
   }
 
-  const [created] = await db
-    .insert(librarianDrafts)
-    .values({
-      id: crypto.randomUUID(),
-      ownerUserId: user.userId,
-      ownerEmail: user.email,
-      kind: input.kind,
-      payloadJson,
-      schemaVersion: CURRENT_DRAFT_SCHEMA_VERSION,
-      revision: 1,
-      status: "draft",
-      groupId: input.groupId ?? null,
-      targetKey,
-      updatedByUserId: user.userId,
-      updatedByEmail: user.email,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .returning();
+  const id = crypto.randomUUID();
+  const [createdRows] = await db.batch([
+    db
+      .insert(librarianDrafts)
+      .values({
+        id,
+        ownerUserId: user.userId,
+        ownerEmail: user.email,
+        kind: input.kind,
+        payloadJson,
+        schemaVersion: CURRENT_DRAFT_SCHEMA_VERSION,
+        revision: 1,
+        status: "draft",
+        groupId: input.groupId ?? null,
+        targetKey,
+        updatedByUserId: user.userId,
+        updatedByEmail: user.email,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning(),
+    db.insert(librarianDraftEvents).values(
+      guardedDraftEventValues({
+        draftId: id,
+        user,
+        action: "created",
+        fromStatus: null,
+        toStatus: "draft",
+        revision: 1,
+        createdAt: now,
+      }),
+    ),
+  ]);
+  const created = createdRows[0];
 
   if (!created) throw new Error("Draft insert did not return a row");
   return { draft: presentDraft(created), created: true };
@@ -316,34 +369,8 @@ export async function transitionDraft(
     ? ["draft"]
     : ["draft", "ready_for_review"];
 
-  const [updated] = await db
-    .update(librarianDrafts)
-    .set({
-      status: nextStatus,
-      revision: sql`${librarianDrafts.revision} + 1`,
-      updatedByUserId: user.userId,
-      updatedByEmail: user.email,
-      updatedAt: now,
-      ...(action === "submit" ? { submittedAt: now } : { cancelledAt: now }),
-    })
-    .where(
-      and(
-        eq(librarianDrafts.id, id),
-        eq(librarianDrafts.ownerUserId, user.userId),
-        eq(librarianDrafts.revision, expectedRevision),
-        inArray(librarianDrafts.status, allowedStatuses),
-      ),
-    )
-    .returning();
-
-  if (updated) return presentDraft(updated);
-
   const [existing] = await db
-    .select({
-      ownerUserId: librarianDrafts.ownerUserId,
-      revision: librarianDrafts.revision,
-      status: librarianDrafts.status,
-    })
+    .select()
     .from(librarianDrafts)
     .where(eq(librarianDrafts.id, id))
     .limit(1);
@@ -353,5 +380,68 @@ export async function transitionDraft(
   if (existing.revision !== expectedRevision) {
     throw new DraftConflictError(existing.revision);
   }
-  throw new DraftLockedError(existing.status);
+  if (!allowedStatuses.includes(existing.status)) {
+    throw new DraftLockedError(existing.status);
+  }
+
+  let batchError: unknown;
+  try {
+    const [updatedRows] = await db.batch([
+      db
+        .update(librarianDrafts)
+        .set({
+          status: nextStatus,
+          revision: sql`${librarianDrafts.revision} + 1`,
+          updatedByUserId: user.userId,
+          updatedByEmail: user.email,
+          updatedAt: now,
+          ...(action === "submit" ? { submittedAt: now } : { cancelledAt: now }),
+        })
+        .where(
+          and(
+            eq(librarianDrafts.id, id),
+            eq(librarianDrafts.ownerUserId, user.userId),
+            eq(librarianDrafts.revision, expectedRevision),
+            eq(librarianDrafts.status, existing.status),
+          ),
+        )
+        .returning(),
+      db.insert(librarianDraftEvents).values(
+        guardedDraftEventValues({
+          draftId: id,
+          user,
+          action: action === "submit" ? "submitted" : "cancelled",
+          fromStatus: existing.status,
+          toStatus: nextStatus,
+          revision: expectedRevision + 1,
+          createdAt: now,
+        }),
+      ),
+    ]);
+    const updated = updatedRows[0];
+    if (!updated) throw new Error("Draft transition did not return a row");
+    return presentDraft(updated);
+  } catch (error) {
+    batchError = error;
+  }
+
+  const [current] = await db
+    .select({
+      ownerUserId: librarianDrafts.ownerUserId,
+      revision: librarianDrafts.revision,
+      status: librarianDrafts.status,
+    })
+    .from(librarianDrafts)
+    .where(eq(librarianDrafts.id, id))
+    .limit(1);
+  if (!current || current.ownerUserId !== user.userId) {
+    throw new DraftNotFoundError();
+  }
+  if (current.revision !== expectedRevision) {
+    throw new DraftConflictError(current.revision);
+  }
+  if (!allowedStatuses.includes(current.status)) {
+    throw new DraftLockedError(current.status);
+  }
+  throw batchError;
 }

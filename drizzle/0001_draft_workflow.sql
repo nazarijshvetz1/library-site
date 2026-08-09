@@ -53,41 +53,7 @@ SELECT
 	'created', NULL, `status`, `revision`, `created_at`
 FROM `librarian_drafts`;
 --> statement-breakpoint
-CREATE TRIGGER `trg_librarian_drafts_audit_insert`
-AFTER INSERT ON `librarian_drafts`
-BEGIN
-	INSERT INTO `librarian_draft_events` (
-		`id`, `draft_id`, `actor_user_id`, `actor_email`, `action`,
-		`from_status`, `to_status`, `revision`, `created_at`
-	) VALUES (
-		lower(hex(randomblob(16))), NEW.`id`,
-		COALESCE(NEW.`updated_by_user_id`, NEW.`owner_user_id`),
-		COALESCE(NEW.`updated_by_email`, NEW.`owner_email`),
-		'created', NULL, NEW.`status`, NEW.`revision`, NEW.`created_at`
-	);
-END;
---> statement-breakpoint
-CREATE TRIGGER `trg_librarian_drafts_audit_update`
-AFTER UPDATE ON `librarian_drafts`
-BEGIN
-	INSERT INTO `librarian_draft_events` (
-		`id`, `draft_id`, `actor_user_id`, `actor_email`, `action`,
-		`from_status`, `to_status`, `revision`, `created_at`
-	) VALUES (
-		lower(hex(randomblob(16))), NEW.`id`,
-		COALESCE(NEW.`updated_by_user_id`, NEW.`owner_user_id`),
-		COALESCE(NEW.`updated_by_email`, NEW.`owner_email`),
-		CASE
-			WHEN OLD.`status` = NEW.`status` THEN 'updated'
-			WHEN NEW.`status` = 'ready_for_review' THEN 'submitted'
-			WHEN NEW.`status` = 'cancelled' THEN 'cancelled'
-			WHEN NEW.`status` = 'approved_pending_apply' THEN 'approved'
-			WHEN NEW.`status` = 'applied' THEN 'applied'
-			WHEN NEW.`status` = 'failed' THEN 'failed'
-			ELSE 'updated'
-		END,
-		OLD.`status`, NEW.`status`, NEW.`revision`, NEW.`updated_at`
-	);
-END;
+CREATE UNIQUE INDEX `idx_librarian_draft_events_draft_revision`
+ON `librarian_draft_events` (`draft_id`, `revision`);
 --> statement-breakpoint
 PRAGMA optimize;
