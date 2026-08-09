@@ -11,6 +11,8 @@ import {
 
 const draftId = "8092f8cf-6e7b-4f4b-9e29-56dd684268f2";
 const requestId = "437e85df-1491-43b8-8831-06dc88fb12b7";
+const productionSpreadsheetId = "18SEyo-tAJ8uHoAFMrYbiaGMtmXjhiscQGcYTpJrNtEI";
+const copySpreadsheetId = "1CopyTestSpreadsheetId_000000000000000000000";
 
 function appsScriptFixture() {
   const rows = [
@@ -32,7 +34,10 @@ function appsScriptFixture() {
     ],
   ];
   const formulas = [];
-  const properties = new Map();
+  const properties = new Map([
+    ["SPREADSHEET_ID", copySpreadsheetId],
+    ["LIBRARIAN_WRITE_MODE", "copy_test"],
+  ]);
   const cache = new Map();
   const lockStats = { acquired: 0, released: 0 };
   let flushes = 0;
@@ -86,8 +91,19 @@ function appsScriptFixture() {
       values.forEach((sourceRow, rowOffset) => {
         assert.equal(sourceRow.length, columnCount);
         sourceRow.forEach((value, columnOffset) => {
-          ensureCell(startRow + rowOffset, startColumn + columnOffset);
-          rows[startRow + rowOffset - 1][startColumn + columnOffset - 1] = value;
+          const targetRow = startRow + rowOffset;
+          const targetColumn = startColumn + columnOffset;
+          if (
+            targetRow > 1 &&
+            targetColumn === 5 &&
+            value !== "" &&
+            !["Активний", "Чернетка", "Завершений"].includes(value)
+          ) {
+            throw new Error("Значення порушує правило перевірки даних");
+          }
+          ensureCell(targetRow, targetColumn);
+          rows[targetRow - 1][targetColumn - 1] = value;
+          formulas[targetRow - 1][targetColumn - 1] = "";
         });
       });
       return this;
@@ -137,7 +153,7 @@ function appsScriptFixture() {
     PropertiesService: { getScriptProperties: () => scriptProperties },
     SpreadsheetApp: {
       openById(id) {
-        assert.equal(id, "18SEyo-tAJ8uHoAFMrYbiaGMtmXjhiscQGcYTpJrNtEI");
+        assert.equal(id, copySpreadsheetId);
         return spreadsheet;
       },
       flush() { flushes += 1; },
@@ -202,6 +218,90 @@ test("Apps Script keeps writes disabled until both sides are explicitly enabled"
   assert.equal(fixture.lockStats.released, 1);
 });
 
+test("Apps Script fails closed when SPREADSHEET_ID is missing", async () => {
+  const fixture = appsScriptFixture();
+  fixture.properties.delete("SPREADSHEET_ID");
+  fixture.properties.set("LIBRARIAN_WRITES_ENABLED", "true");
+  const source = await readFile(new URL("../apps-script/LibrarianGateway.gs", import.meta.url), "utf8");
+  vm.runInContext(source, fixture.context);
+
+  const result = fixture.context.applyGatewayDraft_(applyEnvelope());
+  assert.equal(result.success, false);
+  assert.equal(result.code, "invalid_spreadsheet_id");
+  assert.throws(() => fixture.context.openGatewaySpreadsheet_(), /Некоректний SPREADSHEET_ID/);
+  assert.equal(fixture.rows.length, 2);
+  assert.equal(fixture.lockStats.acquired, 1);
+  assert.equal(fixture.lockStats.released, 1);
+});
+
+test("copy-test mode refuses the production spreadsheet", async () => {
+  const fixture = appsScriptFixture();
+  fixture.properties.set("SPREADSHEET_ID", productionSpreadsheetId);
+  fixture.properties.set("LIBRARIAN_WRITES_ENABLED", "true");
+  const source = await readFile(new URL("../apps-script/LibrarianGateway.gs", import.meta.url), "utf8");
+  vm.runInContext(source, fixture.context);
+
+  const result = fixture.context.applyGatewayDraft_(applyEnvelope());
+  assert.equal(result.success, false);
+  assert.equal(result.code, "unsafe_write_target");
+  assert.equal(fixture.rows.length, 2);
+});
+
+test("write mode must explicitly match the target spreadsheet", async () => {
+  const fixture = appsScriptFixture();
+  const source = await readFile(new URL("../apps-script/LibrarianGateway.gs", import.meta.url), "utf8");
+  vm.runInContext(source, fixture.context);
+  const properties = fixture.context.PropertiesService.getScriptProperties();
+
+  fixture.properties.delete("LIBRARIAN_WRITE_MODE");
+  assert.throws(
+    () => fixture.context.assertGatewayWriteTarget_(properties),
+    (error) => error.gatewayCode === "write_mode_disabled",
+  );
+
+  fixture.properties.set("LIBRARIAN_WRITE_MODE", "unknown");
+  assert.throws(
+    () => fixture.context.assertGatewayWriteTarget_(properties),
+    (error) => error.gatewayCode === "write_mode_disabled",
+  );
+
+  fixture.properties.set("LIBRARIAN_WRITE_MODE", "production");
+  assert.throws(
+    () => fixture.context.assertGatewayWriteTarget_(properties),
+    (error) => error.gatewayCode === "unsafe_write_target",
+  );
+
+  fixture.properties.set("SPREADSHEET_ID", productionSpreadsheetId);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(fixture.context.assertGatewayWriteTarget_(properties))),
+    { mode: "production", spreadsheetId: productionSpreadsheetId },
+  );
+
+  fixture.properties.set("SPREADSHEET_ID", "../bad");
+  assert.throws(
+    () => fixture.context.assertGatewayWriteTarget_(properties),
+    (error) => error.gatewayCode === "invalid_spreadsheet_id",
+  );
+});
+
+test("idempotency ledger is bound to the exact write target", async () => {
+  const fixture = appsScriptFixture();
+  fixture.properties.set("LIBRARIAN_WRITES_ENABLED", "true");
+  const source = await readFile(new URL("../apps-script/LibrarianGateway.gs", import.meta.url), "utf8");
+  vm.runInContext(source, fixture.context);
+
+  const first = fixture.context.applyGatewayDraft_(applyEnvelope());
+  assert.equal(first.success, true);
+  assert.equal(fixture.rows.length, 3);
+
+  fixture.properties.set("LIBRARIAN_WRITE_MODE", "production");
+  fixture.properties.set("SPREADSHEET_ID", productionSpreadsheetId);
+  const wrongTargetReplay = fixture.context.applyGatewayDraft_(applyEnvelope());
+  assert.equal(wrongTargetReplay.success, false);
+  assert.equal(wrongTargetReplay.code, "request_id_conflict");
+  assert.equal(fixture.rows.length, 3);
+});
+
 test("Apps Script rejects a replay while nonce cache access is locked", async () => {
   const fixture = appsScriptFixture();
   const secret = "gateway-test-secret-with-at-least-32-characters";
@@ -243,7 +343,7 @@ test("Apps Script applies one exact academic-year row and resumes idempotently",
   assert.equal(fixture.rows[2][0], "YR-2027-2028");
   assert.equal(fixture.rows[2][1], "2027/2028");
   assert.equal(fixture.rows[2][2].toISOString().slice(0, 10), "2027-09-01");
-  assert.equal(fixture.rows[2][4], "Запланований");
+  assert.equal(fixture.rows[2][4], "Чернетка");
   assert.equal(fixture.rows.length, 3);
 
   const replay = fixture.context.applyGatewayDraft_(applyEnvelope());
@@ -304,7 +404,7 @@ test("Apps Script rejects schema drift and formulas before any cell write", asyn
     3,
     Array(6).fill(""),
     Array(6).fill(""),
-    ["", "", "", "", "=IF(A3=\"\",\"\",\"Запланований\")", ""],
+    ["", "", "", "", "=IF(A3=\"\",\"\",\"Чернетка\")", ""],
   );
   const formulaSource = await readFile(new URL("../apps-script/LibrarianGateway.gs", import.meta.url), "utf8");
   vm.runInContext(formulaSource, formulaFixture.context);
@@ -313,6 +413,60 @@ test("Apps Script rejects schema drift and formulas before any cell write", asyn
   assert.equal(formulaFailure.code, "formula_protected");
   assert.equal(formulaFixture.rows.length, 3);
   assert.ok(formulaFixture.rows[2].every((value) => value === ""));
+
+  const matchingFormulaFixture = appsScriptFixture();
+  matchingFormulaFixture.properties.set("LIBRARIAN_WRITES_ENABLED", "true");
+  matchingFormulaFixture.rows.push([
+    "YR-2027-2028",
+    "2027/2028",
+    new Date("2027-09-01T12:00:00.000Z"),
+    new Date("2028-08-31T12:00:00.000Z"),
+    "Чернетка",
+    "",
+  ]);
+  matchingFormulaFixture.formulas.splice(
+    0,
+    3,
+    Array(6).fill(""),
+    Array(6).fill(""),
+    ["", "", "", "", "=IF(A3=\"\",\"\",\"Чернетка\")", ""],
+  );
+  const matchingFormulaRowBefore = structuredClone(matchingFormulaFixture.rows[2]);
+  const matchingFormulaBefore = structuredClone(matchingFormulaFixture.formulas[2]);
+  const matchingFormulaSource = await readFile(new URL("../apps-script/LibrarianGateway.gs", import.meta.url), "utf8");
+  vm.runInContext(matchingFormulaSource, matchingFormulaFixture.context);
+  const matchingFormulaFailure = matchingFormulaFixture.context.applyGatewayDraft_(applyEnvelope());
+  assert.equal(matchingFormulaFailure.success, false);
+  assert.equal(matchingFormulaFailure.code, "formula_protected");
+  assert.deepEqual(matchingFormulaFixture.rows[2], matchingFormulaRowBefore);
+  assert.deepEqual(matchingFormulaFixture.formulas[2], matchingFormulaBefore);
+});
+
+test("Apps Script safely completes a partial plain-value academic year", async () => {
+  const fixture = appsScriptFixture();
+  fixture.properties.set("LIBRARIAN_WRITES_ENABLED", "true");
+  fixture.rows.push([
+    "YR-2027-2028",
+    "2027/2028",
+    new Date("2027-09-01T12:00:00.000Z"),
+    new Date("2028-08-31T12:00:00.000Z"),
+    "Чернетка",
+    "",
+  ]);
+  const source = await readFile(new URL("../apps-script/LibrarianGateway.gs", import.meta.url), "utf8");
+  vm.runInContext(source, fixture.context);
+
+  const result = fixture.context.applyGatewayDraft_(applyEnvelope());
+  assert.equal(result.success, true);
+  assert.equal(result.result.status, "already_applied");
+  assert.equal(result.result.row, 3);
+  assert.equal(fixture.rows[2][5], "Новий навчальний рік");
+  assert.equal(fixture.rows.length, 3);
+
+  const replay = fixture.context.applyGatewayDraft_(applyEnvelope());
+  assert.equal(replay.success, true);
+  assert.equal(replay.result.row, 3);
+  assert.equal(fixture.rows.length, 3);
 });
 
 test("apply sources enforce owner, revision, HMAC, durable ledger, and exact scope", async () => {
@@ -338,6 +492,9 @@ test("apply sources enforce owner, revision, HMAC, durable ledger, and exact sco
   assert.match(appsScript, /LockService\.getScriptLock\(\)/);
   assert.match(appsScript, /GATEWAY_APPLY_INDEX_V1/);
   assert.match(appsScript, /SpreadsheetApp\.openById\(spreadsheetId\)/);
+  assert.match(appsScript, /spreadsheet_id: writeTarget\.spreadsheetId/);
+  assert.match(appsScript, /dispatchSafeApply_\(input, writeTarget\.spreadsheetId\)/);
+  assert.match(appsScript, /openGatewaySpreadsheet_\(verifiedSpreadsheetId\)/);
   assert.doesNotMatch(appsScript, /SpreadsheetApp\.getActive\(\)/);
   assert.deepEqual(manifest.oauthScopes, ["https://www.googleapis.com/auth/spreadsheets"]);
 });
