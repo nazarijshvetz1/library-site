@@ -38,5 +38,8 @@ yarn-error.log*
 /dist-catalog/
 /dist-pages/
 /.wrangler/
+/.sites-artifacts/
+/.sites-stage/
+*.tsbuildinfo
 /outputs/
 /work/

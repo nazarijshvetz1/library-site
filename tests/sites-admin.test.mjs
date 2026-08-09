@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { access, readFile, readdir, stat } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import {
@@ -335,27 +336,287 @@ test("protected operation drafts reject ambiguous cover, service rooms, and unsa
   assert.equal(invalidRollover.ok, false);
 });
 
-test("draft workflow schema includes optimistic revisions, transitions, and audit triggers", async () => {
-  const [schema, store, route, migration] = await Promise.all([
+test("draft workflow schema includes optimistic revisions and atomic audit batches", async () => {
+  const [schema, eventStore, store, applyStore, route, migration, cleanupMigration] = await Promise.all([
     read("db/schema.ts"),
+    read("lib/draft-event.ts"),
     read("lib/draft-store.ts"),
+    read("lib/draft-apply-store.ts"),
     read("app/api/librarian/drafts/route.ts"),
     read("drizzle/0001_draft_workflow.sql"),
+    read("drizzle/0002_remove_legacy_audit_triggers.sql"),
   ]);
   assert.match(schema, /schemaVersion: integer\("schema_version"\)/);
   assert.match(schema, /revision: integer\("revision"\)/);
   assert.match(schema, /librarianDraftEvents/);
+  assert.match(schema, /uniqueIndex\("idx_librarian_draft_events_draft_revision"\)/);
+  assert.match(eventStore, /changes\(\) = 1/);
+  assert.match(eventStore, /select \$\{librarianDrafts\.id\}/);
+  assert.match(eventStore, /librarianDrafts\.revision\} = \$\{input\.revision\}/);
+  assert.match(eventStore, /librarianDrafts\.status\} = \$\{input\.toStatus\}/);
+  assert.equal([...store.matchAll(/db\.batch\(\[/g)].length, 4);
+  assert.equal([...store.matchAll(/guardedDraftEventValues\(\{/g)].length, 4);
+  assert.equal([...applyStore.matchAll(/db\.batch\(\[/g)].length, 2);
+  assert.equal([...applyStore.matchAll(/guardedDraftEventValues\(\{/g)].length, 2);
+  assert.equal(
+    [...applyStore.matchAll(/requestedId && requestedId !== [a-zA-Z]+Metadata\.requestId/g)].length,
+    2,
+  );
   assert.match(store, /eq\(librarianDrafts\.revision, expectedRevision\)/);
-  assert.match(store, /inArray\(librarianDrafts\.status, allowedStatuses\)/);
+  assert.match(store, /eq\(librarianDrafts\.status, existing\.status\)/);
   assert.match(store, /identicalFirstRequest/);
   assert.match(store, /DraftRevisionRequiredError/);
   assert.match(store, /eq\(librarianDrafts\.revision, input\.revision!\)/);
   assert.match(route, /export async function PATCH/);
   assert.match(route, /validateDraftActionInput/);
   assert.match(route, /draft_revision_required/);
-  assert.match(migration, /CREATE TRIGGER `trg_librarian_drafts_audit_insert`/);
-  assert.match(migration, /CREATE TRIGGER `trg_librarian_drafts_audit_update`/);
+  assert.doesNotMatch(migration, /CREATE TRIGGER/);
+  assert.match(migration, /CREATE UNIQUE INDEX `idx_librarian_draft_events_draft_revision`/);
+  assert.match(cleanupMigration, /DROP TRIGGER IF EXISTS `trg_librarian_drafts_audit_insert`/);
+  assert.match(cleanupMigration, /DROP TRIGGER IF EXISTS `trg_librarian_drafts_audit_update`/);
   assert.doesNotMatch(route, /SpreadsheetApp|google\.script\.run|doPost/);
+});
+
+test("draft migrations execute cleanly and zero-row audit mutations roll back", async () => {
+  const splitStatements = (migration) => migration
+    .split("--> statement-breakpoint")
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+  const [initialMigration, workflowMigration, cleanupMigration] = await Promise.all([
+    read("drizzle/0000_librarian_drafts.sql"),
+    read("drizzle/0001_draft_workflow.sql"),
+    read("drizzle/0002_remove_legacy_audit_triggers.sql"),
+  ]);
+  const database = new DatabaseSync(":memory:");
+  try {
+    database.exec("PRAGMA foreign_keys = ON");
+    for (const statement of splitStatements(initialMigration)) database.exec(statement);
+    database.prepare(`
+      INSERT INTO librarian_drafts (
+        id, owner_user_id, owner_email, kind, payload_json, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "draft-1",
+      "user-1",
+      "librarian@example.com",
+      "material.create",
+      "{}",
+      "draft",
+      "2026-08-09T00:00:00.000Z",
+      "2026-08-09T00:00:00.000Z",
+    );
+    for (const statement of splitStatements(workflowMigration)) database.exec(statement);
+    for (const statement of splitStatements(cleanupMigration)) database.exec(statement);
+
+    const triggers = database.prepare(
+      "SELECT name FROM sqlite_schema WHERE type = 'trigger'",
+    ).all();
+    assert.deepEqual(triggers, []);
+    const indexes = database.prepare(
+      "SELECT name FROM sqlite_schema WHERE type = 'index' AND name = ?",
+    ).all("idx_librarian_draft_events_draft_revision");
+    assert.equal(indexes.length, 1);
+    assert.equal(
+      database.prepare("SELECT COUNT(*) AS count FROM librarian_draft_events").get().count,
+      1,
+    );
+
+    database.exec("DROP INDEX idx_librarian_draft_events_draft_revision");
+    database.exec(`
+      CREATE TRIGGER trg_librarian_drafts_audit_insert
+      AFTER INSERT ON librarian_drafts BEGIN SELECT 1; END;
+      CREATE TRIGGER trg_librarian_drafts_audit_update
+      AFTER UPDATE ON librarian_drafts BEGIN SELECT 1; END;
+    `);
+    for (const statement of splitStatements(cleanupMigration)) database.exec(statement);
+    assert.deepEqual(
+      database.prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger'").all(),
+      [],
+    );
+    assert.equal(
+      database.prepare(
+        "SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'index' AND name = ?",
+      ).get("idx_librarian_draft_events_draft_revision").count,
+      1,
+    );
+
+    database.exec("BEGIN");
+    try {
+      const updated = database.prepare(`
+        UPDATE librarian_drafts
+        SET revision = revision + 1,
+            updated_by_user_id = ?, updated_by_email = ?, updated_at = ?
+        WHERE id = ? AND status = ? AND revision = ?
+        RETURNING revision
+      `).all(
+        "user-1",
+        "librarian@example.com",
+        "2026-08-09T00:01:00.000Z",
+        "draft-1",
+        "draft",
+        1,
+      );
+      assert.equal(updated.length, 1);
+      database.prepare(`
+        INSERT INTO librarian_draft_events (
+          id, draft_id, actor_user_id, actor_email, action,
+          from_status, to_status, revision, created_at
+        ) VALUES (?, (
+          SELECT id FROM librarian_drafts
+          WHERE id = ? AND owner_user_id = ? AND status = ? AND revision = ?
+            AND updated_by_user_id = ? AND updated_by_email = ? AND updated_at = ?
+            AND changes() = 1
+        ), ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "event-2",
+        "draft-1",
+        "user-1",
+        "draft",
+        2,
+        "user-1",
+        "librarian@example.com",
+        "2026-08-09T00:01:00.000Z",
+        "user-1",
+        "librarian@example.com",
+        "updated",
+        "draft",
+        "draft",
+        2,
+        "2026-08-09T00:01:00.000Z",
+      );
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+    assert.equal(
+      database.prepare("SELECT COUNT(*) AS count FROM librarian_draft_events").get().count,
+      2,
+    );
+
+    database.prepare(`
+      INSERT INTO librarian_draft_events (
+        id, draft_id, actor_user_id, actor_email, action,
+        from_status, to_status, revision, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "conflicting-event-3",
+      "draft-1",
+      "user-1",
+      "librarian@example.com",
+      "updated",
+      "draft",
+      "draft",
+      3,
+      "2026-08-09T00:01:30.000Z",
+    );
+    database.exec("BEGIN");
+    assert.throws(() => {
+      database.prepare(`
+        UPDATE librarian_drafts
+        SET revision = revision + 1,
+            updated_by_user_id = ?, updated_by_email = ?, updated_at = ?
+        WHERE id = ? AND status = ? AND revision = ?
+        RETURNING revision
+      `).all(
+        "user-1",
+        "librarian@example.com",
+        "2026-08-09T00:01:30.000Z",
+        "draft-1",
+        "draft",
+        2,
+      );
+      database.prepare(`
+        INSERT INTO librarian_draft_events (
+          id, draft_id, actor_user_id, actor_email, action,
+          from_status, to_status, revision, created_at
+        ) VALUES (?, (
+          SELECT id FROM librarian_drafts
+          WHERE id = ? AND owner_user_id = ? AND status = ? AND revision = ?
+            AND updated_by_user_id = ? AND updated_by_email = ? AND updated_at = ?
+            AND changes() = 1
+        ), ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "event-3",
+        "draft-1",
+        "user-1",
+        "draft",
+        3,
+        "user-1",
+        "librarian@example.com",
+        "2026-08-09T00:01:30.000Z",
+        "user-1",
+        "librarian@example.com",
+        "updated",
+        "draft",
+        "draft",
+        3,
+        "2026-08-09T00:01:30.000Z",
+      );
+    }, /UNIQUE constraint failed/);
+    database.exec("ROLLBACK");
+    assert.equal(
+      database.prepare("SELECT revision FROM librarian_drafts WHERE id = ?").get("draft-1").revision,
+      2,
+    );
+    database.prepare("DELETE FROM librarian_draft_events WHERE id = ?").run("conflicting-event-3");
+
+    database.exec("BEGIN");
+    assert.throws(() => {
+      database.prepare(`
+        UPDATE librarian_drafts
+        SET status = 'cancelled', revision = revision + 1,
+            updated_by_user_id = ?, updated_by_email = ?, updated_at = ?
+        WHERE id = ? AND status = ? AND revision = ?
+        RETURNING revision
+      `).all(
+        "user-1",
+        "librarian@example.com",
+        "2026-08-09T00:02:00.000Z",
+        "draft-1",
+        "ready_for_review",
+        2,
+      );
+      database.prepare(`
+        INSERT INTO librarian_draft_events (
+          id, draft_id, actor_user_id, actor_email, action,
+          from_status, to_status, revision, created_at
+        ) VALUES (?, (
+          SELECT id FROM librarian_drafts
+          WHERE id = ? AND owner_user_id = ? AND status = ? AND revision = ?
+            AND updated_by_user_id = ? AND updated_by_email = ? AND updated_at = ?
+            AND changes() = 1
+        ), ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "event-3",
+        "draft-1",
+        "user-1",
+        "cancelled",
+        3,
+        "user-1",
+        "librarian@example.com",
+        "2026-08-09T00:02:00.000Z",
+        "user-1",
+        "librarian@example.com",
+        "cancelled",
+        "draft",
+        "cancelled",
+        3,
+        "2026-08-09T00:02:00.000Z",
+      );
+    }, /NOT NULL constraint failed/);
+    database.exec("ROLLBACK");
+    assert.equal(
+      database.prepare("SELECT revision FROM librarian_drafts WHERE id = ?").get("draft-1").revision,
+      2,
+    );
+    assert.equal(
+      database.prepare("SELECT COUNT(*) AS count FROM librarian_draft_events").get().count,
+      2,
+    );
+  } finally {
+    database.close();
+  }
 });
 
 test("private workspace supports ISBN lookup, safe scanner lifecycle, and draft updates", async () => {
