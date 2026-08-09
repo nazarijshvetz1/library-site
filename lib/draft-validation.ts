@@ -70,6 +70,7 @@ const DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/
 const ACADEMIC_YEAR_LABEL_PATTERN = /^(20\d{2})\/(20\d{2})$/;
 const CLASS_CODE_PATTERN = /^[\p{L}\p{N}()'’._-]{1,16}$/u;
 const FORMULA_PREFIX_PATTERN = /^[=+\-@]/;
+const SNAPSHOT_VERSION_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 type StringRule = {
   required?: boolean;
@@ -419,11 +420,75 @@ function findFormulaInjection(
     }
     if (isRecord(current.value)) {
       for (const [key, value] of Object.entries(current.value)) {
+        // Opaque base64url SHA-256 tokens are validated separately and are
+        // never written to a spreadsheet cell. A valid token may begin with "-".
+        if (key === "expectedVersion") continue;
         pending.push({ path: `${current.path}.${key}`, value });
       }
     }
   }
   return null;
+}
+
+function validateInitialReceipt(
+  payload: Record<string, unknown>,
+  errors: Record<string, string>,
+): Record<string, unknown> {
+  addUnknownFieldErrors(
+    payload,
+    new Set([
+      "date",
+      "locationId",
+      "locationName",
+      "condition",
+      "quantity",
+      "documentNumber",
+      "notes",
+    ]),
+    "payload.",
+    errors,
+  );
+
+  const normalized: Record<string, unknown> = {};
+  const date = normalizedDate(payload, "date", errors, true);
+  const location = directoryPair(
+    payload,
+    "locationId",
+    "locationName",
+    LOCATION_ID_PATTERN,
+    "LOC-001",
+    true,
+    false,
+    errors,
+  );
+  const condition = enumValue(
+    payload,
+    "condition",
+    ["Придатний", "Пошкоджений", "Не перевірено"] as const,
+    true,
+    errors,
+  );
+  const quantity = integerValue(payload, "quantity", 1, 100_000, true, errors);
+  const documentNumber = stringValue(
+    payload,
+    "documentNumber",
+    { max: 100 },
+    errors,
+  );
+  const notes = stringValue(payload, "notes", { max: 2_000 }, errors);
+
+  if (location.locationId === "LOC-007" || location.locationId === "LOC-008") {
+    errors["payload.locationId"] =
+      "Службове місце списання або втрати не можна обрати для надходження.";
+  }
+
+  if (date) normalized.date = date;
+  Object.assign(normalized, location);
+  if (condition) normalized.condition = condition;
+  if (quantity !== undefined) normalized.quantity = quantity;
+  if (documentNumber) normalized.documentNumber = documentNumber;
+  if (notes) normalized.notes = notes;
+  return normalized;
 }
 
 function validateMaterial(
@@ -434,7 +499,7 @@ function validateMaterial(
     "title", "rubric", "isbn", "author", "year", "grade", "classFrom",
     "classTo", "subject", "publicationType", "publisher", "electronicUrl",
     "coverSourceUrl", "coverPhotoKey", "coverPhotoName", "coverConfirmed",
-    "notes",
+    "notes", "initialReceipt",
   ]);
   addUnknownFieldErrors(payload, allowed, "payload.", errors);
 
@@ -468,6 +533,12 @@ function validateMaterial(
   const isbn = normalizedIsbn(payload, "isbn", errors);
   const electronicUrl = httpUrl(payload, "electronicUrl", errors);
   const coverFields = normalizeCoverFields(payload, errors);
+  const initialReceipt = recordValue(
+    payload,
+    "initialReceipt",
+    false,
+    errors,
+  );
 
   if (classFrom !== undefined && classTo === undefined) classTo = classFrom;
   if (classFrom === undefined && classTo !== undefined) {
@@ -495,6 +566,11 @@ function validateMaterial(
   if (electronicUrl) normalized.electronicUrl = electronicUrl;
   Object.assign(normalized, coverFields);
   if (notes) normalized.notes = notes;
+  if (initialReceipt) {
+    const nestedErrors: Record<string, string> = {};
+    normalized.initialReceipt = validateInitialReceipt(initialReceipt, nestedErrors);
+    copyNestedErrors(nestedErrors, "initialReceipt", errors);
+  }
   return normalized;
 }
 
@@ -503,7 +579,7 @@ function validateMaterialUpdate(
   errors: Record<string, string>,
 ): Record<string, unknown> {
   const allowed = new Set([
-    "materialId", "sourceGeneratedAt", "changes", "reason",
+    "materialId", "expectedVersion", "sourceGeneratedAt", "changes", "reason",
   ]);
   addUnknownFieldErrors(payload, allowed, "payload.", errors);
 
@@ -511,11 +587,19 @@ function validateMaterialUpdate(
   const materialId = identifierValue(
     payload, "materialId", CAT_ID_PATTERN, "CAT-0001", true, errors,
   );
+  const expectedVersion = stringValue(
+    payload, "expectedVersion", { required: true, max: 43 }, errors,
+  );
   const sourceGeneratedAt = normalizedDateTime(payload, "sourceGeneratedAt", errors);
   const reason = stringValue(payload, "reason", { max: 1_000 }, errors);
   const changes = recordValue(payload, "changes", true, errors);
 
   if (materialId) normalized.materialId = materialId;
+  if (expectedVersion && SNAPSHOT_VERSION_PATTERN.test(expectedVersion)) {
+    normalized.expectedVersion = expectedVersion;
+  } else if (expectedVersion) {
+    errors["payload.expectedVersion"] = "Оновіть дані й повторно оберіть матеріал.";
+  }
   if (sourceGeneratedAt) normalized.sourceGeneratedAt = sourceGeneratedAt;
   if (reason) normalized.reason = reason;
   if (!changes) return normalized;
@@ -656,7 +740,7 @@ function validateTransfer(
   const notes = stringValue(payload, "notes", { max: 2_000 }, errors);
   const sourceGeneratedAt = normalizedDateTime(payload, "sourceGeneratedAt", errors);
   const observedAvailableQuantity = integerValue(
-    payload, "observedAvailableQuantity", 0, 100_000, false, errors,
+    payload, "observedAvailableQuantity", 0, 100_000, true, errors,
   );
   if (!from && (!fromLocationId || !fromLocationName)) {
     errors["payload.fromLocationId"] =
@@ -711,7 +795,7 @@ function validateRevision(
   const locationName = stringValue(payload, "locationName", { max: 160 }, errors);
   const count = integerValue(payload, "countedQuantity", 0, 100_000, true, errors);
   const expectedQuantity = integerValue(
-    payload, "expectedQuantity", 0, 100_000, false, errors,
+    payload, "expectedQuantity", 0, 100_000, true, errors,
   );
   const sessionId = stringValue(payload, "sessionId", { max: 80 }, errors);
   const date = normalizedDate(payload, "date", errors, true);
@@ -771,7 +855,7 @@ function validateWriteoff(
   const notes = stringValue(payload, "notes", { max: 2_000 }, errors);
   const sourceGeneratedAt = normalizedDateTime(payload, "sourceGeneratedAt", errors);
   const observedAvailableQuantity = integerValue(
-    payload, "observedAvailableQuantity", 0, 100_000, false, errors,
+    payload, "observedAvailableQuantity", 0, 100_000, true, errors,
   );
 
   if (location.fromLocationId === "LOC-007" || location.fromLocationId === "LOC-008") {
@@ -926,7 +1010,9 @@ function validateClassYearUpdate(
   payload: Record<string, unknown>,
   errors: Record<string, string>,
 ): Record<string, unknown> {
-  const allowed = new Set(["classYearId", "academicYearId", "changes", "reason"]);
+  const allowed = new Set([
+    "classYearId", "academicYearId", "expectedVersion", "changes", "reason",
+  ]);
   addUnknownFieldErrors(payload, allowed, "payload.", errors);
   const normalized: Record<string, unknown> = {};
   const classYearId = identifierValue(
@@ -935,10 +1021,18 @@ function validateClassYearUpdate(
   const academicYearId = validateAcademicYearId(
     payload, "academicYearId", true, errors,
   );
+  const expectedVersion = stringValue(
+    payload, "expectedVersion", { required: true, max: 43 }, errors,
+  );
   const reason = stringValue(payload, "reason", { max: 1_000 }, errors);
   const changes = recordValue(payload, "changes", true, errors);
   if (classYearId) normalized.classYearId = classYearId;
   if (academicYearId) normalized.academicYearId = academicYearId;
+  if (expectedVersion && SNAPSHOT_VERSION_PATTERN.test(expectedVersion)) {
+    normalized.expectedVersion = expectedVersion;
+  } else if (expectedVersion) {
+    errors["payload.expectedVersion"] = "Оновіть дані й повторно оберіть клас.";
+  }
   if (reason) normalized.reason = reason;
   if (!changes) return normalized;
 
@@ -985,12 +1079,15 @@ function validateClassYearClose(
   errors: Record<string, string>,
 ): Record<string, unknown> {
   const allowed = new Set([
-    "classYearId", "actualClosedDate", "reason", "closeCohort", "notes",
+    "classYearId", "expectedVersion", "actualClosedDate", "reason", "closeCohort", "notes",
   ]);
   addUnknownFieldErrors(payload, allowed, "payload.", errors);
   const normalized: Record<string, unknown> = {};
   const classYearId = identifierValue(
     payload, "classYearId", CLASS_YEAR_ID_PATTERN, "CY-2026-001", true, errors,
+  );
+  const expectedVersion = stringValue(
+    payload, "expectedVersion", { required: true, max: 43 }, errors,
   );
   const actualClosedDate = normalizedDate(
     payload, "actualClosedDate", errors, true,
@@ -1008,6 +1105,11 @@ function validateClassYearClose(
     errors["payload.notes"] = "Опишіть іншу причину закриття класу.";
   }
   if (classYearId) normalized.classYearId = classYearId;
+  if (expectedVersion && SNAPSHOT_VERSION_PATTERN.test(expectedVersion)) {
+    normalized.expectedVersion = expectedVersion;
+  } else if (expectedVersion) {
+    errors["payload.expectedVersion"] = "Оновіть дані й повторно оберіть клас.";
+  }
   if (actualClosedDate) normalized.actualClosedDate = actualClosedDate;
   if (reason) normalized.reason = reason;
   if (closeCohort !== undefined) normalized.closeCohort = closeCohort;
@@ -1020,7 +1122,7 @@ function validateRolloverClass(
   errors: Record<string, string>,
 ): Record<string, unknown> {
   const allowed = new Set([
-    "sourceClassYearId", "cohortId", "sourceGrade", "action", "targetGrade",
+    "sourceClassYearId", "expectedVersion", "cohortId", "sourceGrade", "action", "targetGrade",
     "targetCode", "teacherUserId", "teacherName", "locationId", "locationName",
     "overrideReason", "notes",
   ]);
@@ -1029,12 +1131,15 @@ function validateRolloverClass(
   const sourceClassYearId = identifierValue(
     item, "sourceClassYearId", CLASS_YEAR_ID_PATTERN, "CY-2026-001", true, errors,
   );
+  const expectedVersion = stringValue(
+    item, "expectedVersion", { required: true, max: 43 }, errors,
+  );
   const cohortId = identifierValue(
     item, "cohortId", COHORT_ID_PATTERN, "COH-001", true, errors,
   );
   const sourceGrade = integerValue(item, "sourceGrade", 1, 11, true, errors);
   const action = enumValue(
-    item, "action", ["promote", "graduate", "close", "skip"] as const, true, errors,
+    item, "action", ["promote", "graduate", "close"] as const, true, errors,
   );
   const targetGrade = integerValue(item, "targetGrade", 1, 11, false, errors);
   const targetCode = validateClassCode(item, "targetCode", false, errors);
@@ -1074,6 +1179,11 @@ function validateRolloverClass(
   }
 
   if (sourceClassYearId) result.sourceClassYearId = sourceClassYearId;
+  if (expectedVersion && SNAPSHOT_VERSION_PATTERN.test(expectedVersion)) {
+    result.expectedVersion = expectedVersion;
+  } else if (expectedVersion) {
+    errors["payload.expectedVersion"] = "Оновіть дані переходу перед збереженням.";
+  }
   if (cohortId) result.cohortId = cohortId;
   if (sourceGrade !== undefined) result.sourceGrade = sourceGrade;
   if (action) result.action = action;

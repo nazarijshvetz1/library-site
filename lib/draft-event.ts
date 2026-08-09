@@ -10,6 +10,7 @@ export type DraftEventAction =
   | "submitted"
   | "cancelled"
   | "approved"
+  | "returned_for_changes"
   | "applied"
   | "failed";
 

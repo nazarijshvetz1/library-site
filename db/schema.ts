@@ -86,6 +86,7 @@ export const librarianDraftEvents = sqliteTable(
         "submitted",
         "cancelled",
         "approved",
+        "returned_for_changes",
         "applied",
         "failed",
       ],

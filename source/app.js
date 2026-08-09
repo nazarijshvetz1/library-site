@@ -455,7 +455,7 @@ function jsonpPayload(apiUrl) {
 
 async function requestLivePayload(apiUrl) {
   try { return await fetchPayload(apiUrl); }
-  catch (fetchError) { return jsonpPayload(apiUrl); }
+  catch { return jsonpPayload(apiUrl); }
 }
 
 function formattedUpdatedAt(value) {

@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import {
   chatGPTSignInPath,
   chatGPTSignOutPath,
@@ -15,13 +17,13 @@ export default async function Home() {
   return (
     <main className="landing-shell">
       <nav className="landing-nav" aria-label="Головна навігація">
-        <a className="brand-lockup" href="/" aria-label="Єдина бібліотека — головна">
+        <Link className="brand-lockup" href="/" aria-label="Єдина бібліотека — головна">
           <img className="brand-logo" src={LOGO_URL} alt="" width="56" height="56" />
           <span>
             <strong>Єдина бібліотека</strong>
             <small>Міжнародний ліцей МАУП</small>
           </span>
-        </a>
+        </Link>
 
         <a className="nav-link" href={PUBLIC_CATALOG_URL}>
           Відкрити каталог
@@ -41,10 +43,10 @@ export default async function Home() {
           <div className="hero-actions">
             {user ? (
               <>
-                <a className="button button-primary" href="/librarian">
+                <Link className="button button-primary" href="/librarian">
                   Перейти до кабінету
                   <span aria-hidden="true">→</span>
-                </a>
+                </Link>
                 <a className="button button-quiet" href={chatGPTSignOutPath("/")}>
                   Вийти
                 </a>

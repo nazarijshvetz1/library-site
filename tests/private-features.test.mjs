@@ -107,8 +107,13 @@ test("private lookup and upload routes keep authentication and same-origin check
   assert.match(draftRoute, /verifyOwnedCoverPhoto/);
   assert.match(draftRoute, /action === "submit"/);
   assert.match(draftStore, /json_extract\(\$\{librarianDrafts\.payloadJson\}, '\$\.coverPhotoKey'\)/);
+  assert.match(draftStore, /json_extract\(\$\{librarianDrafts\.payloadJson\}, '\$\.changes\.coverPhotoKey'\)/);
   assert.match(coverStorage, /bucket\.head\(key\)/);
   assert.match(coverStorage, /object\.customMetadata\?\.ownerUserId !== userId/);
+  assert.match(coverStorage, /readOwnedCoverAttachment/);
+  assert.match(coverStorage, /readStoredCoverBytes\(object, 900 \* 1024\)/);
+  assert.match(coverStorage, /detectCoverImage/);
+  assert.match(coverStorage, /jpegDimensions/);
   assert.match(workspace, /\/api\/librarian\/isbn-lookup\?isbn=/);
   assert.match(workspace, /\/api\/librarian\/cover-photo/);
   assert.match(workspace, /name="coverConfirmed"/);

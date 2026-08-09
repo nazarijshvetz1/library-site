@@ -143,8 +143,8 @@ test("draft validation accepts supported formats and normalizes ISBN", () => {
 
   for (const input of [
     { kind: "receipt.create", payload: { materialId: "CAT-0112", quantity: 2, location: "Бібліотека", date: "2026-08-07" } },
-    { kind: "transfer.create", payload: { materialId: "CAT-0112", quantity: 1, fromLocation: "Бібліотека", toLocation: "Кабінет 205", date: "2026-08-07" } },
-    { kind: "revision.count", payload: { materialId: "CAT-0112", location: "Бібліотека", countedQuantity: 0, date: "2026-08-07" } },
+    { kind: "transfer.create", payload: { materialId: "CAT-0112", quantity: 1, observedAvailableQuantity: 2, fromLocation: "Бібліотека", toLocation: "Кабінет 205", date: "2026-08-07" } },
+    { kind: "revision.count", payload: { materialId: "CAT-0112", location: "Бібліотека", countedQuantity: 0, expectedQuantity: 2, date: "2026-08-07" } },
   ]) {
     assert.equal(validateDraftInput(input).ok, true);
   }
@@ -192,6 +192,7 @@ test("protected operation drafts validate exact stable identifiers and class his
       kind: "material.update",
       payload: {
         materialId: "CAT-0112",
+        expectedVersion: "m".repeat(43),
         changes: { classFrom: 5, classTo: 6, publisher: "Освіта" },
         reason: "Уточнено картку",
       },
@@ -203,6 +204,7 @@ test("protected operation drafts validate exact stable identifiers and class his
         fromLocationId: "LOC-001",
         fromLocationName: "Бібліотека",
         quantity: 1,
+        observedAvailableQuantity: 2,
         destination: "written_off",
         reason: "worn",
         date: "2026-08-07",
@@ -235,6 +237,7 @@ test("protected operation drafts validate exact stable identifiers and class his
       payload: {
         classYearId: "CY-2026-001",
         academicYearId: "YR-2026-2027",
+        expectedVersion: "c".repeat(43),
         changes: { teacherUserId: null, teacherName: null, code: "А" },
       },
     },
@@ -242,6 +245,7 @@ test("protected operation drafts validate exact stable identifiers and class his
       kind: "class-year.close",
       payload: {
         classYearId: "CY-2026-001",
+        expectedVersion: "c".repeat(43),
         actualClosedDate: "2027-06-30",
         reason: "closed",
         closeCohort: false,
@@ -255,6 +259,7 @@ test("protected operation drafts validate exact stable identifiers and class his
         effectiveDate: "2027-09-01",
         classes: [{
           sourceClassYearId: "CY-2026-001",
+          expectedVersion: "c".repeat(43),
           cohortId: "COH-001",
           sourceGrade: 1,
           action: "promote",
@@ -325,6 +330,7 @@ test("protected operation drafts reject ambiguous cover, service rooms, and unsa
       effectiveDate: "2027-09-01",
       classes: [{
         sourceClassYearId: "CY-2026-025",
+        expectedVersion: "c".repeat(43),
         cohortId: "COH-025",
         sourceGrade: 11,
         action: "promote",
@@ -356,12 +362,12 @@ test("draft workflow schema includes optimistic revisions and atomic audit batch
   assert.match(eventStore, /librarianDrafts\.status\} = \$\{input\.toStatus\}/);
   assert.equal([...store.matchAll(/db\.batch\(\[/g)].length, 4);
   assert.equal([...store.matchAll(/guardedDraftEventValues\(\{/g)].length, 4);
-  assert.equal([...applyStore.matchAll(/db\.batch\(\[/g)].length, 2);
-  assert.equal([...applyStore.matchAll(/guardedDraftEventValues\(\{/g)].length, 2);
-  assert.equal(
-    [...applyStore.matchAll(/requestedId && requestedId !== [a-zA-Z]+Metadata\.requestId/g)].length,
-    2,
-  );
+  assert.equal([...applyStore.matchAll(/db\.batch\(\[/g)].length, 3);
+  assert.equal([...applyStore.matchAll(/guardedDraftEventValues\(\{/g)].length, 3);
+  assert.match(applyStore, /returnDraftApplyForChanges/);
+  assert.match(applyStore, /action: "returned_for_changes"/);
+  assert.match(applyStore, /draftApplyClaimDecision/);
+  assert.match(applyStore, /existingClaimOrThrow/);
   assert.match(store, /eq\(librarianDrafts\.revision, expectedRevision\)/);
   assert.match(store, /eq\(librarianDrafts\.status, existing\.status\)/);
   assert.match(store, /identicalFirstRequest/);
