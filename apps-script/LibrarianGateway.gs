@@ -9,7 +9,7 @@
 
 var LIBRARIAN_GATEWAY_MAX_AGE_SECONDS = 300;
 var LIBRARIAN_GATEWAY_NONCE_TTL_SECONDS = 600;
-var LIBRARIAN_GATEWAY_DEFAULT_SPREADSHEET_ID = "18SEyo-tAJ8uHoAFMrYbiaGMtmXjhiscQGcYTpJrNtEI";
+var LIBRARIAN_GATEWAY_PRODUCTION_SPREADSHEET_ID = "18SEyo-tAJ8uHoAFMrYbiaGMtmXjhiscQGcYTpJrNtEI";
 var LIBRARIAN_GATEWAY_APPLY_LEDGER_LIMIT = 75;
 var LIBRARIAN_GATEWAY_APPLY_LEDGER_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 var LIBRARIAN_GATEWAY_APPLY_INDEX_KEY = "GATEWAY_APPLY_INDEX_V1";
@@ -122,9 +122,10 @@ function buildLibrarianReferenceData_() {
   };
 }
 
-function openGatewaySpreadsheet_() {
-  var configured = PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
-  var spreadsheetId = String(configured || LIBRARIAN_GATEWAY_DEFAULT_SPREADSHEET_ID).trim();
+function openGatewaySpreadsheet_(verifiedSpreadsheetId) {
+  var configured = verifiedSpreadsheetId ||
+    PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
+  var spreadsheetId = String(configured || "").trim();
   if (!/^[A-Za-z0-9_-]{20,100}$/.test(spreadsheetId)) {
     throw new Error("Некоректний SPREADSHEET_ID у властивостях скрипту.");
   }
@@ -141,12 +142,21 @@ function applyGatewayDraft_(rawPayload) {
   }
   try {
     var properties = PropertiesService.getScriptProperties();
+    var writeTarget;
+    try {
+      writeTarget = assertGatewayWriteTarget_(properties);
+    } catch (error) {
+      if (!error || !error.gatewayCode) throw error;
+      return applyFailure_(input, error.gatewayCode, error.message);
+    }
     var ledgerKey = "GATEWAY_APPLY_" + digestWebSafe_(input.requestId).slice(0, 40);
     var fingerprint = digestWebSafe_(JSON.stringify({
       draft_id: input.draftId,
       revision: input.revision,
       kind: input.kind,
       payload: input.payload,
+      write_mode: writeTarget.mode,
+      spreadsheet_id: writeTarget.spreadsheetId,
     }));
     var remembered = readApplyResult_(properties.getProperty(ledgerKey));
     if (remembered) {
@@ -172,7 +182,7 @@ function applyGatewayDraft_(rawPayload) {
 
     var response;
     try {
-      var result = dispatchSafeApply_(input);
+      var result = dispatchSafeApply_(input, writeTarget.spreadsheetId);
       SpreadsheetApp.flush();
       response = {
         success: true,
@@ -193,6 +203,39 @@ function applyGatewayDraft_(rawPayload) {
   } finally {
     lock.releaseLock();
   }
+}
+
+function assertGatewayWriteTarget_(properties) {
+  var mode = String(properties.getProperty("LIBRARIAN_WRITE_MODE") || "").trim();
+  var spreadsheetId = String(properties.getProperty("SPREADSHEET_ID") || "").trim();
+  if (!/^[A-Za-z0-9_-]{20,100}$/.test(spreadsheetId)) {
+    throw gatewayApplyError_(
+      "invalid_spreadsheet_id",
+      "Некоректний SPREADSHEET_ID у властивостях скрипту.",
+    );
+  }
+  if (mode === "copy_test") {
+    if (spreadsheetId === LIBRARIAN_GATEWAY_PRODUCTION_SPREADSHEET_ID) {
+      throw gatewayApplyError_(
+        "unsafe_write_target",
+        "Тестовий режим не може записувати до продуктивної таблиці.",
+      );
+    }
+    return { mode: mode, spreadsheetId: spreadsheetId };
+  }
+  if (mode === "production") {
+    if (spreadsheetId !== LIBRARIAN_GATEWAY_PRODUCTION_SPREADSHEET_ID) {
+      throw gatewayApplyError_(
+        "unsafe_write_target",
+        "Продуктивний режим дозволяє лише основну службову таблицю.",
+      );
+    }
+    return { mode: mode, spreadsheetId: spreadsheetId };
+  }
+  throw gatewayApplyError_(
+    "write_mode_disabled",
+    "Режим запису не налаштовано. Дані не змінено.",
+  );
 }
 
 function validateApplyEnvelope_(raw) {
@@ -232,9 +275,12 @@ function validateApplyEnvelope_(raw) {
   };
 }
 
-function dispatchSafeApply_(input) {
+function dispatchSafeApply_(input, verifiedSpreadsheetId) {
   if (input.kind === "academic-year.create") {
-    return applyAcademicYearCreate_(openGatewaySpreadsheet_(), input.payload);
+    return applyAcademicYearCreate_(
+      openGatewaySpreadsheet_(verifiedSpreadsheetId),
+      input.payload,
+    );
   }
   throw gatewayApplyError_(
     "unsupported_kind",
@@ -266,7 +312,7 @@ function applyAcademicYearCreate_(spreadsheet, payload) {
     label: label,
     startDate: startDate,
     endDate: endDate,
-    status: "Запланований",
+    status: "Чернетка",
     notes: notes,
   };
   var existingRow = findAcademicYearRow_(sheet, columns, academicYearId, label);
@@ -421,7 +467,17 @@ function reconcileAcademicYearRow_(spreadsheet, sheet, row, columns, expected) {
       : wanted;
     needsWrite = true;
   });
-  if (needsWrite) range.setValues([output]);
+  if (needsWrite) {
+    academicYearFieldKeys_().forEach(function (key) {
+      if (formulas[columns[key] - 1]) {
+        throw gatewayApplyError_(
+          "formula_protected",
+          "Рядок містить формулу; часткове доповнення зупинено.",
+        );
+      }
+    });
+    range.setValues([output]);
+  }
 }
 
 function verifyAcademicYearRow_(spreadsheet, sheet, row, columns, expected) {
