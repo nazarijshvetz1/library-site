@@ -54,6 +54,9 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   ]);
   assert.match(html, /id="collectionGrid"/);
   assert.match(html, /type="module" src="\/app\.js"/);
+  assert.match(html, /href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/librarian"/);
+  assert.match(html, /rel="noopener noreferrer"/);
+  assert.doesNotMatch(app, /librarianButton|Режим бібліотекаря підключимо/);
   assert.match(app, /Останні додані до каталогу/);
   assert.match(app, /function openLinkedMaterial\(\)/);
   assert.match(app, /openLinkedMaterial\(\);/);

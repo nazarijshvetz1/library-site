@@ -531,7 +531,6 @@ window.addEventListener("popstate", () => {
   if (linkedId) showMaterial(linkedId, { updateHistory: false });
   else closeMaterial({ fromHistory: true });
 });
-document.querySelector("#librarianButton").addEventListener("click", () => showToast("Режим бібліотекаря підключимо на наступному етапі після затвердження каталогу."));
 elements.filterToggle.addEventListener("click", () => { const open = elements.filters.classList.toggle("open"); elements.filterToggle.setAttribute("aria-expanded", String(open)); });
 
 const snapshot = localSnapshot();
