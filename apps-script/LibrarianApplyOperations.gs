@@ -362,6 +362,10 @@ function executeMaterialCreate_(spreadsheet, journal) {
     verifyCoverIndexRow_(coverSheet, plan.cover_row, plan.material_id);
     checkpointApplyJournal_(journal, "cover_index");
   } else {
+    // A locale-broken formula may have been checkpointed by an older deployment.
+    // Re-run the idempotent writer so that the same request can repair and resume.
+    writeCoverIndexRow_(coverSheet, plan.cover_row, plan.material_id);
+    SpreadsheetApp.flush();
     verifyCoverIndexRow_(coverSheet, plan.cover_row, plan.material_id);
   }
   mutations.push({ sheet: "Обкладинки", row: plan.cover_row, action: "index", entity_id: plan.material_id });
@@ -671,38 +675,78 @@ function verifyNewMaterialBalanceCoverage_(spreadsheet, materialId, activeLocati
   });
 }
 
+function coverIdFormula_(row) {
+  return "=IF('Матеріали'!A" + row + "=\"\";\"\";'Матеріали'!A" + row + ")";
+}
+
+function legacyBrokenCoverIdFormula_(row) {
+  return "=IF('Матеріали'!A" + row + "=\"\",\"\",'Матеріали'!A" + row + ")";
+}
+
+function coverImageFormula_(row) {
+  return "=IF(C" + row + "=\"\";\"\";IMAGE(C" + row + "))";
+}
+
+function legacyBrokenCoverImageFormula_(row) {
+  return "=IF(C" + row + "=\"\",\"\",IMAGE(C" + row + "))";
+}
+
 function preflightCoverRow_(sheet, row, materialId) {
   var values = sheet.getRange(row, 1, 1, 3).getDisplayValues()[0];
   var formulas = sheet.getRange(row, 1, 1, 3).getFormulas()[0];
-  if ((values[0] && String(values[0]).trim() !== materialId) || values[2]) {
+  var idValue = String(values[0] || "").trim();
+  var imageValue = String(values[1] || "").trim();
+  var urlValue = String(values[2] || "").trim();
+  var validIdFormula = formulas[0] === coverIdFormula_(row)
+    || formulas[0] === legacyBrokenCoverIdFormula_(row);
+  var validImageFormula = formulas[1] === coverImageFormula_(row)
+    || formulas[1] === legacyBrokenCoverImageFormula_(row);
+  if ((formulas[0] && !validIdFormula) || (!formulas[0] && idValue && idValue !== materialId)) {
     throw gatewayApplyError_("cover_row_conflict", "Рядок обкладинки вже належить іншому матеріалу.");
   }
-  if (formulas[2]) throw gatewayApplyError_("cover_row_conflict", "URL обкладинки не може бути формулою.");
+  if ((formulas[1] && !validImageFormula) || (!formulas[1] && imageValue)) {
+    throw gatewayApplyError_("cover_row_conflict", "Комірка попереднього перегляду обкладинки вже зайнята.");
+  }
+  if (urlValue || formulas[2]) {
+    throw gatewayApplyError_("cover_row_conflict", "URL обкладинки має бути порожнім до завершення cover workflow.");
+  }
 }
 
 function writeCoverIndexRow_(sheet, row, materialId) {
   preflightCoverRow_(sheet, row, materialId);
   var a = sheet.getRange(row, 1);
   var b = sheet.getRange(row, 2);
+  if (a.getFormula() === legacyBrokenCoverIdFormula_(row)) {
+    a.setFormula(coverIdFormula_(row));
+  }
   if (!String(a.getDisplayValues()[0][0] || "").trim() && !a.getFormula()) {
     if (typeof a.setFormula === "function") {
-      a.setFormula("=IF('Матеріали'!A" + row + "=\"\",\"\",'Матеріали'!A" + row + ")");
+      a.setFormula(coverIdFormula_(row));
     } else {
       a.setValue(materialId);
     }
   }
+  if (b.getFormula() === legacyBrokenCoverImageFormula_(row)) {
+    b.setFormula(coverImageFormula_(row));
+  }
   if (!String(b.getDisplayValues()[0][0] || "").trim() && !b.getFormula() && typeof b.setFormula === "function") {
-    b.setFormula("=IF(C" + row + "=\"\",\"\",IMAGE(C" + row + "))");
+    b.setFormula(coverImageFormula_(row));
   }
 }
 
 function verifyCoverIndexRow_(sheet, row, materialId) {
-  var a = sheet.getRange(row, 1);
-  var actual = String(a.getDisplayValues()[0][0] || "").trim();
-  if (actual !== materialId && !a.getFormula()) {
+  var values = sheet.getRange(row, 1, 1, 3).getDisplayValues()[0];
+  var formulas = sheet.getRange(row, 1, 1, 3).getFormulas()[0];
+  if (String(values[0] || "").trim() !== materialId) {
     throw new Error("Google Sheets не підтвердив індекс обкладинки.");
   }
-  if (String(sheet.getRange(row, 3).getDisplayValues()[0][0] || "").trim()) {
+  if (formulas[0] && formulas[0] !== coverIdFormula_(row)) {
+    throw gatewayApplyError_("cover_row_conflict", "Формула ID обкладинки не відповідає поточному матеріалу.");
+  }
+  if (formulas[1] && formulas[1] !== coverImageFormula_(row)) {
+    throw gatewayApplyError_("cover_row_conflict", "Формула попереднього перегляду обкладинки пошкоджена.");
+  }
+  if (String(values[2] || "").trim() || formulas[2]) {
     throw gatewayApplyError_("cover_row_conflict", "До завершення cover workflow постійний URL має бути порожнім.");
   }
 }
@@ -1079,6 +1123,7 @@ function prepareOperationRowPlan_(spreadsheet, data) {
 function executeOperationRowPlan_(spreadsheet, operationPlan, journal, checkpoint) {
   var sheet = gatewayRequiredSheet_(spreadsheet, "Операції");
   bindOperationRequestIdentity_(operationPlan, journal);
+  refreshOperationMaterialLabel_(spreadsheet, sheet, operationPlan, journal);
   var rowState = ensureOperationPlanTarget_(sheet, operationPlan, journal, checkpoint);
   if (!hasApplyJournalCheckpoint_(journal, checkpoint)) {
     var balanceState = operationBalanceState_(spreadsheet, operationPlan.balance_checks);
@@ -1106,12 +1151,7 @@ function executeOperationRowPlan_(spreadsheet, operationPlan, journal, checkpoin
       checkpointApplyJournal_(journal, checkpoint + ":identity_written");
     }
     if (!rowState.complete) {
-      writeReconciledCells_(
-        sheet,
-        operationPlan.row,
-        operationWritableValues_(operationPlan.values),
-        "operation_row_conflict",
-      );
+      writeOperationRowValues_(sheet, operationPlan.row, operationPlan.values);
       SpreadsheetApp.flush();
       checkpointApplyJournal_(journal, checkpoint + ":row_written");
     }
@@ -1140,6 +1180,34 @@ function executeOperationRowPlan_(spreadsheet, operationPlan, journal, checkpoin
     operation_id: operationId,
     mutation: { sheet: "Операції", row: operationPlan.row, action: "create", entity_id: operationId },
   };
+}
+
+function refreshOperationMaterialLabel_(spreadsheet, operationSheet, operationPlan, journal) {
+  var material = readMaterialDescriptor_(spreadsheet, operationPlan.material_id);
+  var expected = normalizedGatewayCell_(material.label);
+  if (normalizedGatewayCell_(operationPlan.values["3"]) === expected) return;
+  var identityRows = findOperationRequestRows_(operationSheet, operationPlan.request_id);
+  if (identityRows.length > 1) {
+    throw gatewayApplyError_("duplicate_operation_request", "request_id операції повторюється.");
+  }
+  if (identityRows.length === 1) {
+    var existing = normalizedGatewayCell_(operationSheet.getRange(identityRows[0], 3).getValue());
+    if (existing && existing !== expected) {
+      throw gatewayApplyError_("operation_identity_conflict", "Операція вже містить інший матеріал.");
+    }
+  }
+  operationPlan.values["3"] = material.label;
+  updateApplyJournalEntry_(journal, "applying", journal.plan, null, "");
+}
+
+function writeOperationRowValues_(sheet, row, values) {
+  var writable = operationWritableValues_(values);
+  preflightReconciledCells_(sheet, row, writable, "operation_row_conflict", false);
+  var output = [];
+  for (var column = 2; column <= 11; column += 1) {
+    output.push(gatewaySheetValue_(writable[String(column)]));
+  }
+  sheet.getRange(row, 2, 1, 10).setValues([output]);
 }
 
 function operationWritableValues_(values) {
@@ -1363,8 +1431,11 @@ function readMaterialDescriptor_(spreadsheet, rawMaterialId) {
   var id = gatewayMaterialId_(rawMaterialId);
   var sheet = gatewayRequiredSheet_(spreadsheet, "Матеріали");
   var row = findUniqueMaterialRow_(sheet, id);
-  var title = String(sheet.getRange(row, 7).getDisplayValues()[0][0] || "").trim();
-  return { id: id, row: row, label: id + (title ? " — " + title : "") };
+  var label = String(sheet.getRange(row, 19).getDisplayValues()[0][0] || "").trim();
+  if (!label) {
+    throw gatewayApplyError_("material_label_missing", "Матеріал не має службового підпису для облікової операції.");
+  }
+  return { id: id, row: row, label: label };
 }
 
 function resolveGatewayLocation_(spreadsheet, rawId, rawName, allowService) {

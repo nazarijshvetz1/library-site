@@ -772,7 +772,7 @@ export default function LibrarianWorkspace({
               <strong>{writesEnabled ? "Контрольований запис увімкнено" : "Безпечний режим · Google Sheets не змінюється"}</strong>
               <p>{writesEnabled
                 ? gatewayConfigured
-                  ? "Автоматично нічого не вноситься. Після перевірки можна окремо підтвердити лише створення навчального року; інші операції залишаються чернетками."
+                  ? "Автоматично нічого не вноситься. Після перевірки кожну підтримувану операцію можна окремо підтвердити до Google Sheets."
                   : "Запис дозволено, але захищений шлюз ще не налаштовано. Жодна чернетка не може бути внесена до Google Sheets."
                 : "Збережені записи очікують окремої перевірки. Застосування до Google Sheets вимкнено на сервері."}</p>
             </div>
@@ -1775,7 +1775,7 @@ function WriteoffFields({
           <label className="field"><span>Кількість <b aria-hidden="true">*</b></span><input name="quantity" type="number" inputMode="numeric" min="1" step="1" required defaultValue={initialField(initialPayload, "quantity") || "1"} /></label>
           <label className="field"><span>Службове призначення <b aria-hidden="true">*</b></span><select name="destination" required defaultValue={initialField(initialPayload, "destination") || "written_off"}><option value="written_off">Списано</option><option value="lost">Втрачено</option></select></label>
           <label className="field"><span>Причина <b aria-hidden="true">*</b></span><select name="reason" required defaultValue={initialField(initialPayload, "reason") || "worn"}><option value="worn">Зношено</option><option value="obsolete">Застаріло</option><option value="damaged">Пошкоджено</option><option value="lost">Втрачено</option><option value="other">Інша причина</option></select></label>
-          <label className="field"><span>Стан примірників</span><input name="condition" type="text" defaultValue={initialField(initialPayload, "condition")} placeholder="Наприклад, непридатні" /></label>
+          <label className="field"><span>Стан примірників</span><select name="condition" defaultValue={initialField(initialPayload, "condition") || "Не перевірено"}><option>Придатний</option><option>Пошкоджений</option><option>Не перевірено</option></select></label>
           <label className="field"><span>Номер акта</span><input name="actNumber" type="text" defaultValue={initialField(initialPayload, "actNumber")} placeholder="За наявності" /></label>
           <label className="field"><span>Дата <b aria-hidden="true">*</b></span><input name="date" type="date" required defaultValue={initialField(initialPayload, "date") || todayValue()} /></label>
           <label className="field field-wide"><span>Примітка</span><textarea name="notes" rows={3} defaultValue={initialField(initialPayload, "notes")} placeholder="Для іншої причини опишіть її тут" /></label>

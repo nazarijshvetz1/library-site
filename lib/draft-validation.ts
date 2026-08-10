@@ -688,7 +688,13 @@ function validateReceipt(
     payload, "locationId", LOCATION_ID_PATTERN, "LOC-001", false, errors,
   );
   const locationName = stringValue(payload, "locationName", { max: 160 }, errors);
-  const condition = stringValue(payload, "condition", { max: 80 }, errors);
+  const condition = enumValue(
+    payload,
+    "condition",
+    ["Придатний", "Пошкоджений", "Не перевірено"] as const,
+    false,
+    errors,
+  );
   const documentNumber = stringValue(payload, "documentNumber", { max: 100 }, errors);
   const date = normalizedDate(payload, "date", errors, true);
   const notes = stringValue(payload, "notes", { max: 2_000 }, errors);
@@ -735,7 +741,13 @@ function validateTransfer(
     payload, "toLocationId", LOCATION_ID_PATTERN, "LOC-001", false, errors,
   );
   const toLocationName = stringValue(payload, "toLocationName", { max: 160 }, errors);
-  const condition = stringValue(payload, "condition", { max: 80 }, errors);
+  const condition = enumValue(
+    payload,
+    "condition",
+    ["Придатний", "Пошкоджений", "Не перевірено"] as const,
+    false,
+    errors,
+  );
   const date = normalizedDate(payload, "date", errors, true);
   const notes = stringValue(payload, "notes", { max: 2_000 }, errors);
   const sourceGeneratedAt = normalizedDateTime(payload, "sourceGeneratedAt", errors);
@@ -849,7 +861,13 @@ function validateWriteoff(
     true,
     errors,
   );
-  const condition = stringValue(payload, "condition", { max: 80 }, errors);
+  const condition = enumValue(
+    payload,
+    "condition",
+    ["Придатний", "Пошкоджений", "Не перевірено"] as const,
+    false,
+    errors,
+  );
   const actNumber = stringValue(payload, "actNumber", { max: 100 }, errors);
   const date = normalizedDate(payload, "date", errors, true);
   const notes = stringValue(payload, "notes", { max: 2_000 }, errors);
