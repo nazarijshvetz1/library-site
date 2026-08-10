@@ -273,6 +273,7 @@ function appsScriptFixture(options = {}) {
     materialHeaders(),
     ["CAT-0001", "Підручники", "Підручник", "Математика", 1, 1, "Математика 1 клас", "Автор", 2025, "9786170000001", "", "", "", "", "", "", "", "", "", "", "Підручники", 1, "", "Видавець", "9786170000001"],
   ], 1600);
+  sheets.get("Матеріали")._state.rows[1][18] = "Математика 1 клас — 1 клас — Автор — 2025 [CAT-0001]";
   add("Обкладинки", [
     ["ID матеріалу", "Обкладинка", "URL"],
     ["CAT-0001", "", ""],
@@ -328,6 +329,16 @@ function appsScriptFixture(options = {}) {
     const locationByName = new Map(sheets.get("Місця")._state.rows.slice(1).map((row) => [row[1], row[0]]));
     const yearById = new Map(sheets.get("Навчальні роки")._state.rows.slice(1).map((row) => [row[0], row]));
     const materialRows = sheets.get("Матеріали")._state.rows;
+    for (const material of materialRows.slice(1)) {
+      if (!/^CAT-/.test(String(material[0] ?? ""))) continue;
+      const classFrom = Number(material[4]) || 0;
+      const classTo = Number(material[5]) || classFrom;
+      const classLabel = classFrom
+        ? (classFrom === classTo ? `${classFrom} клас` : `${classFrom}–${classTo} класи`)
+        : "";
+      const parts = [material[6], classLabel, material[7], material[8]].filter((value) => display(value).trim());
+      material[18] = `${parts.join(" — ")} [${material[0]}]`;
+    }
     const cover = sheets.get("Обкладинки")._state;
     for (let row = 2; row <= materialRows.length; row += 1) {
       if (cover.formulas[row - 1]?.[0]) cover.rows[row - 1][0] = materialRows[row - 1]?.[0] ?? "";
@@ -713,15 +724,78 @@ test("material create allocates canonical CAT, preserves formulas, creates cover
   assert.equal(material.rows[2][10], "");
   assert.equal(material.rows[2][11], "");
   assert.equal(balanceQuantity(fixture, "CAT-0002", "LOC-001"), 5);
+  assert.equal(
+    fixture.sheets.get("Операції")._state.rows[1][2],
+    material.rows[2][18],
+  );
   const cover = fixture.sheets.get("Обкладинки")._state;
   assert.equal(cover.rows[2][0], "CAT-0002");
   assert.equal(cover.rows[2][2] ?? "", "");
-  assert.ok(cover.formulas[2][1].includes("IMAGE"));
+  assert.equal(cover.formulas[2][0], "=IF('Матеріали'!A3=\"\";\"\";'Матеріали'!A3)");
+  assert.equal(cover.formulas[2][1], "=IF(C3=\"\";\"\";IMAGE(C3))");
 
   const replay = fixture.context.applyGatewayDraft_(envelope);
   assert.equal(replay.success, true);
   assert.equal(material.rows.filter((row) => row[0] === "CAT-0002").length, 1);
   assert.equal(balanceQuantity(fixture, "CAT-0002", "LOC-001"), 5);
+});
+
+test("cover index repairs legacy comma formulas and rejects unrelated formulas", async () => {
+  const fixture = appsScriptFixture();
+  await loadAppsScripts(fixture);
+  const cover = fixture.sheets.get("Обкладинки")._state;
+  fixture.sheets.get("Матеріали")._state.rows[2] = ["CAT-0002"];
+  cover.rows[2] = ["#ERROR!", "#ERROR!", ""];
+  cover.formulas[2] = [
+    "=IF('Матеріали'!A3=\"\",\"\",'Матеріали'!A3)",
+    "=IF(C3=\"\",\"\",IMAGE(C3))",
+    "",
+  ];
+
+  fixture.context.writeCoverIndexRow_(fixture.sheets.get("Обкладинки"), 3, "CAT-0002");
+  fixture.context.SpreadsheetApp.flush();
+  fixture.context.verifyCoverIndexRow_(fixture.sheets.get("Обкладинки"), 3, "CAT-0002");
+
+  assert.equal(cover.rows[2][0], "CAT-0002");
+  assert.equal(cover.formulas[2][0], "=IF('Матеріали'!A3=\"\";\"\";'Матеріали'!A3)");
+  assert.equal(cover.formulas[2][1], "=IF(C3=\"\";\"\";IMAGE(C3))");
+
+  cover.rows[3] = ["", "", ""];
+  cover.formulas[3] = ["=OTHER_SHEET!A4", "", ""];
+  assert.throws(
+    () => fixture.context.writeCoverIndexRow_(fixture.sheets.get("Обкладинки"), 4, "CAT-0003"),
+    /Рядок обкладинки вже належить іншому матеріалу/,
+  );
+  assert.equal(cover.formulas[3][0], "=OTHER_SHEET!A4");
+});
+
+test("an applying material request repairs a locale-broken checkpointed cover row", async () => {
+  const fixture = appsScriptFixture();
+  fixture.properties.set("LIBRARIAN_WRITES_ENABLED", "true");
+  await loadAppsScripts(fixture);
+  const envelope = applyEnvelope("material.create", {
+    title: "Матеріал із відновленою обкладинкою",
+    rubric: "Підручники",
+  }, { requestId: uuidFrom(64), draftId: uuidFrom(164) });
+
+  const first = fixture.context.applyGatewayDraft_(envelope);
+  assert.equal(first.success, true, JSON.stringify(first));
+  const cover = fixture.sheets.get("Обкладинки")._state;
+  cover.rows[2] = ["#ERROR!", "#ERROR!", ""];
+  cover.formulas[2] = [
+    "=IF('Матеріали'!A3=\"\",\"\",'Матеріали'!A3)",
+    "=IF(C3=\"\",\"\",IMAGE(C3))",
+    "",
+  ];
+  const journalSheet = fixture.sheets.get("Журнал застосувань");
+  journalSheet._state.rows[1][6] = "applying";
+  const journal = fixture.context.readApplyJournalEntry_(journalSheet, 2);
+
+  const resumed = fixture.context.executeMaterialCreate_(fixture.spreadsheet, journal);
+  assert.equal(resumed.status, "applied");
+  assert.equal(cover.rows[2][0], "CAT-0002");
+  assert.equal(cover.formulas[2][0], "=IF('Матеріали'!A3=\"\";\"\";'Матеріали'!A3)");
+  assert.equal(cover.formulas[2][1], "=IF(C3=\"\";\"\";IMAGE(C3))");
 });
 
 test("material create remains resumable when balance formulas do not expand for the new CAT", async () => {

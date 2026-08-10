@@ -585,6 +585,35 @@ test("stale guards require opaque versions and frozen stock snapshots", () => {
   assert.match(sheetsGateway, /classYearVersions:/);
 });
 
+test("writeoff condition uses the exact Sheets vocabulary before review", () => {
+  assert.match(
+    workspace,
+    /<select name="condition"[^>]*>.*Придатний.*Пошкоджений.*Не перевірено.*<\/select>/s,
+  );
+
+  const base = {
+    kind: "writeoff.create",
+    payload: {
+      materialId: "CAT-0112",
+      fromLocationId: "LOC-001",
+      fromLocationName: "Бібліотека",
+      quantity: 1,
+      observedAvailableQuantity: 4,
+      destination: "written_off",
+      reason: "worn",
+      date: "2026-08-10",
+    },
+  };
+  assert.equal(validateDraftInput({
+    ...base,
+    payload: { ...base.payload, condition: "Не перевірено" },
+  }).ok, true);
+  assert.equal(validateDraftInput({
+    ...base,
+    payload: { ...base.payload, condition: "Непридатний" },
+  }).ok, false);
+});
+
 test("known gateway outcomes have an editable, pending, or terminal disposition", () => {
   for (const code of [
     "stale_material",

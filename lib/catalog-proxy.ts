@@ -2,7 +2,7 @@ import { getRuntimeString } from "@/lib/runtime-env";
 
 const MAX_CATALOG_BYTES = 8 * 1024 * 1024;
 const MAX_MATERIALS = 10_000;
-const CATALOG_TIMEOUT_MS = 15_000;
+const CATALOG_TIMEOUT_MS = 60_000;
 
 export type CatalogPayload = {
   stats: Record<string, unknown>;
