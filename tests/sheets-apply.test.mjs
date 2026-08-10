@@ -1885,6 +1885,10 @@ test("repair migration is preflighted, reproducible, and idempotent", async () =
   assert.equal(operations.getRange(1313, 2).getDisplayValue(), "LEGACY-SENTINEL");
   assert.equal(operations.getRange(1, 16).getDisplayValue(), "Request ID застосування (службове)");
   assert.equal(operations._state.hiddenColumns.has(16), true);
+  assert.equal(
+    operations._state.validations.get("2:8:999:1").formula,
+    '=OR(H2="";AND(ISNUMBER(H2);H2=INT(H2);H2>0))',
+  );
   const second = fixture.context.repairLibrarianGatewayData_(fixture.spreadsheet);
   assert.equal(second.materials, 0);
   assert.equal(second.operationRows, 0);

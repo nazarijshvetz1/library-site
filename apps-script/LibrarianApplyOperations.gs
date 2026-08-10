@@ -3087,7 +3087,7 @@ function repairLibrarianGatewayData_(spreadsheet) {
 
   if (typeof SpreadsheetApp.newDataValidation === "function") {
     var positiveIntegerRule = SpreadsheetApp.newDataValidation()
-      .requireFormulaSatisfied("=OR(H2=\"\",AND(ISNUMBER(H2),H2=INT(H2),H2>0))")
+      .requireFormulaSatisfied("=OR(H2=\"\";AND(ISNUMBER(H2);H2=INT(H2);H2>0))")
       .setAllowInvalid(false)
       .build();
     operations.getRange(2, 8, genericOperationMaximum - 1, 1).setDataValidation(positiveIntegerRule);
