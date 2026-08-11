@@ -1594,6 +1594,9 @@ function LoanIssueForm({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!writesEnabled || !source || !teacherUserId) return;
+    const submittedDueAt = String(
+      new FormData(event.currentTarget).get("dueAt") ?? "",
+    ).trim();
     setSaving(true);
     setSuccess(false);
     setMessage("");
@@ -1607,7 +1610,7 @@ function LoanIssueForm({
             requestId: crypto.randomUUID(),
             teacherUserId,
             issuedAt,
-            dueAt: dueAt || null,
+            dueAt: submittedDueAt || null,
             notes: notes.trim() || null,
             items: [{
               materialId: detail.id,
@@ -1679,7 +1682,13 @@ function LoanIssueForm({
             <input type="date" value={issuedAt} onChange={(event) => setIssuedAt(event.target.value)} required />
           </EditField>
           <EditField label="Повернути до">
-            <input type="date" min={issuedAt} value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
+            <input
+              name="dueAt"
+              type="date"
+              min={issuedAt}
+              value={dueAt}
+              onChange={(event) => setDueAt(event.target.value)}
+            />
           </EditField>
           <EditField label="Примітка" wide>
             <textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Наприклад, для роботи з 7-А класом" />

@@ -525,6 +525,10 @@ test("actual count, teacher issue and partial/full returns keep one balanced sto
     },
     d1,
   );
+  assert.equal(
+    sqlite.prepare("SELECT due_at FROM loans WHERE id = ?").get(loan.loanId).due_at,
+    "2026-09-01",
+  );
   const reference = await directory.readLibraryReferenceData(d1);
   assert.deepEqual(reference.teachers, [{ id: "USR-TCH", fullName: "Ірина Вчитель" }]);
   assert.deepEqual(reference.locations, [{
@@ -536,6 +540,7 @@ test("actual count, teacher issue and partial/full returns keep one balanced sto
   const openLoans = await directory.listOpenLoans(d1);
   assert.equal(openLoans.length, 1);
   assert.equal(openLoans[0].loanId, loan.loanId);
+  assert.equal(openLoans[0].dueAt, "2026-09-01");
   assert.equal(openLoans[0].items[0].loanItemId, loan.items[0].loanItemId);
   assert.equal(openLoans[0].items[0].quantityOutstanding, 2);
   assert.equal(sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 2);

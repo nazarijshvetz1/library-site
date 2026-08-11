@@ -101,6 +101,9 @@ test("new librarian route renders D1 workspace and keeps legacy workspace intact
   assert.match(workspace, /teacher\.fullName/u);
   assert.match(workspace, /source\.quantity/u);
   assert.match(workspace, /quantityOutstanding/u);
+  assert.match(workspace, /name="dueAt"/u);
+  assert.match(workspace, /new FormData\(event\.currentTarget\)\.get\("dueAt"\)/u);
+  assert.match(workspace, /dueAt: submittedDueAt \|\| null/u);
   assert.match(workspace, /thumbnailUrl/u);
   assert.match(workspace, /item\.year/u);
   assert.doesNotMatch(workspace, /Ревізія/u);
