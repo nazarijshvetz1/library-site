@@ -68,6 +68,18 @@ test("classifies a store as a commercial page, never as an ebook", async () => {
   });
 });
 
+test("keeps authentication enrollment separate from staff borrowing status", async () => {
+  const { bundle, report } = importCanonicalExport(await fixture());
+  const users = new Map(bundle.tables.users.map((row) => [row.user_id, row]));
+
+  assert.equal(report.ok, true, stableStringify(report.diagnostics));
+  assert.equal(users.get("USR-001").is_active, 1);
+  assert.equal(users.get("USR-002").status, "Доступ не активовано");
+  assert.equal(users.get("USR-002").is_active, 1, "a current teacher remains available for borrowing");
+  assert.equal(users.get("USR-003").is_active, 1, "a current administrator remains active without login enrollment");
+  assert.equal(users.get("USR-004").is_active, 0, "a former employee remains inactive");
+});
+
 test("reports ISBN formula failures and validation diagnostics without blocking migration", async () => {
   const { bundle, report } = importCanonicalExport(await fixture());
   const material = bundle.tables.materials.find((row) => row.material_id === "CAT-0590");

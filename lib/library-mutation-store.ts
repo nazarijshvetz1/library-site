@@ -293,6 +293,8 @@ export async function createMaterialDirect(
         JSON.stringify(materialAfter),
         createdAt,
       ),
+      // Keep FTS after the audit: its guard must observe the material INSERT's changes().
+      insertMaterialSearchStatement(db, materialId, 1),
     ];
     for (const link of persistedLinks) {
       statements.push(
@@ -728,6 +730,9 @@ export async function updateMaterialDirect(
       JSON.stringify(after),
       updatedAt,
     ),
+    // Keep FTS after the audit: its guard must observe the material UPDATE's changes().
+    deleteMaterialSearchStatement(db, material, nextVersion),
+    insertMaterialSearchStatement(db, materialId, nextVersion),
   ];
 
   if (input.changes.links) {
@@ -1823,6 +1828,52 @@ function materialSearchText(material: ReturnType<typeof materialSnapshot>): stri
     material.subject,
     material.publicationYear ?? "",
   ].join(" "));
+}
+
+function insertMaterialSearchStatement(
+  db: D1Binding,
+  materialId: string,
+  version: number,
+): D1Statement {
+  return db.prepare(`
+    INSERT INTO materials_fts (
+      rowid, title, author, isbn_normalized, publisher,
+      rubric, subject, publication_type, search_text
+    )
+    SELECT
+      rowid, title, author, isbn_normalized, publisher,
+      rubric, subject, publication_type, search_text
+    FROM materials
+    WHERE id = ? AND version = ?
+  `).bind(materialId, version);
+}
+
+function deleteMaterialSearchStatement(
+  db: D1Binding,
+  material: MaterialRow,
+  currentVersion: number,
+): D1Statement {
+  return db.prepare(`
+    INSERT INTO materials_fts (
+      materials_fts, rowid, title, author, isbn_normalized, publisher,
+      rubric, subject, publication_type, search_text
+    )
+    SELECT
+      'delete', rowid, ?, ?, ?, ?, ?, ?, ?, ?
+    FROM materials
+    WHERE id = ? AND version = ?
+  `).bind(
+    material.title,
+    material.author,
+    material.isbn_normalized,
+    material.publisher,
+    material.rubric,
+    material.subject,
+    material.publication_type,
+    material.search_text,
+    material.id,
+    currentVersion,
+  );
 }
 
 function normalizeSearchText(value: unknown): string {

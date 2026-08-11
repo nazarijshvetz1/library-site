@@ -408,34 +408,4 @@ CREATE VIRTUAL TABLE `materials_fts` USING fts5(
 	content_rowid='rowid',
 	tokenize='unicode61 remove_diacritics 2'
 );--> statement-breakpoint
-CREATE TRIGGER `materials_fts_after_insert` AFTER INSERT ON `materials` BEGIN
-	INSERT INTO `materials_fts`(
-		rowid, title, author, isbn_normalized, publisher, rubric, subject, publication_type, search_text
-	) VALUES (
-		new.rowid, new.title, new.author, new.isbn_normalized, new.publisher,
-		new.rubric, new.subject, new.publication_type, new.search_text
-	);
-END;--> statement-breakpoint
-CREATE TRIGGER `materials_fts_after_delete` AFTER DELETE ON `materials` BEGIN
-	INSERT INTO `materials_fts`(
-		materials_fts, rowid, title, author, isbn_normalized, publisher, rubric, subject, publication_type, search_text
-	) VALUES (
-		'delete', old.rowid, old.title, old.author, old.isbn_normalized, old.publisher,
-		old.rubric, old.subject, old.publication_type, old.search_text
-	);
-END;--> statement-breakpoint
-CREATE TRIGGER `materials_fts_after_update` AFTER UPDATE ON `materials` BEGIN
-	INSERT INTO `materials_fts`(
-		materials_fts, rowid, title, author, isbn_normalized, publisher, rubric, subject, publication_type, search_text
-	) VALUES (
-		'delete', old.rowid, old.title, old.author, old.isbn_normalized, old.publisher,
-		old.rubric, old.subject, old.publication_type, old.search_text
-	);
-	INSERT INTO `materials_fts`(
-		rowid, title, author, isbn_normalized, publisher, rubric, subject, publication_type, search_text
-	) VALUES (
-		new.rowid, new.title, new.author, new.isbn_normalized, new.publisher,
-		new.rubric, new.subject, new.publication_type, new.search_text
-	);
-END;--> statement-breakpoint
 PRAGMA optimize;

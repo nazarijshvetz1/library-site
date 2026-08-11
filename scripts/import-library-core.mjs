@@ -488,6 +488,27 @@ function normalizeLocations(rows, diagnostics) {
   return result;
 }
 
+const CURRENT_STAFF_ROLES = new Set([
+  "адміністратор",
+  "адміністрація",
+  "бібліотекар",
+  "бібліотекар адміністратор",
+  "учитель",
+]);
+
+const ACTIVE_USER_STATUSES = new Set([
+  "активна",
+  "активне",
+  "активний",
+]);
+
+function isDomainActiveUser(role, status) {
+  const normalizedStatus = normalizeSearchText(status);
+  if (ACTIVE_USER_STATUSES.has(normalizedStatus)) return true;
+  if (normalizedStatus !== "доступ не активовано") return false;
+  return CURRENT_STAFF_ROLES.has(normalizeSearchText(role));
+}
+
 function normalizeUsers(rows, diagnostics) {
   const result = [];
   const seenIds = new Map();
@@ -514,15 +535,16 @@ function normalizeUsers(rows, diagnostics) {
     if (email && seenEmails.has(email)) {
       diagnostics.error("user_email_duplicate", `${location}.email`, "Email належить кільком користувачам.", { email, first_user_id: seenEmails.get(email) });
     } else if (email) seenEmails.set(email, id);
+    const role = cleanText(field(row, ["Роль", "role"], 2));
     const status = cleanText(field(row, ["Статус", "status"], 5));
     result.push({
       user_id: id,
       name,
-      role: cleanText(field(row, ["Роль", "role"], 2)) || null,
+      role: role || null,
       current_class: cleanText(field(row, ["Поточний клас", "current_class"], 3)) || null,
       email: email || null,
       status: status || null,
-      is_active: Number(/^актив/i.test(status)),
+      is_active: Number(isDomainActiveUser(role, status)),
     });
   }
   return result;

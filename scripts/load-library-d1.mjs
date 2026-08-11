@@ -733,7 +733,7 @@ function validateTargetRows(tables, diagnostics) {
 
 export async function inspectD1LoadPlan(db, plan) {
   validatePlanShape(plan);
-  const requiredTables = TABLE_SPECS.map((spec) => spec.name);
+  const requiredTables = [...TABLE_SPECS.map((spec) => spec.name), "materials_fts"];
   const schemaRows = await queryRows(db, `SELECT name FROM sqlite_schema WHERE type = 'table' AND name IN (${requiredTables.map(sqlLiteral).join(", ")})`);
   const present = new Set(schemaRows.map((row) => String(row.name)));
   const missing = requiredTables.filter((name) => !present.has(name));
@@ -819,6 +819,8 @@ export async function loadD1Plan(db, plan, options = {}) {
   for (const spec of TABLE_SPECS) {
     sqlStatements.push(...buildInsertStatements(spec, before._newRowsByTable[spec.name]));
   }
+  // Rebuild in the same batch so imported materials and their search index commit together.
+  sqlStatements.push("INSERT INTO materials_fts(materials_fts) VALUES('rebuild')");
   try {
     await db.batch(sqlStatements.map((sql) => db.prepare(sql)));
   } catch (cause) {

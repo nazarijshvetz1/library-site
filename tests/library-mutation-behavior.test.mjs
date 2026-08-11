@@ -132,6 +132,7 @@ function seed(sqlite) {
       other_location_quantity, loaned_quantity, updated_at
     ) VALUES ('CAT-0001', 5, 5, 0, 0, ?)
   `).run(now);
+  sqlite.exec("INSERT INTO materials_fts(materials_fts) VALUES('rebuild')");
 }
 
 const actor = {
@@ -180,6 +181,14 @@ test("direct material edit commits once, preserves history and rejects stale ver
   assert.equal(sqlite.prepare("SELECT count(*) AS count FROM material_links").get().count, 1);
   assert.equal(sqlite.prepare("SELECT count(*) AS count FROM audit_events WHERE action = 'material.updated'").get().count, 1);
   assert.equal(sqlite.prepare("SELECT count(*) AS count FROM mutation_commands").get().count, 1);
+  assert.equal(
+    sqlite.prepare("SELECT count(*) AS count FROM materials_fts WHERE materials_fts MATCH '2020'").get().count,
+    0,
+  );
+  assert.equal(
+    sqlite.prepare("SELECT count(*) AS count FROM materials_fts WHERE materials_fts MATCH '2024'").get().count,
+    1,
+  );
   const auditAfter = JSON.parse(sqlite.prepare(`
     SELECT after_json FROM audit_events WHERE action = 'material.updated'
   `).get().after_json);
@@ -316,6 +325,10 @@ test("new material with initial receipt and later receipt commit without drafts"
   assert.deepEqual(replay, created);
   assert.equal(created.materialId, "CAT-0002");
   assert.equal(created.receipt.quantityAfter, 3);
+  assert.equal(
+    sqlite.prepare("SELECT count(*) AS count FROM materials_fts WHERE materials_fts MATCH '9786170000000'").get().count,
+    1,
+  );
   assert.deepEqual(
     plainRow(sqlite.prepare(`
       SELECT total_quantity, library_quantity, loaned_quantity

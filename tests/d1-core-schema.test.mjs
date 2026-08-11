@@ -83,30 +83,41 @@ test("core migration extends the existing draft database without recreating it",
   );
   assert.doesNotMatch(phaseOneSql, /CREATE TABLE `librarian_drafts`/);
   assert.doesNotMatch(phaseOneSql, /CREATE TABLE `librarian_draft_events`/);
-  database.close();
-});
-
-test("catalog, sparse stock and FTS constraints remain synchronized", async () => {
-  const database = await migratedDatabase();
-  seedDirectories(database);
-
-  assert.equal(
+  assert.doesNotMatch(phaseOneSql, /CREATE\s+TRIGGER/iu);
+  assert.deepEqual(
     database
-      .prepare("SELECT count(*) AS count FROM materials_fts WHERE materials_fts MATCH 'algebra*'")
+      .prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND name LIKE 'materials_fts_%'")
+      .all(),
+    [],
+  );
+  database.close();
+
+  const tokenizedDatabase = new DatabaseSync(":memory:");
+  tokenizedDatabase.exec("PRAGMA foreign_keys = ON;");
+  for (const file of migrationFiles.slice(0, -1)) {
+    tokenizedDatabase.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
+  }
+  for (const token of phaseOneSql.split(";").map((value) => value.trim()).filter(Boolean)) {
+    tokenizedDatabase.exec(`${token};`);
+  }
+  assert.equal(
+    tokenizedDatabase
+      .prepare("SELECT count(*) AS count FROM sqlite_schema WHERE name = 'materials_fts'")
       .get().count,
     1,
   );
+  tokenizedDatabase.close();
+});
 
-  database.exec("UPDATE materials SET title = 'Geometry basics', search_text = 'geometry basics math' WHERE id = 'CAT-0001'");
+test("catalog and sparse stock constraints support an explicit FTS rebuild", async () => {
+  const database = await migratedDatabase();
+  seedDirectories(database);
+
+  database.exec("INSERT INTO materials_fts(materials_fts) VALUES('rebuild')");
+
   assert.equal(
     database
       .prepare("SELECT count(*) AS count FROM materials_fts WHERE materials_fts MATCH 'algebra*'")
-      .get().count,
-    0,
-  );
-  assert.equal(
-    database
-      .prepare("SELECT count(*) AS count FROM materials_fts WHERE materials_fts MATCH 'geometry*'")
       .get().count,
     1,
   );

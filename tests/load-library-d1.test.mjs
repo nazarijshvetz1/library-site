@@ -73,6 +73,21 @@ test("dry-run reconciles an empty schema without writing", async (t) => {
   assert.equal(count(database, "inventory_transactions"), 0);
 });
 
+test("dry-run refuses a schema without the FTS table before any writes", async (t) => {
+  const database = await databaseWithSchema(t);
+  database.exec("DROP TABLE materials_fts");
+  const adapter = createNodeSqliteD1Adapter(database);
+  const { plan } = buildD1LoadPlan(await fixtureBundle(), { throwOnError: true });
+
+  await assert.rejects(
+    loadD1Plan(adapter, plan, { dryRun: true }),
+    (error) => error?.code === "D1_SCHEMA_MISSING"
+      && error.missingTables.includes("materials_fts"),
+  );
+  assert.equal(count(database, "materials"), 0);
+  assert.equal(count(database, "users"), 0);
+});
+
 test("full import is atomic and a repeated import adds no duplicates", async (t) => {
   const database = await databaseWithSchema(t);
   const adapter = createNodeSqliteD1Adapter(database);
@@ -88,13 +103,19 @@ test("full import is atomic and a repeated import adds no duplicates", async (t)
   assert.equal(count(database, "material_links"), 3);
   assert.equal(count(database, "material_cover_assets"), 3);
   assert.equal(count(database, "locations"), 2);
-  assert.equal(count(database, "users"), 2);
+  assert.equal(count(database, "users"), 4);
   assert.equal(count(database, "holdings"), 3);
   assert.equal(count(database, "material_stock_totals"), 4);
   assert.equal(count(database, "inventory_transactions"), 5);
   assert.equal(count(database, "inventory_transaction_lines"), 5);
   assert.equal(count(database, "audit_events"), 3);
   assert.equal(count(database, "materials_fts"), 4);
+  assert.equal(
+    database
+      .prepare("SELECT count(*) AS count FROM materials_fts WHERE materials_fts MATCH '9780306406157'")
+      .get().count,
+    1,
+  );
 
   const stock = database.prepare(`
     SELECT total_quantity, library_quantity, other_location_quantity, loaned_quantity
@@ -146,7 +167,7 @@ test("a failing statement rolls back the entire local atomic batch", async (t) =
     loadD1Plan(adapter, plan, { dryRun: false }),
     (error) => error?.code === "D1_ATOMIC_BATCH_FAILED" && /fixture atomic failure/u.test(error.message),
   );
-  for (const table of ["locations", "users", "materials", "material_links", "holdings", "inventory_transactions", "audit_events"]) {
+  for (const table of ["locations", "users", "materials", "materials_fts", "material_links", "holdings", "inventory_transactions", "audit_events"]) {
     assert.equal(count(database, table), 0, `${table} must be rolled back`);
   }
 });
