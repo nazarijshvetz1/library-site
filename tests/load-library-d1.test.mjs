@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -9,6 +12,7 @@ import {
   buildD1LoadPlan,
   createNodeSqliteD1Adapter,
   loadD1Plan,
+  runCli,
 } from "../scripts/load-library-d1.mjs";
 
 const fixturePath = fileURLToPath(new URL("./fixtures/library-core-canonical.json", import.meta.url));
@@ -195,4 +199,32 @@ test("loader has no production or network access path", async () => {
   assert.doesNotMatch(source, /from\s+["']node:https?["']/u);
   assert.doesNotMatch(source, /--remote\b/u);
   assert.match(source, /--apply-local/u);
+  assert.match(source, /--plan/u);
+});
+
+test("CLI exports reproducible compact hosted plan bytes with an exact hash report", async (t) => {
+  const directory = await mkdtemp(path.join(tmpdir(), "library-d1-plan-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const input = path.join(directory, "staging.json");
+  const firstPlan = path.join(directory, "plan-1.json");
+  const secondPlan = path.join(directory, "plan-2.json");
+  const firstReport = path.join(directory, "report-1.json");
+  const secondReport = path.join(directory, "report-2.json");
+  await writeFile(input, JSON.stringify(await fixtureBundle()), "utf8");
+
+  await runCli(["--input", input, "--plan", firstPlan, "--report", firstReport]);
+  await runCli(["--input", input, "--plan", secondPlan, "--report", secondReport]);
+
+  const [firstBytes, secondBytes] = await Promise.all([readFile(firstPlan), readFile(secondPlan)]);
+  assert.deepEqual(firstBytes, secondBytes);
+  assert.equal(firstBytes.at(-1), 0x0a, "hosted plan has one documented trailing newline");
+  assert.doesNotMatch(firstBytes.toString("utf8", 0, 200), /\n\s{2}/u, "plan is compact, not pretty-printed");
+  const digest = createHash("sha256").update(firstBytes).digest("hex");
+  const report = JSON.parse(await readFile(firstReport, "utf8"));
+  const repeated = JSON.parse(await readFile(secondReport, "utf8"));
+  assert.equal(report.hosted_plan.written, true);
+  assert.equal(report.hosted_plan.byte_length, firstBytes.byteLength);
+  assert.equal(report.hosted_plan.sha256, digest);
+  assert.deepEqual(report.hosted_plan, repeated.hosted_plan);
+  assert.equal(JSON.parse(firstBytes).format, "library-d1-load-plan");
 });

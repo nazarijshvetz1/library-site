@@ -868,3 +868,81 @@ export const auditEvents = sqliteTable(
     ),
   ],
 );
+
+const migrationImportStatuses = [
+  "uploaded",
+  "preflighted",
+  "committed",
+  "verified",
+  "cleaned",
+] as const;
+
+/** Durable state for the short-lived, staging-only, hash-pinned import gate. */
+export const migrationImportRuns = sqliteTable(
+  "migration_import_runs",
+  {
+    id: text("id").primaryKey(),
+    planSha256: text("plan_sha256").notNull(),
+    sourceBundleSha256: text("source_bundle_sha256").notNull(),
+    objectKey: text("object_key").notNull(),
+    status: text("status", { enum: migrationImportStatuses }).notNull(),
+    planBytes: integer("plan_bytes").notNull(),
+    expectedRows: integer("expected_rows"),
+    insertStatements: integer("insert_statements"),
+    preflightJson: text("preflight_json"),
+    verificationJson: text("verification_json"),
+    createdByUserId: text("created_by_user_id").notNull(),
+    createdByEmail: text("created_by_email").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    committedAt: text("committed_at"),
+    verifiedAt: text("verified_at"),
+    cleanedAt: text("cleaned_at"),
+    lastErrorCode: text("last_error_code"),
+  },
+  (table) => [
+    uniqueIndex("idx_migration_import_runs_plan_sha256").on(table.planSha256),
+    index("idx_migration_import_runs_status_expires").on(table.status, table.expiresAt),
+    check(
+      "migration_import_runs_plan_hash_valid",
+      sql`length(${table.planSha256}) = 64 and ${table.planSha256} not glob '*[^0-9a-f]*'`,
+    ),
+    check(
+      "migration_import_runs_source_hash_valid",
+      sql`length(${table.sourceBundleSha256}) = 64 and ${table.sourceBundleSha256} not glob '*[^0-9a-f]*'`,
+    ),
+    check(
+      "migration_import_runs_object_private",
+      sql`${table.objectKey} = '_migration/library-d1/' || ${table.planSha256} || '/' || ${table.id} || '.json'`,
+    ),
+    check(
+      "migration_import_runs_status_valid",
+      sql`${table.status} in ('uploaded', 'preflighted', 'committed', 'verified', 'cleaned')`,
+    ),
+    check(
+      "migration_import_runs_plan_bytes_valid",
+      sql`${table.planBytes} > 0 and ${table.planBytes} <= 6291456`,
+    ),
+    check(
+      "migration_import_runs_expected_rows_valid",
+      sql`${table.expectedRows} is null or ${table.expectedRows} > 0`,
+    ),
+    check(
+      "migration_import_runs_statement_count_valid",
+      sql`${table.insertStatements} is null or (${table.insertStatements} > 0 and ${table.insertStatements} <= 43)`,
+    ),
+    check(
+      "migration_import_runs_actor_valid",
+      sql`length(trim(${table.createdByUserId})) > 0 and length(trim(${table.createdByEmail})) > 0`,
+    ),
+    check(
+      "migration_import_runs_preflight_json_valid",
+      sql`${table.preflightJson} is null or json_valid(${table.preflightJson})`,
+    ),
+    check(
+      "migration_import_runs_verification_json_valid",
+      sql`${table.verificationJson} is null or json_valid(${table.verificationJson})`,
+    ),
+  ],
+);

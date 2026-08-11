@@ -1179,22 +1179,46 @@ export async function runCli(argv = process.argv.slice(2)) {
   if (!args.input) throw new Error("Вкажіть --input <staging-bundle.json>.");
   assertLocalPath(args.input, "--input");
   if (args.database) assertLocalPath(args.database, "--database");
+  if (args.plan) assertLocalPath(args.plan, "--plan");
   if (args.applyLocal && !args.database) throw new Error("--apply-local вимагає --database <local.sqlite>.");
 
   const inputPath = path.resolve(args.input);
+  const planPath = args.plan ? path.resolve(args.plan) : null;
+  const reportPath = args.report ? path.resolve(args.report) : null;
+  const databasePath = args.database ? path.resolve(args.database) : null;
+  for (const [label, candidate] of [["--plan", planPath], ["--report", reportPath], ["--database", databasePath]]) {
+    if (candidate && candidate === inputPath) throw new Error(`${label} не може перезаписувати --input.`);
+  }
+  if (planPath && reportPath && planPath === reportPath) throw new Error("--plan і --report мають вказувати на різні файли.");
+  if (planPath && databasePath && planPath === databasePath) throw new Error("--plan не може перезаписувати --database.");
+  if (reportPath && databasePath && reportPath === databasePath) throw new Error("--report не може перезаписувати --database.");
   const bundle = JSON.parse(await readFile(inputPath, "utf8"));
   const { plan, report: planReport } = buildD1LoadPlan(bundle);
+  const hostedPlanBytes = `${stableStringify(plan, 0)}\n`;
+  const hostedPlan = {
+    format: PLAN_FORMAT,
+    format_version: PLAN_VERSION,
+    target_schema: TARGET_SCHEMA,
+    byte_length: new TextEncoder().encode(hostedPlanBytes).byteLength,
+    sha256: sha256(hostedPlanBytes),
+    written: false,
+  };
   let result = {
     ok: planReport.ok,
     dry_run: true,
     applied: false,
     plan: planReport,
     target: null,
+    hosted_plan: hostedPlan,
   };
   if (!planReport.ok) {
     result = { ...result, ok: false };
-  } else if (args.database) {
-    const databasePath = path.resolve(args.database);
+  } else if (planPath) {
+    await mkdir(path.dirname(planPath), { recursive: true });
+    await writeFile(planPath, hostedPlanBytes, "utf8");
+    hostedPlan.written = true;
+  }
+  if (planReport.ok && databasePath) {
     const file = await stat(databasePath);
     if (!file.isFile()) throw new Error("--database має вказувати на наявний локальний SQLite-файл.");
     const { DatabaseSync } = await import("node:sqlite");
@@ -1202,15 +1226,14 @@ export async function runCli(argv = process.argv.slice(2)) {
     try {
       const adapter = createNodeSqliteD1Adapter(database);
       const target = await loadD1Plan(adapter, plan, { dryRun: !args.applyLocal });
-      result = { ok: true, dry_run: !args.applyLocal, applied: target.applied, plan: planReport, target };
+      result = { ...result, ok: true, dry_run: !args.applyLocal, applied: target.applied, target };
     } finally {
       database.close();
     }
   }
 
   const output = `${stableStringify(result)}\n`;
-  if (args.report) {
-    const reportPath = path.resolve(args.report);
+  if (reportPath) {
     await mkdir(path.dirname(reportPath), { recursive: true });
     await writeFile(reportPath, output, "utf8");
   } else process.stdout.write(output);
@@ -1226,7 +1249,7 @@ function parseArgs(argv) {
       result.applyLocal = true;
       continue;
     }
-    if (!["--input", "--database", "--report"].includes(key)) throw new Error(`Невідомий аргумент: ${key}`);
+    if (!["--input", "--database", "--report", "--plan"].includes(key)) throw new Error(`Невідомий аргумент: ${key}`);
     const value = argv[index + 1];
     if (!value || value.startsWith("--")) throw new Error(`Відсутнє значення для ${key}.`);
     result[key.slice(2)] = value;

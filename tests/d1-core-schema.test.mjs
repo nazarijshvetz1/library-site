@@ -8,6 +8,7 @@ const migrationFiles = [
   "drizzle/0001_draft_workflow.sql",
   "drizzle/0002_remove_legacy_audit_triggers.sql",
   "drizzle/0003_odd_the_order.sql",
+  "drizzle/0004_staging_import_runs.sql",
 ];
 
 async function migratedDatabase() {
@@ -71,6 +72,7 @@ test("core migration extends the existing draft database without recreating it",
     "material_stock_totals",
     "materials",
     "materials_fts",
+    "migration_import_runs",
     "mutation_commands",
     "users",
   ]) {
@@ -79,6 +81,10 @@ test("core migration extends the existing draft database without recreating it",
 
   const phaseOneSql = await readFile(
     new URL("../drizzle/0003_odd_the_order.sql", import.meta.url),
+    "utf8",
+  );
+  const importRunSql = await readFile(
+    new URL("../drizzle/0004_staging_import_runs.sql", import.meta.url),
     "utf8",
   );
   assert.doesNotMatch(phaseOneSql, /CREATE TABLE `librarian_drafts`/);
@@ -94,10 +100,13 @@ test("core migration extends the existing draft database without recreating it",
 
   const tokenizedDatabase = new DatabaseSync(":memory:");
   tokenizedDatabase.exec("PRAGMA foreign_keys = ON;");
-  for (const file of migrationFiles.slice(0, -1)) {
+  for (const file of migrationFiles.slice(0, 3)) {
     tokenizedDatabase.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
   }
   for (const token of phaseOneSql.split(";").map((value) => value.trim()).filter(Boolean)) {
+    tokenizedDatabase.exec(`${token};`);
+  }
+  for (const token of importRunSql.split(";").map((value) => value.trim()).filter(Boolean)) {
     tokenizedDatabase.exec(`${token};`);
   }
   assert.equal(
@@ -105,6 +114,26 @@ test("core migration extends the existing draft database without recreating it",
       .prepare("SELECT count(*) AS count FROM sqlite_schema WHERE name = 'materials_fts'")
       .get().count,
     1,
+  );
+  assert.equal(
+    tokenizedDatabase
+      .prepare("SELECT count(*) AS count FROM sqlite_schema WHERE type = 'table' AND name = 'migration_import_runs'")
+      .get().count,
+    1,
+  );
+  assert.deepEqual(
+    tokenizedDatabase
+      .prepare(`
+        SELECT name FROM sqlite_schema
+        WHERE type = 'index' AND tbl_name = 'migration_import_runs' AND sql IS NOT NULL
+        ORDER BY name
+      `)
+      .all()
+      .map((row) => row.name),
+    [
+      "idx_migration_import_runs_plan_sha256",
+      "idx_migration_import_runs_status_expires",
+    ],
   );
   tokenizedDatabase.close();
 });

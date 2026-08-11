@@ -142,8 +142,17 @@ node scripts/import-library-core.mjs `
 ```powershell
 node scripts/load-library-d1.mjs `
   --input .migration-private/d1-staging.json `
+  --plan .migration-private/d1-hosted-load-plan.json `
   --report .migration-private/d1-load-plan-report.json
 ```
+
+`--plan` створює саме той файл, який приймає `/librarian/import`: компактний
+стабільно впорядкований UTF-8 JSON з одним завершальним `LF`. У
+`hosted_plan.sha256` та `hosted_plan.byte_length` звіту записуються hash і
+розмір точних байтів цього файла. Саме цей SHA-256 треба тимчасово задати як
+`LIBRARY_IMPORT_PLAN_SHA256`; pretty-print або повторне збереження редактором
+змінить hash. План містить службові та персональні дані й має залишатися лише
+у `.migration-private/`.
 
 Для reconciliation із уже підготовленою локальною копією SQLite/D1 schema `0003`:
 
@@ -171,3 +180,52 @@ node scripts/load-library-d1.mjs `
 Усі нові рядки виконуються одним SQLite/D1 batch. Якщо хоча б один statement не проходить constraint або trigger, весь batch відкочується. Loader не ділить невдалий запис на частково успішні пакети. Повторний запуск спочатку порівнює всі цільові рядки: ідентичні рядки позначаються `unchanged`, нових записів не створюється.
 
 Production D1 не слід підключати до CLI. Для майбутнього контрольованого перенесення функції `buildD1LoadPlan()`, `inspectD1LoadPlan()` і `loadD1Plan()` можна викликати з одноразового адміністративного середовища, передавши справжній D1 binding. Це має бути окремий погоджений крок після перевірки dry-run і резервної копії.
+
+## Одноразовий hosted-import лише для staging
+
+Маршрут `/librarian/import` призначений лише для контрольованого завантаження
+вже побудованого `library-d1-load-plan` JSON до окремої порожньої staging D1.
+Він не приймає staging bundle, SQL, URL або архів. Production-конфігурація не
+повинна містити ввімкнений import-прапорець.
+
+Перед коротким вікном імпорту в приватному staging deployment задаються:
+
+- `APP_ENV=staging`;
+- `LIBRARY_IMPORT_ENABLED=true`;
+- `LIBRARY_IMPORT_ALLOWED_ORIGIN` — точний HTTPS origin staging-сайту без шляху;
+- `LIBRARY_IMPORT_PLAN_SHA256` — SHA-256 точних байтів перевіреного JSON-плану;
+- `LIBRARY_IMPORT_EXPIRES_AT` — ISO-8601 час у майбутньому, не далі ніж через 7 діб;
+- звичайний `LIBRARIAN_ALLOWED_EMAILS` для ChatGPT-auth allowlist;
+- `LIBRARIAN_WRITES_ENABLED=false` залишається незалежно вимкненим.
+
+До першого upload у staging для R2 bucket `COVER_UPLOADS` обов’язково налаштовують
+і перевіряють lifecycle rule **лише** для префікса `_migration/library-d1/`:
+видалення об’єктів через **45 діб**. Коротший строк не підходить, бо сесія може
+мати до 7 діб активного вікна і ще до 30 діб recovery grace для verify/cleanup.
+Правило є страховкою для унікального orphan-об’єкта, якщо після R2 PUT результат
+D1-запису та повторного читання лишився невизначеним. Воно не повинно охоплювати
+обкладинки або інші ключі bucket. Наявність правила треба підтвердити в hosting/R2
+до ввімкнення `LIBRARY_IMPORT_ENABLED`; сам код сайту не створює lifecycle policy.
+
+Послідовність у прихованій консолі фіксована:
+
+1. **Upload** перевіряє розмір до 6 МіБ, строгий контракт, SHA-256 і кладе
+   файл лише у приватний R2-префікс `_migration/library-d1/`.
+2. **Preflight** лише читає D1. Він відмовляється працювати, якщо цільові
+   таблиці не порожні, є конфлікти, зайві чи вже наявні рядки.
+3. **Atomic commit** повторно читає hash-pinned план з R2, сам будує
+   детерміновані INSERT statements і виконує їх, FTS rebuild та зміну
+   службового статусу одним D1 batch. Клієнт ніколи не надсилає SQL.
+4. **Verify** незалежно звіряє всі рядки, конфлікти й зайві дані, виконує
+   FTS5 external-content `integrity-check` з `rank=1` та детерміновані
+   `MATCH` smoke tests. Сам `COUNT(*)` не вважається доказом справного індексу.
+5. **Cleanup** після успішного verify видаляє приватний JSON із R2, але
+   залишає компактний журнал `migration_import_runs` у D1. Прострочену
+   сесію, яка зупинилася на upload/preflight і ще не писала фонд, можна
+   безпечно abort/cleanup у межах 30-добового службового grace period.
+
+Кожна фаза дозволена лише власнику сесії та лише з точного staging origin.
+Повтор того самого запиту є resumable/idempotent: він повертає вже збережений
+статус, але не виконує import вдруге. Після cleanup треба негайно встановити
+`LIBRARY_IMPORT_ENABLED=false` і прибрати hash/expiry з environment. Сам факт
+успішного staging-import не є дозволом на production cutover.
