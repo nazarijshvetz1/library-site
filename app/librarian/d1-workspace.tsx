@@ -206,8 +206,8 @@ type LibrarianWorkspaceProps = {
   signOutHref: string;
 };
 
-const LOGO_URL =
-  "https://nazarijshvetz1.github.io/library-site/library-logo.png";
+const PUBLIC_CATALOG_URL = "https://nazarijshvetz1.github.io/library-site/";
+const LOGO_URL = `${PUBLIC_CATALOG_URL}library-logo.png`;
 
 const EMPTY_FILTERS: CatalogSearchFilters = {
   q: "",
@@ -386,9 +386,16 @@ export default function D1LibrarianWorkspace({
           </span>
         </Link>
         <div className={styles.account}>
-          <Link href="/" className={styles.catalogLink}>
-            Публічний каталог ↗
-          </Link>
+          <a
+            href={PUBLIC_CATALOG_URL}
+            className={styles.catalogLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Відкрити публічний каталог у новій вкладці"
+          >
+            <span className={styles.catalogLinkLabel}>Публічний каталог</span>{" "}
+            <span aria-hidden="true">↗</span>
+          </a>
           <span>
             <strong>{displayName}</strong>
             <small>{role === "admin" ? "Адміністратор" : "Бібліотекар"}</small>

@@ -74,6 +74,7 @@
   color: var(--green-900);
   font-size: 11px;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .catalogLink:hover {
@@ -1683,7 +1684,18 @@
 @media (max-width: 720px) {
   .header { min-height: 66px; padding: 0 13px; }
   .brand img { width: 42px; height: 42px; }
-  .brand small, .catalogLink, .account > span { display: none; }
+  .brand small, .account > span { display: none; }
+  .catalogLink {
+    width: 36px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    background: #fff;
+    font-size: 16px;
+  }
+  .catalogLinkLabel { display: none; }
   .brand strong { font-size: 17px; }
   .account { gap: 8px; }
   .workspace { padding: 17px 13px 55px; }
