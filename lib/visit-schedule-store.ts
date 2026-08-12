@@ -314,11 +314,11 @@ export async function createVisitBooking(
              NULL, ?
       FROM json_each(?)
     `).bind(id, id, now, JSON.stringify(segments)),
-    auditStatement(db, {
+    auditClaimStatement(db, {
       id: `AUD-${crypto.randomUUID()}`, actorUserId: null, actorEmail: user.email,
       action: "visit.booking.create", entityType: "visit_booking", entityId: id,
       requestId: input.requestId, before: null, after: result, metadata: null,
-      createdAt: now, expectedPreviousChanges: segments.length,
+      createdAt: now, claimOwner: "booking", expectedClaimCount: segments.length,
     }),
     completeVisitCommand(db, input.requestId, result, now),
   ];
@@ -420,12 +420,13 @@ async function cancelBooking(
           cancelled_by_user_id = ?, cancelled_at = ?, updated_at = ?, version = version + 1
       WHERE id = ? AND status = 'active' AND version = ? ${updateOwnerSql} ${accessGuardSql}
     `).bind(...updateBindings, ...accessBindings),
-    auditStatement(db, {
+    auditCancellationStatement(db, {
       id: `AUD-${crypto.randomUUID()}`, actorUserId: actor?.id ?? null, actorEmail: user.email,
       action: actor ? "visit.booking.admin_cancel" : "visit.booking.cancel",
       entityType: "visit_booking", entityId: bookingId, requestId: input.requestId,
       before: privateBooking(row), after: privateResult,
-      metadata: actor ? { reason: input.reason } : null, createdAt: now, expectedPreviousChanges: 1,
+      metadata: actor ? { reason: input.reason } : null, createdAt: now,
+      claimOwner: "booking", expectedVersion: privateResult.version, cancelledAt: now,
     }),
     completeVisitCommand(db, input.requestId, privateResult, now),
   ];
@@ -510,11 +511,11 @@ export async function createVisitClosure(
              CASE WHEN EXISTS (SELECT 1 FROM visit_schedule_closures WHERE id = ? AND status = 'active') THEN ? ELSE NULL END,
              ? FROM json_each(?)
     `).bind(id, id, now, JSON.stringify(segments)),
-    auditStatement(db, {
+    auditClaimStatement(db, {
       id: `AUD-${crypto.randomUUID()}`, actorUserId: actor.id, actorEmail: user.email,
       action: "visit.closure.create", entityType: "visit_schedule_closure", entityId: id,
       requestId: input.requestId, before: null, after: result, metadata: null,
-      createdAt: now, expectedPreviousChanges: segments.length,
+      createdAt: now, claimOwner: "closure", expectedClaimCount: segments.length,
     }),
     completeVisitCommand(db, input.requestId, result, now),
   ];
@@ -571,11 +572,11 @@ export async function cancelVisitClosure(
       WHERE id = ? AND status = 'active' AND version = ?
         AND EXISTS (SELECT 1 FROM users WHERE id = ? AND status='active' AND role IN ('admin','librarian'))
     `).bind(actor.id, now, now, closureId, input.expectedVersion, actor.id),
-    auditStatement(db, {
+    auditCancellationStatement(db, {
       id: `AUD-${crypto.randomUUID()}`, actorUserId: actor.id, actorEmail: user.email,
       action: "visit.closure.cancel", entityType: "visit_schedule_closure", entityId: closureId,
       requestId: input.requestId, before: closure(row), after: result, metadata: null,
-      createdAt: now, expectedPreviousChanges: 1,
+      createdAt: now, claimOwner: "closure", expectedVersion: result.version, cancelledAt: now,
     }),
     completeVisitCommand(db, input.requestId, result, now),
   ];
@@ -755,21 +756,56 @@ function completeVisitCommand(db: VisitD1Database, requestId: string, result: un
   `).bind(JSON.stringify(result), now, now, requestId);
 }
 
-function auditStatement(db: VisitD1Database, input: {
+function auditClaimStatement(db: VisitD1Database, input: {
   id: string; actorUserId: string | null; actorEmail: string; action: string;
   entityType: string; entityId: string; requestId: string;
   before: unknown; after: unknown; metadata: unknown; createdAt: string;
-  expectedPreviousChanges: number;
+  claimOwner: "booking" | "closure"; expectedClaimCount: number;
 }) {
+  const ownerColumn = input.claimOwner === "booking" ? "booking_id" : "closure_id";
+  const entityTable = input.claimOwner === "booking" ? "visit_bookings" : "visit_schedule_closures";
   return db.prepare(`
     INSERT INTO audit_events (
       id, actor_user_id, actor_email, action, entity_type, entity_id,
       request_id, before_json, after_json, metadata_json, created_at
-    ) VALUES (?, ?, ?, ?, ?, CASE WHEN changes() = ? THEN ? ELSE NULL END,
+    ) VALUES (?, ?, ?, ?, ?, CASE WHEN EXISTS (
+        SELECT 1 FROM ${entityTable} WHERE id = ? AND status = 'active'
+      ) AND (
+        SELECT COUNT(*) FROM visit_slot_claims WHERE ${ownerColumn} = ?
+      ) = ? THEN ? ELSE NULL END,
       ?, ?, ?, ?, ?)
   `).bind(
     input.id, input.actorUserId, input.actorEmail.toLowerCase(), input.action, input.entityType,
-    input.expectedPreviousChanges, input.entityId, input.requestId,
+    input.entityId, input.entityId, input.expectedClaimCount, input.entityId, input.requestId,
+    input.before === null ? null : JSON.stringify(input.before),
+    input.after === null ? null : JSON.stringify(input.after),
+    input.metadata === null ? null : JSON.stringify(input.metadata), input.createdAt,
+  );
+}
+
+function auditCancellationStatement(db: VisitD1Database, input: {
+  id: string; actorUserId: string | null; actorEmail: string; action: string;
+  entityType: string; entityId: string; requestId: string;
+  before: unknown; after: unknown; metadata: unknown; createdAt: string;
+  claimOwner: "booking" | "closure"; expectedVersion: number; cancelledAt: string;
+}) {
+  const ownerColumn = input.claimOwner === "booking" ? "booking_id" : "closure_id";
+  const entityTable = input.claimOwner === "booking" ? "visit_bookings" : "visit_schedule_closures";
+  return db.prepare(`
+    INSERT INTO audit_events (
+      id, actor_user_id, actor_email, action, entity_type, entity_id,
+      request_id, before_json, after_json, metadata_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, CASE WHEN EXISTS (
+        SELECT 1 FROM ${entityTable}
+        WHERE id = ? AND status = 'cancelled' AND version = ? AND cancelled_at = ?
+      ) AND NOT EXISTS (
+        SELECT 1 FROM visit_slot_claims WHERE ${ownerColumn} = ?
+      ) THEN ? ELSE NULL END,
+      ?, ?, ?, ?, ?)
+  `).bind(
+    input.id, input.actorUserId, input.actorEmail.toLowerCase(), input.action, input.entityType,
+    input.entityId, input.expectedVersion, input.cancelledAt, input.entityId, input.entityId,
+    input.requestId,
     input.before === null ? null : JSON.stringify(input.before),
     input.after === null ? null : JSON.stringify(input.after),
     input.metadata === null ? null : JSON.stringify(input.metadata), input.createdAt,

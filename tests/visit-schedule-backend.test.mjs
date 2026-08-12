@@ -115,6 +115,16 @@ test("shared segment-claim schema is the atomic booking-versus-closure race guar
   assert.match(sql, /% 5 = 0/);
 });
 
+test("visit audits verify persisted final state without relying on changes()", async () => {
+  const source = await readFile(new URL("../lib/visit-schedule-store.ts", import.meta.url), "utf8");
+  assert.match(source, /claimOwner:\s*"booking", expectedClaimCount: segments\.length/);
+  assert.match(source, /claimOwner:\s*"closure", expectedClaimCount: segments\.length/);
+  assert.match(source, /SELECT COUNT\(\*\) FROM visit_slot_claims WHERE \$\{ownerColumn\} = \?/);
+  assert.match(source, /status = 'cancelled' AND version = \? AND cancelled_at = \?/);
+  assert.match(source, /NOT EXISTS \(\s*SELECT 1 FROM visit_slot_claims WHERE \$\{ownerColumn\} = \?/);
+  assert.doesNotMatch(source, /changes\(\)/);
+});
+
 test("visit migration rejects impossible local dates", async () => {
   const { sqlite } = await visitDatabase();
   const now = new Date().toISOString();
