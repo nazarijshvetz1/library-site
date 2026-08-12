@@ -702,6 +702,8 @@ export async function closeClassYearDirect(
   const beforeRow = await requireClassYear(db, classYearId);
   if (beforeRow.status === "closed") throw new AcademicAdminError("class_year_closed", 409, "Клас уже закрито.");
   if (beforeRow.version !== input.expectedVersion) throw versionConflict(classYearId, beforeRow.version);
+  const openLoan = await findOpenClassLoan(db, [classYearId]);
+  if (openLoan) throw classHasOpenLoans(openLoan);
   if (input.reason === "graduated" && (beforeRow.grade !== 11 || !input.closeCohort)) {
     throw new AcademicAdminError(
       "graduation_requires_final_grade",
@@ -753,7 +755,18 @@ export async function closeClassYearDirect(
       SET status = 'closed', actual_closed_date = ?, notes = ?,
           version = version + 1, updated_at = ?
       WHERE id = ? AND version = ? AND status IN ('planned', 'active')
-    `).bind(input.actualClosedDate, notes, updatedAt, classYearId, input.expectedVersion),
+        AND NOT EXISTS (
+          SELECT 1 FROM class_loans
+          WHERE class_year_id = ? AND status = 'open'
+        )
+    `).bind(
+      input.actualClosedDate,
+      notes,
+      updatedAt,
+      classYearId,
+      input.expectedVersion,
+      classYearId,
+    ),
     auditGuardStatement(db, {
       actor,
       action: "class_year.closed",
@@ -797,15 +810,21 @@ export async function closeClassYearDirect(
     );
   }
   statements.push(completeCommandStatement(db, input.requestId, result, updatedAt));
-  const replayed = await executeIdempotentBatch<ClassYearMutationResult>(
-    db,
-    statements,
-    input.requestId,
-    requestHash,
-    "class_year_version_conflict",
-    "Клас або група вже змінилися. Оновіть дані перед повторним закриттям.",
-  );
-  return replayed ?? result;
+  try {
+    const replayed = await executeIdempotentBatch<ClassYearMutationResult>(
+      db,
+      statements,
+      input.requestId,
+      requestHash,
+      "class_year_version_conflict",
+      "Клас або група вже змінилися. Оновіть дані перед повторним закриттям.",
+    );
+    return replayed ?? result;
+  } catch (error) {
+    const racedLoan = await findOpenClassLoan(db, [classYearId]);
+    if (racedLoan) throw classHasOpenLoans(racedLoan);
+    throw error;
+  }
 }
 
 export async function rolloverAcademicYearDirect(
@@ -833,6 +852,11 @@ export async function rolloverAcademicYearDirect(
     throw new AcademicAdminError("rollover_date_invalid", 400, "Дата переходу має належати цільовому навчальному року.");
   }
   const sourceRows = await listOpenClassYears(db, input.sourceYearId);
+  const openSourceLoan = await findOpenClassLoan(
+    db,
+    sourceRows.map((row) => row.id),
+  );
+  if (openSourceLoan) throw classHasOpenLoans(openSourceLoan);
   const inputIds = new Set(input.classes.map((item) => item.sourceClassYearId));
   const missing = sourceRows.filter((row) => !inputIds.has(row.id)).map((row) => row.id);
   const foreign = input.classes.filter((item) => !sourceRows.some((row) => row.id === item.sourceClassYearId)).map((item) => item.sourceClassYearId);
@@ -1091,6 +1115,11 @@ export async function rolloverAcademicYearDirect(
       );
       return replayed ?? result;
     } catch (error) {
+      const racedLoan = await findOpenClassLoan(
+        db,
+        sourceRows.map((row) => row.id),
+      );
+      if (racedLoan) throw classHasOpenLoans(racedLoan);
       if (attempt < 2 && isClassAllocationConflict(error)) continue;
       if (isUniqueConflict(error)) {
         throw new AcademicAdminError("rollover_conflict", 409, "Цільові класи вже існують або конфліктують між собою.");
@@ -1400,6 +1429,10 @@ function bulkCloseSourceClassesStatement(
       AND cy.cohort_id = items.cohort_id AND cy.grade = items.grade
       AND cy.version = items.expected_version
       AND cy.status IN ('planned', 'active')
+      AND NOT EXISTS (
+        SELECT 1 FROM class_loans
+        WHERE class_year_id = cy.id AND status = 'open'
+      )
   `).bind(JSON.stringify(rows), effectiveDate, updatedAt, sourceYearId);
 }
 
@@ -1631,6 +1664,42 @@ function versionConflict(classYearId: string, currentVersion: number): AcademicA
     409,
     "Клас уже змінився. Оновіть дані.",
     { classYearId, currentVersion },
+  );
+}
+
+async function findOpenClassLoan(
+  db: AcademicD1Database,
+  classYearIds: string[],
+): Promise<{ classYearId: string; classLoanId: string } | null> {
+  if (classYearIds.length === 0) return null;
+  const row = await db.prepare(`
+    WITH requested AS (
+      SELECT CAST(value AS TEXT) AS class_year_id FROM json_each(?)
+    )
+    SELECT cl.class_year_id, cl.id AS class_loan_id
+    FROM requested
+    JOIN class_loans cl ON cl.class_year_id = requested.class_year_id
+    WHERE cl.status = 'open'
+    ORDER BY cl.class_year_id, cl.id
+    LIMIT 1
+  `).bind(JSON.stringify(classYearIds)).first<{
+    class_year_id: string;
+    class_loan_id: string;
+  }>();
+  return row
+    ? { classYearId: row.class_year_id, classLoanId: row.class_loan_id }
+    : null;
+}
+
+function classHasOpenLoans(openLoan: {
+  classYearId: string;
+  classLoanId: string;
+}): AcademicAdminError {
+  return new AcademicAdminError(
+    "class_has_open_loans",
+    409,
+    "Клас має неповернену видачу. Спочатку поверніть усі примірники, а потім закрийте клас або виконайте перехід року.",
+    openLoan,
   );
 }
 

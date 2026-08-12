@@ -79,6 +79,7 @@ function openDatabase() {
     "0001_draft_workflow.sql",
     "0002_remove_legacy_audit_triggers.sql",
     "0003_odd_the_order.sql",
+    "0005_young_night_nurse.sql",
   ]) {
     const sql = fs.readFileSync(path.join(root, "drizzle", file), "utf8");
     for (const statement of sql.split(/-->\s*statement-breakpoint/gu)) {
@@ -129,6 +130,18 @@ function seedRollover(sqlite) {
       ('CY-2026-002', 'YR-2026-2027', 'COH-002', '11-Б', 11, 'Б',
        'USR-TCH', 'LOC-002', '2026-09-01', '2027-08-31', 'active', NULL, '', 1, '${now}', '${now}');
   `);
+}
+
+function seedOpenClassLoan(sqlite, classYearId, id = "CLOAN-BLOCK") {
+  const now = "2026-09-10T08:00:00.000Z";
+  sqlite.prepare(`
+    INSERT INTO class_loans (
+      id, class_year_id, responsible_teacher_user_id, status,
+      issued_at, due_at, closed_at, notes, issued_by_user_id,
+      closed_by_user_id, version, created_at, updated_at
+    ) VALUES (?, ?, 'USR-TCH', 'open', '2026-09-10', NULL, NULL, '',
+      'USR-LIB', NULL, 1, ?, ?)
+  `).run(id, classYearId, now, now);
 }
 
 function seedLargeRollover(sqlite, count = 26) {
@@ -360,6 +373,71 @@ test("an active year with no open classes can roll over to an empty draft year",
   assert.equal(sqlite.prepare("SELECT status FROM academic_years WHERE id = 'YR-2026-2027'").get().status, "closed");
   assert.equal(sqlite.prepare("SELECT status FROM academic_years WHERE id = 'YR-2027-2028'").get().status, "active");
   assert.equal(sqlite.prepare("SELECT count(*) AS count FROM audit_events").get().count, 2);
+});
+
+test("manual class close loses atomically to a concurrent open class loan", async () => {
+  const { sqlite, d1 } = openDatabase();
+  seedRollover(sqlite);
+  d1.beforeBatch = () => seedOpenClassLoan(sqlite, "CY-2026-001");
+  await assert.rejects(
+    academic.closeClassYearDirect(actor, "CY-2026-001", {
+      requestId: request(16),
+      expectedVersion: 1,
+      actualClosedDate: "2027-06-30",
+      reason: "manual",
+      closeCohort: false,
+      notes: "",
+    }, d1),
+    (error) => error instanceof academic.AcademicAdminError
+      && error.code === "class_has_open_loans"
+      && error.details.classYearId === "CY-2026-001",
+  );
+  assert.equal(sqlite.prepare("SELECT status FROM class_years WHERE id = 'CY-2026-001'").get().status, "active");
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM mutation_commands").get().count, 0);
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM audit_events").get().count, 0);
+});
+
+test("rollover loses atomically to a concurrent open class loan", async () => {
+  const { sqlite, d1 } = openDatabase();
+  seedRollover(sqlite);
+  d1.beforeBatch = () => seedOpenClassLoan(sqlite, "CY-2026-002");
+  await assert.rejects(
+    academic.rolloverAcademicYearDirect(actor, {
+      requestId: request(17),
+      sourceYearId: "YR-2026-2027",
+      sourceYearVersion: 1,
+      targetYearId: "YR-2027-2028",
+      targetYearVersion: 1,
+      effectiveDate: "2027-09-01",
+      notes: "",
+      classes: [
+        {
+          sourceClassYearId: "CY-2026-001",
+          expectedVersion: 1,
+          cohortId: "COH-001",
+          sourceGrade: 10,
+          action: "promote",
+          targetGrade: 11,
+          targetCode: "А",
+        },
+        {
+          sourceClassYearId: "CY-2026-002",
+          expectedVersion: 1,
+          cohortId: "COH-002",
+          sourceGrade: 11,
+          action: "graduate",
+        },
+      ],
+    }, d1),
+    (error) => error instanceof academic.AcademicAdminError
+      && error.code === "class_has_open_loans"
+      && error.details.classYearId === "CY-2026-002",
+  );
+  assert.equal(sqlite.prepare("SELECT status FROM academic_years WHERE id = 'YR-2026-2027'").get().status, "active");
+  assert.equal(sqlite.prepare("SELECT status FROM academic_years WHERE id = 'YR-2027-2028'").get().status, "draft");
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM class_years WHERE academic_year_id = 'YR-2027-2028'").get().count, 0);
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM mutation_commands").get().count, 0);
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM audit_events").get().count, 0);
 });
 
 test("rollover covers every class in one atomic replayable command", async () => {

@@ -50,7 +50,19 @@
           <form class="hero-search" id="heroSearchForm" role="search">
             <label class="sr-only" for="heroSearch">Пошук у каталозі</label>
             <span aria-hidden="true">⌕</span>
-            <input id="heroSearch" type="search" placeholder="Назва, автор, предмет або CAT-ID" autocomplete="off" />
+            <div class="hero-search-field">
+              <input
+                id="heroSearch"
+                type="search"
+                placeholder="Назва, автор, предмет або CAT-ID"
+                autocomplete="off"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-controls="titleSuggestions"
+                aria-expanded="false"
+              />
+              <div class="title-suggestions" id="titleSuggestions" role="listbox" aria-label="Схожі назви матеріалів" hidden></div>
+            </div>
             <button type="submit">Знайти</button>
           </form>
           <div class="quick-links" aria-label="Швидкий пошук">
@@ -116,7 +128,7 @@
           <aside class="filters" id="filters" aria-label="Фільтри каталогу">
             <div class="filter-header"><strong>Фільтри</strong><button type="button" id="clearFilters">Очистити</button></div>
             <label>Клас<select id="gradeFilter"><option value="">Усі класи</option></select></label>
-            <label>Рубрика<select id="rubricFilter"><option value="">Усі рубрики</option></select></label>
+            <label>Рубрика<select id="rubricFilter"><option value="">Усі</option></select></label>
             <label>Предмет<select id="subjectFilter"><option value="">Усі предмети</option></select></label>
             <label>Тип видання<select id="typeFilter"><option value="">Усі типи</option></select></label>
             <label class="availability-check">

@@ -36,6 +36,36 @@ export type OpenLoan = {
   items: OpenLoanItem[];
 };
 
+export type OpenClassLoanItem = {
+  classLoanItemId: string;
+  materialId: string;
+  materialTitle: string;
+  materialYear: number | null;
+  sourceLocationId: string;
+  sourceLocationName: string;
+  condition: string;
+  quantityIssued: number;
+  quantityReturned: number;
+  quantityOutstanding: number;
+};
+
+export type OpenClassLoan = {
+  classLoanId: string;
+  classYearId: string;
+  className: string;
+  academicYearId: string;
+  academicYearLabel: string;
+  cohortId: string;
+  responsibleTeacherUserId: string;
+  responsibleTeacherName: string;
+  status: "open";
+  issuedAt: string;
+  dueAt: string | null;
+  notes: string;
+  version: number;
+  items: OpenClassLoanItem[];
+};
+
 type DirectoryRow = Record<string, unknown>;
 
 export async function readLibraryReferenceData(
@@ -142,6 +172,105 @@ export async function listOpenLoans(
     const returned = Math.min(issued, nonNegativeInteger(row.quantity_returned));
     loan.items.push({
       loanItemId,
+      materialId,
+      materialTitle: boundedText(row.material_title, 500),
+      materialYear: nullableYear(row.material_year),
+      sourceLocationId: boundedText(row.source_location_id, 64),
+      sourceLocationName: boundedText(row.source_location_name, 240),
+      condition: boundedText(row.condition, 80) || "unspecified",
+      quantityIssued: issued,
+      quantityReturned: returned,
+      quantityOutstanding: issued - returned,
+    });
+  }
+  return [...loans.values()];
+}
+
+export async function listOpenClassLoans(
+  db: CatalogD1Database,
+  options: { classYearId?: string; limit?: number } = {},
+): Promise<OpenClassLoan[]> {
+  const classYearId = boundedText(options.classYearId, 128);
+  const limit = Math.min(200, Math.max(1, Math.trunc(options.limit ?? 100)));
+  const bindings: Array<string | number> = [];
+  const classFilter = classYearId ? "AND class_year_id = ?" : "";
+  if (classYearId) bindings.push(classYearId);
+  bindings.push(limit);
+  const result = await db.prepare(`
+    SELECT
+      cl.id AS class_loan_id,
+      cl.class_year_id,
+      cy.class_name,
+      cy.academic_year_id,
+      ay.label AS academic_year_label,
+      cy.cohort_id,
+      cl.responsible_teacher_user_id,
+      teacher.full_name AS responsible_teacher_name,
+      cl.status,
+      cl.issued_at,
+      cl.due_at,
+      cl.notes,
+      cl.version,
+      cli.id AS class_loan_item_id,
+      cli.material_id,
+      m.title AS material_title,
+      m.publication_year AS material_year,
+      cli.source_location_id,
+      loc.name AS source_location_name,
+      cli.condition,
+      cli.quantity_issued,
+      cli.quantity_returned
+    FROM (
+      SELECT id
+      FROM class_loans
+      WHERE status = 'open'
+      ${classFilter}
+      ORDER BY COALESCE(due_at, '9999-12-31') ASC, issued_at ASC, id ASC
+      LIMIT ?
+    ) selected
+    JOIN class_loans cl ON cl.id = selected.id
+    JOIN class_years cy ON cy.id = cl.class_year_id
+    JOIN academic_years ay ON ay.id = cy.academic_year_id
+    JOIN users teacher ON teacher.id = cl.responsible_teacher_user_id
+    JOIN class_loan_items cli ON cli.class_loan_id = cl.id
+    JOIN materials m ON m.id = cli.material_id
+    JOIN locations loc ON loc.id = cli.source_location_id
+    WHERE cli.quantity_returned < cli.quantity_issued
+    ORDER BY COALESCE(cl.due_at, '9999-12-31') ASC, cl.issued_at ASC,
+      cl.id ASC, cli.created_at ASC, cli.id ASC
+  `).bind(...bindings).all();
+
+  const loans = new Map<string, OpenClassLoan>();
+  for (const rawRow of result.results ?? []) {
+    const row = rawRow as DirectoryRow;
+    const classLoanId = boundedText(row.class_loan_id, 128);
+    const classLoanItemId = boundedText(row.class_loan_item_id, 128);
+    const materialId = boundedText(row.material_id, 64);
+    if (!classLoanId || !classLoanItemId || !materialId) continue;
+    let loan = loans.get(classLoanId);
+    if (!loan) {
+      loan = {
+        classLoanId,
+        classYearId: boundedText(row.class_year_id, 128),
+        className: boundedText(row.class_name, 300),
+        academicYearId: boundedText(row.academic_year_id, 128),
+        academicYearLabel: boundedText(row.academic_year_label, 64),
+        cohortId: boundedText(row.cohort_id, 128),
+        responsibleTeacherUserId: boundedText(row.responsible_teacher_user_id, 128),
+        responsibleTeacherName: boundedText(row.responsible_teacher_name, 300),
+        status: "open",
+        issuedAt: boundedText(row.issued_at, 40),
+        dueAt: boundedText(row.due_at, 40) || null,
+        notes: boundedText(row.notes, 4_000),
+        version: positiveInteger(row.version),
+        items: [],
+      };
+      loans.set(classLoanId, loan);
+    }
+    const issued = nonNegativeInteger(row.quantity_issued);
+    const returned = Math.min(issued, nonNegativeInteger(row.quantity_returned));
+    loan.items.push({
+      classLoanItemId,
       materialId,
       materialTitle: boundedText(row.material_title, 500),
       materialYear: nullableYear(row.material_year),

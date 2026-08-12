@@ -39,6 +39,35 @@ export function newestMaterialsByCatalogId(items, limit = 12) {
     .slice(0, maximum);
 }
 
+function normalizedSearchText(value) {
+  return String(value || "")
+    .toLocaleLowerCase("uk")
+    .replace(/[’`]/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function titleSuggestions(items, query, limit = 6) {
+  const needle = normalizedSearchText(query);
+  const maximum = Math.max(0, Math.min(12, Math.floor(Number(limit)) || 0));
+  if (needle.length < 2 || maximum === 0) return [];
+  const tokens = needle.split(" ").filter(Boolean);
+  return (Array.isArray(items) ? items : [])
+    .map((item, index) => {
+      const title = normalizedSearchText(item && item.title);
+      if (!title || !tokens.every((token) => title.includes(token))) return null;
+      const wordPrefix = title.split(/[^\p{L}\p{N}]+/u).some((word) => word.startsWith(needle));
+      const score = title === needle ? 0 : title.startsWith(needle) ? 1 : wordPrefix ? 2 : title.includes(needle) ? 3 : 4;
+      return { item, index, score };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.score - right.score
+      || normalizedSearchText(left.item.title).localeCompare(normalizedSearchText(right.item.title), "uk")
+      || left.index - right.index)
+    .slice(0, maximum)
+    .map(({ item }) => item);
+}
+
 export function normalizeCatalogApiUrl(value, baseUrl = "https://catalog.invalid/") {
   try {
     const url = new URL(String(value || "").trim(), String(baseUrl || "https://catalog.invalid/"));
@@ -106,6 +135,8 @@ let syncPromise = null;
 let currentMaterialId = "";
 let fallbackLocationCount = 0;
 let hasLiveCatalog = false;
+let activeSuggestionIndex = -1;
+let visibleSuggestions = [];
 const materialDetails = new Map();
 const detailPromises = new Map();
 
@@ -120,10 +151,11 @@ const elements = {
   locationsStat: document.querySelector("#locationsStat"), rubricsStat: document.querySelector("#rubricsStat"),
   dataSync: document.querySelector("#dataSync"), dataSyncText: document.querySelector("#dataSyncText"), syncRetry: document.querySelector("#syncRetry"),
   collectionGrid: document.querySelector("#collectionGrid"),
+  suggestions: document.querySelector("#titleSuggestions"),
 };
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#039;", '"': "&quot;" })[character]);
-const normalized = (value) => String(value || "").toLocaleLowerCase("uk").replace(/[’`]/g, "'").trim();
+const normalized = normalizedSearchText;
 const cleanText = (value, maximum = 500) => String(value ?? "").trim().slice(0, maximum);
 const nonNegativeInteger = (value) => {
   const number = Math.floor(Number(value));
@@ -422,6 +454,58 @@ function stockMarkup(item, { loadingDetail = false, detailError = false } = {}) 
   </div>`;
 }
 
+function closeTitleSuggestions() {
+  visibleSuggestions = [];
+  activeSuggestionIndex = -1;
+  elements.suggestions.hidden = true;
+  elements.suggestions.innerHTML = "";
+  elements.search.setAttribute("aria-expanded", "false");
+  elements.search.removeAttribute("aria-activedescendant");
+}
+
+function suggestionCoverMarkup(item) {
+  if (!item.cover) return `<span class="suggestion-cover-fallback" aria-hidden="true">${escapeHtml((item.title || "?").slice(0, 1))}</span>`;
+  return `<img data-cover src="${escapeHtml(item.cover)}" alt="" loading="lazy"><span class="suggestion-cover-fallback" aria-hidden="true" hidden>${escapeHtml((item.title || "?").slice(0, 1))}</span>`;
+}
+
+function renderTitleSuggestions() {
+  visibleSuggestions = titleSuggestions(materials, elements.search.value, 6);
+  activeSuggestionIndex = -1;
+  if (!visibleSuggestions.length || document.activeElement !== elements.search) {
+    closeTitleSuggestions();
+    return;
+  }
+  elements.suggestions.innerHTML = visibleSuggestions.map((item, index) => `
+    <button class="title-suggestion" id="title-suggestion-${index}" type="button" role="option" aria-selected="false" data-title-suggestion="${escapeHtml(item.id)}">
+      <span class="suggestion-cover">${suggestionCoverMarkup(item)}</span>
+      <span class="suggestion-copy"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml([item.author || "Автор не вказаний", item.year || "Рік не вказаний"].join(" · "))}</small></span>
+    </button>`).join("");
+  bindCoverErrors(elements.suggestions);
+  elements.suggestions.hidden = false;
+  elements.search.setAttribute("aria-expanded", "true");
+}
+
+function setActiveSuggestion(index) {
+  if (!visibleSuggestions.length) return;
+  activeSuggestionIndex = (index + visibleSuggestions.length) % visibleSuggestions.length;
+  elements.suggestions.querySelectorAll("[role=option]").forEach((option, optionIndex) => {
+    const active = optionIndex === activeSuggestionIndex;
+    option.setAttribute("aria-selected", String(active));
+    if (active) option.scrollIntoView({ block: "nearest" });
+  });
+  elements.search.setAttribute("aria-activedescendant", `title-suggestion-${activeSuggestionIndex}`);
+}
+
+function chooseTitleSuggestion(materialId) {
+  const item = materials.find((material) => material.id === materialId);
+  if (!item) return;
+  elements.search.value = item.title;
+  state.search = item.title;
+  closeTitleSuggestions();
+  resetLimitAndRender();
+  showMaterial(item.id);
+}
+
 function linksMarkup(item, { loadingDetail = false, detailError = false } = {}) {
   if (loadingDetail) return `<div class="material-links" aria-busy="true"><h3>Посилання</h3><p>Завантажуємо відкриті джерела…</p></div>`;
   if (detailError) return `<div class="material-links"><h3>Посилання</h3><p>Не вдалося завантажити посилання. Спробуйте відкрити картку ще раз.</p></div>`;
@@ -625,8 +709,16 @@ for (let grade = 1; grade <= 11; grade += 1) {
   const option = document.createElement("option"); option.value = String(grade); option.textContent = `${grade} клас`; elements.grade.append(option);
 }
 
-document.querySelector("#heroSearchForm").addEventListener("submit", (event) => { event.preventDefault(); state.search = elements.search.value; resetLimitAndRender(); document.querySelector("#catalog").scrollIntoView({ behavior: "smooth" }); });
-elements.search.addEventListener("input", () => { state.search = elements.search.value; resetLimitAndRender(); });
+document.querySelector("#heroSearchForm").addEventListener("submit", (event) => { event.preventDefault(); state.search = elements.search.value; closeTitleSuggestions(); resetLimitAndRender(); document.querySelector("#catalog").scrollIntoView({ behavior: "smooth" }); });
+elements.search.addEventListener("input", () => { state.search = elements.search.value; resetLimitAndRender(); renderTitleSuggestions(); });
+elements.search.addEventListener("focus", renderTitleSuggestions);
+elements.search.addEventListener("blur", () => window.setTimeout(closeTitleSuggestions, 120));
+elements.search.addEventListener("keydown", (event) => {
+  if (event.key === "ArrowDown" && visibleSuggestions.length) { event.preventDefault(); setActiveSuggestion(activeSuggestionIndex + 1); }
+  else if (event.key === "ArrowUp" && visibleSuggestions.length) { event.preventDefault(); setActiveSuggestion(activeSuggestionIndex - 1); }
+  else if (event.key === "Enter" && activeSuggestionIndex >= 0) { event.preventDefault(); chooseTitleSuggestion(visibleSuggestions[activeSuggestionIndex].id); }
+  else if (event.key === "Escape") closeTitleSuggestions();
+});
 elements.grade.addEventListener("change", () => { state.grade = elements.grade.value; resetLimitAndRender(); });
 elements.rubric.addEventListener("change", () => { state.rubric = elements.rubric.value; resetLimitAndRender(); });
 elements.subject.addEventListener("change", () => { state.subject = elements.subject.value; resetLimitAndRender(); });
@@ -638,6 +730,7 @@ elements.syncRetry.addEventListener("click", synchronizeCatalog);
 document.querySelector("#clearFilters").addEventListener("click", clearFilters); document.querySelector("[data-clear]").addEventListener("click", clearFilters);
 
 document.addEventListener("click", (event) => {
+  const suggestion = event.target.closest("[data-title-suggestion]"); if (suggestion) chooseTitleSuggestion(suggestion.dataset.titleSuggestion);
   const detail = event.target.closest("[data-details]"); if (detail) showMaterial(detail.dataset.details);
   const collection = event.target.closest("[data-collection]"); if (collection) activateCollection(collection.dataset.collection);
   const copyMaterial = event.target.closest("[data-copy-material]"); if (copyMaterial) shareOrCopyMaterial(copyMaterial.dataset.copyMaterial, "copy");

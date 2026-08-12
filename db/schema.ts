@@ -132,6 +132,7 @@ const academicYearStatuses = ["draft", "active", "closed"] as const;
 const cohortStatuses = ["active", "graduated", "closed"] as const;
 const classYearStatuses = ["planned", "active", "closed"] as const;
 const loanStatuses = ["open", "closed", "cancelled"] as const;
+const classLoanTransactionKinds = ["issue", "return"] as const;
 const inventoryTransactionKinds = [
   "receipt",
   "transfer",
@@ -560,6 +561,186 @@ export const classYears = sqliteTable(
         or (${table.status} != 'closed' and ${table.actualClosedDate} is null)`,
     ),
     check("class_years_version_positive", sql`${table.version} > 0`),
+  ],
+);
+
+/**
+ * Annual class-level circulation. This stays separate from teacher loans so
+ * the existing teacher borrower invariant remains intact.
+ */
+export const classLoans = sqliteTable(
+  "class_loans",
+  {
+    id: text("id").primaryKey(),
+    classYearId: text("class_year_id")
+      .notNull()
+      .references(() => classYears.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    responsibleTeacherUserId: text("responsible_teacher_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    status: text("status", { enum: loanStatuses }).notNull().default("open"),
+    issuedAt: text("issued_at").notNull(),
+    dueAt: text("due_at"),
+    closedAt: text("closed_at"),
+    notes: text("notes").notNull().default(""),
+    issuedByUserId: text("issued_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    closedByUserId: text("closed_by_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    version: integer("version").notNull().default(1),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("idx_class_loans_class_status_due").on(
+      table.classYearId,
+      table.status,
+      table.dueAt,
+    ),
+    index("idx_class_loans_status_due").on(table.status, table.dueAt),
+    index("idx_class_loans_teacher_status_due").on(
+      table.responsibleTeacherUserId,
+      table.status,
+      table.dueAt,
+    ),
+    check(
+      "class_loans_status_valid",
+      sql`${table.status} in ('open', 'closed', 'cancelled')`,
+    ),
+    check(
+      "class_loans_due_after_issue",
+      sql`${table.dueAt} is null or ${table.dueAt} >= ${table.issuedAt}`,
+    ),
+    check(
+      "class_loans_closed_fields_consistent",
+      sql`(${table.status} = 'closed' and ${table.closedAt} is not null and ${table.closedByUserId} is not null)
+        or (${table.status} != 'closed' and ${table.closedAt} is null and ${table.closedByUserId} is null)`,
+    ),
+    check("class_loans_version_positive", sql`${table.version} > 0`),
+  ],
+);
+
+export const classLoanItems = sqliteTable(
+  "class_loan_items",
+  {
+    id: text("id").primaryKey(),
+    classLoanId: text("class_loan_id")
+      .notNull()
+      .references(() => classLoans.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    materialId: text("material_id")
+      .notNull()
+      .references(() => materials.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    sourceLocationId: text("source_location_id")
+      .notNull()
+      .references(() => locations.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    condition: text("condition", { enum: holdingConditions })
+      .notNull()
+      .default("unspecified"),
+    quantityIssued: integer("quantity_issued").notNull(),
+    quantityReturned: integer("quantity_returned").notNull().default(0),
+    notes: text("notes").notNull().default(""),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("idx_class_loan_items_loan_material").on(table.classLoanId, table.materialId),
+    index("idx_class_loan_items_material_loan").on(table.materialId, table.classLoanId),
+    check(
+      "class_loan_items_condition_valid",
+      sql`${table.condition} in ('unspecified', 'good', 'worn', 'damaged')`,
+    ),
+    check("class_loan_items_quantity_issued_positive", sql`${table.quantityIssued} > 0`),
+    check(
+      "class_loan_items_quantity_returned_valid",
+      sql`${table.quantityReturned} >= 0 and ${table.quantityReturned} <= ${table.quantityIssued}`,
+    ),
+  ],
+);
+
+/** Immutable, actor-attributed stock ledger for class circulation. */
+export const classLoanTransactions = sqliteTable(
+  "class_loan_transactions",
+  {
+    id: text("id").primaryKey(),
+    requestId: text("request_id").notNull(),
+    classLoanId: text("class_loan_id")
+      .notNull()
+      .references(() => classLoans.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    kind: text("kind", { enum: classLoanTransactionKinds }).notNull(),
+    occurredAt: text("occurred_at").notNull(),
+    notes: text("notes").notNull().default(""),
+    actorUserId: text("actor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_class_loan_transactions_request").on(table.requestId),
+    index("idx_class_loan_transactions_loan_occurred").on(
+      table.classLoanId,
+      table.occurredAt,
+    ),
+    index("idx_class_loan_transactions_actor_occurred").on(
+      table.actorUserId,
+      table.occurredAt,
+    ),
+    check(
+      "class_loan_transactions_kind_valid",
+      sql`${table.kind} in ('issue', 'return')`,
+    ),
+  ],
+);
+
+export const classLoanTransactionLines = sqliteTable(
+  "class_loan_transaction_lines",
+  {
+    id: text("id").primaryKey(),
+    transactionId: text("transaction_id")
+      .notNull()
+      .references(() => classLoanTransactions.id, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    classLoanItemId: text("class_loan_item_id")
+      .notNull()
+      .references(() => classLoanItems.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    materialId: text("material_id")
+      .notNull()
+      .references(() => materials.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    locationId: text("location_id")
+      .notNull()
+      .references(() => locations.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    condition: text("condition", { enum: holdingConditions })
+      .notNull()
+      .default("unspecified"),
+    quantityDelta: integer("quantity_delta").notNull(),
+    quantityBefore: integer("quantity_before").notNull(),
+    quantityAfter: integer("quantity_after").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    index("idx_class_loan_lines_transaction").on(table.transactionId),
+    index("idx_class_loan_lines_item").on(table.classLoanItemId),
+    index("idx_class_loan_lines_material_transaction").on(
+      table.materialId,
+      table.transactionId,
+    ),
+    check(
+      "class_loan_lines_condition_valid",
+      sql`${table.condition} in ('unspecified', 'good', 'worn', 'damaged')`,
+    ),
+    check(
+      "class_loan_lines_quantities_nonnegative",
+      sql`${table.quantityBefore} >= 0 and ${table.quantityAfter} >= 0`,
+    ),
+    check(
+      "class_loan_lines_delta_balanced",
+      sql`${table.quantityAfter} = ${table.quantityBefore} + ${table.quantityDelta}`,
+    ),
+    check("class_loan_lines_delta_nonzero", sql`${table.quantityDelta} != 0`),
   ],
 );
 

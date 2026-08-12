@@ -10,6 +10,7 @@ export const DEFAULT_PUBLIC_CATALOG_LIMIT = 24;
 export const MAX_PUBLIC_CATALOG_LIMIT = 48;
 export const DEFAULT_LIBRARIAN_SEARCH_LIMIT = 12;
 export const MAX_LIBRARIAN_SEARCH_LIMIT = 20;
+export const MAX_CATALOG_RUBRIC_OPTIONS = 200;
 
 type D1Value = string | number | null;
 
@@ -259,6 +260,29 @@ export async function listCatalogMaterials(
     ? encodeCatalogCursor(cursorFromRow(asRow(lastRow), query))
     : null;
   return { items, nextCursor, hasMore };
+}
+
+export async function listCatalogRubrics(
+  db: CatalogD1Database,
+  limit = MAX_CATALOG_RUBRIC_OPTIONS,
+): Promise<string[]> {
+  const boundedLimit = Number.isInteger(limit)
+    ? Math.max(1, Math.min(limit, MAX_CATALOG_RUBRIC_OPTIONS))
+    : MAX_CATALOG_RUBRIC_OPTIONS;
+  const response = await db.prepare(`
+    SELECT DISTINCT rubric
+    FROM materials
+    WHERE status = 'active' AND archived_at IS NULL
+      AND rubric != ''
+    ORDER BY rubric ASC
+    LIMIT ?
+  `).bind(boundedLimit).all();
+  const rubrics = (response.results ?? [])
+    .map((row) => boundedText(asRow(row).rubric, 180))
+    .filter((rubric) => rubric && !containsControlCharacter(rubric));
+  return [...new Set(rubrics)].sort((left, right) =>
+    left.localeCompare(right, "uk-UA", { sensitivity: "base" })
+  );
 }
 
 export async function getCatalogMaterialDetail(

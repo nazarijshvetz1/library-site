@@ -38,7 +38,7 @@ export default async function Home() {
           <p className="hero-lead">
             Переглядайте відкритий каталог або увійдіть до захищеного кабінету,
             щоб одразу додавати й редагувати матеріали, реєструвати надходження,
-            переміщення, списання, видачу вчителям і навчальні роки з класами.
+            переміщення, списання, видачу вчителям і класам та керувати навчальними роками.
           </p>
 
           <div className="hero-actions">
@@ -81,7 +81,7 @@ export default async function Home() {
           <div className="feature-grid">
             <article><span aria-hidden="true">＋</span><strong>Новий матеріал</strong><small>Фактичний залишок, CAT-ID, опис і фото</small></article>
             <article><span aria-hidden="true">⇄</span><strong>Рух фонду</strong><small>Надходження, переміщення, списання</small></article>
-            <article><span aria-hidden="true">→</span><strong>Видача вчителям</strong><small>Видача й повернення</small></article>
+            <article><span aria-hidden="true">→</span><strong>Видача вчителям і класам</strong><small>Пакетна видача й повернення</small></article>
             <article><span aria-hidden="true">▣</span><strong>Роки й класи</strong><small>Відкриття, зміни та перехід</small></article>
           </div>
           <p className="draft-preview"><span aria-hidden="true">●</span> Підтверджені зміни відразу зберігаються у захищеній базі</p>

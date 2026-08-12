@@ -4,14 +4,17 @@ import test from "node:test";
 
 import {
   buildCatalogSearchUrl,
+  clearPendingClassCirculationIntent,
   editDraftToChanges,
   gradeLabel,
   holdingKey,
   materialToEditDraft,
+  readPendingClassCirculationIntent,
   resolveLiveFormTextForSubmission,
   resolveLoanDueAtForSubmission,
   suggestNextAcademicYearStart,
   todayInKyiv,
+  writePendingClassCirculationIntent,
 } from "../lib/librarian-d1-client.ts";
 import {
   clearPendingInventoryIntent,
@@ -42,6 +45,19 @@ test("catalog search URL uses bounded D1 query filters and cursor", () => {
   assert.equal(url.searchParams.get("sort"), "title");
   assert.equal(url.searchParams.get("limit"), "20");
   assert.equal(url.searchParams.get("cursor"), "next-page");
+
+  for (const q of ["Автор Петренко", "9786170000001", "CAT-0001"]) {
+    const preserved = new URL(buildCatalogSearchUrl({
+      q,
+      rubric: "",
+      grade: "",
+      subject: "",
+      publicationType: "",
+      available: false,
+    }), "https://library.test");
+    assert.equal(preserved.searchParams.get("q"), q);
+    assert.equal(preserved.searchParams.has("rubric"), false);
+  }
 });
 
 test("material edit conversion preserves nullable fields for PATCH", () => {
@@ -190,6 +206,47 @@ test("an uncertain inventory request survives remount with its exact request ID 
   assert.equal(readPendingInventoryIntent(storage, "transfer", "CAT-0001"), null);
 });
 
+test("an uncertain class circulation request survives remount with its exact payload", () => {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  };
+  const intent = {
+    kind: "class-issue",
+    requestId: "123e4567-e89b-42d3-a456-426614174000",
+    payload: {
+      requestId: "123e4567-e89b-42d3-a456-426614174000",
+      classYearId: "CY-2026-7A",
+      expectedClassYearVersion: 3,
+      responsibleTeacherUserId: "USR-TEACHER",
+      issuedAt: "2026-09-01",
+      dueAt: "2027-05-31",
+      notes: null,
+      items: [{
+        materialId: "CAT-0001",
+        sourceLocationId: "LOC-001",
+        condition: "good",
+        quantity: 20,
+        expectedAvailableQuantity: 25,
+      }],
+    },
+  };
+
+  writePendingClassCirculationIntent(storage, intent);
+  assert.deepEqual(readPendingClassCirculationIntent(storage, "class-issue"), intent);
+  assert.equal(readPendingClassCirculationIntent(storage, "class-return"), null);
+  clearPendingClassCirculationIntent(storage, "class-issue");
+  assert.equal(readPendingClassCirculationIntent(storage, "class-issue"), null);
+
+  assert.equal(readPendingClassCirculationIntent({
+    getItem() { throw new Error("storage denied"); },
+    setItem() {},
+    removeItem() {},
+  }, "class-issue"), null);
+});
+
 test("new librarian route renders D1 workspace and keeps legacy workspace intact", async () => {
   const [page, workspace, client, styles] = await Promise.all([
     read("app/librarian/page.tsx"),
@@ -213,6 +270,23 @@ test("new librarian route renders D1 workspace and keeps legacy workspace intact
     /<Link href="\/" className=\{styles\.catalogLink\}>/u,
   );
   assert.match(client, /\/api\/librarian\/materials\/search/u);
+  assert.match(workspace, /\/api\/librarian\/materials\/facets/u);
+  assert.match(workspace, /<option value="">Усі<\/option>/u);
+  assert.doesNotMatch(workspace, /Усі рубрики/u);
+  assert.match(workspace, /role="combobox"/u);
+  assert.match(workspace, /aria-autocomplete="list"/u);
+  assert.match(workspace, /role="listbox"/u);
+  assert.match(workspace, /role="option"/u);
+  assert.match(workspace, /resolvedSearchScope === catalogFiltersKey\(filters\)/u);
+  assert.match(workspace, /normalizedQuery\.length >= 2 && suggestionsReady/u);
+  assert.match(workspace, /titleQueryTokens\.every\(\(token\) => normalizedTitle\.includes\(token\)\)/u);
+  assert.match(workspace, /\}\)\.slice\(0, 6\)/u);
+  assert.match(workspace, /event\.key === "ArrowDown"/u);
+  assert.match(workspace, /event\.key === "ArrowUp"/u);
+  assert.match(workspace, /event\.key === "Enter"/u);
+  assert.match(workspace, /selectSuggestion\(activeSuggestionItem\)/u);
+  assert.match(styles, /\.suggestions/u);
+  assert.match(styles, /max-height: min\(390px, 58vh\)/u);
   assert.match(workspace, /method: "PATCH"/u);
   assert.match(workspace, /method: "DELETE"/u);
   assert.match(workspace, /Видалити матеріал/u);
@@ -286,7 +360,45 @@ test("new librarian route renders D1 workspace and keeps legacy workspace intact
   );
   assert.match(workspace, /thumbnailUrl/u);
   assert.match(workspace, /item\.year/u);
+  assert.match(workspace, /item\.author/u);
+  assert.match(workspace, /item\.year \? String\(item\.year\)/u);
   assert.doesNotMatch(workspace, /Ревізія/u);
+
+  const classIssue = workspace.match(
+    /function ClassIssueWorkspace[\s\S]*?(?=function LoanReturnPanel)/u,
+  )?.[0] ?? "";
+  assert.match(classIssue, /classYear\.status === "active"/u);
+  assert.match(classIssue, /year\.status === "active"/u);
+  assert.match(classIssue, /cohort\.status === "active"/u);
+  assert.match(classIssue, /assignedTeacherUserId/u);
+  assert.match(classIssue, /expectedClassYearVersion: selectedClassYear\.version/u);
+  assert.match(classIssue, /expectedAvailableQuantity: item\.expectedAvailableQuantity/u);
+  assert.match(classIssue, /cart\.length >= 100/u);
+  assert.match(classIssue, /window\.confirm/u);
+  assert.match(classIssue, /"\/api\/librarian\/class-loans"/u);
+  assert.match(classIssue, /writePendingClassCirculationIntent\(intent\)/u);
+  assert.match(classIssue, /sendIssueIntent\(pendingIntent, true\)/u);
+  assert.match(classIssue, /max=\{selectedClassYear\?\.endDate\}/u);
+  assert.match(classIssue, /ref=\{issuedAtInputRef\}/u);
+  assert.match(classIssue, /ref=\{classDueAtInputRef\}/u);
+  assert.doesNotMatch(
+    classIssue.match(/ref=\{issuedAtInputRef\}[\s\S]*?\/>/u)?.[0] ?? "",
+    /onChange=/u,
+  );
+
+  const classReturn = workspace.match(
+    /function ClassReturnWorkspace[\s\S]*?(?=function Cover\()/u,
+  )?.[0] ?? "";
+  assert.match(classReturn, /\/api\/librarian\/class-loans\?limit=200/u);
+  assert.match(classReturn, /"\/api\/librarian\/class-loans\/returns"/u);
+  assert.match(classReturn, /expectedVersion: loan\.version/u);
+  assert.match(classReturn, /quantityOutstanding/u);
+  assert.match(classReturn, /returnLocationId/u);
+  assert.match(classReturn, /window\.confirm/u);
+  assert.match(classReturn, /sendReturnIntent\(pendingIntent, true\)/u);
+  assert.match(classReturn, /ref=\{classReturnedAtInputRef\}/u);
+  assert.match(classReturn, /aria-busy=\{locked\}/u);
+  assert.match(styles, /\.classCirculationCard[\s\S]*?min-height: 44px/u);
 
   const academic = await read("app/librarian/academic-workspace.tsx");
   assert.match(academic, /\/api\/librarian\/academic-reference/u);
