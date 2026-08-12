@@ -19,17 +19,18 @@
     <link rel="stylesheet" href="/brand.css" />
   </head>
   <body>
-    <a class="skip-link" href="#catalog">Перейти до каталогу</a>
+    <a class="skip-link" href="#main-content">Перейти до основного вмісту</a>
 
     <header class="site-header">
       <a class="brand" href="#top" aria-label="Єдина бібліотека ліцею — на головну">
         <img class="brand-logo" src="/library-logo.png" alt="" />
         <span><strong>Єдина бібліотека</strong><small>Міжнародний ліцей МАУП</small></span>
       </a>
-      <nav aria-label="Головна навігація">
-        <a class="nav-active" href="#catalog">Каталог</a>
-        <a href="#collections">Добірки</a>
-        <a href="#how-it-works">Як користуватися</a>
+      <nav class="site-nav" aria-label="Головна навігація">
+        <a class="nav-active" href="#catalog" data-primary-section="catalog" aria-current="location">Каталог</a>
+        <a href="#visit-schedule" data-primary-section="visit-schedule">Графік відвідування бібліотеки</a>
+        <a class="nav-secondary" href="#collections">Добірки</a>
+        <a class="nav-secondary" href="#how-it-works">Як користуватися</a>
       </nav>
       <a
         class="librarian-button"
@@ -39,7 +40,8 @@
       ><span aria-hidden="true">↗</span> Для бібліотекаря</a>
     </header>
 
-    <main id="top">
+    <main id="main-content">
+      <span id="top" aria-hidden="true"></span>
       <section class="hero" aria-labelledby="hero-title">
         <div class="hero-orbit hero-orbit-one" aria-hidden="true"></div>
         <div class="hero-orbit hero-orbit-two" aria-hidden="true"></div>
@@ -93,6 +95,52 @@
         <div><strong id="copiesStat">18 825</strong><span>примірників</span></div>
         <div><strong id="locationsStat">15</strong><span>місць зберігання</span></div>
         <div><strong id="rubricsStat">12</strong><span>тематичних рубрик</span></div>
+      </section>
+
+      <section class="visit-schedule-section" id="visit-schedule" aria-labelledby="visit-schedule-title">
+        <div class="visit-schedule-heading">
+          <div>
+            <p class="eyebrow dark"><span></span> Відвідування бібліотеки</p>
+            <h2 id="visit-schedule-title">Графік відвідування бібліотеки</h2>
+            <p>Перевірте вільний час і забронюйте відвідування класом. Після надсилання час закріплюється одразу.</p>
+          </div>
+          <div class="visit-view-switch" role="group" aria-label="Вигляд графіка">
+            <button type="button" data-visit-view="week" aria-pressed="true">Тиждень</button>
+            <button type="button" data-visit-view="list" aria-pressed="false">Список</button>
+          </div>
+        </div>
+
+        <div class="visit-toolbar" aria-label="Вибір тижня">
+          <button id="visitPrevWeek" type="button" aria-label="Попередній тиждень"><span aria-hidden="true">←</span></button>
+          <p id="visitWeekLabel" aria-live="polite">Поточний тиждень</p>
+          <button class="visit-today-button" id="visitThisWeek" type="button">Цей тиждень</button>
+          <button id="visitNextWeek" type="button" aria-label="Наступний тиждень"><span aria-hidden="true">→</span></button>
+        </div>
+
+        <div class="visit-sync" id="visitScheduleStatus" data-state="loading" role="status" aria-live="polite">
+          <span class="visit-sync-dot" aria-hidden="true"></span>
+          <span id="visitScheduleStatusText">Завантажуємо графік…</span>
+          <button id="visitScheduleRetry" type="button" hidden>Спробувати ще раз</button>
+        </div>
+
+        <ul class="visit-legend" aria-label="Позначення графіка">
+          <li data-visit-status="free"><span aria-hidden="true"></span>Вільно</li>
+          <li data-visit-status="busy"><span aria-hidden="true"></span>Заброньовано</li>
+          <li data-visit-status="closed"><span aria-hidden="true"></span>Бібліотека зачинена</li>
+          <li data-visit-status="unavailable"><span aria-hidden="true"></span>Недоступно для запису</li>
+        </ul>
+
+        <div class="visit-schedule-content" id="visitScheduleContent" data-view="week" aria-busy="true">
+          <div class="visit-loading" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span>
+          </div>
+        </div>
+        <div class="visit-empty" id="visitScheduleEmpty" hidden>
+          <span aria-hidden="true">○</span>
+          <h3>Графік ще не опубліковано</h3>
+          <p>Бібліотекар додасть години відвідування найближчим часом.</p>
+        </div>
+        <p class="visit-booking-note"><span aria-hidden="true">↗</span> Заявка відкриється у захищеному кабінеті. У посилання передаються лише дата і час, без персональних даних.</p>
       </section>
 
       <section class="collections-section" id="collections" aria-labelledby="collections-title">

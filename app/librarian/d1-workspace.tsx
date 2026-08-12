@@ -593,6 +593,10 @@ export default function D1LibrarianWorkspace({
             <span className={styles.catalogLinkLabel}>Публічний каталог</span>{" "}
             <span aria-hidden="true">↗</span>
           </a>
+          <Link href="/librarian/visits" className={styles.catalogLink}>
+            <span className={styles.catalogLinkLabel}>Відвідування</span>{" "}
+            <span aria-hidden="true">▣</span>
+          </Link>
           <span>
             <strong>{displayName}</strong>
             <small>{role === "admin" ? "Адміністратор" : "Бібліотекар"}</small>

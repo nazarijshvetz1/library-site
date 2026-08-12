@@ -145,6 +145,9 @@ const inventoryTransactionKinds = [
 ] as const;
 const inventoryTransactionStatuses = ["posted", "reversed"] as const;
 const mutationCommandStatuses = ["processing", "completed", "failed"] as const;
+const visitBookingStatuses = ["active", "cancelled"] as const;
+const visitClosureStatuses = ["active", "cancelled"] as const;
+const visitHourStatuses = ["active", "inactive"] as const;
 
 /**
  * Canonical bibliographic record. `id` is the durable CAT-ID while
@@ -949,6 +952,241 @@ export const inventoryTransactionLines = sqliteTable(
       sql`${table.countedQuantity} is null or (
         ${table.countedQuantity} >= 0 and ${table.countedQuantity} = ${table.quantityAfter}
       )`,
+    ),
+  ],
+);
+
+/** Weekly opening hours in Europe/Kyiv. Missing rows use the runtime defaults. */
+export const visitScheduleHours = sqliteTable(
+  "visit_schedule_hours",
+  {
+    weekday: integer("weekday").primaryKey(),
+    startTime: text("start_time").notNull(),
+    endTime: text("end_time").notNull(),
+    status: text("status", { enum: visitHourStatuses }).notNull().default("active"),
+    version: integer("version").notNull().default(1),
+    updatedByUserId: text("updated_by_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    check("visit_hours_weekday_valid", sql`${table.weekday} between 1 and 7`),
+    check(
+      "visit_hours_time_valid",
+      sql`${table.startTime} glob '[0-9][0-9]:[0-5][0-9]'
+        and ${table.endTime} glob '[0-9][0-9]:[0-5][0-9]'
+        and cast(substr(${table.startTime}, 1, 2) as integer) between 0 and 23
+        and cast(substr(${table.endTime}, 1, 2) as integer) between 0 and 23
+        and cast(substr(${table.startTime}, 4, 2) as integer) % 5 = 0
+        and cast(substr(${table.endTime}, 4, 2) as integer) % 5 = 0
+        and ${table.startTime} < ${table.endTime}`,
+    ),
+    check(
+      "visit_hours_status_valid",
+      sql`${table.status} in ('active', 'inactive')`,
+    ),
+    check("visit_hours_version_positive", sql`${table.version} > 0`),
+  ],
+);
+
+/** Librarian-managed exceptions to weekly hours. */
+export const visitScheduleClosures = sqliteTable(
+  "visit_schedule_closures",
+  {
+    id: text("id").primaryKey(),
+    visitDate: text("visit_date").notNull(),
+    startTime: text("start_time").notNull(),
+    endTime: text("end_time").notNull(),
+    status: text("status", { enum: visitClosureStatuses }).notNull().default("active"),
+    reason: text("reason").notNull().default(""),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    cancelledByUserId: text("cancelled_by_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    version: integer("version").notNull().default(1),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    cancelledAt: text("cancelled_at"),
+  },
+  (table) => [
+    index("idx_visit_closures_date_status_time").on(
+      table.visitDate,
+      table.status,
+      table.startTime,
+    ),
+    check(
+      "visit_closures_date_valid",
+      sql`${table.visitDate} glob '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'
+        and date(${table.visitDate}, '+0 days') = ${table.visitDate}`,
+    ),
+    check(
+      "visit_closures_time_valid",
+      sql`${table.startTime} glob '[0-9][0-9]:[0-5][0-9]'
+        and ${table.endTime} glob '[0-9][0-9]:[0-5][0-9]'
+        and cast(substr(${table.startTime}, 1, 2) as integer) between 0 and 23
+        and cast(substr(${table.endTime}, 1, 2) as integer) between 0 and 23
+        and cast(substr(${table.startTime}, 4, 2) as integer) % 5 = 0
+        and cast(substr(${table.endTime}, 4, 2) as integer) % 5 = 0
+        and ${table.startTime} < ${table.endTime}`,
+    ),
+    check(
+      "visit_closures_status_valid",
+      sql`${table.status} in ('active', 'cancelled')`,
+    ),
+    check(
+      "visit_closures_cancel_consistent",
+      sql`(${table.status} = 'active' and ${table.cancelledAt} is null and ${table.cancelledByUserId} is null)
+        or (${table.status} = 'cancelled' and ${table.cancelledAt} is not null and ${table.cancelledByUserId} is not null)`,
+    ),
+    check("visit_closures_version_positive", sql`${table.version} > 0`),
+  ],
+);
+
+/** SIWC-owned bookings. Public serializers must never expose owner or class fields. */
+export const visitBookings = sqliteTable(
+  "visit_bookings",
+  {
+    id: text("id").primaryKey(),
+    ownerAuthUserId: text("owner_auth_user_id").notNull(),
+    ownerEmail: text("owner_email").notNull(),
+    surname: text("surname").notNull(),
+    classYearId: text("class_year_id").references(() => classYears.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    classLabel: text("class_label"),
+    visitDate: text("visit_date").notNull(),
+    startTime: text("start_time").notNull(),
+    endTime: text("end_time").notNull(),
+    purpose: text("purpose").notNull().default(""),
+    status: text("status", { enum: visitBookingStatuses }).notNull().default("active"),
+    cancelReason: text("cancel_reason").notNull().default(""),
+    cancelledByAuthUserId: text("cancelled_by_auth_user_id"),
+    cancelledByUserId: text("cancelled_by_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    version: integer("version").notNull().default(1),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    cancelledAt: text("cancelled_at"),
+  },
+  (table) => [
+    index("idx_visit_bookings_date_status_time").on(
+      table.visitDate,
+      table.status,
+      table.startTime,
+    ),
+    index("idx_visit_bookings_owner_status_date").on(
+      table.ownerAuthUserId,
+      table.status,
+      table.visitDate,
+    ),
+    index("idx_visit_bookings_class_date").on(table.classYearId, table.visitDate),
+    check("visit_bookings_owner_not_blank", sql`length(trim(${table.ownerAuthUserId})) > 0`),
+    check("visit_bookings_email_not_blank", sql`length(trim(${table.ownerEmail})) > 0`),
+    check("visit_bookings_surname_length", sql`length(trim(${table.surname})) between 2 and 80`),
+    check(
+      "visit_bookings_date_valid",
+      sql`${table.visitDate} glob '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'
+        and date(${table.visitDate}, '+0 days') = ${table.visitDate}`,
+    ),
+    check(
+      "visit_bookings_time_valid",
+      sql`${table.startTime} glob '[0-9][0-9]:[0-5][0-9]'
+        and ${table.endTime} glob '[0-9][0-9]:[0-5][0-9]'
+        and cast(substr(${table.startTime}, 1, 2) as integer) between 0 and 23
+        and cast(substr(${table.endTime}, 1, 2) as integer) between 0 and 23
+        and cast(substr(${table.startTime}, 4, 2) as integer) % 5 = 0
+        and cast(substr(${table.endTime}, 4, 2) as integer) % 5 = 0
+        and ${table.startTime} < ${table.endTime}`,
+    ),
+    check(
+      "visit_bookings_status_valid",
+      sql`${table.status} in ('active', 'cancelled')`,
+    ),
+    check(
+      "visit_bookings_cancel_consistent",
+      sql`(${table.status} = 'active' and ${table.cancelledAt} is null
+          and ${table.cancelledByAuthUserId} is null and ${table.cancelledByUserId} is null)
+        or (${table.status} = 'cancelled' and ${table.cancelledAt} is not null
+          and ((${table.cancelledByAuthUserId} is not null and ${table.cancelledByUserId} is null)
+            or (${table.cancelledByAuthUserId} is null and ${table.cancelledByUserId} is not null)))`,
+    ),
+    check("visit_bookings_version_positive", sql`${table.version} > 0`),
+  ],
+);
+
+/** One row per five-minute Kyiv-local segment; the primary key is the race guard. */
+export const visitSlotClaims = sqliteTable(
+  "visit_slot_claims",
+  {
+    segmentKey: text("segment_key").primaryKey(),
+    bookingId: text("booking_id")
+      .references(() => visitBookings.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    closureId: text("closure_id")
+      .references(() => visitScheduleClosures.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    index("idx_visit_slot_claims_booking").on(table.bookingId),
+    index("idx_visit_slot_claims_closure").on(table.closureId),
+    check(
+      "visit_slot_claims_exactly_one_owner",
+      sql`(${table.bookingId} is not null and ${table.closureId} is null)
+        or (${table.bookingId} is null and ${table.closureId} is not null)`,
+    ),
+    check(
+      "visit_slot_claims_key_valid",
+      sql`${table.segmentKey} glob '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]T[0-9][0-9]:[0-5][0-9]'
+        and date(substr(${table.segmentKey}, 1, 10), '+0 days') = substr(${table.segmentKey}, 1, 10)
+        and cast(substr(${table.segmentKey}, 12, 2) as integer) between 0 and 23
+        and cast(substr(${table.segmentKey}, 15, 2) as integer) % 5 = 0`,
+    ),
+  ],
+);
+
+/** Idempotency receipts for SIWC teachers, who need not exist in `users`. */
+export const visitMutationCommands = sqliteTable(
+  "visit_mutation_commands",
+  {
+    id: text("id").primaryKey(),
+    ownerAuthUserId: text("owner_auth_user_id").notNull(),
+    kind: text("kind").notNull(),
+    requestHash: text("request_hash").notNull(),
+    status: text("status", { enum: mutationCommandStatuses }).notNull().default("processing"),
+    targetId: text("target_id"),
+    resultJson: text("result_json"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    completedAt: text("completed_at"),
+  },
+  (table) => [
+    index("idx_visit_commands_owner_created").on(table.ownerAuthUserId, table.createdAt),
+    check("visit_commands_owner_not_blank", sql`length(trim(${table.ownerAuthUserId})) > 0`),
+    check("visit_commands_kind_not_blank", sql`length(trim(${table.kind})) > 0`),
+    check(
+      "visit_commands_hash_valid",
+      sql`length(${table.requestHash}) = 64 and lower(${table.requestHash}) not glob '*[^0-9a-f]*'`,
+    ),
+    check(
+      "visit_commands_status_valid",
+      sql`${table.status} in ('processing', 'completed', 'failed')`,
+    ),
+    check(
+      "visit_commands_result_valid",
+      sql`${table.resultJson} is null or json_valid(${table.resultJson})`,
+    ),
+    check(
+      "visit_commands_completion_consistent",
+      sql`(${table.status} = 'processing' and ${table.completedAt} is null)
+        or (${table.status} in ('completed', 'failed') and ${table.completedAt} is not null)`,
     ),
   ],
 );
