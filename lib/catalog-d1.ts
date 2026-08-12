@@ -324,9 +324,12 @@ export async function getCatalogCoverAsset(
   const id = normalizeCatalogId(materialId);
   if (!id) return null;
   const row = await db.prepare(`
-    SELECT storage_provider, storage_key, external_url, mime_type, sha256
-    FROM material_cover_assets
-    WHERE material_id = ? AND status = 'ready'
+    SELECT
+      c.storage_provider, c.storage_key, c.external_url, c.mime_type, c.sha256
+    FROM material_cover_assets c
+    JOIN materials m ON m.id = c.material_id
+    WHERE c.material_id = ? AND c.status = 'ready'
+      AND m.status = 'active' AND m.archived_at IS NULL
     LIMIT 1
   `).bind(id).first();
   if (!row) return null;

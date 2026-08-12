@@ -743,7 +743,8 @@
 }
 
 .primaryButton,
-.secondaryButton {
+.secondaryButton,
+.dangerButton {
   min-height: 40px;
   padding: 0 14px;
   border: 1px solid transparent;
@@ -751,6 +752,62 @@
   cursor: pointer;
   font-size: 9px;
   font-weight: 800;
+}
+
+.dangerButton {
+  min-height: 44px;
+  border-color: #e9b9b1;
+  background: #fff5f3;
+  color: var(--danger);
+}
+
+.dangerZone {
+  margin-top: 28px;
+  padding-top: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-top: 1px solid #edc7c0;
+}
+
+.editFields {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.dangerZone > div {
+  min-width: 0;
+}
+
+.dangerZone h3,
+.dangerZone p {
+  margin: 0;
+}
+
+.dangerZone h3 {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.dangerZone p,
+.dangerZone small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.dangerZone small {
+  color: #906b12;
+}
+
+.dangerButton:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: #ffe8e3;
 }
 
 .primaryButton {
@@ -770,7 +827,8 @@
 }
 
 .primaryButton:disabled,
-.secondaryButton:disabled {
+.secondaryButton:disabled,
+.dangerButton:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -1730,6 +1788,8 @@
   .stockStrip { grid-template-columns: repeat(3, minmax(80px, 1fr)); overflow-x: auto; }
   .formActions { align-items: stretch; flex-direction: column; }
   .formActions > span { margin-right: 0; }
+  .dangerZone { align-items: stretch; flex-direction: column; }
+  .dangerZone .dangerButton { width: 100%; }
   .loanSummary { grid-template-columns: 1fr; }
   .linkEditor article { grid-template-columns: 1fr; }
   .linkNumber, .linkUrlField, .publicLinkToggle { grid-column: auto; }

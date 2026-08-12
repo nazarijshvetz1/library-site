@@ -294,6 +294,232 @@ test("a material race returns a stable 409 conflict without a partial command", 
   assert.equal(sqlite.prepare("SELECT count(*) AS count FROM audit_events").get().count, 0);
 });
 
+test("material archive preserves history, disappears from search and replays once", async () => {
+  const { sqlite, d1 } = openDatabase();
+  const input = {
+    requestId: "10000000-0000-4000-8000-000000000013",
+    expectedVersion: 1,
+  };
+
+  await assert.rejects(
+    mutation.archiveMaterialDirect(actor, "CAT-0001", input, d1),
+    (error) => error instanceof mutation.LibraryMutationError
+      && error.status === 409
+      && error.code === "material_has_stock"
+      && error.details.totalQuantity === 5,
+  );
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM mutation_commands").get().count, 0);
+
+  await assert.rejects(
+    mutation.archiveMaterialDirect(
+      actor,
+      "CAT-0001",
+      {
+        requestId: "10000000-0000-4000-8000-000000000019",
+        expectedVersion: 99,
+      },
+      d1,
+    ),
+    (error) => error instanceof mutation.LibraryMutationError
+      && error.status === 409
+      && error.code === "material_version_conflict",
+  );
+
+  sqlite.exec("DELETE FROM holdings WHERE material_id = 'CAT-0001'");
+  sqlite.exec(`
+    UPDATE material_stock_totals
+    SET total_quantity = 0, library_quantity = 0,
+        other_location_quantity = 0, loaned_quantity = 0
+    WHERE material_id = 'CAT-0001'
+  `);
+  const first = await mutation.archiveMaterialDirect(actor, "CAT-0001", input, d1);
+  const replay = await mutation.archiveMaterialDirect(actor, "CAT-0001", input, d1);
+  assert.deepEqual(replay, first);
+  await assert.rejects(
+    mutation.archiveMaterialDirect(
+      actor,
+      "CAT-0001",
+      { ...input, expectedVersion: 2 },
+      d1,
+    ),
+    (error) => error instanceof mutation.LibraryMutationError
+      && error.status === 409
+      && error.code === "request_id_conflict",
+  );
+  assert.deepEqual(
+    plainRow(sqlite.prepare(`
+      SELECT status, version, archived_at FROM materials WHERE id = 'CAT-0001'
+    `).get()),
+    { status: "archived", version: 2, archived_at: first.archivedAt },
+  );
+  assert.equal(
+    sqlite.prepare("SELECT count(*) AS count FROM materials_fts WHERE materials_fts MATCH 'стара'").get().count,
+    1,
+    "external-content FTS must retain the archived content row for integrity",
+  );
+  assert.doesNotThrow(() => {
+    sqlite.exec("INSERT INTO materials_fts(materials_fts, rank) VALUES('integrity-check', 1)");
+  }, "external-content FTS must remain consistent with the retained materials row");
+  assert.equal(
+    sqlite.prepare("SELECT count(*) AS count FROM audit_events WHERE action = 'material.archived'").get().count,
+    1,
+  );
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM mutation_commands").get().count, 1);
+  const audit = sqlite.prepare(`
+    SELECT before_json, after_json, metadata_json
+    FROM audit_events WHERE action = 'material.archived'
+  `).get();
+  assert.equal(JSON.parse(audit.before_json).status, "active");
+  assert.equal(JSON.parse(audit.after_json).status, "archived");
+  assert.deepEqual(JSON.parse(audit.metadata_json), {
+    mode: "archive",
+    historyPreserved: true,
+  });
+  assert.equal(await catalog.getCatalogMaterialDetail(d1, "CAT-0001", "librarian"), null);
+  assert.equal(
+    sqlite.prepare("SELECT count(*) AS count FROM material_stock_totals WHERE material_id = 'CAT-0001'").get().count,
+    1,
+    "archiving must preserve the zero stock history row",
+  );
+});
+
+test("an outstanding teacher loan blocks material archive even with no holding", async () => {
+  const { sqlite, d1 } = openDatabase();
+  sqlite.exec("DELETE FROM holdings WHERE material_id = 'CAT-0001'");
+  sqlite.exec(`
+    UPDATE material_stock_totals
+    SET total_quantity = 0, library_quantity = 0,
+        other_location_quantity = 0, loaned_quantity = 0
+    WHERE material_id = 'CAT-0001'
+  `);
+  sqlite.prepare(`
+    INSERT INTO loans (
+      id, teacher_user_id, status, issued_at, due_at, closed_at, notes,
+      issued_by_user_id, closed_by_user_id, version, created_at, updated_at
+    ) VALUES (
+      'LOAN-ARCHIVE', 'USR-TCH', 'open', '2026-08-11', NULL, NULL, '',
+      'USR-LIB', NULL, 1, '2026-08-11T09:00:00.000Z', '2026-08-11T09:00:00.000Z'
+    )
+  `).run();
+  sqlite.prepare(`
+    INSERT INTO loan_items (
+      id, loan_id, material_id, source_location_id, condition,
+      quantity_issued, quantity_returned, notes, created_at, updated_at
+    ) VALUES (
+      'LI-ARCHIVE', 'LOAN-ARCHIVE', 'CAT-0001', 'LOC-001', 'good',
+      1, 0, '', '2026-08-11T09:00:00.000Z', '2026-08-11T09:00:00.000Z'
+    )
+  `).run();
+
+  await assert.rejects(
+    mutation.archiveMaterialDirect(
+      actor,
+      "CAT-0001",
+      {
+        requestId: "10000000-0000-4000-8000-000000000015",
+        expectedVersion: 1,
+      },
+      d1,
+    ),
+    (error) => error instanceof mutation.LibraryMutationError
+      && error.status === 409
+      && error.code === "material_has_stock"
+      && error.details.totalQuantity === 1
+      && error.details.loanedQuantity === 1,
+  );
+  assert.equal(sqlite.prepare("SELECT status FROM materials WHERE id = 'CAT-0001'").get().status, "active");
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM audit_events").get().count, 0);
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM mutation_commands").get().count, 0);
+});
+
+test("a stock race aborts material archive without partial history", async () => {
+  const { sqlite, d1 } = openDatabase();
+  sqlite.exec("DELETE FROM holdings WHERE material_id = 'CAT-0001'");
+  sqlite.exec(`
+    UPDATE material_stock_totals
+    SET total_quantity = 0, library_quantity = 0,
+        other_location_quantity = 0, loaned_quantity = 0
+    WHERE material_id = 'CAT-0001'
+  `);
+  d1.beforeBatch = () => {
+    sqlite.prepare(`
+      INSERT INTO holdings (
+        material_id, location_id, condition, quantity, version, updated_at
+      ) VALUES ('CAT-0001', 'LOC-001', 'good', 1, 1, '2026-08-11T09:00:00.000Z')
+    `).run();
+    sqlite.exec(`
+      UPDATE material_stock_totals
+      SET total_quantity = 1, library_quantity = 1, updated_at = '2026-08-11T09:00:00.000Z'
+      WHERE material_id = 'CAT-0001'
+    `);
+  };
+
+  await assert.rejects(
+    mutation.archiveMaterialDirect(
+      actor,
+      "CAT-0001",
+      {
+        requestId: "10000000-0000-4000-8000-000000000014",
+        expectedVersion: 1,
+      },
+      d1,
+    ),
+    (error) => error instanceof mutation.LibraryMutationError
+      && error.status === 409
+      && error.code === "material_archive_conflict",
+  );
+  assert.equal(sqlite.prepare("SELECT status FROM materials WHERE id = 'CAT-0001'").get().status, "active");
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM audit_events").get().count, 0);
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM mutation_commands").get().count, 0);
+});
+
+test("an archive race aborts zero-stock counts atomically", async () => {
+  for (const [index, countedQuantity] of [0, 1].entries()) {
+    const { sqlite, d1 } = openDatabase();
+    sqlite.exec("DELETE FROM holdings WHERE material_id = 'CAT-0001'");
+    sqlite.exec(`
+      UPDATE material_stock_totals
+      SET total_quantity = 0, library_quantity = 0,
+          other_location_quantity = 0, loaned_quantity = 0
+      WHERE material_id = 'CAT-0001'
+    `);
+    d1.beforeBatch = () => {
+      sqlite.exec(`
+        UPDATE materials
+        SET status = 'archived', version = 2,
+            archived_at = '2026-08-11T09:00:00.000Z',
+            updated_at = '2026-08-11T09:00:00.000Z'
+        WHERE id = 'CAT-0001'
+      `);
+    };
+
+    await assert.rejects(
+      mutation.adjustHoldingToActualCount(
+        actor,
+        {
+          requestId: `10000000-0000-4000-8000-00000000001${index + 6}`,
+          materialId: "CAT-0001",
+          locationId: "LOC-001",
+          condition: "good",
+          expectedQuantity: 0,
+          countedQuantity,
+          reason: "correction",
+          occurredAt: "2026-08-11",
+          notes: null,
+        },
+        d1,
+      ),
+      (error) => error instanceof mutation.LibraryMutationError
+        && error.status === 409
+        && error.code === "stock_quantity_conflict",
+    );
+    assert.equal(sqlite.prepare("SELECT count(*) AS count FROM holdings").get().count, 0);
+    assert.equal(sqlite.prepare("SELECT count(*) AS count FROM inventory_transactions").get().count, 0);
+    assert.equal(sqlite.prepare("SELECT count(*) AS count FROM audit_events").get().count, 0);
+    assert.equal(sqlite.prepare("SELECT count(*) AS count FROM mutation_commands").get().count, 0);
+  }
+});
+
 test("new material with initial receipt and later receipt commit without drafts", async () => {
   const { sqlite, d1 } = openDatabase();
   const createInput = {

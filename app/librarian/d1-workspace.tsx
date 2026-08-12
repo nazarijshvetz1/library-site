@@ -260,11 +260,13 @@ export default function D1LibrarianWorkspace({
   const [detailError, setDetailError] = useState("");
   const [editing, setEditing] = useState(false);
   const [workspaceNotice, setWorkspaceNotice] = useState("");
+  const [workspaceNoticeTone, setWorkspaceNoticeTone] = useState<"error" | "success">("error");
   const [refreshToken, setRefreshToken] = useState(0);
   const [teachers, setTeachers] = useState<LibraryTeacher[]>([]);
   const [locations, setLocations] = useState<LibraryLocation[]>([]);
   const [referenceState, setReferenceState] = useState<LoadState>("loading");
   const [referenceError, setReferenceError] = useState("");
+  const workspaceTitleRef = useRef<HTMLHeadingElement>(null);
 
   const loadDetail = useCallback(async (materialId: string) => {
     const request = detailRequestRef.current + 1;
@@ -336,6 +338,7 @@ export default function D1LibrarianWorkspace({
       setSelectedId(materialId);
       setEditing(false);
       setWorkspaceNotice("");
+      setWorkspaceNoticeTone("error");
       void loadDetail(materialId);
     },
     [loadDetail],
@@ -373,6 +376,22 @@ export default function D1LibrarianWorkspace({
     setTool(nextTool);
     setEditing(false);
     setWorkspaceNotice("");
+    setWorkspaceNoticeTone("error");
+  }
+
+  function handleMaterialArchived(materialId: string) {
+    selectedIdRef.current = null;
+    detailRequestRef.current += 1;
+    setSelectedId(null);
+    setItems((current) => current.filter((item) => item.id !== materialId));
+    setDetail(null);
+    setDetailState("idle");
+    setDetailError("");
+    setEditing(false);
+    setRefreshToken((value) => value + 1);
+    setWorkspaceNotice(`Матеріал ${materialId} видалено з каталогу. Історію операцій збережено.`);
+    setWorkspaceNoticeTone("success");
+    window.queueMicrotask(() => workspaceTitleRef.current?.focus());
   }
 
   return (
@@ -456,7 +475,7 @@ export default function D1LibrarianWorkspace({
           <div className={styles.titleRow}>
             <div>
               <p className={styles.eyebrow}>D1 · швидкий режим</p>
-              <h1>{toolTitle(tool)}</h1>
+              <h1 ref={workspaceTitleRef} tabIndex={-1}>{toolTitle(tool)}</h1>
               <p>{toolDescription(tool)}</p>
             </div>
             <button
@@ -471,7 +490,7 @@ export default function D1LibrarianWorkspace({
 
           {workspaceNotice ? (
             <div className={styles.workspaceNotice} role="status" aria-live="polite">
-              <InlineMessage tone="error">{workspaceNotice}</InlineMessage>
+              <InlineMessage tone={workspaceNoticeTone}>{workspaceNotice}</InlineMessage>
               <button
                 type="button"
                 aria-label="Закрити повідомлення"
@@ -507,11 +526,18 @@ export default function D1LibrarianWorkspace({
                   editing={editing}
                   onEditing={(value) => {
                     setEditing(value);
-                    if (value) setWorkspaceNotice("");
+                    if (value) {
+                      setWorkspaceNotice("");
+                      setWorkspaceNoticeTone("error");
+                    }
                   }}
                   writesEnabled={writesEnabled}
                   onSaved={refreshSelected}
-                  onNotice={setWorkspaceNotice}
+                  onNotice={(message) => {
+                    setWorkspaceNotice(message);
+                    setWorkspaceNoticeTone("error");
+                  }}
+                  onArchived={handleMaterialArchived}
                   onChooseTool={chooseTool}
                 />
               ) : null}
@@ -785,6 +811,7 @@ function MaterialCard({
   writesEnabled,
   onSaved,
   onNotice,
+  onArchived,
   onChooseTool,
 }: {
   detail: MaterialDetail | null;
@@ -795,6 +822,7 @@ function MaterialCard({
   writesEnabled: boolean;
   onSaved: () => Promise<void>;
   onNotice: (message: string) => void;
+  onArchived: (materialId: string) => void;
   onChooseTool: (tool: Tool) => void;
 }) {
   if (state === "idle") return <ChooseMaterial />;
@@ -818,6 +846,7 @@ function MaterialCard({
           onEditing(false);
           void onSaved();
         }}
+        onArchived={onArchived}
       />
     );
   }
@@ -1139,12 +1168,14 @@ function MaterialEditForm({
   onCancel,
   onCompleted,
   onPartialUnknown,
+  onArchived,
 }: {
   detail: MaterialDetail;
   writesEnabled: boolean;
   onCancel: () => void;
   onCompleted: () => Promise<void>;
   onPartialUnknown: (message: string) => void;
+  onArchived: (materialId: string) => void;
 }) {
   const [draft, setDraft] = useState<MaterialEditDraft>(() => materialToEditDraft(detail));
   const [links, setLinks] = useState<EditableLinkDraft[]>(() =>
@@ -1158,9 +1189,12 @@ function MaterialEditForm({
     })),
   );
   const [saving, setSaving] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [archiveUncertain, setArchiveUncertain] = useState(false);
   const [message, setMessage] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const coverUpload = useDirectCoverUpload();
+  const archiveRequestId = useRef<string | null>(null);
 
   function update<K extends keyof MaterialEditDraft>(key: K, value: MaterialEditDraft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -1173,7 +1207,7 @@ function MaterialEditForm({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!writesEnabled || typeof detail.version !== "number") return;
+    if (archiving || !writesEnabled || typeof detail.version !== "number") return;
     setSaving(true);
     setMessage("");
     setFieldErrors({});
@@ -1214,18 +1248,68 @@ function MaterialEditForm({
     }
   }
 
+  async function archiveMaterial() {
+    if (saving || archiving || !writesEnabled || typeof detail.version !== "number") return;
+    if (!archiveUncertain) {
+      const confirmed = window.confirm(
+        `Видалити ${detail.id} «${detail.title}» з каталогу?\n\nМатеріал зникне з пошуку та публічного каталогу після оновлення кешу (зазвичай до 10 хвилин). CAT-ID й історія операцій залишаться в базі. Незбережені зміни у формі буде втрачено.`,
+      );
+      if (!confirmed) return;
+    }
+
+    setArchiving(true);
+    setMessage("");
+    setFieldErrors({});
+    const requestId = archiveRequestId.current ?? crypto.randomUUID();
+    archiveRequestId.current = requestId;
+    try {
+      await apiJson<MutationEnvelope<{
+        materialId: string;
+        version: number;
+        archivedAt: string;
+      }>>(`/api/librarian/materials/${encodeURIComponent(detail.id)}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          requestId,
+          expectedVersion: detail.version,
+        }),
+      });
+      archiveRequestId.current = null;
+      setArchiveUncertain(false);
+      coverUpload.clear();
+      onArchived(detail.id);
+    } catch (error) {
+      if (error instanceof ApiError) setFieldErrors(error.fieldErrors);
+      const uncertain = !isDefinitiveArchiveFailure(error);
+      setArchiveUncertain(uncertain);
+      if (!uncertain) archiveRequestId.current = null;
+      setMessage(errorMessage(error));
+    } finally {
+      setArchiving(false);
+    }
+  }
+
   return (
-    <form className={styles.editForm} onSubmit={submit}>
+    <form className={styles.editForm} onSubmit={submit} aria-busy={saving || archiving}>
       <div className={styles.formHeading}>
         <div>
           <p>{detail.id}</p>
           <h2>Редагування матеріалу</h2>
           <small>Зміни зберігаються одразу, без проміжної чернетки.</small>
         </div>
-        <button type="button" onClick={onCancel}>×</button>
+        <button
+          type="button"
+          aria-label="Закрити редагування"
+          disabled={saving || archiving}
+          onClick={onCancel}
+        >
+          ×
+        </button>
       </div>
 
-      <div className={styles.formGrid}>
+      <fieldset className={styles.editFields} disabled={saving || archiving}>
+        <div className={styles.formGrid}>
         <EditField label="Назва" required error={fieldError(fieldErrors, "title")} wide>
           <input value={draft.title} onChange={(event) => update("title", event.target.value)} required />
         </EditField>
@@ -1257,7 +1341,7 @@ function MaterialEditForm({
           <input value={draft.publisher} onChange={(event) => update("publisher", event.target.value)} />
         </EditField>
         <div className={styles.fieldWide}>
-          <IsbnLookupAssist isbn={draft.isbn} onApply={applyBookCandidate} disabled={saving} />
+          <IsbnLookupAssist isbn={draft.isbn} onApply={applyBookCandidate} disabled={saving || archiving} />
         </div>
         <EditField label="Примітка" error={fieldError(fieldErrors, "notes")} wide>
           <textarea rows={4} value={draft.notes} onChange={(event) => update("notes", event.target.value)} />
@@ -1266,7 +1350,7 @@ function MaterialEditForm({
           <CoverPhotoField
             upload={coverUpload}
             currentUrl={detail.cover?.url || detail.thumbnailUrl}
-            disabled={!writesEnabled || saving}
+            disabled={!writesEnabled || saving || archiving}
           />
         </div>
         <div className={styles.fieldWide}>
@@ -1276,7 +1360,8 @@ function MaterialEditForm({
             error={fieldError(fieldErrors, "links")}
           />
         </div>
-      </div>
+        </div>
+      </fieldset>
 
       {message ? (
         <InlineMessage tone={message === "Матеріал оновлено." ? "success" : "error"}>
@@ -1286,15 +1371,53 @@ function MaterialEditForm({
       {coverUpload.error ? <InlineMessage tone="error">{coverUpload.error}</InlineMessage> : null}
 
       <div className={styles.formActions}>
-        <button className={styles.secondaryButton} type="button" onClick={onCancel}>Скасувати</button>
+        <button className={styles.secondaryButton} type="button" disabled={saving || archiving} onClick={onCancel}>Скасувати</button>
         <button
           className={styles.primaryButton}
           type="submit"
-          disabled={saving || coverUpload.normalizing || !writesEnabled || typeof detail.version !== "number"}
+          disabled={saving || archiving || coverUpload.normalizing || !writesEnabled || typeof detail.version !== "number"}
         >
           {saving ? "Зберігаємо…" : "Зберегти зміни"}
         </button>
       </div>
+
+      <section
+        className={styles.dangerZone}
+        aria-labelledby={`archive-title-${detail.id}`}
+        aria-describedby={`archive-help-${detail.id}`}
+      >
+        <div>
+          <h3 id={`archive-title-${detail.id}`}>Видалення матеріалу</h3>
+          <p id={`archive-help-${detail.id}`}>
+            Матеріал зникне з пошуку та публічного каталогу після оновлення кешу (зазвичай до 10 хвилин). CAT-ID й історія операцій залишаться в базі.
+          </p>
+          {detail.totalQuantity > 0 || detail.loanedQuantity > 0 ? (
+            <small>
+              Зараз в обліку {detail.totalQuantity} примірн., видано {detail.loanedQuantity}.
+              Спочатку поверніть видане та встановіть фактичний залишок 0 або виконайте списання.
+            </small>
+          ) : null}
+        </div>
+        <button
+          className={styles.dangerButton}
+          type="button"
+          disabled={
+            saving
+            || archiving
+            || coverUpload.normalizing
+            || !writesEnabled
+            || detail.totalQuantity > 0
+            || detail.loanedQuantity > 0
+          }
+          onClick={() => void archiveMaterial()}
+        >
+          {archiving
+            ? "Видаляємо…"
+            : archiveUncertain
+              ? "Перевірити видалення"
+              : "Видалити матеріал"}
+        </button>
+      </section>
     </form>
   );
 }
@@ -3370,6 +3493,30 @@ const DEFINITIVE_INVENTORY_FAILURES = new Set([
   "unsupported_media_type",
   "invalid_json",
 ]);
+
+const DEFINITIVE_ARCHIVE_FAILURES = new Set([
+  "validation_failed",
+  "authentication_required",
+  "access_denied",
+  "allowlist_not_configured",
+  "cross_origin_request",
+  "actor_not_mapped",
+  "material_not_found",
+  "material_version_conflict",
+  "material_has_stock",
+  "material_archive_conflict",
+  "request_id_conflict",
+  "unsupported_media_type",
+  "invalid_json",
+]);
+
+function isDefinitiveArchiveFailure(error: unknown): boolean {
+  return error instanceof ApiError
+    && error.status !== 408
+    && error.status !== 425
+    && error.status !== 429
+    && DEFINITIVE_ARCHIVE_FAILURES.has(error.code);
+}
 
 function isDefinitiveInventoryFailure(error: unknown): boolean {
   return error instanceof ApiError

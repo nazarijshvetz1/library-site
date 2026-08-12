@@ -38,6 +38,7 @@
 | Детальна картка | `GET /api/librarian/materials/:id` | роль бібліотекаря; службові поля не потрапляють у public API |
 | Новий матеріал | `POST /api/librarian/materials` | автоматичний CAT-ID, `requestId`, одна атомарна команда |
 | Редагування матеріалу й посилань | `PATCH /api/librarian/materials/:id` | `expectedVersion`, конфлікт замість перезапису |
+| Видалення матеріалу з каталогу | `DELETE /api/librarian/materials/:id` | soft archive, `expectedVersion`, нульовий фактичний залишок, відсутність неповернених видач, збереження CAT-ID та історії |
 | Додавання або заміна фото | `POST /api/librarian/materials/:id/cover` | owner-scoped JPEG, прапорець запису, `requestId`, очікувана версія обкладинки, R2 + D1 audit |
 | Надходження | `POST /api/librarian/receipts` | очікуваний залишок, транзакція й аудит |
 | Фактична кількість | `POST /api/librarian/stock-adjustments` | очікуваний залишок, причина й дата |
