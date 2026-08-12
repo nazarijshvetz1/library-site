@@ -22,6 +22,9 @@ export type OwnedCoverAttachment = {
   originalName: string;
   byteLength: number;
   sha256: string;
+  width: number;
+  height: number;
+  bytes: Uint8Array;
   base64: string;
 };
 
@@ -140,6 +143,9 @@ export async function readOwnedCoverAttachment(
     sha256: [...new Uint8Array(digest)]
       .map((byte) => byte.toString(16).padStart(2, "0"))
       .join(""),
+    width: dimensions.width,
+    height: dimensions.height,
+    bytes,
     base64: bytesToBase64(bytes),
   };
 }

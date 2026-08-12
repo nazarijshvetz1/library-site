@@ -22,6 +22,14 @@ class CoverUploadTooLargeError extends Error {}
 export async function POST(request: Request) {
   const authorization = await authorizeLibrarianApi();
   if (!authorization.ok) return authorization.response;
+  if (!authorization.value.access.writesEnabled) {
+    return uploadError(
+      503,
+      "writes_disabled",
+      "Завантаження обкладинок тимчасово вимкнено.",
+      false,
+    );
+  }
   if (!isSameOriginRequest(request)) {
     return librarianError(
       403,
@@ -105,6 +113,7 @@ export async function POST(request: Request) {
       ownerUserId: user.userId,
       originalName: safeOriginalName(value.name),
       uploadedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1_000).toISOString(),
     },
   });
 
@@ -153,6 +162,14 @@ export async function GET(request: Request) {
 export async function DELETE(request: Request) {
   const authorization = await authorizeLibrarianApi();
   if (!authorization.ok) return authorization.response;
+  if (!authorization.value.access.writesEnabled) {
+    return uploadError(
+      503,
+      "writes_disabled",
+      "Видалення завантажених обкладинок тимчасово вимкнено.",
+      false,
+    );
+  }
   if (!isSameOriginRequest(request)) {
     return uploadError(403, "cross_origin_request", "Запит має надійти з цього самого сайту.", authorization.value.access.writesEnabled);
   }

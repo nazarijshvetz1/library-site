@@ -1,14 +1,15 @@
 import { readFile, writeFile } from "node:fs/promises";
 
 const apiUrl = String(process.argv[2] || "").trim();
-if (!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(apiUrl)) {
-  console.error("Вкажіть повний URL розгортання Apps Script, що закінчується на /exec.");
+if (!/^https:\/\/[A-Za-z0-9.-]+\/api\/catalog-v2\/?$/.test(apiUrl)) {
+  console.error("Вкажіть повний HTTPS URL публічного Sites API, що закінчується на /api/catalog-v2.");
   process.exitCode = 1;
 } else {
   const configUrl = new URL("../source/config.js", import.meta.url);
   const current = await readFile(configUrl, "utf8");
-  const next = current.replace(/apiUrl:\s*"[^"]*"/, `apiUrl: ${JSON.stringify(apiUrl)}`);
-  if (next === current) throw new Error("У source/config.js не знайдено поле apiUrl.");
+  const normalized = apiUrl.replace(/\/$/, "");
+  const next = current.replace(/catalogApiUrl:\s*"[^"]*"/, `catalogApiUrl: ${JSON.stringify(normalized)}`);
+  if (next === current) throw new Error("У source/config.js не знайдено поле catalogApiUrl.");
   await writeFile(configUrl, next, "utf8");
-  console.log("URL Google Sheets API записано у source/config.js.");
+  console.log("URL D1 catalog API записано у source/config.js.");
 }

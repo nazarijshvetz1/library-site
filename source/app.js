@@ -39,6 +39,31 @@ export function newestMaterialsByCatalogId(items, limit = 12) {
     .slice(0, maximum);
 }
 
+export function normalizeCatalogApiUrl(value, baseUrl = "https://catalog.invalid/") {
+  try {
+    const url = new URL(String(value || "").trim(), String(baseUrl || "https://catalog.invalid/"));
+    const localDevelopment = url.protocol === "http:"
+      && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+    if ((url.protocol !== "https:" && !localDevelopment) || url.username || url.password) return "";
+    if (!/\/api\/catalog-v2\/?$/.test(url.pathname)) return "";
+    url.pathname = url.pathname.replace(/\/$/, "");
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+export function catalogDetailApiUrl(apiUrl, materialId, baseUrl = "https://catalog.invalid/") {
+  const endpoint = normalizeCatalogApiUrl(apiUrl, baseUrl);
+  const id = normalizeCatalogId(materialId);
+  if (!endpoint || !id) return "";
+  const url = new URL(endpoint);
+  url.pathname = `${url.pathname}/${encodeURIComponent(id)}`;
+  return url.toString();
+}
+
 function cleanMessagePart(value, maximum = 500) {
   return String(value || "").trim().replace(/\s+/g, " ").slice(0, maximum);
 }
@@ -67,7 +92,7 @@ const config = window.LIBRARY_CONFIG && typeof window.LIBRARY_CONFIG === "object
 const balanceData = window.BALANCE_DATA && typeof window.BALANCE_DATA === "object" ? window.BALANCE_DATA : {};
 const collator = new Intl.Collator("uk", { sensitivity: "base", numeric: true });
 const state = { search: "", grade: "", rubric: "", subject: "", type: "", available: false, collection: "", sort: "recommended", limit: 18 };
-const emptyStock = () => ({ total: 0, library: 0, other: 0, locations: [] });
+const emptyStock = () => ({ total: 0, available: 0, library: 0, other: 0, loaned: 0, locations: [] });
 
 const COLLECTIONS = Object.freeze([
   { id: "latest", symbol: "＋", title: "Останні додані до каталогу", description: "Останні записи за порядком CAT-ID" },
@@ -79,6 +104,10 @@ const COLLECTIONS = Object.freeze([
 let materials = [];
 let syncPromise = null;
 let currentMaterialId = "";
+let fallbackLocationCount = 0;
+let hasLiveCatalog = false;
+const materialDetails = new Map();
+const detailPromises = new Map();
 
 const elements = {
   grid: document.querySelector("#materialGrid"), count: document.querySelector("#resultsCount"), empty: document.querySelector("#emptyState"),
@@ -106,8 +135,26 @@ const gradeNumber = (value) => {
 };
 
 function safeCoverUrl(value) {
-  const url = cleanText(value, 1000);
-  return /^https:\/\/raw\.githubusercontent\.com\/nazarijshvetz1\/library-covers\/main\/covers\/CAT-\d{4,}\.jpg(?:\?.*)?$/i.test(url) ? url : "";
+  try {
+    const candidate = cleanText(value, 1000);
+    if (!candidate) return "";
+    const apiUrl = normalizeCatalogApiUrl(config.catalogApiUrl, window.location.href);
+    const url = new URL(candidate, apiUrl || window.location.href);
+    if (url.protocol !== "https:" || url.username || url.password) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function safePublicLinkUrl(value) {
+  try {
+    const url = new URL(cleanText(value, 2000));
+    if (!/^https?:$/.test(url.protocol) || url.username || url.password) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
 }
 
 function normalizeStock(rawStock, quantityHint) {
@@ -117,9 +164,19 @@ function normalizeStock(rawStock, quantityHint) {
     quantity: nonNegativeInteger(location && location.quantity),
   })).filter((location) => location.name && location.quantity > 0).slice(0, 100) : [];
   const total = nonNegativeInteger(source.total ?? quantityHint);
+  const loaned = Math.min(total, nonNegativeInteger(source.loaned));
+  const available = Math.min(total, nonNegativeInteger(source.available ?? Math.max(0, total - loaned)));
   const library = Math.min(total, nonNegativeInteger(source.library));
   const other = Math.min(total, nonNegativeInteger(source.other));
-  return { total, library, other, locations };
+  return { total, available, library, other, loaned, locations };
+}
+
+function normalizeLinks(rawLinks) {
+  return (Array.isArray(rawLinks) ? rawLinks : []).map((link) => ({
+    kind: cleanText(link && link.kind, 80),
+    label: cleanText(link && link.label, 240) || "Відкрити посилання",
+    url: safePublicLinkUrl(link && link.url),
+  })).filter((link) => link.url).slice(0, 50);
 }
 
 function normalizeMaterial(raw) {
@@ -127,21 +184,37 @@ function normalizeMaterial(raw) {
   const id = cleanText(raw.id, 24).toUpperCase();
   const title = cleanText(raw.title, 500);
   if (!/^CAT-\d{4,}$/.test(id) || !title) return null;
-  const stock = normalizeStock(raw.stock, raw.quantity);
+  const holdings = Array.isArray(raw.holdings) ? raw.holdings.map((holding) => ({
+    id: cleanText(holding && holding.locationId, 80),
+    name: cleanText(holding && holding.locationName, 160),
+    quantity: nonNegativeInteger(holding && holding.quantity),
+  })).filter((holding) => holding.name && holding.quantity > 0) : [];
+  const stock = normalizeStock(raw.stock || {
+    total: raw.totalQuantity,
+    available: raw.availableQuantity,
+    library: raw.libraryQuantity,
+    other: raw.otherLocationQuantity,
+    loaned: raw.loanedQuantity,
+    locations: holdings,
+  }, raw.quantity);
   const classFrom = gradeNumber(raw.classFrom);
   return {
     id,
     rubric: cleanText(raw.rubric, 180) || "Без рубрики",
-    type: cleanText(raw.type, 180) || "Не зазначено",
+    type: cleanText(raw.publicationType ?? raw.type, 180) || "Не зазначено",
     subject: cleanText(raw.subject, 180) || "Не зазначено",
     classFrom,
     classTo: gradeNumber(raw.classTo) || classFrom,
     title,
     author: cleanText(raw.author, 300),
     year: nonNegativeInteger(raw.year) || "",
-    cover: safeCoverUrl(raw.cover),
+    isbn: cleanText(raw.isbn, 32),
+    publisher: cleanText(raw.publisher, 240),
+    cover: safeCoverUrl(raw.cover && typeof raw.cover === "object" ? raw.cover.url : (raw.thumbnailUrl ?? raw.cover)),
     quantity: stock.total,
+    availableQuantity: stock.available,
     stock,
+    links: normalizeLinks(raw.links),
   };
 }
 
@@ -169,14 +242,26 @@ function datasetStats(items, supplied = {}) {
   };
 }
 
-function normalizePayload(payload) {
-  if (!payload || payload.success === false || Number(payload.schemaVersion) !== 1 || !Array.isArray(payload.materials)) {
+function normalizeCatalogPage(payload) {
+  if (!payload || payload.success === false || Number(payload.schemaVersion) !== 2 || !Array.isArray(payload.items)) {
     throw new Error("Некоректна відповідь каталогу");
   }
-  const items = payload.materials.map(normalizeMaterial).filter(Boolean);
-  const reportedCount = nonNegativeInteger(payload.stats && payload.stats.materials);
-  if (!items.length || (reportedCount && reportedCount !== items.length)) throw new Error("Отримано неповний каталог");
-  return { materials: items, stats: datasetStats(items, payload.stats), generatedAt: cleanText(payload.generatedAt, 60) };
+  const items = payload.items.map(normalizeMaterial).filter(Boolean);
+  if (items.length !== payload.items.length) throw new Error("Отримано пошкоджену сторінку каталогу");
+  const page = payload.page && typeof payload.page === "object" ? payload.page : {};
+  const hasMore = page.hasMore === true;
+  const nextCursor = cleanText(page.nextCursor, 2000);
+  if (hasMore && (!items.length || !nextCursor)) throw new Error("Каталог повернув некоректний курсор");
+  return { items, hasMore, nextCursor };
+}
+
+function normalizeDetailPayload(payload) {
+  if (!payload || payload.success === false || Number(payload.schemaVersion) !== 2 || !payload.material) {
+    throw new Error("Некоректна картка матеріалу");
+  }
+  const material = normalizeMaterial(payload.material);
+  if (!material) throw new Error("Некоректна картка матеріалу");
+  return material;
 }
 
 function classLabel(item) {
@@ -240,6 +325,7 @@ function updateFiltersAndStats(stats) {
 
 function applyDataset(nextMaterials, suppliedStats) {
   materials = nextMaterials;
+  materialDetails.clear();
   updateFiltersAndStats(datasetStats(materials, suppliedStats));
   state.limit = 18;
   render();
@@ -251,12 +337,12 @@ function filteredMaterials() {
   const collectionIds = state.collection ? new Set(materialsForCollection(state.collection).map((item) => item.id)) : null;
   const result = materials.filter((item) => {
     if (collectionIds && !collectionIds.has(item.id)) return false;
-    if (query && !normalized([item.title, item.author, item.subject, item.type, item.rubric, item.id].join(" ")).includes(query)) return false;
+    if (query && !normalized([item.title, item.author, item.subject, item.type, item.rubric, item.id, item.isbn, item.publisher].join(" ")).includes(query)) return false;
     if (grade && !(Number(item.classFrom) <= grade && Number(item.classTo || item.classFrom) >= grade)) return false;
     if (state.rubric && item.rubric !== state.rubric) return false;
     if (state.subject && item.subject !== state.subject) return false;
     if (state.type && item.type !== state.type) return false;
-    if (state.available && Number(item.quantity) <= 0) return false;
+    if (state.available && Number(item.availableQuantity) <= 0) return false;
     return true;
   });
   if (state.sort === "title") result.sort((a, b) => collator.compare(a.title, b.title));
@@ -280,7 +366,7 @@ function bindCoverErrors(root) {
 }
 
 function cardMarkup(item) {
-  const available = Number(item.quantity) > 0;
+  const available = Number(item.availableQuantity) > 0;
   return `<article class="material-card"><div class="cover-wrap"><span class="class-badge">${escapeHtml(classLabel(item))}</span>${coverMarkup(item)}</div><div class="card-body">
     <div class="card-kicker"><span>${escapeHtml(item.subject)}</span><span class="availability ${available ? "" : "none"}">${available ? "У наявності" : "Немає"}</span></div>
     <h3>${escapeHtml(item.title)}</h3><p class="author-line">${escapeHtml(item.author)}${item.year ? ` · ${escapeHtml(item.year)}` : ""}</p>
@@ -316,45 +402,94 @@ function activateCollection(id) {
   document.querySelector("#catalog").scrollIntoView({ behavior: "smooth" });
 }
 
-function stockMarkup(item) {
+function stockMarkup(item, { loadingDetail = false, detailError = false } = {}) {
   const locations = Array.isArray(item.stock.locations) ? item.stock.locations : [];
   const locationMarkup = locations.length
     ? `<ul class="location-list">${locations.map((location) => `<li class="stock-location"><i></i><span>${escapeHtml(location.name)}</span><strong>${escapeHtml(location.quantity)}</strong></li>`).join("")}</ul>`
-    : `<p class="stock-empty">Наразі доступних примірників немає.</p>`;
+    : `<p class="stock-empty">${loadingDetail
+      ? "Завантажуємо розміщення…"
+      : detailError
+        ? "Не вдалося оновити розміщення. Спробуйте відкрити картку ще раз."
+        : "Для цього матеріалу немає відкритих даних про розміщення."}</p>`;
   return `<div class="stock-box">
     <div class="stock-summary">
       <div class="stock-total"><span>Усього</span><strong>${escapeHtml(item.stock.total)}</strong></div>
+      <div class="stock-total"><span>Доступно</span><strong>${escapeHtml(item.stock.available)}</strong></div>
       <div class="stock-total"><span>У бібліотеці</span><strong>${escapeHtml(item.stock.library)}</strong></div>
       <div class="stock-total"><span>В інших кабінетах</span><strong>${escapeHtml(item.stock.other)}</strong></div>
+      ${item.stock.loaned ? `<div class="stock-total"><span>Видано</span><strong>${escapeHtml(item.stock.loaned)}</strong></div>` : ""}
     </div>${locationMarkup}
   </div>`;
+}
+
+function linksMarkup(item, { loadingDetail = false, detailError = false } = {}) {
+  if (loadingDetail) return `<div class="material-links" aria-busy="true"><h3>Посилання</h3><p>Завантажуємо відкриті джерела…</p></div>`;
+  if (detailError) return `<div class="material-links"><h3>Посилання</h3><p>Не вдалося завантажити посилання. Спробуйте відкрити картку ще раз.</p></div>`;
+  if (!item.links.length) return "";
+  return `<div class="material-links"><h3>Посилання</h3><ul>${item.links.map((link) => `<li><a href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer"><span>${escapeHtml(link.label)}</span><i aria-hidden="true">↗</i></a></li>`).join("")}</ul></div>`;
 }
 
 function directMaterialUrl(id) {
   return urlWithMaterial(window.location.href, id);
 }
 
-function showMaterial(id, { updateHistory = true } = {}) {
-  const item = materials.find((material) => material.id === id); if (!item) return false;
+function renderMaterialDialog(item, detailState = {}) {
   const directUrl = directMaterialUrl(item.id);
+  const secondaryMeta = [item.publisher, item.isbn ? `ISBN ${item.isbn}` : ""].filter(Boolean);
   elements.dialogContent.innerHTML = `<div class="dialog-layout"><div class="dialog-cover">${coverMarkup(item, true)}</div><div class="dialog-copy">
     <p class="dialog-id">${escapeHtml(item.id)} · ${escapeHtml(item.rubric)}</p><h2>${escapeHtml(item.title)}</h2>
     <p class="dialog-meta">${escapeHtml(item.author)}${item.year ? ` · ${escapeHtml(item.year)} рік` : ""}</p>
+    ${secondaryMeta.length ? `<p class="dialog-secondary-meta">${secondaryMeta.map(escapeHtml).join(" · ")}</p>` : ""}
     <div class="dialog-tags"><span>${escapeHtml(classLabel(item))}</span><span>${escapeHtml(item.subject)}</span><span>${escapeHtml(item.type)}</span></div>
-    ${stockMarkup(item)}
+    ${stockMarkup(item, detailState)}
+    ${linksMarkup(item, detailState)}
     <div class="dialog-actions" aria-label="Дії з карткою">
       <button type="button" data-copy-material="${escapeHtml(item.id)}">Скопіювати посилання</button>
       <button type="button" data-share-material="${escapeHtml(item.id)}">Поділитися</button>
       <button class="report-error-button" type="button" data-report-error="${escapeHtml(item.id)}">Повідомити про помилку</button>
     </div>
-    <p class="dialog-note">Це безпечна версія для перегляду. Вона не змінює дані у службовій таблиці.</p>
+    <p class="dialog-note">Каталог доступний лише для перегляду. Зміни вносяться у захищеному кабінеті бібліотекаря.</p>
   </div></div>`;
   bindCoverErrors(elements.dialogContent);
+  return directUrl;
+}
+
+async function loadMaterialDetail(id) {
+  if (materialDetails.has(id)) return materialDetails.get(id);
+  if (detailPromises.has(id)) return detailPromises.get(id);
+  const url = catalogDetailApiUrl(config.catalogApiUrl, id, window.location.href);
+  if (!url) throw new Error("catalog_api_unavailable");
+  const request = fetch(url, {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  }).then(async (response) => {
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const detail = normalizeDetailPayload(await response.json());
+    materialDetails.set(id, detail);
+    return detail;
+  }).finally(() => detailPromises.delete(id));
+  detailPromises.set(id, request);
+  return request;
+}
+
+function showMaterial(id, { updateHistory = true } = {}) {
+  const summary = materials.find((material) => material.id === id); if (!summary) return false;
+  const cachedDetail = materialDetails.get(id);
+  const hasApi = Boolean(catalogDetailApiUrl(config.catalogApiUrl, id, window.location.href));
+  const item = cachedDetail || summary;
+  const directUrl = renderMaterialDialog(item, { loadingDetail: !cachedDetail && hasApi });
   currentMaterialId = item.id;
   if (updateHistory && materialIdFromUrl(window.location.href) !== item.id) {
     window.history.pushState({ ...(window.history.state || {}), libraryMaterial: item.id }, "", directUrl);
   }
   if (!elements.dialog.open) elements.dialog.showModal();
+  if (!cachedDetail && hasApi) {
+    loadMaterialDetail(id).then((detail) => {
+      if (currentMaterialId === id && elements.dialog.open) renderMaterialDialog(detail);
+    }).catch(() => {
+      if (currentMaterialId === id && elements.dialog.open) renderMaterialDialog(summary, { detailError: true });
+    });
+  }
   return true;
 }
 
@@ -424,38 +559,37 @@ function setSyncStatus(status, message, retry = false) {
   elements.syncRetry.hidden = !retry;
 }
 
-function validApiUrl(value) {
-  return /^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(String(value || "").trim());
-}
-
-async function fetchPayload(apiUrl) {
+async function fetchCatalogPage(apiUrl, cursor = "") {
   const url = new URL(apiUrl);
-  url.searchParams.set("client", "library-site");
-  const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
+  url.searchParams.set("limit", "48");
+  url.searchParams.set("sort", "title");
+  if (cursor) url.searchParams.set("cursor", cursor);
+  const response = await fetch(url, { headers: { Accept: "application/json" } });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.json();
+  return normalizeCatalogPage(await response.json());
 }
 
-function jsonpPayload(apiUrl) {
-  return new Promise((resolve, reject) => {
-    const callback = `libraryCatalogCallback_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const script = document.createElement("script");
-    const url = new URL(apiUrl);
-    url.searchParams.set("callback", callback);
-    url.searchParams.set("client", "library-site");
-    const cleanup = () => { delete window[callback]; script.remove(); };
-    const timer = window.setTimeout(() => { cleanup(); reject(new Error("Перевищено час очікування")); }, 15000);
-    window[callback] = (payload) => { window.clearTimeout(timer); cleanup(); resolve(payload); };
-    script.onerror = () => { window.clearTimeout(timer); cleanup(); reject(new Error("Не вдалося підключитися")); };
-    script.src = url.toString();
-    script.async = true;
-    document.head.append(script);
-  });
-}
-
-async function requestLivePayload(apiUrl) {
-  try { return await fetchPayload(apiUrl); }
-  catch { return jsonpPayload(apiUrl); }
+async function requestLiveCatalog(apiUrl) {
+  const items = [];
+  const ids = new Set();
+  const cursors = new Set();
+  let cursor = "";
+  for (let pageNumber = 0; pageNumber < 100; pageNumber += 1) {
+    const page = await fetchCatalogPage(apiUrl, cursor);
+    page.items.forEach((item) => {
+      if (ids.has(item.id)) throw new Error("Каталог повернув повторний CAT-ID");
+      ids.add(item.id);
+      items.push(item);
+    });
+    if (!page.hasMore) {
+      if (!items.length) throw new Error("Каталог не містить матеріалів");
+      return items;
+    }
+    if (cursors.has(page.nextCursor)) throw new Error("Каталог повернув повторний курсор");
+    cursors.add(page.nextCursor);
+    cursor = page.nextCursor;
+  }
+  throw new Error("Каталог перевищив безпечну кількість сторінок");
 }
 
 function formattedUpdatedAt(value) {
@@ -465,19 +599,21 @@ function formattedUpdatedAt(value) {
 }
 
 async function synchronizeCatalog() {
-  const apiUrl = String(config.apiUrl || "").trim();
-  if (!validApiUrl(apiUrl)) {
-    setSyncStatus("snapshot", "Показано перевірену копію бази");
+  const apiUrl = normalizeCatalogApiUrl(config.catalogApiUrl, window.location.href);
+  if (!apiUrl) {
+    setSyncStatus("snapshot", "Показано локальну резервну копію каталогу");
     return;
   }
   if (syncPromise) return syncPromise;
-  setSyncStatus("loading", "Оновлюємо дані з Google Sheets…");
-  syncPromise = requestLivePayload(apiUrl).then((payload) => {
-    const live = normalizePayload(payload);
-    applyDataset(live.materials, live.stats);
-    setSyncStatus("live", `Оновлено з Google Sheets · ${formattedUpdatedAt(live.generatedAt)}`);
+  setSyncStatus("loading", "Оновлюємо каталог із захищеної бази…");
+  syncPromise = requestLiveCatalog(apiUrl).then((liveMaterials) => {
+    applyDataset(liveMaterials, { locations: fallbackLocationCount });
+    hasLiveCatalog = true;
+    setSyncStatus("live", `Актуальні дані · ${formattedUpdatedAt(new Date().toISOString())}`);
   }).catch(() => {
-    setSyncStatus("error", "Google Sheets тимчасово недоступна — показано перевірену копію", true);
+    setSyncStatus("error", hasLiveCatalog
+      ? "Не вдалося оновити — показано останні отримані дані"
+      : "Захищена база тимчасово недоступна — показано локальну резервну копію", true);
   }).finally(() => { syncPromise = null; });
   return syncPromise;
 }
@@ -534,8 +670,9 @@ window.addEventListener("popstate", () => {
 elements.filterToggle.addEventListener("click", () => { const open = elements.filters.classList.toggle("open"); elements.filterToggle.setAttribute("aria-expanded", String(open)); });
 
 const snapshot = localSnapshot();
-applyDataset(snapshot, { locations: 13 });
+fallbackLocationCount = datasetStats(snapshot).locations;
+applyDataset(snapshot, { locations: fallbackLocationCount });
 synchronizeCatalog();
 const refreshMinutes = Math.min(60, Math.max(5, nonNegativeInteger(config.refreshMinutes) || 10));
-if (validApiUrl(config.apiUrl)) window.setInterval(synchronizeCatalog, refreshMinutes * 60 * 1000);
+if (normalizeCatalogApiUrl(config.catalogApiUrl, window.location.href)) window.setInterval(synchronizeCatalog, refreshMinutes * 60 * 1000);
 }
