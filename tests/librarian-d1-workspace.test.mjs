@@ -199,6 +199,18 @@ test("new librarian route renders D1 workspace and keeps legacy workspace intact
 
   assert.match(page, /import D1LibrarianWorkspace from "\.\/d1-workspace"/u);
   assert.match(page, /<D1LibrarianWorkspace/u);
+  assert.match(
+    workspace,
+    /const PUBLIC_CATALOG_URL = "https:\/\/nazarijshvetz1\.github\.io\/library-site\/";/u,
+  );
+  assert.match(workspace, /href=\{PUBLIC_CATALOG_URL\}/u);
+  assert.match(workspace, /target="_blank"/u);
+  assert.match(workspace, /rel="noopener noreferrer"/u);
+  assert.match(workspace, /aria-label="Відкрити публічний каталог у новій вкладці"/u);
+  assert.doesNotMatch(
+    workspace,
+    /<Link href="\/" className=\{styles\.catalogLink\}>/u,
+  );
   assert.match(client, /\/api\/librarian\/materials\/search/u);
   assert.match(workspace, /method: "PATCH"/u);
   assert.match(workspace, /\/api\/librarian\/stock-adjustments/u);
