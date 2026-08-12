@@ -387,6 +387,16 @@ test("cover asset lookup returns only safe ready R2 metadata", async () => {
       sha256: "a".repeat(64),
     });
     assert.equal(await getCatalogCoverAsset(db, "../CAT-0001"), null);
+    sqlite.exec(`
+      UPDATE materials
+      SET status = 'archived', archived_at = '2026-08-12T10:00:00.000Z'
+      WHERE id = 'CAT-0001'
+    `);
+    assert.equal(
+      await getCatalogCoverAsset(db, "CAT-0001"),
+      null,
+      "an archived material must not expose its retained cover bytes",
+    );
   } finally {
     sqlite.close();
   }

@@ -42,6 +42,26 @@ test("material edits accept public store links and reject unsafe overposting", (
   assert.match(invalid.fieldErrors["changes.catalogNumber"], /Невідоме/u);
 });
 
+test("material archive validation requires only an idempotency key and version", () => {
+  const valid = validation.validateMaterialArchiveInput({
+    requestId: REQUEST_ID,
+    expectedVersion: 3,
+  });
+  assert.equal(valid.ok, true);
+  assert.deepEqual(valid.value, {
+    requestId: REQUEST_ID,
+    expectedVersion: 3,
+  });
+
+  const overposted = validation.validateMaterialArchiveInput({
+    requestId: REQUEST_ID,
+    expectedVersion: 3,
+    hardDelete: true,
+  });
+  assert.equal(overposted.ok, false);
+  assert.ok(overposted.fieldErrors.hardDelete);
+});
+
 test("material links allow only HTTP(S) without embedded credentials", () => {
   for (const url of ["javascript:alert(1)", "file:///tmp/book.pdf", "https://a:b@example.com/book"]) {
     const result = validation.validateMaterialUpdateInput({
@@ -281,6 +301,9 @@ test("direct write routes remain authenticated, same-origin and fail closed", ()
     assert.match(source, /if \(!access\.writesEnabled\)/u);
     assert.match(source, /readDraftJsonBody\(request/u);
   }
+  assert.match(materialRoute, /export async function DELETE\(/u);
+  assert.match(materialRoute, /validateMaterialArchiveInput/u);
+  assert.match(materialRoute, /archiveMaterialDirect/u);
 });
 
 test("mutation store binds every direct write to idempotency and one D1 batch", () => {
@@ -295,6 +318,7 @@ test("mutation store binds every direct write to idempotency and one D1 batch", 
   assert.match(source, /changes\(\) = 1/u);
   assert.match(source, /stock\.counted/u);
   assert.match(source, /material\.created/u);
+  assert.match(source, /material\.archived/u);
   assert.match(source, /stock\.received/u);
   assert.match(source, /stock\.transferred/u);
   assert.match(source, /stock\.written_off/u);

@@ -39,6 +39,11 @@ export type MaterialUpdateInput = {
   };
 };
 
+export type MaterialArchiveInput = {
+  requestId: string;
+  expectedVersion: number;
+};
+
 export type MaterialCreateInput = {
   requestId: string;
   title: string;
@@ -363,6 +368,23 @@ export function validateMaterialUpdateInput(
     expectedVersion,
     changes,
   });
+}
+
+export function validateMaterialArchiveInput(
+  input: unknown,
+): ValidationResult<MaterialArchiveInput> {
+  const errors: Record<string, string> = {};
+  if (!isRecord(input)) {
+    return invalid("body", "Очікується підтвердження видалення матеріалу.");
+  }
+  assertExactKeys(input, ["requestId", "expectedVersion"], errors);
+  const requestId = readUuid(input.requestId, "requestId", errors);
+  const expectedVersion = readPositiveInteger(
+    input.expectedVersion,
+    "expectedVersion",
+    errors,
+  );
+  return finish(errors, { requestId, expectedVersion });
 }
 
 export function validateStockAdjustmentInput(

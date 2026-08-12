@@ -191,10 +191,11 @@ test("an uncertain inventory request survives remount with its exact request ID 
 });
 
 test("new librarian route renders D1 workspace and keeps legacy workspace intact", async () => {
-  const [page, workspace, client] = await Promise.all([
+  const [page, workspace, client, styles] = await Promise.all([
     read("app/librarian/page.tsx"),
     read("app/librarian/d1-workspace.tsx"),
     read("lib/librarian-d1-client.ts"),
+    read("app/librarian/d1-workspace.module.css"),
   ]);
 
   assert.match(page, /import D1LibrarianWorkspace from "\.\/d1-workspace"/u);
@@ -213,6 +214,28 @@ test("new librarian route renders D1 workspace and keeps legacy workspace intact
   );
   assert.match(client, /\/api\/librarian\/materials\/search/u);
   assert.match(workspace, /method: "PATCH"/u);
+  assert.match(workspace, /method: "DELETE"/u);
+  assert.match(workspace, /Видалити матеріал/u);
+  assert.match(workspace, /className=\{styles\.dangerZone\}/u);
+  assert.match(
+    workspace,
+    /<fieldset className=\{styles\.editFields\} disabled=\{saving \|\| archiving\}>/u,
+  );
+  assert.match(workspace, /aria-label="Закрити редагування"/u);
+  assert.match(workspace, /type="button"[\s\S]*?onClick=\{\(\) => void archiveMaterial\(\)\}/u);
+  assert.match(workspace, /window\.confirm/u);
+  assert.match(workspace, /archiveRequestId\.current \?\? crypto\.randomUUID\(\)/u);
+  assert.match(workspace, /archiveUncertain[\s\S]*?Перевірити видалення/u);
+  assert.match(workspace, /coverUpload\.clear\(\);[\s\S]*?onArchived\(detail\.id\)/u);
+  assert.match(workspace, /onArchived\(detail\.id\)/u);
+  assert.match(workspace, /setItems\(\(current\) => current\.filter\(\(item\) => item\.id !== materialId\)\)/u);
+  assert.match(workspace, /setWorkspaceNoticeTone\("success"\)/u);
+  assert.match(workspace, /detail\.totalQuantity > 0 \|\| detail\.loanedQuantity > 0/u);
+  assert.match(workspace, /\|\| detail\.totalQuantity > 0[\s\S]*?\|\| detail\.loanedQuantity > 0/u);
+  assert.match(styles, /\.dangerButton/u);
+  assert.match(styles, /\.editFields \{[\s\S]*?border: 0/u);
+  assert.match(styles, /\.dangerButton \{[\s\S]*?min-height: 44px/u);
+  assert.match(styles, /\.dangerZone \.dangerButton \{ width: 100%; \}/u);
   assert.match(workspace, /\/api\/librarian\/stock-adjustments/u);
   assert.match(workspace, /\/api\/librarian\/library-reference/u);
   assert.match(workspace, /"\/api\/librarian\/loans"/u);

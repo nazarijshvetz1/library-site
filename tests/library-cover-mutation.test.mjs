@@ -474,7 +474,10 @@ test("partial edit outcome is raised before the cover form unmounts", () => {
     workspace,
     /if \(coverSaved\) \{\s*onPartialUnknown\([\s\S]*?\);\s*\} else \{\s*setMessage\(errorMessage\(error\)\);/u,
   );
-  assert.match(workspace, /<InlineMessage tone="error">\{workspaceNotice\}<\/InlineMessage>/u);
+  assert.match(
+    workspace,
+    /<InlineMessage tone=\{workspaceNoticeTone\}>\{workspaceNotice\}<\/InlineMessage>/u,
+  );
   assert.doesNotMatch(workspace, /if \(coverSaved\) await onRefresh\(\)/u);
   assert.doesNotMatch(
     workspace,

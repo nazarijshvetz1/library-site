@@ -14,10 +14,14 @@ import {
 } from "@/lib/librarian-api";
 import {
   type LibraryD1Database,
+  archiveMaterialDirect,
   LibraryMutationError,
   updateMaterialDirect,
 } from "@/lib/library-mutation-store";
-import { validateMaterialUpdateInput } from "@/lib/library-write-validation";
+import {
+  validateMaterialArchiveInput,
+  validateMaterialUpdateInput,
+} from "@/lib/library-write-validation";
 
 export const dynamic = "force-dynamic";
 
@@ -148,6 +152,79 @@ export async function PATCH(
       503,
       "material_update_unavailable",
       "Не вдалося зберегти матеріал. Спробуйте ще раз.",
+      true,
+    );
+  }
+}
+
+export async function DELETE(
+  request: Request,
+  context: RouteContext,
+): Promise<Response> {
+  const authorization = await authorizeLibrarianApi();
+  if (!authorization.ok) return authorization.response;
+  const { user, access } = authorization.value;
+
+  if (!access.writesEnabled) {
+    return librarianError(
+      503,
+      "writes_disabled",
+      "Збереження тимчасово вимкнено адміністратором.",
+      false,
+    );
+  }
+  if (!isSameOriginRequest(request)) {
+    return librarianError(
+      403,
+      "cross_origin_request",
+      "Запит має надійти з цього самого сайту.",
+      true,
+    );
+  }
+
+  const { id: rawId } = await context.params;
+  const id = normalizeCatalogId(rawId);
+  if (!id) {
+    return librarianError(400, "invalid_material_id", "Некоректний CAT-ID.", true);
+  }
+  const body = await readDraftJsonBody(request, true);
+  if (!body.ok) return body.response;
+  const validated = validateMaterialArchiveInput(body.value);
+  if (!validated.ok) {
+    return librarianError(
+      400,
+      "validation_failed",
+      "Не вдалося підтвердити видалення матеріалу.",
+      true,
+      validated.fieldErrors,
+    );
+  }
+
+  try {
+    const result = await archiveMaterialDirect(
+      user,
+      id,
+      validated.value,
+      env.DB as unknown as LibraryD1Database,
+    );
+    return librarianJson({ success: true, result, writesEnabled: true });
+  } catch (error) {
+    if (error instanceof LibraryMutationError) {
+      return librarianJson(
+        {
+          success: false,
+          code: error.code,
+          error: error.message,
+          ...(error.details ?? {}),
+          writesEnabled: true,
+        },
+        { status: error.status },
+      );
+    }
+    return librarianError(
+      503,
+      "material_archive_unavailable",
+      "Не вдалося видалити матеріал із каталогу. Спробуйте ще раз.",
       true,
     );
   }

@@ -2,6 +2,7 @@ import type { ChatGPTUser } from "@/app/chatgpt-auth";
 import type {
   LoanCreateInput,
   LoanReturnInput,
+  MaterialArchiveInput,
   MaterialCreateInput,
   MaterialUpdateInput,
   ReceiptCreateDetails,
@@ -65,12 +66,19 @@ type MaterialRow = {
   status: string;
   version: number;
   updated_at: string;
+  archived_at: string | null;
 };
 
 export type MaterialMutationResult = {
   materialId: string;
   version: number;
   updatedAt: string;
+};
+
+export type MaterialArchiveResult = {
+  materialId: string;
+  version: number;
+  archivedAt: string;
 };
 
 export type ReceiptMutationResult = {
@@ -612,7 +620,7 @@ export async function updateMaterialDirect(
       id, catalog_number, title, sort_title, search_text, rubric,
       publication_type, subject, class_from, class_to, author,
       publication_year, isbn, isbn_normalized, publisher, notes,
-      status, version, updated_at
+      status, version, updated_at, archived_at
     FROM materials
     WHERE id = ? AND status = 'active' AND archived_at IS NULL
     LIMIT 1
@@ -807,6 +815,182 @@ export async function updateMaterialDirect(
   return replayed ?? result;
 }
 
+export async function archiveMaterialDirect(
+  user: ChatGPTUser,
+  materialId: string,
+  input: MaterialArchiveInput,
+  providedDb?: LibraryD1Database,
+): Promise<MaterialArchiveResult> {
+  const db = database(providedDb);
+  const actor = await resolveMutationActor(db, user);
+  const requestHash = await mutationHash({
+    kind: "material.archive",
+    actorUserId: actor.id,
+    materialId,
+    input,
+  });
+  const replay = await replayCompletedCommand<MaterialArchiveResult>(
+    db,
+    input.requestId,
+    requestHash,
+  );
+  if (replay) return replay;
+
+  const material = await db.prepare(`
+    SELECT
+      id, catalog_number, title, sort_title, search_text, rubric,
+      publication_type, subject, class_from, class_to, author,
+      publication_year, isbn, isbn_normalized, publisher, notes,
+      status, version, updated_at, archived_at
+    FROM materials
+    WHERE id = ? AND status = 'active' AND archived_at IS NULL
+    LIMIT 1
+  `).bind(materialId).first<MaterialRow>();
+  if (!material) {
+    throw new LibraryMutationError(
+      "material_not_found",
+      404,
+      "Матеріал не знайдено або його вже видалено з каталогу.",
+    );
+  }
+  if (Number(material.version) !== input.expectedVersion) {
+    throw new LibraryMutationError(
+      "material_version_conflict",
+      409,
+      "Матеріал уже змінено в іншій вкладці. Оновіть картку перед видаленням.",
+      { currentVersion: Number(material.version) },
+    );
+  }
+
+  const stock = await db.prepare(`
+    SELECT
+      COALESCE((
+        SELECT SUM(h.quantity) FROM holdings h
+        WHERE h.material_id = ? AND h.quantity > 0
+      ), 0) + COALESCE((
+        SELECT SUM(li.quantity_issued - li.quantity_returned)
+        FROM loan_items li
+        JOIN loans lo ON lo.id = li.loan_id
+        WHERE li.material_id = ? AND lo.status != 'cancelled'
+          AND li.quantity_issued > li.quantity_returned
+      ), 0) AS total_quantity,
+      COALESCE((
+        SELECT SUM(li.quantity_issued - li.quantity_returned)
+        FROM loan_items li
+        JOIN loans lo ON lo.id = li.loan_id
+        WHERE li.material_id = ? AND lo.status != 'cancelled'
+          AND li.quantity_issued > li.quantity_returned
+      ), 0) AS loaned_quantity
+  `).bind(materialId, materialId, materialId)
+    .first<{ total_quantity: number; loaned_quantity: number }>();
+  const totalQuantity = Number(stock?.total_quantity ?? 0);
+  const loanedQuantity = Number(stock?.loaned_quantity ?? 0);
+  if (totalQuantity > 0 || loanedQuantity > 0) {
+    throw new LibraryMutationError(
+      "material_has_stock",
+      409,
+      "Матеріал має примірники або незавершені видачі. Спочатку поверніть видане та обнуліть залишок через списання.",
+      { totalQuantity, loanedQuantity },
+    );
+  }
+
+  const links = await readMaterialLinks(db, materialId);
+  const before = {
+    ...materialSnapshot(material, links),
+    status: "active",
+    archivedAt: null,
+  };
+  const archivedAt = new Date().toISOString();
+  const nextVersion = input.expectedVersion + 1;
+  const after = {
+    ...before,
+    status: "archived",
+    version: nextVersion,
+    archivedAt,
+  };
+  const result: MaterialArchiveResult = {
+    materialId,
+    version: nextVersion,
+    archivedAt,
+  };
+
+  const statements: D1Statement[] = [
+    insertCommandStatement(
+      db,
+      input.requestId,
+      requestHash,
+      actor.id,
+      "material.archive",
+      "material",
+      materialId,
+      archivedAt,
+    ),
+    db.prepare(`
+      UPDATE materials
+      SET status = 'archived', version = ?, updated_at = ?, archived_at = ?
+      WHERE id = ? AND version = ? AND status = 'active' AND archived_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM holdings h
+          WHERE h.material_id = ? AND h.quantity > 0
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM loan_items li
+          JOIN loans lo ON lo.id = li.loan_id
+          WHERE li.material_id = ? AND lo.status != 'cancelled'
+            AND li.quantity_issued > li.quantity_returned
+        )
+    `).bind(
+      nextVersion,
+      archivedAt,
+      archivedAt,
+      materialId,
+      input.expectedVersion,
+      materialId,
+      materialId,
+    ),
+    db.prepare(`
+      INSERT INTO audit_events (
+        id, actor_user_id, actor_email, action, entity_type, entity_id,
+        request_id, before_json, after_json, metadata_json, created_at
+      ) VALUES (
+        ?, ?, ?, 'material.archived', 'material',
+        (
+          SELECT id FROM materials
+          WHERE id = ? AND version = ? AND status = 'archived'
+            AND archived_at = ? AND changes() = 1
+        ),
+        ?, ?, ?, ?, ?
+      )
+    `).bind(
+      crypto.randomUUID(),
+      actor.id,
+      actor.email,
+      materialId,
+      nextVersion,
+      archivedAt,
+      input.requestId,
+      JSON.stringify(before),
+      JSON.stringify(after),
+      JSON.stringify({ mode: "archive", historyPreserved: true }),
+      archivedAt,
+    ),
+    completeCommandStatement(db, input.requestId, result, archivedAt),
+  ];
+
+  const replayed = await executeIdempotentBatch<MaterialArchiveResult>(
+    db,
+    statements,
+    input.requestId,
+    requestHash,
+    {
+      code: "material_archive_conflict",
+      message: "Матеріал або його залишок змінилися під час видалення. Оновіть картку й перевірте залишок.",
+    },
+  );
+  return replayed ?? result;
+}
+
 export async function adjustHoldingToActualCount(
   user: ChatGPTUser,
   input: StockAdjustmentInput,
@@ -926,7 +1110,10 @@ export async function adjustHoldingToActualCount(
         VALUES (
           ?, ?, (
             SELECT m.id FROM materials m JOIN locations l ON l.id = ?
-            WHERE m.id = ? AND NOT EXISTS (
+            WHERE m.id = ?
+              AND m.status = 'active' AND m.archived_at IS NULL
+              AND l.status = 'active' AND l.type != 'service'
+              AND NOT EXISTS (
               SELECT 1 FROM holdings h
               WHERE h.material_id = m.id AND h.location_id = l.id AND h.condition = ?
             )
@@ -968,9 +1155,14 @@ export async function adjustHoldingToActualCount(
         countedQuantity: input.countedQuantity,
         createdAt,
         guardSql: `
-          SELECT material_id FROM holdings
-          WHERE material_id = ? AND location_id = ? AND condition = ?
-            AND quantity = ? AND version = 1 AND changes() = 1
+          SELECT h.material_id
+          FROM holdings h
+          JOIN materials m ON m.id = h.material_id
+          JOIN locations l ON l.id = h.location_id
+          WHERE h.material_id = ? AND h.location_id = ? AND h.condition = ?
+            AND h.quantity = ? AND h.version = 1 AND changes() = 1
+            AND m.status = 'active' AND m.archived_at IS NULL
+            AND l.status = 'active' AND l.type != 'service'
         `,
         guardBindings: [
           input.materialId,
@@ -1004,7 +1196,11 @@ export async function adjustHoldingToActualCount(
         quantityAfter: 0,
         countedQuantity: 0,
         createdAt,
-        guardSql: "SELECT id FROM materials WHERE id = ? AND changes() = 1",
+        guardSql: `
+          SELECT id FROM materials
+          WHERE id = ? AND status = 'active' AND archived_at IS NULL
+            AND changes() = 1
+        `,
         guardBindings: [input.materialId],
       }),
     );
@@ -1037,9 +1233,14 @@ export async function adjustHoldingToActualCount(
         countedQuantity: input.countedQuantity,
         createdAt,
         guardSql: `
-          SELECT material_id FROM holdings
-          WHERE material_id = ? AND location_id = ? AND condition = ?
-            AND quantity = ? AND version = ? AND changes() = 1
+          SELECT h.material_id
+          FROM holdings h
+          JOIN materials m ON m.id = h.material_id
+          JOIN locations l ON l.id = h.location_id
+          WHERE h.material_id = ? AND h.location_id = ? AND h.condition = ?
+            AND h.quantity = ? AND h.version = ? AND changes() = 1
+            AND m.status = 'active' AND m.archived_at IS NULL
+            AND l.status = 'active' AND l.type != 'service'
         `,
         guardBindings: [
           input.materialId,
