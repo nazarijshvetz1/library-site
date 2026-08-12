@@ -29,18 +29,15 @@ import {
 } from "../lib/staging-import-gate.ts";
 
 const fixtureUrl = new URL("./fixtures/library-core-canonical.json", import.meta.url);
-const migrationUrls = [0, 1, 2, 3, 4, 5, 6].map((index) => new URL(
-  `../drizzle/${[
+const migrationUrls = [
     "0000_librarian_drafts.sql",
     "0001_draft_workflow.sql",
     "0002_remove_legacy_audit_triggers.sql",
     "0003_odd_the_order.sql",
     "0004_staging_import_runs.sql",
     "0005_young_night_nurse.sql",
-    "0006_pale_sauron.sql",
-  ][index]}`,
-  import.meta.url,
-));
+    "0006_pale_sauron.sql", "0007_cold_whiplash.sql",
+  ].map((file) => new URL(`../drizzle/${file}`, import.meta.url));
 
 async function fixturePlan() {
   const canonical = JSON.parse(await readFile(fixtureUrl, "utf8"));

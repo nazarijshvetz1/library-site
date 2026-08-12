@@ -37,7 +37,7 @@ async function visitDatabase() {
   for (const file of [
     "0000_librarian_drafts.sql", "0001_draft_workflow.sql", "0002_remove_legacy_audit_triggers.sql",
     "0003_odd_the_order.sql", "0004_staging_import_runs.sql", "0005_young_night_nurse.sql",
-    "0006_pale_sauron.sql",
+    "0006_pale_sauron.sql", "0007_cold_whiplash.sql",
   ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
   const now = new Date().toISOString();
   sqlite.prepare(`INSERT INTO users
@@ -113,6 +113,38 @@ test("shared segment-claim schema is the atomic booking-versus-closure race guar
   assert.match(sql, /visit_slot_claims_exactly_one_owner/);
   assert.match(sql, /between 0 and 23/);
   assert.match(sql, /% 5 = 0/);
+  assert.match(sql, /substr\("visit_slot_claims"\."segment_key", 1, 10\) glob/);
+  assert.doesNotMatch(sql, /T\[0-9\]\[0-9\]:\[0-5\]\[0-9\]/);
+});
+
+test("visit slot-claim migration preserves rows with foreign keys enabled", async () => {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec("PRAGMA foreign_keys = ON;");
+  for (const file of [
+    "0000_librarian_drafts.sql", "0001_draft_workflow.sql", "0002_remove_legacy_audit_triggers.sql",
+    "0003_odd_the_order.sql", "0004_staging_import_runs.sql", "0005_young_night_nurse.sql",
+    "0006_pale_sauron.sql",
+  ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
+  const now = new Date().toISOString();
+  sqlite.prepare(`INSERT INTO visit_bookings (
+    id, owner_auth_user_id, owner_email, surname, visit_date, start_time, end_time,
+    purpose, status, cancel_reason, version, created_at, updated_at
+  ) VALUES ('VIS-UPGRADE', 'auth-upgrade', 'upgrade@example.test', 'Тестовий',
+    '2026-09-01', '09:00', '09:20', '', 'active', '', 1, ?, ?)`)
+    .run(now, now);
+  sqlite.prepare(`INSERT INTO visit_slot_claims
+    (segment_key, booking_id, closure_id, created_at)
+    VALUES ('2026-09-01T09:00', 'VIS-UPGRADE', NULL, ?)`)
+    .run(now);
+  const migration = await readFile(new URL("../drizzle/0007_cold_whiplash.sql", import.meta.url), "utf8");
+  assert.doesNotMatch(migration, /PRAGMA foreign_keys\s*=\s*OFF/i);
+  sqlite.exec(migration);
+  assert.equal(sqlite.prepare("PRAGMA foreign_keys").get().foreign_keys, 1);
+  assert.equal(sqlite.prepare("SELECT booking_id FROM visit_slot_claims WHERE segment_key='2026-09-01T09:00'").get().booking_id, "VIS-UPGRADE");
+  assert.throws(() => sqlite.prepare(`INSERT INTO visit_slot_claims
+    (segment_key, booking_id, closure_id, created_at)
+    VALUES ('2026-09-01X09:05', 'VIS-UPGRADE', NULL, ?)`)
+    .run(now), /visit_slot_claims_key_valid/);
 });
 
 test("visit audits verify persisted final state without relying on changes()", async () => {

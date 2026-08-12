@@ -11,6 +11,7 @@ const migrationFiles = [
   "drizzle/0004_staging_import_runs.sql",
   "drizzle/0005_young_night_nurse.sql",
   "drizzle/0006_pale_sauron.sql",
+  "drizzle/0007_cold_whiplash.sql",
 ];
 
 async function migratedDatabase() {

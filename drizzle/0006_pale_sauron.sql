@@ -126,7 +126,10 @@ CREATE TABLE `visit_slot_claims` (
 	FOREIGN KEY (`closure_id`) REFERENCES `visit_schedule_closures`(`id`) ON UPDATE cascade ON DELETE restrict,
 	CONSTRAINT "visit_slot_claims_exactly_one_owner" CHECK(("visit_slot_claims"."booking_id" is not null and "visit_slot_claims"."closure_id" is null)
         or ("visit_slot_claims"."booking_id" is null and "visit_slot_claims"."closure_id" is not null)),
-	CONSTRAINT "visit_slot_claims_key_valid" CHECK("visit_slot_claims"."segment_key" glob '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]T[0-9][0-9]:[0-5][0-9]'
+	CONSTRAINT "visit_slot_claims_key_valid" CHECK(length("visit_slot_claims"."segment_key") = 16
+		and substr("visit_slot_claims"."segment_key", 1, 10) glob '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'
+		and substr("visit_slot_claims"."segment_key", 11, 1) = 'T'
+		and substr("visit_slot_claims"."segment_key", 12, 5) glob '[0-9][0-9]:[0-5][0-9]'
         and date(substr("visit_slot_claims"."segment_key", 1, 10), '+0 days') = substr("visit_slot_claims"."segment_key", 1, 10)
         and cast(substr("visit_slot_claims"."segment_key", 12, 2) as integer) between 0 and 23
         and cast(substr("visit_slot_claims"."segment_key", 15, 2) as integer) % 5 = 0)
