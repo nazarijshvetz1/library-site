@@ -82,10 +82,13 @@ function fixture() {
       storage_key TEXT,
       external_url TEXT,
       mime_type TEXT,
+      byte_length INTEGER,
       width INTEGER,
       height INTEGER,
       sha256 TEXT,
       status TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT '',
       updated_at TEXT NOT NULL
     );
     CREATE TABLE material_links (

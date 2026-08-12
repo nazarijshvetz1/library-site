@@ -181,24 +181,46 @@ node scripts/load-library-d1.mjs `
 
 Production D1 не слід підключати до CLI. Для майбутнього контрольованого перенесення функції `buildD1LoadPlan()`, `inspectD1LoadPlan()` і `loadD1Plan()` можна викликати з одноразового адміністративного середовища, передавши справжній D1 binding. Це має бути окремий погоджений крок після перевірки dry-run і резервної копії.
 
-## Одноразовий hosted-import лише для staging
+## Одноразовий hosted-import для staging і production cutover
 
-Маршрут `/librarian/import` призначений лише для контрольованого завантаження
-вже побудованого `library-d1-load-plan` JSON до окремої порожньої staging D1.
-Він не приймає staging bundle, SQL, URL або архів. Production-конфігурація не
-повинна містити ввімкнений import-прапорець.
+Маршрут `/librarian/import` приймає лише вже побудований
+`library-d1-load-plan` JSON для контрольованого завантаження в порожню D1. Він
+не приймає staging bundle, SQL, URL або архів. Контур fail closed: production
+недоступний, якщо не задано окремий точний режим cutover.
 
-Перед коротким вікном імпорту в приватному staging deployment задаються:
+Чинна staging-конфігурація залишається сумісною:
 
 - `APP_ENV=staging`;
-- `LIBRARY_IMPORT_ENABLED=true`;
-- `LIBRARY_IMPORT_ALLOWED_ORIGIN` — точний HTTPS origin staging-сайту без шляху;
+- `LIBRARY_IMPORT_MODE` не потрібний;
+- `LIBRARY_IMPORT_ENABLED=true` лише на коротке вікно імпорту.
+
+Production дозволяється лише за одночасної точної комбінації:
+
+- `APP_ENV=production`;
+- `LIBRARY_IMPORT_MODE=production_cutover` — точне значення у нижньому регістрі;
+- `LIBRARY_IMPORT_ENABLED=true` лише на погоджене вікно cutover.
+
+Будь-який інший `APP_ENV`, відсутній/інший production mode або вимкнений прапорець
+повертає fail-closed відмову до доступу до D1 чи R2. Для обох середовищ також
+обов’язкові:
+
+- `LIBRARY_IMPORT_ALLOWED_ORIGIN` — точний HTTPS origin саме цільового Sites-сайту без шляху;
 - `LIBRARY_IMPORT_PLAN_SHA256` — SHA-256 точних байтів перевіреного JSON-плану;
 - `LIBRARY_IMPORT_EXPIRES_AT` — ISO-8601 час у майбутньому, не далі ніж через 7 діб;
 - звичайний `LIBRARIAN_ALLOWED_EMAILS` для ChatGPT-auth allowlist;
 - `LIBRARIAN_WRITES_ENABLED=false` залишається незалежно вимкненим.
 
-До першого upload у staging для R2 bucket `COVER_UPLOADS` обов’язково налаштовують
+Для production сервер додатково відхиляє import, якщо звичайний бібліотечний
+запис уже ввімкнено: `LIBRARIAN_WRITES_ENABLED` має залишатися `false` протягом
+upload, preflight, commit, verify та cleanup.
+
+Перед production upload додатково обов’язкові перевірений D1 recovery point,
+фінальна звірка плану з резервною копією, замороження змін у старій базі та
+підтвердження, що binding `DB` і bucket `COVER_UPLOADS` належать production, а
+не staging. UI вимагає окреме підтвердження production cutover перед commit;
+воно не замінює серверні runtime-gates.
+
+До першого upload для цільового R2 bucket `COVER_UPLOADS` обов’язково налаштовують
 і перевіряють lifecycle rule **лише** для префікса `_migration/library-d1/`:
 видалення об’єктів через **45 діб**. Коротший строк не підходить, бо сесія може
 мати до 7 діб активного вікна і ще до 30 діб recovery grace для verify/cleanup.
@@ -224,8 +246,11 @@ D1-запису та повторного читання лишився неви
    сесію, яка зупинилася на upload/preflight і ще не писала фонд, можна
    безпечно abort/cleanup у межах 30-добового службового grace period.
 
-Кожна фаза дозволена лише власнику сесії та лише з точного staging origin.
+Кожна фаза дозволена лише власнику сесії та лише з точного дозволеного origin
+того самого середовища.
 Повтор того самого запиту є resumable/idempotent: він повертає вже збережений
 статус, але не виконує import вдруге. Після cleanup треба негайно встановити
-`LIBRARY_IMPORT_ENABLED=false` і прибрати hash/expiry з environment. Сам факт
-успішного staging-import не є дозволом на production cutover.
+`LIBRARY_IMPORT_ENABLED=false` і прибрати `LIBRARY_IMPORT_MODE`, hash та expiry з
+environment. Сам `LIBRARY_IMPORT_MODE=production_cutover` без решти перевірок
+нічого не дозволяє. Успішний staging-import також не є дозволом на production
+cutover.

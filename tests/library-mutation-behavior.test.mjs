@@ -697,3 +697,255 @@ test("one return can merge two loan items into the same holding atomically", asy
     },
   );
 });
+
+test("transfer and writeoff commit atomically, rebuild totals and replay once", async () => {
+  const { sqlite, d1 } = openDatabase();
+  const now = "2026-08-11T08:00:00.000Z";
+  sqlite.prepare(`
+    INSERT INTO locations (
+      id, name, type, status, is_public, sort_order, created_at, updated_at
+    ) VALUES ('LOC-002', 'Кабінет 2', 'classroom', 'active', 1, 2, ?, ?)
+  `).run(now, now);
+
+  const transferInput = {
+    requestId: "10000000-0000-4000-8000-000000000030",
+    materialId: "CAT-0001",
+    sourceLocationId: "LOC-001",
+    destinationLocationId: "LOC-002",
+    condition: "unspecified",
+    quantity: 2,
+    expectedSourceQuantity: 5,
+    expectedDestinationQuantity: 0,
+    occurredAt: "2026-08-12",
+    documentNumber: "Накладна 30",
+    notes: null,
+  };
+  const transferred = await mutation.transferStockDirect(actor, transferInput, d1);
+  const transferReplay = await mutation.transferStockDirect(actor, transferInput, d1);
+  assert.deepEqual(transferReplay, transferred);
+  assert.deepEqual(
+    sqlite.prepare(`
+      SELECT location_id, quantity, version FROM holdings
+      WHERE material_id = 'CAT-0001' AND condition = 'unspecified'
+      ORDER BY location_id
+    `).all().map(plainRow),
+    [
+      { location_id: "LOC-001", quantity: 3, version: 2 },
+      { location_id: "LOC-002", quantity: 2, version: 1 },
+    ],
+  );
+  assert.deepEqual(
+    plainRow(sqlite.prepare(`
+      SELECT total_quantity, library_quantity, other_location_quantity, loaned_quantity
+      FROM material_stock_totals WHERE material_id = 'CAT-0001'
+    `).get()),
+    {
+      total_quantity: 5,
+      library_quantity: 3,
+      other_location_quantity: 2,
+      loaned_quantity: 0,
+    },
+  );
+  assert.deepEqual(
+    sqlite.prepare(`
+      SELECT line.location_id, line.quantity_delta, line.quantity_before, line.quantity_after
+      FROM inventory_transaction_lines line
+      JOIN inventory_transactions tx ON tx.id = line.transaction_id
+      WHERE tx.kind = 'transfer'
+      ORDER BY line.location_id
+    `).all().map(plainRow),
+    [
+      { location_id: "LOC-001", quantity_delta: -2, quantity_before: 5, quantity_after: 3 },
+      { location_id: "LOC-002", quantity_delta: 2, quantity_before: 0, quantity_after: 2 },
+    ],
+  );
+  assert.equal(
+    sqlite.prepare("SELECT count(*) AS count FROM audit_events WHERE action = 'stock.transferred'").get().count,
+    1,
+  );
+
+  await assert.rejects(
+    mutation.transferStockDirect(
+      actor,
+      { ...transferInput, notes: "Інший запит із тим самим requestId" },
+      d1,
+    ),
+    (error) => error instanceof mutation.LibraryMutationError
+      && error.code === "request_id_conflict",
+  );
+
+  const writeoffInput = {
+    requestId: "10000000-0000-4000-8000-000000000031",
+    materialId: "CAT-0001",
+    locationId: "LOC-002",
+    condition: "unspecified",
+    quantity: 2,
+    expectedQuantity: 2,
+    reason: "obsolete",
+    occurredAt: "2026-08-13",
+    documentNumber: "Акт 31",
+    notes: "Затверджене списання",
+  };
+  const writtenOff = await mutation.writeOffStockDirect(actor, writeoffInput, d1);
+  const writeoffReplay = await mutation.writeOffStockDirect(actor, writeoffInput, d1);
+  assert.deepEqual(writeoffReplay, writtenOff);
+  assert.equal(writtenOff.quantityAfter, 0);
+  assert.equal(writtenOff.holdingVersion, null);
+  assert.equal(
+    sqlite.prepare("SELECT count(*) AS count FROM holdings WHERE location_id = 'LOC-002'").get().count,
+    0,
+  );
+  assert.deepEqual(
+    plainRow(sqlite.prepare(`
+      SELECT total_quantity, library_quantity, other_location_quantity, loaned_quantity
+      FROM material_stock_totals WHERE material_id = 'CAT-0001'
+    `).get()),
+    {
+      total_quantity: 3,
+      library_quantity: 3,
+      other_location_quantity: 0,
+      loaned_quantity: 0,
+    },
+  );
+  assert.deepEqual(
+    plainRow(sqlite.prepare(`
+      SELECT tx.kind, tx.reason, tx.document_number, line.quantity_delta,
+             line.quantity_before, line.quantity_after
+      FROM inventory_transactions tx
+      JOIN inventory_transaction_lines line ON line.transaction_id = tx.id
+      WHERE tx.kind = 'writeoff'
+    `).get()),
+    {
+      kind: "writeoff",
+      reason: "obsolete",
+      document_number: "Акт 31",
+      quantity_delta: -2,
+      quantity_before: 2,
+      quantity_after: 0,
+    },
+  );
+  assert.equal(
+    sqlite.prepare("SELECT count(*) AS count FROM audit_events WHERE action = 'stock.written_off'").get().count,
+    1,
+  );
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM mutation_commands").get().count, 2);
+});
+
+test("transfer and writeoff races return 409 without partial inventory history", async () => {
+  const transferDb = openDatabase();
+  const now = "2026-08-11T08:00:00.000Z";
+  transferDb.sqlite.prepare(`
+    INSERT INTO locations (
+      id, name, type, status, is_public, sort_order, created_at, updated_at
+    ) VALUES ('LOC-002', 'Кабінет 2', 'classroom', 'active', 1, 2, ?, ?)
+  `).run(now, now);
+  transferDb.d1.beforeBatch = () => {
+    transferDb.sqlite.prepare(`
+      UPDATE holdings SET quantity = 4, version = 2
+      WHERE material_id = 'CAT-0001' AND location_id = 'LOC-001'
+        AND condition = 'unspecified' AND quantity = 5 AND version = 1
+    `).run();
+  };
+  await assert.rejects(
+    mutation.transferStockDirect(
+      actor,
+      {
+        requestId: "10000000-0000-4000-8000-000000000032",
+        materialId: "CAT-0001",
+        sourceLocationId: "LOC-001",
+        destinationLocationId: "LOC-002",
+        condition: "unspecified",
+        quantity: 2,
+        expectedSourceQuantity: 5,
+        expectedDestinationQuantity: 0,
+        occurredAt: "2026-08-12",
+        documentNumber: null,
+        notes: null,
+      },
+      transferDb.d1,
+    ),
+    (error) => error instanceof mutation.LibraryMutationError
+      && error.status === 409
+      && error.code === "stock_quantity_conflict",
+  );
+  assert.equal(transferDb.sqlite.prepare("SELECT quantity FROM holdings WHERE location_id = 'LOC-001'").get().quantity, 4);
+  assert.equal(transferDb.sqlite.prepare("SELECT count(*) AS count FROM holdings WHERE location_id = 'LOC-002'").get().count, 0);
+  assert.equal(transferDb.sqlite.prepare("SELECT count(*) AS count FROM inventory_transactions").get().count, 0);
+  assert.equal(transferDb.sqlite.prepare("SELECT count(*) AS count FROM mutation_commands").get().count, 0);
+  assert.equal(transferDb.sqlite.prepare("SELECT count(*) AS count FROM audit_events").get().count, 0);
+
+  const destinationRaceDb = openDatabase();
+  destinationRaceDb.sqlite.prepare(`
+    INSERT INTO locations (
+      id, name, type, status, is_public, sort_order, created_at, updated_at
+    ) VALUES ('LOC-002', 'Кабінет 2', 'classroom', 'active', 1, 2, ?, ?)
+  `).run(now, now);
+  destinationRaceDb.d1.beforeBatch = () => {
+    destinationRaceDb.sqlite.prepare(`
+      INSERT INTO holdings (
+        material_id, location_id, condition, quantity, version, updated_at
+      ) VALUES ('CAT-0001', 'LOC-002', 'unspecified', 1, 1, ?)
+    `).run(now);
+  };
+  await assert.rejects(
+    mutation.transferStockDirect(
+      actor,
+      {
+        requestId: "10000000-0000-4000-8000-000000000034",
+        materialId: "CAT-0001",
+        sourceLocationId: "LOC-001",
+        destinationLocationId: "LOC-002",
+        condition: "unspecified",
+        quantity: 2,
+        expectedSourceQuantity: 5,
+        expectedDestinationQuantity: 0,
+        occurredAt: "2026-08-12",
+        documentNumber: null,
+        notes: null,
+      },
+      destinationRaceDb.d1,
+    ),
+    (error) => error instanceof mutation.LibraryMutationError
+      && error.status === 409
+      && error.code === "stock_quantity_conflict",
+  );
+  assert.equal(destinationRaceDb.sqlite.prepare("SELECT quantity FROM holdings WHERE location_id = 'LOC-001'").get().quantity, 5);
+  assert.equal(destinationRaceDb.sqlite.prepare("SELECT quantity FROM holdings WHERE location_id = 'LOC-002'").get().quantity, 1);
+  assert.equal(destinationRaceDb.sqlite.prepare("SELECT count(*) AS count FROM inventory_transactions").get().count, 0);
+  assert.equal(destinationRaceDb.sqlite.prepare("SELECT count(*) AS count FROM mutation_commands").get().count, 0);
+  assert.equal(destinationRaceDb.sqlite.prepare("SELECT count(*) AS count FROM audit_events").get().count, 0);
+
+  const writeoffDb = openDatabase();
+  writeoffDb.d1.beforeBatch = () => {
+    writeoffDb.sqlite.prepare(`
+      UPDATE holdings SET quantity = 4, version = 2
+      WHERE material_id = 'CAT-0001' AND location_id = 'LOC-001'
+        AND condition = 'unspecified' AND quantity = 5 AND version = 1
+    `).run();
+  };
+  await assert.rejects(
+    mutation.writeOffStockDirect(
+      actor,
+      {
+        requestId: "10000000-0000-4000-8000-000000000033",
+        materialId: "CAT-0001",
+        locationId: "LOC-001",
+        condition: "unspecified",
+        quantity: 2,
+        expectedQuantity: 5,
+        reason: "damaged",
+        occurredAt: "2026-08-12",
+        documentNumber: "Акт 33",
+        notes: null,
+      },
+      writeoffDb.d1,
+    ),
+    (error) => error instanceof mutation.LibraryMutationError
+      && error.status === 409
+      && error.code === "stock_quantity_conflict",
+  );
+  assert.equal(writeoffDb.sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 4);
+  assert.equal(writeoffDb.sqlite.prepare("SELECT count(*) AS count FROM inventory_transactions").get().count, 0);
+  assert.equal(writeoffDb.sqlite.prepare("SELECT count(*) AS count FROM mutation_commands").get().count, 0);
+  assert.equal(writeoffDb.sqlite.prepare("SELECT count(*) AS count FROM audit_events").get().count, 0);
+});

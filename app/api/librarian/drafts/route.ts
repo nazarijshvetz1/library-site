@@ -61,6 +61,14 @@ export async function POST(request: Request) {
   if (!authorization.ok) return authorization.response;
 
   const { user, access } = authorization.value;
+  if (!access.writesEnabled) {
+    return librarianError(
+      503,
+      "writes_disabled",
+      "Збереження чернеток тимчасово вимкнено.",
+      false,
+    );
+  }
   if (!isSameOriginRequest(request)) {
     return librarianError(
       403,
@@ -160,6 +168,14 @@ export async function PATCH(request: Request) {
   if (!authorization.ok) return authorization.response;
 
   const { user, access } = authorization.value;
+  if (!access.writesEnabled) {
+    return librarianError(
+      503,
+      "writes_disabled",
+      "Зміна чернеток тимчасово вимкнена.",
+      false,
+    );
+  }
   if (!isSameOriginRequest(request)) {
     return librarianError(
       403,

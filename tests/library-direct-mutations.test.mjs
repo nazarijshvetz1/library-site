@@ -140,6 +140,70 @@ test("other stock correction requires an explanatory note", () => {
   assert.ok(result.fieldErrors.notes);
 });
 
+test("transfer validation requires distinct locations and both optimistic quantities", () => {
+  const valid = validation.validateStockTransferInput({
+    requestId: REQUEST_ID,
+    materialId: "CAT-1279",
+    sourceLocationId: "LOC-001",
+    destinationLocationId: "LOC-002",
+    condition: "good",
+    quantity: 3,
+    expectedSourceQuantity: 8,
+    expectedDestinationQuantity: 2,
+    occurredAt: "2026-08-11",
+    documentNumber: "Накладна 8",
+    notes: null,
+  });
+  assert.equal(valid.ok, true);
+  assert.equal(valid.value.expectedSourceQuantity, 8);
+  assert.equal(valid.value.expectedDestinationQuantity, 2);
+
+  const sameLocation = validation.validateStockTransferInput({
+    ...valid.value,
+    destinationLocationId: "LOC-001",
+  });
+  assert.equal(sameLocation.ok, false);
+  assert.ok(sameLocation.fieldErrors.destinationLocationId);
+
+  const overdrawn = validation.validateStockTransferInput({
+    ...valid.value,
+    quantity: 9,
+  });
+  assert.equal(overdrawn.ok, false);
+  assert.ok(overdrawn.fieldErrors.quantity);
+});
+
+test("writeoff validation requires a bounded quantity and explanation for other", () => {
+  const valid = validation.validateStockWriteoffInput({
+    requestId: REQUEST_ID,
+    materialId: "CAT-1279",
+    locationId: "LOC-001",
+    condition: "damaged",
+    quantity: 2,
+    expectedQuantity: 4,
+    reason: "damaged",
+    occurredAt: "2026-08-11",
+    documentNumber: "Акт 4",
+    notes: null,
+  });
+  assert.equal(valid.ok, true);
+
+  const unexplained = validation.validateStockWriteoffInput({
+    ...valid.value,
+    reason: "other",
+    notes: null,
+  });
+  assert.equal(unexplained.ok, false);
+  assert.ok(unexplained.fieldErrors.notes);
+
+  const overdrawn = validation.validateStockWriteoffInput({
+    ...valid.value,
+    quantity: 5,
+  });
+  assert.equal(overdrawn.ok, false);
+  assert.ok(overdrawn.fieldErrors.quantity);
+});
+
 test("teacher loan validation rejects duplicate items and an earlier due date", () => {
   const result = validation.validateLoanCreateInput({
     requestId: REQUEST_ID,
@@ -194,6 +258,14 @@ test("direct write routes remain authenticated, same-origin and fail closed", ()
     path.join(root, "app/api/librarian/loans/returns/route.ts"),
     "utf8",
   );
+  const transferRoute = fs.readFileSync(
+    path.join(root, "app/api/librarian/transfers/route.ts"),
+    "utf8",
+  );
+  const writeoffRoute = fs.readFileSync(
+    path.join(root, "app/api/librarian/writeoffs/route.ts"),
+    "utf8",
+  );
   for (const source of [
     materialRoute,
     materialCreateRoute,
@@ -201,6 +273,8 @@ test("direct write routes remain authenticated, same-origin and fail closed", ()
     stockRoute,
     loanRoute,
     returnRoute,
+    transferRoute,
+    writeoffRoute,
   ]) {
     assert.match(source, /authorizeLibrarianApi\(\)/u);
     assert.match(source, /isSameOriginRequest\(request\)/u);
@@ -222,6 +296,8 @@ test("mutation store binds every direct write to idempotency and one D1 batch", 
   assert.match(source, /stock\.counted/u);
   assert.match(source, /material\.created/u);
   assert.match(source, /stock\.received/u);
+  assert.match(source, /stock\.transferred/u);
+  assert.match(source, /stock\.written_off/u);
   assert.match(source, /loan\.issued/u);
   assert.match(source, /loan\.returned/u);
   assert.match(source, /loan_item\.returned/u);

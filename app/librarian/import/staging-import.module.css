@@ -47,6 +47,19 @@
 
 .warning span { font-size: 13px; line-height: 1.5; }
 
+.productionWarning {
+  margin-top: 24px;
+  padding: 16px;
+  display: grid;
+  gap: 5px;
+  border: 1px solid #e1a09a;
+  border-radius: 13px;
+  background: #fff0ed;
+  color: #8d2f27;
+}
+
+.productionWarning span { font-size: 13px; line-height: 1.5; }
+
 .identity {
   margin: 24px 0;
   display: grid;
@@ -92,7 +105,66 @@
 
 .uploadBox button { background: #214e2e; color: white; }
 .uploadBox button:disabled,
-.steps button:disabled { cursor: not-allowed; opacity: 0.42; }
+.steps button:disabled,
+.resetBox button:disabled { cursor: not-allowed; opacity: 0.42; }
+
+.resetBox {
+  margin-top: 18px;
+  padding: 17px;
+  display: grid;
+  gap: 13px;
+  border: 1px solid #e1a09a;
+  border-radius: 14px;
+  background: #fff7f4;
+  color: #743028;
+}
+
+.resetBox > div,
+.resetBox label { display: grid; gap: 5px; }
+.resetBox small,
+.resetBox label span { font-size: 12px; line-height: 1.45; }
+.resetBox input {
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid #d8aaa5;
+  border-radius: 9px;
+  background: white;
+  color: #52231e;
+}
+.resetBox button {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid #9c3328;
+  border-radius: 10px;
+  background: #9c3328;
+  color: white;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.productionConfirmation {
+  margin-top: 18px;
+  padding: 15px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 11px;
+  align-items: start;
+  border: 1px solid #e1a09a;
+  border-radius: 12px;
+  background: #fff7f4;
+  color: #743028;
+}
+
+.productionConfirmation input {
+  width: 19px;
+  height: 19px;
+  margin: 1px 0 0;
+  accent-color: #9c3328;
+}
+
+.productionConfirmation span { display: grid; gap: 3px; }
+.productionConfirmation strong { font-size: 13px; }
+.productionConfirmation small { font-size: 11px; line-height: 1.45; }
 
 .steps {
   margin-top: 18px;

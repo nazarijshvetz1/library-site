@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { stableStringify } from "./import-library-core.mjs";
 
 const PLAN_FORMAT = "library-d1-load-plan";
-const PLAN_VERSION = 1;
+const PLAN_VERSION = 2;
 const STAGING_FORMAT = "library-d1-staging";
 const STAGING_VERSION = 1;
 const TARGET_SCHEMA = "0003";
@@ -26,6 +26,12 @@ const REQUIRED_STAGING_TABLES = Object.freeze([
   "stock_balances",
 ]);
 
+const OPTIONAL_ACADEMIC_STAGING_TABLES = Object.freeze([
+  "academic_years",
+  "cohorts",
+  "class_years",
+]);
+
 const TABLE_SPECS = Object.freeze([
   tableSpec("locations", [
     "id", "name", "type", "status", "is_public", "sort_order", "created_at", "updated_at",
@@ -33,6 +39,16 @@ const TABLE_SPECS = Object.freeze([
   tableSpec("users", [
     "id", "full_name", "sort_name", "email", "auth_user_id", "role", "status", "created_at", "updated_at",
   ], ["id"], [["email"], ["auth_user_id"]]),
+  tableSpec("academic_years", [
+    "id", "label", "start_date", "end_date", "status", "notes", "version", "created_at", "updated_at",
+  ], ["id"], [["label"]]),
+  tableSpec("cohorts", [
+    "id", "status", "notes", "created_at", "updated_at",
+  ], ["id"]),
+  tableSpec("class_years", [
+    "id", "academic_year_id", "cohort_id", "class_name", "grade", "code", "teacher_user_id", "location_id",
+    "start_date", "end_date", "status", "actual_closed_date", "notes", "version", "created_at", "updated_at",
+  ], ["id"], [["academic_year_id", "cohort_id"], ["academic_year_id", "class_name"]]),
   tableSpec("materials", [
     "id", "catalog_number", "title", "sort_title", "search_text", "rubric", "publication_type", "subject",
     "class_from", "class_to", "author", "publication_year", "isbn", "isbn_normalized", "publisher", "notes",
@@ -111,6 +127,21 @@ export function buildD1LoadPlan(bundle, options = {}) {
   const userById = uniqueMap(users, "id", "target_user_duplicate", "users", diagnostics);
   const materialById = uniqueMap(materials, "id", "target_material_duplicate", "materials", diagnostics);
 
+  const academicYears = staging.academic_years.map((row, index) => mapAcademicYear(row, index, importedAt, diagnostics));
+  const cohorts = staging.cohorts.map((row, index) => mapCohort(row, index, importedAt, diagnostics));
+  const academicYearById = uniqueMap(academicYears, "id", "target_academic_year_duplicate", "academic_years", diagnostics);
+  const cohortById = uniqueMap(cohorts, "id", "target_cohort_duplicate", "cohorts", diagnostics);
+  const classYears = staging.class_years.map((row, index) => mapClassYear(
+    row,
+    index,
+    importedAt,
+    { academicYearById, cohortById, userById, locationById },
+    diagnostics,
+  ));
+  for (const issue of academicTargetStateIssues(academicYears, cohorts, classYears)) {
+    diagnostics.error(issue.code, issue.location, issue.message, issue.details);
+  }
+
   const links = staging.material_links.map((row, index) => mapLink(row, index, importedAt, materialById, diagnostics));
   const covers = staging.cover_assets.map((row, index) => mapCover(row, index, importedAt, materialById, diagnostics));
   const migrationActor = chooseMigrationActor(users, staging.users, diagnostics);
@@ -177,6 +208,9 @@ export function buildD1LoadPlan(bundle, options = {}) {
   const tables = {
     locations: sortTargetRows(locations, ["id"]),
     users: sortTargetRows(users, ["id"]),
+    academic_years: sortTargetRows(academicYears, ["id"]),
+    cohorts: sortTargetRows(cohorts, ["id"]),
+    class_years: sortTargetRows(classYears, ["id"]),
     materials: sortTargetRows(materials, ["id"]),
     material_links: sortTargetRows(links, ["id"]),
     material_cover_assets: sortTargetRows(covers, ["id"]),
@@ -195,7 +229,10 @@ export function buildD1LoadPlan(bundle, options = {}) {
     source_bundle_sha256: sourceHash,
     source: bundle?.source ?? null,
     migration_actor_id: migrationActor?.id ?? null,
-    staging_counts: Object.fromEntries(REQUIRED_STAGING_TABLES.map((name) => [name, staging[name].length])),
+    staging_counts: Object.fromEntries([
+      ...REQUIRED_STAGING_TABLES,
+      ...OPTIONAL_ACADEMIC_STAGING_TABLES,
+    ].map((name) => [name, staging[name].length])),
     target_counts: Object.fromEntries(TABLE_SPECS.map((spec) => [spec.name, tables[spec.name].length])),
     stock: {
       staging_total: sum(staging.stock_balances, (row) => integer(row?.quantity) ?? 0),
@@ -249,7 +286,7 @@ function validateStagingBundle(bundle, diagnostics) {
   }
   const sourceTables = isObject(bundle?.tables) ? bundle.tables : {};
   if (!isObject(bundle?.tables)) diagnostics.error("staging_tables_missing", "bundle.tables", "У staging bundle немає tables.");
-  return Object.fromEntries(REQUIRED_STAGING_TABLES.map((name) => {
+  const required = Object.fromEntries(REQUIRED_STAGING_TABLES.map((name) => {
     const value = sourceTables[name];
     if (!Array.isArray(value)) {
       diagnostics.error("staging_table_missing", `bundle.tables.${name}`, "Обов'язкова staging-таблиця відсутня.");
@@ -257,6 +294,11 @@ function validateStagingBundle(bundle, diagnostics) {
     }
     return [name, value];
   }));
+  for (const name of OPTIONAL_ACADEMIC_STAGING_TABLES) {
+    const value = sourceTables[name];
+    required[name] = Array.isArray(value) ? value : [];
+  }
+  return required;
 }
 
 function normalizeImportedAt(value, diagnostics) {
@@ -406,6 +448,291 @@ function mapUser(row, index, importedAt, diagnostics) {
     created_at: importedAt,
     updated_at: importedAt,
   };
+}
+
+function mapAcademicYear(row, index, importedAt, diagnostics) {
+  const location = `bundle.tables.academic_years[${index}]`;
+  const id = uppercase(row?.academic_year_id);
+  const idMatch = id.match(/^YR-(20\d{2})-(20\d{2})$/u);
+  if (!idMatch || Number(idMatch[2]) !== Number(idMatch[1]) + 1) {
+    diagnostics.error("academic_year_id_invalid", `${location}.academic_year_id`, "Некоректний ID навчального року.", id);
+  }
+  const label = cleanText(row?.label);
+  const labelMatch = label.match(/^(20\d{2})\/(20\d{2})$/u);
+  if (!labelMatch || Number(labelMatch[2]) !== Number(labelMatch[1]) + 1) {
+    diagnostics.error("academic_year_label_invalid", `${location}.label`, "Некоректна назва навчального року.", label);
+  }
+  if (idMatch && labelMatch && (idMatch[1] !== labelMatch[1] || idMatch[2] !== labelMatch[2])) {
+    diagnostics.error("academic_year_label_mismatch", `${location}.label`, "Назва навчального року не відповідає ID.", { id, label });
+  }
+  const startDate = calendarDate(row?.start_date, `${location}.start_date`, diagnostics);
+  const endDate = calendarDate(row?.end_date, `${location}.end_date`, diagnostics);
+  if (startDate >= endDate) diagnostics.error("academic_year_date_order", location, "Дата завершення має бути пізнішою за дату початку.");
+  if (idMatch && startDate.slice(0, 4) !== idMatch[1]) {
+    diagnostics.error("academic_year_start_mismatch", `${location}.start_date`, "Рік дати початку не відповідає навчальному року.");
+  }
+  if (idMatch && endDate.slice(0, 4) !== idMatch[2]) {
+    diagnostics.error("academic_year_end_mismatch", `${location}.end_date`, "Рік дати завершення не відповідає навчальному року.");
+  }
+  const status = cleanText(row?.status);
+  if (!["draft", "active", "closed"].includes(status)) {
+    diagnostics.error("academic_year_status_invalid", `${location}.status`, "Некоректний статус навчального року.", status);
+  }
+  rejectNulStrings(row, location, diagnostics);
+  return {
+    id,
+    label,
+    start_date: startDate,
+    end_date: endDate,
+    status: ["draft", "active", "closed"].includes(status) ? status : "draft",
+    notes: cleanText(row?.notes),
+    version: 1,
+    created_at: importedAt,
+    updated_at: importedAt,
+  };
+}
+
+function mapCohort(row, index, importedAt, diagnostics) {
+  const location = `bundle.tables.cohorts[${index}]`;
+  const id = uppercase(row?.cohort_id);
+  if (!/^COH-\d{3,}$/u.test(id)) {
+    diagnostics.error("cohort_id_invalid", `${location}.cohort_id`, "Некоректний ID класної групи.", id);
+  }
+  const status = cleanText(row?.status);
+  if (!["active", "graduated", "closed"].includes(status)) {
+    diagnostics.error("cohort_status_invalid", `${location}.status`, "Некоректний статус класної групи.", status);
+  }
+  rejectNulStrings(row, location, diagnostics);
+  return {
+    id,
+    status: ["active", "graduated", "closed"].includes(status) ? status : "active",
+    notes: cleanText(row?.notes),
+    created_at: importedAt,
+    updated_at: importedAt,
+  };
+}
+
+function mapClassYear(row, index, importedAt, refs, diagnostics) {
+  const location = `bundle.tables.class_years[${index}]`;
+  const id = uppercase(row?.class_year_id);
+  if (!/^CY-20\d{2}-\d{3,}$/u.test(id)) {
+    diagnostics.error("class_year_id_invalid", `${location}.class_year_id`, "Некоректний ID класу.", id);
+  }
+  const academicYearId = uppercase(row?.academic_year_id);
+  const cohortId = uppercase(row?.cohort_id);
+  validateReference(academicYearId, refs.academicYearById, "class_year_academic_year_missing", `${location}.academic_year_id`, diagnostics);
+  validateReference(cohortId, refs.cohortById, "class_year_cohort_missing", `${location}.cohort_id`, diagnostics);
+  const className = cleanText(row?.class_name);
+  const grade = integer(row?.grade);
+  const code = cleanText(row?.code).toLocaleUpperCase("uk-UA");
+  if (!Number.isSafeInteger(grade) || grade < 1 || grade > 11) {
+    diagnostics.error("class_year_grade_invalid", `${location}.grade`, "Паралель класу має бути від 1 до 11.", row?.grade ?? null);
+  }
+  if (!/^[\p{L}\p{N}().'_-]{1,16}$/u.test(code)) {
+    diagnostics.error("class_year_code_invalid", `${location}.code`, "Некоректний код класу.", code);
+  }
+  if (className !== `${grade ?? 1}-${code}`) {
+    diagnostics.error("class_year_name_invalid", `${location}.class_name`, "Назва класу має складатися з паралелі та коду.", className);
+  }
+  const teacherUserId = stringOrNull(row?.teacher_user_id)?.toLocaleUpperCase("en-US") ?? null;
+  const locationId = stringOrNull(row?.location_id)?.toLocaleUpperCase("en-US") ?? null;
+  if (teacherUserId) {
+    validateReference(teacherUserId, refs.userById, "class_year_teacher_missing", `${location}.teacher_user_id`, diagnostics);
+    if (refs.userById.get(teacherUserId)?.role !== "teacher" || refs.userById.get(teacherUserId)?.status !== "active") {
+      diagnostics.error("class_year_teacher_invalid", `${location}.teacher_user_id`, "Класний керівник має бути активним учителем.", teacherUserId);
+    }
+  }
+  if (locationId) {
+    validateReference(locationId, refs.locationById, "class_year_location_missing", `${location}.location_id`, diagnostics);
+    const targetLocation = refs.locationById.get(locationId);
+    if (targetLocation && (targetLocation.status !== "active" || targetLocation.type === "service")) {
+      diagnostics.error("class_year_location_invalid", `${location}.location_id`, "Кабінет має бути активним неслужбовим місцем.", locationId);
+    }
+  }
+  const startDate = calendarDate(row?.start_date, `${location}.start_date`, diagnostics);
+  const endDate = calendarDate(row?.end_date, `${location}.end_date`, diagnostics);
+  if (startDate >= endDate) diagnostics.error("class_year_date_order", location, "Дата завершення класу має бути пізнішою за дату початку.");
+  const academicYear = refs.academicYearById.get(academicYearId);
+  if (academicYear && (startDate < academicYear.start_date || endDate > academicYear.end_date)) {
+    diagnostics.error("class_year_date_outside_academic_year", location, "Дати класу мають бути в межах навчального року.");
+  }
+  const status = cleanText(row?.status);
+  if (!["planned", "active", "closed"].includes(status)) {
+    diagnostics.error("class_year_status_invalid", `${location}.status`, "Некоректний статус класу.", status);
+  }
+  const actualClosedDate = row?.actual_closed_date === null || cleanText(row?.actual_closed_date) === ""
+    ? null
+    : calendarDate(row?.actual_closed_date, `${location}.actual_closed_date`, diagnostics);
+  if ((status === "closed") !== Boolean(actualClosedDate)) {
+    diagnostics.error("class_year_close_state_invalid", location, "Закритий клас повинен мати фактичну дату закриття, а відкритий — не повинен.");
+  }
+  rejectNulStrings(row, location, diagnostics);
+  return {
+    id,
+    academic_year_id: academicYearId,
+    cohort_id: cohortId,
+    class_name: className,
+    grade: grade ?? 1,
+    code,
+    teacher_user_id: teacherUserId,
+    location_id: locationId,
+    start_date: startDate,
+    end_date: endDate,
+    status: ["planned", "active", "closed"].includes(status) ? status : "planned",
+    actual_closed_date: actualClosedDate,
+    notes: cleanText(row?.notes),
+    version: 1,
+    created_at: importedAt,
+    updated_at: importedAt,
+  };
+}
+
+function academicTargetStateIssues(academicYears, cohorts, classYears) {
+  const issues = [];
+  const activeYears = academicYears.filter((row) => row?.status === "active");
+  if (activeYears.length > 1) {
+    issues.push({
+      code: "target_academic_year_active_duplicate",
+      location: "plan.tables.academic_years",
+      message: "Активним може бути лише один навчальний рік.",
+      details: activeYears.map((row) => row.id),
+    });
+  }
+  const yearsById = new Map(academicYears.map((row) => [row?.id, row]));
+  const cohortsById = new Map(cohorts.map((row) => [row?.id, row]));
+  const openCohorts = new Map();
+  classYears.forEach((row, index) => {
+    const location = `plan.tables.class_years[${index}]`;
+    const year = yearsById.get(row?.academic_year_id);
+    const cohort = cohortsById.get(row?.cohort_id);
+    const idYear = cleanText(row?.id).match(/^CY-(20\d{2})-/u)?.[1];
+    if (idYear && idYear !== cleanText(row?.academic_year_id).slice(3, 7)) {
+      issues.push({ code: "target_class_year_id_mismatch", location: `${location}.id`, message: "ID класу не відповідає навчальному року." });
+    }
+    if (row?.status !== "closed") {
+      if (cohort && cohort.status !== "active") {
+        issues.push({ code: "target_class_cohort_status_invalid", location: `${location}.cohort_id`, message: "Відкритий клас має належати активній класній групі." });
+      }
+      if (openCohorts.has(row?.cohort_id)) {
+        issues.push({
+          code: "target_class_cohort_open_duplicate",
+          location: `${location}.cohort_id`,
+          message: "Класна група використовується більш ніж одним відкритим класом.",
+          details: { first_class_year_id: openCohorts.get(row.cohort_id) },
+        });
+      } else openCohorts.set(row?.cohort_id, row?.id);
+    }
+    if (year && (
+      (row?.status === "active" && year.status !== "active")
+      || (row?.status === "planned" && year.status !== "draft")
+      || (year.status === "closed" && row?.status !== "closed")
+    )) {
+      issues.push({ code: "target_class_academic_status_invalid", location: `${location}.status`, message: "Статус класу не узгоджений зі статусом навчального року." });
+    }
+  });
+  return issues;
+}
+
+function academicTargetShapeIssues(tables) {
+  const issues = [];
+  const add = (code, location, message, details) => {
+    const issue = { code, location, message };
+    if (details !== undefined) issue.details = details;
+    issues.push(issue);
+  };
+  const yearsById = new Map();
+  const yearIds = new Set();
+  tables.academic_years.forEach((row, index) => {
+    const location = `plan.tables.academic_years[${index}]`;
+    const id = typeof row?.id === "string" ? row.id : "";
+    const label = typeof row?.label === "string" ? row.label : "";
+    const idMatch = id.match(/^YR-(20\d{2})-(20\d{2})$/u);
+    const labelMatch = label.match(/^(20\d{2})\/(20\d{2})$/u);
+    if (!idMatch || Number(idMatch[2]) !== Number(idMatch[1]) + 1) {
+      add("target_academic_year_invalid", `${location}.id`, "Некоректний ID навчального року.");
+    }
+    if (!labelMatch || Number(labelMatch[2]) !== Number(labelMatch[1]) + 1
+      || (idMatch && (labelMatch[1] !== idMatch[1] || labelMatch[2] !== idMatch[2]))) {
+      add("target_academic_year_invalid", `${location}.label`, "Назва навчального року не відповідає ID.");
+    }
+    if (!isCalendarDate(row?.start_date) || !isCalendarDate(row?.end_date) || row.start_date >= row.end_date) {
+      add("target_academic_year_invalid", location, "Некоректний діапазон дат навчального року.");
+    } else if (idMatch && (row.start_date.slice(0, 4) !== idMatch[1] || row.end_date.slice(0, 4) !== idMatch[2])) {
+      add("target_academic_year_invalid", location, "Дати не відповідають ID навчального року.");
+    }
+    if (!["draft", "active", "closed"].includes(row?.status)) {
+      add("target_academic_year_invalid", `${location}.status`, "Некоректний статус навчального року.");
+    }
+    if (!Number.isSafeInteger(row?.version) || row.version < 1) {
+      add("target_academic_year_invalid", `${location}.version`, "Версія має бути додатним цілим числом.");
+    }
+    if (yearIds.has(id)) add("target_academic_year_duplicate", `${location}.id`, "ID навчального року повторюється.");
+    yearIds.add(id);
+    yearsById.set(id, row);
+  });
+
+  const cohortsById = new Map();
+  const cohortIds = new Set();
+  tables.cohorts.forEach((row, index) => {
+    const location = `plan.tables.cohorts[${index}]`;
+    const id = typeof row?.id === "string" ? row.id : "";
+    if (!/^COH-\d{3,}$/u.test(id)) add("target_cohort_invalid", `${location}.id`, "Некоректний ID класної групи.");
+    if (!["active", "graduated", "closed"].includes(row?.status)) {
+      add("target_cohort_invalid", `${location}.status`, "Некоректний статус класної групи.");
+    }
+    if (cohortIds.has(id)) add("target_cohort_duplicate", `${location}.id`, "ID класної групи повторюється.");
+    cohortIds.add(id);
+    cohortsById.set(id, row);
+  });
+
+  const usersById = new Map(tables.users.map((row) => [row?.id, row]));
+  const locationsById = new Map(tables.locations.map((row) => [row?.id, row]));
+  const classIds = new Set();
+  tables.class_years.forEach((row, index) => {
+    const location = `plan.tables.class_years[${index}]`;
+    const id = typeof row?.id === "string" ? row.id : "";
+    const idMatch = id.match(/^CY-(20\d{2})-\d{3,}$/u);
+    const year = yearsById.get(row?.academic_year_id);
+    if (!idMatch || !year || idMatch[1] !== String(row?.academic_year_id).slice(3, 7)) {
+      add("target_class_year_invalid", `${location}.id`, "ID класу не відповідає навчальному року.");
+    }
+    if (!cohortsById.has(row?.cohort_id)) add("target_class_year_invalid", `${location}.cohort_id`, "Класна група не знайдена.");
+    if (!Number.isSafeInteger(row?.grade) || row.grade < 1 || row.grade > 11) {
+      add("target_class_year_invalid", `${location}.grade`, "Паралель має бути від 1 до 11.");
+    }
+    if (typeof row?.code !== "string" || !/^[\p{L}\p{N}().'_-]{1,16}$/u.test(row.code)
+      || row.class_name !== `${row.grade}-${row.code}`) {
+      add("target_class_year_invalid", `${location}.class_name`, "Назва класу не відповідає паралелі та коду.");
+    }
+    if (!isCalendarDate(row?.start_date) || !isCalendarDate(row?.end_date) || row.start_date >= row.end_date) {
+      add("target_class_year_invalid", location, "Некоректний діапазон дат класу.");
+    } else if (year && (row.start_date < year.start_date || row.end_date > year.end_date)) {
+      add("target_class_year_invalid", location, "Дати класу виходять за межі навчального року.");
+    }
+    if (!["planned", "active", "closed"].includes(row?.status)
+      || ((row?.status === "closed") !== (row?.actual_closed_date !== null))
+      || (row?.actual_closed_date !== null && (!isCalendarDate(row.actual_closed_date) || row.actual_closed_date < row.start_date))) {
+      add("target_class_year_invalid", `${location}.status`, "Статус і дата закриття класу не узгоджені.");
+    }
+    if (!Number.isSafeInteger(row?.version) || row.version < 1) {
+      add("target_class_year_invalid", `${location}.version`, "Версія має бути додатним цілим числом.");
+    }
+    if (row?.teacher_user_id !== null) {
+      const teacher = usersById.get(row.teacher_user_id);
+      if (!teacher || teacher.role !== "teacher" || teacher.status !== "active") {
+        add("target_class_teacher_invalid", `${location}.teacher_user_id`, "Класний керівник має бути активним учителем.");
+      }
+    }
+    if (row?.location_id !== null) {
+      const classLocation = locationsById.get(row.location_id);
+      if (!classLocation || classLocation.status !== "active" || classLocation.type === "service") {
+        add("target_class_location_invalid", `${location}.location_id`, "Кабінет має бути активним неслужбовим місцем.");
+      }
+    }
+    if (classIds.has(id)) add("target_class_year_duplicate", `${location}.id`, "ID класу повторюється.");
+    classIds.add(id);
+  });
+  return issues;
 }
 
 function chooseMigrationActor(users, stagingUsers, diagnostics) {
@@ -920,6 +1247,20 @@ function validatePlanShape(plan) {
       throw error;
     }
   }
+  const academicIssues = [
+    ...academicTargetShapeIssues(plan.tables),
+    ...academicTargetStateIssues(
+      plan.tables.academic_years,
+      plan.tables.cohorts,
+      plan.tables.class_years,
+    ),
+  ];
+  if (academicIssues.length > 0) {
+    const error = new Error("D1 load plan містить неузгоджені стани навчальних років або класів.");
+    error.code = "D1_PLAN_INVALID";
+    error.report = { diagnostics: academicIssues };
+    throw error;
+  }
 }
 
 function validationError(report) {
@@ -1040,11 +1381,26 @@ function auditEmail(user, userId) {
 
 function dayStart(value, location, diagnostics) {
   const text = cleanText(value);
-  if (!/^\d{4}-\d{2}-\d{2}$/u.test(text) || !Number.isFinite(Date.parse(`${text}T00:00:00.000Z`))) {
+  if (!isCalendarDate(text)) {
     diagnostics.error("date_invalid", location, "Очікується календарна дата YYYY-MM-DD.", text || null);
     return "1970-01-01T00:00:00.000Z";
   }
   return `${text}T00:00:00.000Z`;
+}
+
+function calendarDate(value, location, diagnostics) {
+  const text = cleanText(value);
+  if (!isCalendarDate(text)) {
+    diagnostics.error("date_invalid", location, "Очікується календарна дата YYYY-MM-DD.", text || null);
+    return "1970-01-01";
+  }
+  return text;
+}
+
+function isCalendarDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
+  const timestamp = Date.parse(`${value}T00:00:00.000Z`);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
 }
 
 function ledgerQuantity(ledger, materialId, locationId, condition) {

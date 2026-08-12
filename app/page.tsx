@@ -37,7 +37,8 @@ export default async function Home() {
           <h1 id="landing-title">Уся бібліотечна робота — в одному зрозумілому просторі</h1>
           <p className="hero-lead">
             Переглядайте відкритий каталог або увійдіть до захищеного кабінету,
-            щоб готувати надходження, переміщення та ревізію.
+            щоб одразу додавати й редагувати матеріали, реєструвати надходження,
+            переміщення, списання, видачу вчителям і навчальні роки з класами.
           </p>
 
           <div className="hero-actions">
@@ -78,18 +79,18 @@ export default async function Home() {
             <span className="status-pill"><i /> захищено</span>
           </div>
           <div className="feature-grid">
-            <article><span aria-hidden="true">＋</span><strong>Новий матеріал</strong><small>Картка за ISBN</small></article>
-            <article><span aria-hidden="true">↓</span><strong>Надходження</strong><small>Кількість і місце</small></article>
-            <article><span aria-hidden="true">⇄</span><strong>Переміщення</strong><small>Між кабінетами</small></article>
-            <article><span aria-hidden="true">✓</span><strong>Ревізія</strong><small>Фактичний залишок</small></article>
+            <article><span aria-hidden="true">＋</span><strong>Новий матеріал</strong><small>Фактичний залишок, CAT-ID, опис і фото</small></article>
+            <article><span aria-hidden="true">⇄</span><strong>Рух фонду</strong><small>Надходження, переміщення, списання</small></article>
+            <article><span aria-hidden="true">→</span><strong>Видача вчителям</strong><small>Видача й повернення</small></article>
+            <article><span aria-hidden="true">▣</span><strong>Роки й класи</strong><small>Відкриття, зміни та перехід</small></article>
           </div>
-          <p className="draft-preview"><span aria-hidden="true">◷</span> Спочатку чернетка — зміни завжди під контролем</p>
+          <p className="draft-preview"><span aria-hidden="true">●</span> Підтверджені зміни відразу зберігаються у захищеній базі</p>
         </aside>
       </section>
 
       <footer className="landing-footer">
         <span>© {new Date().getFullYear()} Бібліотека Міжнародного ліцею МАУП</span>
-        <span>Дані каталогу оновлюються з єдиної службової бази</span>
+        <span>Каталог і кабінет працюють з єдиною захищеною базою</span>
       </footer>
     </main>
   );

@@ -1,4 +1,5 @@
 import {
+  bindHostedImportCommitGuard,
   buildHostedImportInsertSql,
   HostedImportError,
   totalHostedImportRows,
@@ -75,6 +76,14 @@ export async function POST(request: Request): Promise<Response> {
     );
     const statements = [
       stateStatement,
+      bindHostedImportCommitGuard(context.db, {
+        runId: run.id,
+        planSha256,
+        expectedRows,
+        insertStatements: insertSql.length,
+        expiresAt: context.gateExpiresAt,
+        committedAt,
+      }),
       ...insertSql.map((sql) => context.db.prepare(sql)),
       context.db.prepare("INSERT INTO materials_fts(materials_fts) VALUES('rebuild')"),
     ];

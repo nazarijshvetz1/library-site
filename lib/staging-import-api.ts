@@ -21,7 +21,9 @@ import {
   evaluateStagingImportGate,
   isImportRunExpiryAccepted,
   isStagingImportGateActive,
+  type LibraryImportTarget,
 } from "@/lib/staging-import-gate";
+import { STAGING_RESET_CONFIRMATION } from "@/lib/staging-reset-contract";
 const ACTION_BODY_LIMIT = 2048;
 const PLAN_OBJECT_PREFIX = "_migration/library-d1/";
 
@@ -79,9 +81,11 @@ export type StagingImportContext = {
   user: ChatGPTUser;
   db: D1DatabaseLike;
   bucket: ImportBucket;
+  target: LibraryImportTarget;
   allowedOrigin: string;
   pinnedPlanSha256: string;
   gateExpiresAt: string;
+  librarianWritesEnabled: boolean;
 };
 
 type ImportAuthorization =
@@ -97,7 +101,9 @@ export async function authorizeStagingImport(
 
   const gate = evaluateStagingImportGate({
     appEnv: getRuntimeString("APP_ENV"),
+    importMode: getRuntimeString("LIBRARY_IMPORT_MODE"),
     enabled: getRuntimeBoolean("LIBRARY_IMPORT_ENABLED"),
+    librarianWritesEnabled: authorization.value.access.writesEnabled,
     allowedOrigin: getRuntimeString("LIBRARY_IMPORT_ALLOWED_ORIGIN"),
     pinnedPlanSha256: getRuntimeString("LIBRARY_IMPORT_PLAN_SHA256"),
     expiresAt: getRuntimeString("LIBRARY_IMPORT_EXPIRES_AT"),
@@ -114,8 +120,8 @@ export async function authorizeStagingImport(
         gate.code === "staging_import_disabled"
           ? "Одноразовий імпорт у цьому середовищі вимкнено."
           : gate.code === "staging_import_origin_denied"
-            ? "Запит staging-import надійшов не з дозволеного staging-сайту."
-            : "Захисний контур staging-import налаштовано не повністю або його строк минув.",
+            ? "Запит імпорту надійшов не з дозволеного сайту."
+            : "Захисний контур імпорту налаштовано не повністю або його строк минув.",
         false,
       ),
     };
@@ -130,7 +136,7 @@ export async function authorizeStagingImport(
       response: librarianError(
         503,
         "staging_import_bindings_unavailable",
-        "Staging D1 або приватне R2-сховище недоступні.",
+        "D1 або приватне R2-сховище недоступні.",
         false,
       ),
     };
@@ -142,9 +148,11 @@ export async function authorizeStagingImport(
       user: authorization.value.user,
       db: db as D1DatabaseLike,
       bucket: bucket as ImportBucket,
+      target: gate.target,
       allowedOrigin: gate.allowedOrigin,
       pinnedPlanSha256: gate.pinnedPlanSha256,
       gateExpiresAt: gate.expiresAt,
+      librarianWritesEnabled: authorization.value.access.writesEnabled,
     },
   };
 }
@@ -165,7 +173,7 @@ export function importFailure(error: unknown): Response {
   return librarianError(
     503,
     "staging_import_unavailable",
-    "Операцію staging-import не виконано. Дані production не змінено.",
+    "Операцію одноразового імпорту не завершено.",
     false,
   );
 }
@@ -234,7 +242,7 @@ export async function requireImportRun(
 
 export function assertPinnedPlan(context: StagingImportContext, planSha256: string): void {
   if (!/^[a-f0-9]{64}$/u.test(planSha256) || planSha256 !== context.pinnedPlanSha256) {
-    throw new HostedImportError("plan_hash_not_pinned", "SHA-256 плану не збігається з дозволеним staging-планом.", 403);
+    throw new HostedImportError("plan_hash_not_pinned", "SHA-256 плану не збігається з дозволеним планом імпорту.", 403);
   }
 }
 
@@ -242,7 +250,7 @@ export function assertStagingImportStillActive(context: StagingImportContext): v
   if (!isStagingImportGateActive(context.gateExpiresAt)) {
     throw new HostedImportError(
       "staging_import_gate_expired",
-      "Строк staging-import минув до завершення upload; приватний файл не збережено.",
+      "Строк імпорту минув до завершення upload; приватний файл не збережено.",
       410,
     );
   }
@@ -276,6 +284,44 @@ export async function loadStoredImportPlan(
 }
 
 export async function readPlanShaAction(request: Request): Promise<string> {
+  const record = await readActionRecord(request);
+  if (Object.keys(record).length !== 1 || typeof record.planSha256 !== "string") {
+    throw new HostedImportError("action_contract_invalid", "Очікується лише поле planSha256.");
+  }
+  assertActionHash(record.planSha256);
+  return record.planSha256;
+}
+
+export async function readStagingResetAction(
+  request: Request,
+): Promise<{ planSha256: string; confirmation: typeof STAGING_RESET_CONFIRMATION }> {
+  const record = await readActionRecord(request);
+  const keys = Object.keys(record).sort();
+  if (keys.length !== 2
+    || keys[0] !== "confirmation"
+    || keys[1] !== "planSha256"
+    || typeof record.planSha256 !== "string"
+    || typeof record.confirmation !== "string") {
+    throw new HostedImportError(
+      "staging_reset_contract_invalid",
+      "Очікуються лише поля planSha256 і confirmation.",
+    );
+  }
+  assertActionHash(record.planSha256);
+  if (record.confirmation !== STAGING_RESET_CONFIRMATION) {
+    throw new HostedImportError(
+      "staging_reset_confirmation_invalid",
+      `Для очищення введіть точно: ${STAGING_RESET_CONFIRMATION}`,
+      409,
+    );
+  }
+  return {
+    planSha256: record.planSha256,
+    confirmation: STAGING_RESET_CONFIRMATION,
+  };
+}
+
+async function readActionRecord(request: Request): Promise<Record<string, unknown>> {
   const contentType = request.headers.get("Content-Type")?.toLowerCase() ?? "";
   if (!contentType.startsWith("application/json")) {
     throw new HostedImportError("unsupported_media_type", "Потрібне JSON-тіло запиту.", 415);
@@ -296,14 +342,13 @@ export async function readPlanShaAction(request: Request): Promise<string> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new HostedImportError("action_json_invalid", "JSON має бути об’єктом.");
   }
-  const record = value as Record<string, unknown>;
-  if (Object.keys(record).length !== 1 || typeof record.planSha256 !== "string") {
-    throw new HostedImportError("action_contract_invalid", "Очікується лише поле planSha256.");
-  }
-  if (!/^[a-f0-9]{64}$/u.test(record.planSha256)) {
+  return value as Record<string, unknown>;
+}
+
+function assertActionHash(value: string): void {
+  if (!/^[a-f0-9]{64}$/u.test(value)) {
     throw new HostedImportError("action_hash_invalid", "planSha256 має бути SHA-256 у нижньому регістрі.");
   }
-  return record.planSha256;
 }
 
 export async function executeRun(

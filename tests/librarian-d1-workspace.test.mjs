@@ -8,8 +8,16 @@ import {
   gradeLabel,
   holdingKey,
   materialToEditDraft,
+  resolveLiveFormTextForSubmission,
+  resolveLoanDueAtForSubmission,
+  suggestNextAcademicYearStart,
   todayInKyiv,
 } from "../lib/librarian-d1-client.ts";
+import {
+  clearPendingInventoryIntent,
+  readPendingInventoryIntent,
+  writePendingInventoryIntent,
+} from "../lib/librarian-pending-intent.ts";
 
 const root = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
@@ -76,6 +84,112 @@ test("workspace helpers keep holding identity and Ukrainian labels stable", () =
   assert.equal(todayInKyiv(new Date("2026-08-10T22:30:00.000Z")), "2026-08-11");
 });
 
+test("loan due date submission prefers the value visible in the date input", () => {
+  assert.equal(
+    resolveLoanDueAtForSubmission(" 2026-09-01 ", "", ""),
+    "2026-09-01",
+  );
+  assert.equal(
+    resolveLoanDueAtForSubmission(undefined, "2026-09-02", ""),
+    "2026-09-02",
+  );
+  assert.equal(
+    resolveLoanDueAtForSubmission(undefined, null, "2026-09-03"),
+    "2026-09-03",
+  );
+  assert.equal(resolveLoanDueAtForSubmission(undefined, null, "  "), null);
+});
+
+test("live form submission prefers the current native input value over stale React state", () => {
+  assert.equal(
+    resolveLiveFormTextForSubmission(" 2028-09-01 ", "2026-09-01", "2026-09-01"),
+    "2028-09-01",
+  );
+  assert.equal(
+    resolveLiveFormTextForSubmission(undefined, "2029-08-31", "2027-08-31"),
+    "2029-08-31",
+  );
+  assert.equal(
+    resolveLiveFormTextForSubmission(undefined, null, "2027-09-01"),
+    "2027-09-01",
+  );
+  assert.equal(resolveLiveFormTextForSubmission("", null, "  "), null);
+});
+
+test("new academic year defaults continue after the latest stored period", () => {
+  assert.equal(
+    suggestNextAcademicYearStart([
+      { label: "2026/2027", endDate: "2027-08-31" },
+      { label: "2027/2028", endDate: "" },
+    ], 2026),
+    2028,
+  );
+  assert.equal(
+    suggestNextAcademicYearStart([
+      { label: "невизначений", endDate: "2029-08-31" },
+      { label: "2028/2029", endDate: null },
+    ], 2026),
+    2029,
+  );
+  assert.equal(suggestNextAcademicYearStart([], 2026), 2026);
+  assert.equal(
+    suggestNextAcademicYearStart([{ label: "архів", endDate: "" }], 2026),
+    2026,
+  );
+});
+
+test("class creation only offers active academic years", async () => {
+  const academic = await read("app/librarian/academic-workspace.tsx");
+  const classCreate = academic.match(
+    /function ClassCreate[\s\S]*?(?=function ClassUpdate)/u,
+  )?.[0] ?? "";
+
+  assert.match(
+    classCreate,
+    /reference\.academicYears\.filter\(\(year\) => year\.status === "active"\)/u,
+  );
+  assert.doesNotMatch(
+    classCreate,
+    /year\.status !== "closed"/u,
+    "draft years must not be submitted to the active-year-only API",
+  );
+  assert.match(
+    classCreate,
+    /writesEnabled=\{writesEnabled && Boolean\(years\.length\)\}/u,
+  );
+  assert.match(classCreate, /потрібен активний навчальний рік/u);
+});
+
+test("an uncertain inventory request survives remount with its exact request ID and payload", () => {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  };
+  const intent = {
+    kind: "transfer",
+    materialId: "CAT-0001",
+    requestId: "123e4567-e89b-42d3-a456-426614174000",
+    payload: {
+      requestId: "123e4567-e89b-42d3-a456-426614174000",
+      materialId: "CAT-0001",
+      sourceLocationId: "LOC-001",
+      destinationLocationId: "LOC-002",
+      condition: "good",
+      quantity: 2,
+      expectedSourceQuantity: 5,
+      expectedDestinationQuantity: 1,
+    },
+  };
+
+  writePendingInventoryIntent(storage, intent);
+  assert.deepEqual(readPendingInventoryIntent(storage, "transfer", "CAT-0001"), intent);
+  assert.equal(readPendingInventoryIntent(storage, "writeoff", "CAT-0001"), null);
+  clearPendingInventoryIntent(storage, "transfer", "CAT-0001");
+  assert.equal(readPendingInventoryIntent(storage, "transfer", "CAT-0001"), null);
+});
+
 test("new librarian route renders D1 workspace and keeps legacy workspace intact", async () => {
   const [page, workspace, client] = await Promise.all([
     read("app/librarian/page.tsx"),
@@ -93,6 +207,22 @@ test("new librarian route renders D1 workspace and keeps legacy workspace intact
   assert.match(workspace, /\/api\/librarian\/loans\/returns/u);
   assert.match(workspace, /"\/api\/librarian\/materials"/u);
   assert.match(workspace, /\/api\/librarian\/receipts/u);
+  assert.match(workspace, /\/api\/librarian\/transfers/u);
+  assert.match(workspace, /expectedSourceQuantity: source\?\.quantity/u);
+  assert.match(workspace, /expectedDestinationQuantity: destinationHolding\?\.quantity \?\? 0/u);
+  assert.match(workspace, /\/api\/librarian\/writeoffs/u);
+  assert.match(workspace, /expectedQuantity: source\?\.quantity/u);
+  assert.match(workspace, /requestError\.code === "stock_quantity_conflict"/u);
+  assert.match(workspace, /window\.confirm/u);
+  assert.match(workspace, /selectedIdRef\.current !== materialId/u);
+  assert.match(workspace, /detailRequestRef\.current/u);
+  assert.match(workspace, /writePendingInventoryIntent\(intent\)/u);
+  assert.match(workspace, /retryPending \? "Перевірити результат"/u);
+  assert.match(workspace, /role=\{tone === "error" \? "alert" : "status"\}/u);
+  assert.match(workspace, /\/api\/librarian\/isbn-lookup\?isbn=/u);
+  assert.match(workspace, /mergeBookLookupDraft/u);
+  assert.match(workspace, /mergeBookLookupLink/u);
+  assert.match(workspace, /current\.title\.trim\(\) \|\| candidate\.title/u);
   assert.match(workspace, /initialReceipt/u);
   assert.match(workspace, /expectedQuantity: 0/u);
   assert.match(workspace, /links: linkPayload\(links\)/u);
@@ -102,11 +232,49 @@ test("new librarian route renders D1 workspace and keeps legacy workspace intact
   assert.match(workspace, /source\.quantity/u);
   assert.match(workspace, /quantityOutstanding/u);
   assert.match(workspace, /name="dueAt"/u);
+  assert.match(workspace, /ref=\{dueAtInputRef\}/u);
+  assert.match(workspace, /dueAtInputRef\.current\?\.value/u);
   assert.match(workspace, /new FormData\(event\.currentTarget\)\.get\("dueAt"\)/u);
-  assert.match(workspace, /dueAt: submittedDueAt \|\| null/u);
+  assert.match(workspace, /dueAt: submittedDueAt/u);
+  const dueAtInput = workspace.match(
+    /<input\s+ref=\{dueAtInputRef\}[\s\S]*?name="dueAt"[\s\S]*?\/>/u,
+  )?.[0] ?? "";
+  assert.match(
+    dueAtInput,
+    /onInput=\{\(event\) => setDueAt\(event\.currentTarget\.value\)\}/u,
+    "the controlled due-date field must consume native input events",
+  );
+  assert.doesNotMatch(
+    dueAtInput,
+    /onChange=/u,
+    "the due-date field must not duplicate state synchronization in onChange",
+  );
   assert.match(workspace, /thumbnailUrl/u);
   assert.match(workspace, /item\.year/u);
   assert.doesNotMatch(workspace, /Ревізія/u);
+
+  const academic = await read("app/librarian/academic-workspace.tsx");
+  assert.match(academic, /\/api\/librarian\/academic-reference/u);
+  assert.match(academic, /\/api\/librarian\/academic-years"/u);
+  assert.match(academic, /\/api\/librarian\/class-years"/u);
+  assert.match(academic, /\/close/u);
+  assert.match(academic, /\/academic-years\/rollover/u);
+  assert.match(academic, /expectedVersion: selected\.version/u);
+  assert.match(academic, /sourceYearVersion: sourceYear\.version/u);
+  assert.match(academic, /targetYearVersion: targetYear\.version/u);
+  assert.match(academic, /suggestNextAcademicYearStart\(\s*reference\.academicYears/u);
+  assert.match(academic, /ref=\{startDateInputRef\} name="startDate"/u);
+  assert.match(academic, /ref=\{endDateInputRef\} name="endDate"/u);
+  assert.match(academic, /ref=\{actualClosedDateInputRef\} name="actualClosedDate"/u);
+  assert.match(academic, /ref=\{effectiveDateInputRef\} name="effectiveDate"/u);
+  assert.match(academic, /startDate: submittedStartDate/u);
+  assert.match(academic, /endDate: submittedEndDate/u);
+  assert.match(academic, /actualClosedDate: submittedActualClosedDate/u);
+  assert.match(academic, /effectiveDate: submittedEffectiveDate/u);
+  assert.match(academic, /name="startDate" type="date" value=\{startDate\} onInput=\{updateStartDate\}/u);
+  assert.match(academic, /name="endDate" type="date" value=\{endDate\} min=\{startDate\} onInput=\{updateEndDate\}/u);
+  assert.match(academic, /name="actualClosedDate" type="date" value=\{actualClosedDate\} onInput=\{updateActualClosedDate\}/u);
+  assert.match(academic, /name="effectiveDate" type="date" value=\{effectiveDate\} onInput=\{updateEffectiveDate\}/u);
 
   const legacy = await read("app/librarian/workspace.tsx");
   assert.match(legacy, /revision\.count/u);

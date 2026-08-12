@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { STAGING_RESET_CONFIRMATION } from "@/lib/staging-reset-contract";
 import styles from "./staging-import.module.css";
 
 type Phase = "idle" | "uploaded" | "preflighted" | "committed" | "verified" | "cleaned";
+type ImportTarget = "staging" | "production";
 
 type ApiResult = {
   success?: boolean;
@@ -17,7 +19,13 @@ type ApiResult = {
   [key: string]: unknown;
 };
 
-export default function ImportConsole({ displayName }: { displayName: string }) {
+export default function ImportConsole({
+  displayName,
+  target,
+}: {
+  displayName: string;
+  target: ImportTarget;
+}) {
   const [file, setFile] = useState<File | null>(null);
   const [planSha256, setPlanSha256] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
@@ -27,6 +35,8 @@ export default function ImportConsole({ displayName }: { displayName: string }) 
   const [message, setMessage] = useState("");
   const [messageIsError, setMessageIsError] = useState(false);
   const [result, setResult] = useState<ApiResult | null>(null);
+  const [productionConfirmed, setProductionConfirmed] = useState(false);
+  const [resetConfirmation, setResetConfirmation] = useState("");
 
   useEffect(() => {
     if (!expiresAt) return;
@@ -48,14 +58,9 @@ export default function ImportConsole({ displayName }: { displayName: string }) 
     setMessageIsError(false);
     let sha256 = "";
     try {
-      if (file.size <= 0 || file.size > 6 * 1024 * 1024) {
-        throw new Error("JSON-план має бути непорожнім і не перевищувати 6 МіБ.");
-      }
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const digest = await crypto.subtle.digest("SHA-256", bytes);
-      sha256 = [...new Uint8Array(digest)]
-        .map((byte) => byte.toString(16).padStart(2, "0"))
-        .join("");
+      const planFile = await readPlanFile(file);
+      const { bytes } = planFile;
+      sha256 = planFile.sha256;
       setPlanSha256(sha256);
       const response = await fetch("/api/internal/library-import/upload", {
         method: "POST",
@@ -88,8 +93,45 @@ export default function ImportConsole({ displayName }: { displayName: string }) 
     }
   }
 
+  async function resetStagingD1() {
+    if (target !== "staging" || phase !== "idle" || !file || busy
+      || resetConfirmation !== STAGING_RESET_CONFIRMATION) return;
+    setBusy(true);
+    setMessage("");
+    setMessageIsError(false);
+    try {
+      const { sha256 } = await readPlanFile(file);
+      setPlanSha256(sha256);
+      const response = await fetch("/api/internal/library-import/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          planSha256: sha256,
+          confirmation: resetConfirmation,
+        }),
+        credentials: "same-origin",
+      });
+      const body = await readResponse(response);
+      setPhase("idle");
+      setResult(body);
+      setResetConfirmation("");
+      setMessage("Тестову D1 очищено атомарно. Тепер завантажте цей самий JSON-план.");
+    } catch (error) {
+      setMessageIsError(true);
+      if (error instanceof ImportApiError) setResult(error.body);
+      setMessage(error instanceof Error ? error.message : "Тестову D1 не очищено.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runPhase(next: Exclude<Phase, "idle" | "uploaded">) {
     if (!planSha256 || busy) return;
+    if (next === "committed" && target === "production" && !productionConfirmed) {
+      setMessageIsError(true);
+      setMessage("Підтвердьте production cutover перед atomic commit.");
+      return;
+    }
     setBusy(true);
     setMessage("");
     setMessageIsError(false);
@@ -103,7 +145,7 @@ export default function ImportConsole({ displayName }: { displayName: string }) 
       const body = await readResponse(response);
       setPhase(responsePhase(body.status, next));
       setResult(body);
-      setMessage(phaseMessage(next));
+      setMessage(phaseMessage(next, target));
     } catch (error) {
       if (error instanceof ImportApiError
         && shouldRestoreExpiredRun(error)
@@ -143,28 +185,31 @@ export default function ImportConsole({ displayName }: { displayName: string }) 
   }
 
   const expired = isExpired(expiresAt, nowMs);
+  const production = target === "production";
 
   return (
     <main className={styles.shell}>
       <section className={styles.card} aria-labelledby="import-title">
         <div className={styles.heading}>
           <div>
-            <p>Внутрішній інструмент · лише staging</p>
+            <p>Внутрішній інструмент · {production ? "production cutover" : "staging"}</p>
             <h1 id="import-title">Одноразовий імпорт до D1</h1>
           </div>
           <Link href="/librarian">← Кабінет</Link>
         </div>
 
-        <div className={styles.warning}>
-          <strong>Production недоступний цьому маршруту.</strong>
-          <span>
-            Файл приймається лише за наперед дозволеним SHA-256, а commit стає доступним
-            тільки після чистого preflight.
-          </span>
+        <div className={production ? styles.productionWarning : styles.warning}>
+          <strong>{production
+            ? "Увага: це робоча production D1."
+            : "Staging-контур відокремлений від production."}</strong>
+          <span>{production
+            ? "Atomic commit запише весь перевірений план у робочу базу. Перед ним мають бути готові D1 recovery point, фінальна звірка та замороження змін у старій базі."
+            : "Файл приймається лише за наперед дозволеним SHA-256, а commit стає доступним тільки після чистого preflight."}</span>
         </div>
 
         <dl className={styles.identity}>
           <div><dt>Користувач</dt><dd>{displayName}</dd></div>
+          <div><dt>Середовище</dt><dd>{production ? "PRODUCTION" : "STAGING"}</dd></div>
           <div><dt>Стан</dt><dd>{phaseLabel(phase)}</dd></div>
           <div><dt>SHA-256</dt><dd>{planSha256 || "ще не обчислено"}</dd></div>
         </dl>
@@ -184,12 +229,63 @@ export default function ImportConsole({ displayName }: { displayName: string }) 
           </button>
         </div>
 
+        {!production ? (
+          <section className={styles.resetBox} aria-labelledby="staging-reset-title">
+            <div>
+              <strong id="staging-reset-title">Очистити тестову D1 перед імпортом</strong>
+              <small>
+                Видаляє лише тестові доменні дані та попередні сесії імпорту. Схема,
+                міграції й legacy-чернетки залишаються.
+              </small>
+            </div>
+            <label htmlFor="staging-reset-confirmation">
+              <span>Для підтвердження введіть: <b>{STAGING_RESET_CONFIRMATION}</b></span>
+              <input
+                id="staging-reset-confirmation"
+                type="text"
+                value={resetConfirmation}
+                disabled={busy || phase !== "idle"}
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(event) => setResetConfirmation(event.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={!file || busy || phase !== "idle" || resetConfirmation !== STAGING_RESET_CONFIRMATION}
+              onClick={() => void resetStagingD1()}
+            >
+              Очистити тестову D1 перед імпортом
+            </button>
+          </section>
+        ) : null}
+
+        {production ? (
+          <label
+            className={styles.productionConfirmation}
+            htmlFor="production-cutover-confirmation"
+            aria-label="Підтверджую production cutover"
+          >
+            <input
+              id="production-cutover-confirmation"
+              type="checkbox"
+              checked={productionConfirmed}
+              disabled={busy || phase === "committed" || phase === "verified" || phase === "cleaned"}
+              onChange={(event) => setProductionConfirmed(event.target.checked)}
+            />
+            <span>
+              <strong>Підтверджую production cutover</strong>
+              <small>Recovery point створено, SHA-256 фінального плану звірено, а зміни у старій базі заморожено.</small>
+            </span>
+          </label>
+        ) : null}
+
         <div className={styles.steps}>
           <button type="button" disabled={busy || phase !== "uploaded"} onClick={() => void runPhase("preflighted")}>
             2. Preflight
             <small>Лише читає D1 і перевіряє, що ціль порожня.</small>
           </button>
-          <button className={styles.commit} type="button" disabled={busy || phase !== "preflighted"} onClick={() => void runPhase("committed")}>
+          <button className={styles.commit} type="button" disabled={busy || phase !== "preflighted" || (production && !productionConfirmed)} onClick={() => void runPhase("committed")}>
             3. Atomic commit
             <small>Вносить усі рядки одним D1 batch.</small>
           </button>
@@ -248,11 +344,13 @@ function phaseEndpoint(phase: Phase): string {
         : "cleanup";
 }
 
-function phaseMessage(phase: Phase): string {
+function phaseMessage(phase: Phase, target: ImportTarget): string {
   return phase === "preflighted" ? "Preflight пройдено: цільова D1 чиста й готова."
     : phase === "committed" ? "Атомарний commit завершено. Тепер обов’язково виконайте verify."
       : phase === "verified" ? "Reconciliation і пошуковий індекс підтверджено."
-        : "Приватний файл плану очищено; журнал імпорту залишився у D1.";
+        : target === "production"
+          ? "Приватний план очищено. Негайно вимкніть LIBRARY_IMPORT_ENABLED і приберіть LIBRARY_IMPORT_MODE, SHA та expiry."
+          : "Приватний файл плану очищено; журнал імпорту залишився у D1.";
 }
 
 function phaseLabel(phase: Phase): string {
@@ -284,4 +382,18 @@ function shouldRestoreExpiredRun(error: ImportApiError): boolean {
 
 function isExpired(value: string, nowMs: number): boolean {
   return Boolean(value) && Number.isFinite(Date.parse(value)) && Date.parse(value) <= nowMs;
+}
+
+async function readPlanFile(file: File): Promise<{ bytes: Uint8Array; sha256: string }> {
+  if (file.size <= 0 || file.size > 6 * 1024 * 1024) {
+    throw new Error("JSON-план має бути непорожнім і не перевищувати 6 МіБ.");
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return {
+    bytes,
+    sha256: [...new Uint8Array(digest)]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join(""),
+  };
 }

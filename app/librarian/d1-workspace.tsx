@@ -8,6 +8,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -19,12 +20,33 @@ import {
   type CatalogSearchFilters,
   type MaterialEditDraft,
   materialToEditDraft,
+  resolveLoanDueAtForSubmission,
   todayInKyiv,
 } from "@/lib/librarian-d1-client";
+import { normalizeCoverPhotoForUpload } from "@/lib/cover-client";
+import {
+  clearPendingInventoryIntent as clearStoredInventoryIntent,
+  type PendingInventoryIntent,
+  readPendingInventoryIntent as readStoredInventoryIntent,
+  writePendingInventoryIntent as writeStoredInventoryIntent,
+} from "@/lib/librarian-pending-intent";
+import AcademicWorkspace, {
+  type AcademicTool,
+  isAcademicTool,
+} from "./academic-workspace";
 
 import styles from "./d1-workspace.module.css";
 
-type Tool = "catalog" | "create" | "receipt" | "count" | "issue" | "return";
+type Tool =
+  | "catalog"
+  | "create"
+  | "receipt"
+  | "transfer"
+  | "writeoff"
+  | "count"
+  | "issue"
+  | "return"
+  | AcademicTool;
 type LoadState = "idle" | "loading" | "ready" | "error";
 
 type CatalogMaterial = {
@@ -85,6 +107,7 @@ type MaterialDetail = CatalogMaterial & {
     mimeType: string;
     width: number | null;
     height: number | null;
+    version?: number;
   } | null;
 };
 
@@ -106,6 +129,7 @@ type MutationEnvelope<T> = {
 
 type ApiFailure = {
   success?: false;
+  code?: string;
   error?: string;
   message?: string;
   fieldErrors?: Record<string, string>;
@@ -127,6 +151,23 @@ type ReferenceEnvelope = {
   success: boolean;
   teachers: LibraryTeacher[];
   locations: LibraryLocation[];
+};
+
+type BookLookupCandidate = {
+  isbn: string;
+  title: string;
+  authors: string[];
+  publisher: string;
+  publishedYear: number | null;
+  coverUrl: string;
+  sourceUrl: string;
+  provider: "google_books" | "open_library";
+};
+
+type BookLookupEnvelope = {
+  success: boolean;
+  found: boolean;
+  candidates: BookLookupCandidate[];
 };
 
 type OpenLoanItem = {
@@ -181,6 +222,8 @@ const TOOLS: Array<{ id: Tool; icon: string; label: string; hint: string }> = [
   { id: "catalog", icon: "⌕", label: "Каталог", hint: "Пошук і картка" },
   { id: "create", icon: "+", label: "Новий матеріал", hint: "Додати без чернетки" },
   { id: "receipt", icon: "↓", label: "Надходження", hint: "Додати примірники" },
+  { id: "transfer", icon: "⇄", label: "Переміщення", hint: "Змінити розміщення" },
+  { id: "writeoff", icon: "−", label: "Списання", hint: "Зменшити залишок" },
   {
     id: "count",
     icon: "✓",
@@ -189,6 +232,11 @@ const TOOLS: Array<{ id: Tool; icon: string; label: string; hint: string }> = [
   },
   { id: "issue", icon: "→", label: "Видача", hint: "Видати вчителю" },
   { id: "return", icon: "↩", label: "Повернення", hint: "Прийняти книги" },
+  { id: "academic-year", icon: "▣", label: "Новий навчальний рік", hint: "Створити період" },
+  { id: "class-create", icon: "+", label: "Відкрити клас", hint: "Додати до року" },
+  { id: "class-update", icon: "↻", label: "Змінити клас", hint: "Керівник і кабінет" },
+  { id: "class-close", icon: "×", label: "Закрити клас", hint: "Зберегти історію" },
+  { id: "rollover", icon: "⇢", label: "Перехід на новий рік", hint: "Перевести всі класи" },
 ];
 
 export default function D1LibrarianWorkspace({
@@ -205,10 +253,13 @@ export default function D1LibrarianWorkspace({
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
+  const detailRequestRef = useRef(0);
   const [detail, setDetail] = useState<MaterialDetail | null>(null);
   const [detailState, setDetailState] = useState<LoadState>("idle");
   const [detailError, setDetailError] = useState("");
   const [editing, setEditing] = useState(false);
+  const [workspaceNotice, setWorkspaceNotice] = useState("");
   const [refreshToken, setRefreshToken] = useState(0);
   const [teachers, setTeachers] = useState<LibraryTeacher[]>([]);
   const [locations, setLocations] = useState<LibraryLocation[]>([]);
@@ -216,15 +267,19 @@ export default function D1LibrarianWorkspace({
   const [referenceError, setReferenceError] = useState("");
 
   const loadDetail = useCallback(async (materialId: string) => {
+    const request = detailRequestRef.current + 1;
+    detailRequestRef.current = request;
     setDetailState("loading");
     setDetailError("");
     try {
       const response = await apiJson<DetailEnvelope>(
         `/api/librarian/materials/${encodeURIComponent(materialId)}`,
       );
+      if (request !== detailRequestRef.current || selectedIdRef.current !== materialId) return;
       setDetail(response.material);
       setDetailState("ready");
     } catch (error) {
+      if (request !== detailRequestRef.current || selectedIdRef.current !== materialId) return;
       setDetail(null);
       setDetailState("error");
       setDetailError(errorMessage(error));
@@ -276,8 +331,11 @@ export default function D1LibrarianWorkspace({
 
   const selectMaterial = useCallback(
     (materialId: string) => {
+      selectedIdRef.current = materialId;
+      detailRequestRef.current += 1;
       setSelectedId(materialId);
       setEditing(false);
+      setWorkspaceNotice("");
       void loadDetail(materialId);
     },
     [loadDetail],
@@ -305,9 +363,16 @@ export default function D1LibrarianWorkspace({
     }
   }
 
-  async function refreshSelected() {
+  const refreshSelected = useCallback(async () => {
     setRefreshToken((value) => value + 1);
-    if (selectedId) await loadDetail(selectedId);
+    const currentId = selectedIdRef.current;
+    if (currentId) await loadDetail(currentId);
+  }, [loadDetail]);
+
+  function chooseTool(nextTool: Tool) {
+    setTool(nextTool);
+    setEditing(false);
+    setWorkspaceNotice("");
   }
 
   return (
@@ -343,10 +408,7 @@ export default function D1LibrarianWorkspace({
                 key={item.id}
                 className={tool === item.id ? styles.toolActive : styles.tool}
                 type="button"
-                onClick={() => {
-                  setTool(item.id);
-                  setEditing(false);
-                }}
+                onClick={() => chooseTool(item.id)}
               >
                 <span aria-hidden="true">{item.icon}</span>
                 <span>
@@ -376,10 +438,7 @@ export default function D1LibrarianWorkspace({
                 key={item.id}
                 className={tool === item.id ? styles.mobileToolActive : ""}
                 type="button"
-                onClick={() => {
-                  setTool(item.id);
-                  setEditing(false);
-                }}
+                onClick={() => chooseTool(item.id)}
               >
                 <span aria-hidden="true">{item.icon}</span>
                 {item.label}
@@ -403,19 +462,34 @@ export default function D1LibrarianWorkspace({
             </button>
           </div>
 
-          <div className={styles.workGrid}>
-            <CatalogSearch
-              filters={filters}
-              onFilters={setFilters}
-              items={items}
-              state={searchState}
-              error={searchError}
-              selectedId={selectedId}
-              onSelect={selectMaterial}
-              nextCursor={nextCursor}
-              loadingMore={loadingMore}
-              onLoadMore={() => void loadMore()}
-            />
+          {workspaceNotice ? (
+            <div className={styles.workspaceNotice} role="status" aria-live="polite">
+              <InlineMessage tone="error">{workspaceNotice}</InlineMessage>
+              <button
+                type="button"
+                aria-label="Закрити повідомлення"
+                onClick={() => setWorkspaceNotice("")}
+              >
+                ×
+              </button>
+            </div>
+          ) : null}
+
+          <div className={isAcademicTool(tool) ? styles.workGridWide : styles.workGrid}>
+            {!isAcademicTool(tool) ? (
+              <CatalogSearch
+                filters={filters}
+                onFilters={setFilters}
+                items={items}
+                state={searchState}
+                error={searchError}
+                selectedId={selectedId}
+                onSelect={selectMaterial}
+                nextCursor={nextCursor}
+                loadingMore={loadingMore}
+                onLoadMore={() => void loadMore()}
+              />
+            ) : null}
 
             <section className={styles.actionPane}>
               {tool === "catalog" ? (
@@ -424,10 +498,14 @@ export default function D1LibrarianWorkspace({
                   state={detailState}
                   error={detailError}
                   editing={editing}
-                  onEditing={setEditing}
+                  onEditing={(value) => {
+                    setEditing(value);
+                    if (value) setWorkspaceNotice("");
+                  }}
                   writesEnabled={writesEnabled}
                   onSaved={refreshSelected}
-                  onChooseTool={setTool}
+                  onNotice={setWorkspaceNotice}
+                  onChooseTool={chooseTool}
                 />
               ) : null}
               {tool === "count" ? (
@@ -450,11 +528,35 @@ export default function D1LibrarianWorkspace({
                     setRefreshToken((value) => value + 1);
                     selectMaterial(materialId);
                   }}
-                  onOpenMaterial={() => setTool("catalog")}
+                  onOpenMaterial={() => chooseTool("catalog")}
                 />
               ) : null}
               {tool === "receipt" ? (
                 <ReceiptPanel
+                  detail={detail}
+                  state={detailState}
+                  error={detailError}
+                  writesEnabled={writesEnabled}
+                  locations={locations}
+                  referenceState={referenceState}
+                  referenceError={referenceError}
+                  onSaved={refreshSelected}
+                />
+              ) : null}
+              {tool === "transfer" ? (
+                <TransferPanel
+                  detail={detail}
+                  state={detailState}
+                  error={detailError}
+                  writesEnabled={writesEnabled}
+                  locations={locations}
+                  referenceState={referenceState}
+                  referenceError={referenceError}
+                  onSaved={refreshSelected}
+                />
+              ) : null}
+              {tool === "writeoff" ? (
+                <WriteoffPanel
                   detail={detail}
                   state={detailState}
                   error={detailError}
@@ -475,7 +577,7 @@ export default function D1LibrarianWorkspace({
                   referenceState={referenceState}
                   referenceError={referenceError}
                   onSaved={refreshSelected}
-                  onChooseReturn={() => setTool("return")}
+                  onChooseReturn={() => chooseTool("return")}
                 />
               ) : null}
               {tool === "return" ? (
@@ -486,6 +588,14 @@ export default function D1LibrarianWorkspace({
                   referenceState={referenceState}
                   referenceError={referenceError}
                   onSaved={refreshSelected}
+                />
+              ) : null}
+              {isAcademicTool(tool) ? (
+                <AcademicWorkspace
+                  tool={tool}
+                  writesEnabled={writesEnabled}
+                  teachers={teachers}
+                  locations={locations}
                 />
               ) : null}
             </section>
@@ -667,6 +777,7 @@ function MaterialCard({
   onEditing,
   writesEnabled,
   onSaved,
+  onNotice,
   onChooseTool,
 }: {
   detail: MaterialDetail | null;
@@ -676,6 +787,7 @@ function MaterialCard({
   onEditing: (value: boolean) => void;
   writesEnabled: boolean;
   onSaved: () => Promise<void>;
+  onNotice: (message: string) => void;
   onChooseTool: (tool: Tool) => void;
 }) {
   if (state === "idle") return <ChooseMaterial />;
@@ -690,9 +802,14 @@ function MaterialCard({
         detail={detail}
         writesEnabled={writesEnabled}
         onCancel={() => onEditing(false)}
-        onSaved={async () => {
+        onCompleted={async () => {
           onEditing(false);
           await onSaved();
+        }}
+        onPartialUnknown={(message) => {
+          onNotice(message);
+          onEditing(false);
+          void onSaved();
         }}
       />
     );
@@ -808,16 +925,219 @@ function MaterialCard({
   );
 }
 
+type CoverSelection = {
+  file: File;
+  previewUrl: string;
+  requestId: string;
+  photoKey: string;
+  retainForRetry: boolean;
+};
+
+type CoverUploadController = {
+  file: File | null;
+  previewUrl: string;
+  normalizing: boolean;
+  error: string;
+  choose: (file: File | null) => Promise<void>;
+  clear: () => void;
+  promote: (materialId: string, expectedVersion: number) => Promise<void>;
+};
+
+function useDirectCoverUpload(): CoverUploadController {
+  const [selection, setSelection] = useState<CoverSelection | null>(null);
+  const [normalizing, setNormalizing] = useState(false);
+  const [error, setError] = useState("");
+
+  const previewUrl = selection?.previewUrl ?? "";
+  const temporaryKey = selection?.photoKey ?? "";
+  const retainForRetry = selection?.retainForRetry ?? false;
+  useEffect(() => () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
+  useEffect(() => () => {
+    if (temporaryKey && !retainForRetry) {
+      void deleteTemporaryCover(temporaryKey);
+    }
+  }, [temporaryKey, retainForRetry]);
+
+  function clear() {
+    if (selection?.photoKey) void deleteTemporaryCover(selection.photoKey);
+    setSelection(null);
+    setError("");
+  }
+
+  async function choose(file: File | null) {
+    if (!file) {
+      clear();
+      return;
+    }
+    setNormalizing(true);
+    setError("");
+    try {
+      const normalized = await normalizeCoverPhotoForUpload(file);
+      if (selection?.photoKey) void deleteTemporaryCover(selection.photoKey);
+      setSelection({
+        file: normalized,
+        previewUrl: URL.createObjectURL(normalized),
+        requestId: crypto.randomUUID(),
+        photoKey: "",
+        retainForRetry: false,
+      });
+    } catch (selectionError) {
+      setError(errorMessage(selectionError));
+    } finally {
+      setNormalizing(false);
+    }
+  }
+
+  async function promote(materialId: string, expectedVersion: number) {
+    if (!selection) return;
+    setError("");
+    let active = selection;
+    try {
+      if (!active.photoKey) {
+        const form = new FormData();
+        form.set("photo", active.file, active.file.name);
+        const uploaded = await apiJson<{
+          success: true;
+          photo: { key: string };
+        }>("/api/librarian/cover-photo", {
+          method: "POST",
+          body: form,
+        });
+        active = {
+          ...active,
+          photoKey: uploaded.photo.key,
+          retainForRetry: true,
+        };
+        setSelection(active);
+      }
+      const finalized = await apiJson<MutationEnvelope<{
+        materialId: string;
+        coverVersion: number;
+        url: string;
+      }> & { sourceCleanedUp?: boolean }>(`/api/librarian/materials/${encodeURIComponent(materialId)}/cover`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          requestId: active.requestId,
+          coverPhotoKey: active.photoKey,
+          expectedVersion,
+        }),
+      });
+      if (!finalized.sourceCleanedUp) void deleteTemporaryCover(active.photoKey);
+      setSelection(null);
+    } catch (uploadError) {
+      const message = errorMessage(uploadError);
+      if (
+        active.photoKey
+        && uploadError instanceof ApiError
+        && uploadError.status >= 400
+        && uploadError.status < 500
+      ) {
+        void deleteTemporaryCover(active.photoKey);
+        setSelection({
+          ...active,
+          photoKey: "",
+          requestId: crypto.randomUUID(),
+          retainForRetry: false,
+        });
+      } else if (active.photoKey) {
+        setSelection({ ...active, retainForRetry: true });
+      }
+      setError(message);
+      throw uploadError;
+    }
+  }
+
+  return {
+    file: selection?.file ?? null,
+    previewUrl: selection?.previewUrl ?? "",
+    normalizing,
+    error,
+    choose,
+    clear,
+    promote,
+  };
+}
+
+function CoverPhotoField({
+  upload,
+  currentUrl,
+  disabled,
+}: {
+  upload: CoverUploadController;
+  currentUrl: string;
+  disabled: boolean;
+}) {
+  const previewUrl = upload.previewUrl || currentUrl;
+  return (
+    <section className={styles.directCoverField} aria-busy={upload.normalizing}>
+      <div className={styles.directCoverPreview}>
+        {previewUrl ? <img src={previewUrl} alt="Попередній перегляд обкладинки" /> : <span aria-hidden="true">Б</span>}
+      </div>
+      <div className={styles.directCoverCopy}>
+        <strong>{upload.file ? "Нова обкладинка готова" : currentUrl ? "Поточна обкладинка" : "Додати обкладинку"}</strong>
+        <p>
+          {upload.normalizing
+            ? "Готуємо компактний JPEG…"
+            : upload.file
+              ? `${upload.file.name} · ${Math.ceil(upload.file.size / 1024)} КБ`
+              : "JPG, PNG або WEBP. Браузер підготує JPEG до 600 × 900 пікселів."}
+        </p>
+        <div className={styles.directCoverActions}>
+          <label className={styles.secondaryButton}>
+            {upload.file || currentUrl ? "Обрати інше фото" : "Обрати фото"}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              capture="environment"
+              disabled={disabled || upload.normalizing}
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0] ?? null;
+                event.currentTarget.value = "";
+                void upload.choose(file);
+              }}
+            />
+          </label>
+          {upload.file ? <button type="button" className={styles.secondaryButton} disabled={disabled} onClick={upload.clear}>Прибрати нове фото</button> : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+async function deleteTemporaryCover(key: string): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetch(
+        `/api/librarian/cover-photo?key=${encodeURIComponent(key)}`,
+        {
+          method: "DELETE",
+          credentials: "same-origin",
+          headers: { accept: "application/json" },
+          keepalive: true,
+        },
+      );
+      if (response.ok || response.status === 404 || response.status === 409) return;
+    } catch {
+      // Retry a transient connection failure while the page is still alive.
+    }
+  }
+}
+
 function MaterialEditForm({
   detail,
   writesEnabled,
   onCancel,
-  onSaved,
+  onCompleted,
+  onPartialUnknown,
 }: {
   detail: MaterialDetail;
   writesEnabled: boolean;
   onCancel: () => void;
-  onSaved: () => Promise<void>;
+  onCompleted: () => Promise<void>;
+  onPartialUnknown: (message: string) => void;
 }) {
   const [draft, setDraft] = useState<MaterialEditDraft>(() => materialToEditDraft(detail));
   const [links, setLinks] = useState<EditableLinkDraft[]>(() =>
@@ -833,9 +1153,15 @@ function MaterialEditForm({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const coverUpload = useDirectCoverUpload();
 
   function update<K extends keyof MaterialEditDraft>(key: K, value: MaterialEditDraft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function applyBookCandidate(candidate: BookLookupCandidate) {
+    setDraft((current) => mergeBookLookupDraft(current, candidate));
+    setLinks((current) => mergeBookLookupLink(current, candidate));
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -844,7 +1170,12 @@ function MaterialEditForm({
     setSaving(true);
     setMessage("");
     setFieldErrors({});
+    let coverSaved = false;
     try {
+      if (coverUpload.file) {
+        await coverUpload.promote(detail.id, detail.cover?.version ?? 0);
+        coverSaved = true;
+      }
       await apiJson<MutationEnvelope<{ materialId: string; version: number }>>(
         `/api/librarian/materials/${encodeURIComponent(detail.id)}`,
         {
@@ -861,10 +1192,16 @@ function MaterialEditForm({
         },
       );
       setMessage("Матеріал оновлено.");
-      await onSaved();
+      await onCompleted();
     } catch (error) {
       if (error instanceof ApiError) setFieldErrors(error.fieldErrors);
-      setMessage(errorMessage(error));
+      if (coverSaved) {
+        onPartialUnknown(
+          `Обкладинку збережено, але результат інших змін не вдалося підтвердити. Картку завантажуємо повторно; перевірте поля перед наступною дією: ${errorMessage(error)}`,
+        );
+      } else {
+        setMessage(errorMessage(error));
+      }
     } finally {
       setSaving(false);
     }
@@ -912,9 +1249,19 @@ function MaterialEditForm({
         <EditField label="Видавництво" error={fieldError(fieldErrors, "publisher")}>
           <input value={draft.publisher} onChange={(event) => update("publisher", event.target.value)} />
         </EditField>
+        <div className={styles.fieldWide}>
+          <IsbnLookupAssist isbn={draft.isbn} onApply={applyBookCandidate} disabled={saving} />
+        </div>
         <EditField label="Примітка" error={fieldError(fieldErrors, "notes")} wide>
           <textarea rows={4} value={draft.notes} onChange={(event) => update("notes", event.target.value)} />
         </EditField>
+        <div className={styles.fieldWide}>
+          <CoverPhotoField
+            upload={coverUpload}
+            currentUrl={detail.cover?.url || detail.thumbnailUrl}
+            disabled={!writesEnabled || saving}
+          />
+        </div>
         <div className={styles.fieldWide}>
           <LinkEditor
             links={links}
@@ -929,13 +1276,14 @@ function MaterialEditForm({
           {message}
         </InlineMessage>
       ) : null}
+      {coverUpload.error ? <InlineMessage tone="error">{coverUpload.error}</InlineMessage> : null}
 
       <div className={styles.formActions}>
         <button className={styles.secondaryButton} type="button" onClick={onCancel}>Скасувати</button>
         <button
           className={styles.primaryButton}
           type="submit"
-          disabled={saving || !writesEnabled || typeof detail.version !== "number"}
+          disabled={saving || coverUpload.normalizing || !writesEnabled || typeof detail.version !== "number"}
         >
           {saving ? "Зберігаємо…" : "Зберегти зміни"}
         </button>
@@ -974,9 +1322,15 @@ function MaterialCreatePanel({
   const [message, setMessage] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [createdId, setCreatedId] = useState("");
+  const coverUpload = useDirectCoverUpload();
 
   function update<K extends keyof MaterialEditDraft>(key: K, value: MaterialEditDraft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function applyBookCandidate(candidate: BookLookupCandidate) {
+    setDraft((current) => mergeBookLookupDraft(current, candidate));
+    setLinks((current) => mergeBookLookupLink(current, candidate));
   }
 
   function reset() {
@@ -989,6 +1343,7 @@ function MaterialCreatePanel({
     setMessage("");
     setFieldErrors({});
     setCreatedId("");
+    coverUpload.clear();
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -1021,12 +1376,46 @@ function MaterialCreatePanel({
           } : null,
         }),
       });
-      setCreatedId(response.result.materialId);
-      setMessage(`Матеріал ${response.result.materialId} створено.`);
-      await onCreated(response.result.materialId);
+      const materialId = response.result.materialId;
+      setCreatedId(materialId);
+      await onCreated(materialId);
+      const hadCover = Boolean(coverUpload.file);
+      if (hadCover) {
+        try {
+          await coverUpload.promote(materialId, 0);
+        } catch (coverError) {
+          setMessage(
+            coverCleanupPending(coverError)
+              ? `Матеріал ${materialId} створено, але стан обкладинки ще не вдалося підтвердити. Повторіть дію з тим самим фото: ${errorMessage(coverError)}`
+              : `Матеріал ${materialId} створено, але обкладинку ще не додано: ${errorMessage(coverError)}`,
+          );
+          return;
+        }
+        await onCreated(materialId);
+      }
+      setMessage(`Матеріал ${materialId} створено${hadCover ? " з обкладинкою" : ""}.`);
     } catch (requestError) {
       if (requestError instanceof ApiError) setFieldErrors(requestError.fieldErrors);
       setMessage(errorMessage(requestError));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function retryCreatedCover() {
+    if (!createdId || !coverUpload.file || !writesEnabled) return;
+    setSaving(true);
+    setMessage("");
+    try {
+      await coverUpload.promote(createdId, 0);
+      setMessage(`Обкладинку матеріалу ${createdId} додано.`);
+      await onCreated(createdId);
+    } catch (error) {
+      setMessage(
+        coverCleanupPending(error)
+          ? `Матеріал ${createdId} уже створено, але стан обкладинки ще не вдалося підтвердити. Повторіть дію з тим самим фото: ${errorMessage(error)}`
+          : `Матеріал ${createdId} уже створено, але обкладинку не додано: ${errorMessage(error)}`,
+      );
     } finally {
       setSaving(false);
     }
@@ -1073,6 +1462,9 @@ function MaterialCreatePanel({
         <EditField label="Видавництво" error={fieldError(fieldErrors, "publisher")}>
           <input value={draft.publisher} onChange={(event) => update("publisher", event.target.value)} />
         </EditField>
+        <div className={styles.fieldWide}>
+          <IsbnLookupAssist isbn={draft.isbn} onApply={applyBookCandidate} disabled={saving || Boolean(createdId)} />
+        </div>
         <EditField label="Примітка" error={fieldError(fieldErrors, "notes")} wide>
           <textarea rows={3} value={draft.notes} onChange={(event) => update("notes", event.target.value)} />
         </EditField>
@@ -1081,13 +1473,12 @@ function MaterialCreatePanel({
         </div>
       </div>
 
-      <div className={styles.coverStageNotice}>
-        <span aria-hidden="true">▧</span>
-        <div>
-          <strong>Обкладинка не втрачена</strong>
-          <p>Фото або пошук обкладинки підключимо окремим безпечним етапом. Наявні обкладинки та старий спосіб додавання не змінюються.</p>
-        </div>
-      </div>
+      <CoverPhotoField
+        upload={coverUpload}
+        currentUrl=""
+        disabled={!writesEnabled || saving || Boolean(createdId)}
+      />
+      {coverUpload.error ? <InlineMessage tone="error">{coverUpload.error}</InlineMessage> : null}
 
       <label className={styles.receiptToggle}>
         <input
@@ -1132,16 +1523,21 @@ function MaterialCreatePanel({
         </div>
       ) : null}
 
-      {message ? <InlineMessage tone={createdId ? "success" : "error"}>{message}</InlineMessage> : null}
+      {message ? <InlineMessage tone={createdId && !coverUpload.file ? "success" : "error"}>{message}</InlineMessage> : null}
 
       <div className={styles.formActions}>
         {createdId ? (
           <>
             <button className={styles.secondaryButton} type="button" onClick={reset}>Додати ще один</button>
+            {coverUpload.file ? (
+              <button className={styles.secondaryButton} type="button" disabled={saving} onClick={() => void retryCreatedCover()}>
+                Повторити обкладинку
+              </button>
+            ) : null}
             <button className={styles.secondaryButton} type="button" onClick={onOpenMaterial}>Відкрити картку</button>
           </>
         ) : <span>Збереження відбувається напряму в D1, без чернетки.</span>}
-        <button className={styles.primaryButton} type="submit" disabled={!writesEnabled || saving || Boolean(createdId)}>
+        <button className={styles.primaryButton} type="submit" disabled={!writesEnabled || saving || coverUpload.normalizing || Boolean(createdId)}>
           {saving ? "Створюємо…" : "Створити матеріал"}
         </button>
       </div>
@@ -1294,6 +1690,628 @@ function ReceiptForm({
         <span>Залишок і журнал надходжень оновляться однією операцією.</span>
         <button className={styles.primaryButton} type="submit" disabled={!writesEnabled || !effectiveLocationId || saving || !quantity}>
           {saving ? "Зберігаємо…" : "Зареєструвати надходження"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function TransferPanel({
+  detail,
+  state,
+  error,
+  writesEnabled,
+  locations,
+  referenceState,
+  referenceError,
+  onSaved,
+}: {
+  detail: MaterialDetail | null;
+  state: LoadState;
+  error: string;
+  writesEnabled: boolean;
+  locations: LibraryLocation[];
+  referenceState: LoadState;
+  referenceError: string;
+  onSaved: () => Promise<void>;
+}) {
+  if (state === "idle") return <ChooseMaterial />;
+  if (state === "loading" || referenceState === "loading") return <PanelLoading />;
+  if (state === "error" || !detail) return <InlineMessage tone="error">{error}</InlineMessage>;
+  if (referenceState === "error") return <InlineMessage tone="error">{referenceError}</InlineMessage>;
+  return (
+    <TransferForm
+      key={detail.id}
+      detail={detail}
+      writesEnabled={writesEnabled}
+      locations={locations.filter((location) => location.type !== "service")}
+      onSaved={onSaved}
+    />
+  );
+}
+
+function TransferForm({
+  detail,
+  writesEnabled,
+  locations,
+  onSaved,
+}: {
+  detail: MaterialDetail;
+  writesEnabled: boolean;
+  locations: LibraryLocation[];
+  onSaved: () => Promise<void>;
+}) {
+  const initialIntent = useMemo(
+    () => readPendingInventoryIntent("transfer", detail.id),
+    [detail.id],
+  );
+  const initialPayload = initialIntent?.payload ?? {};
+  const availableHoldings = detail.holdings.filter(
+    (holding) =>
+      holding.locationStatus === "active"
+      && holding.locationType !== "service"
+      && holding.quantity > 0,
+  );
+  const [sourceKey, setSourceKey] = useState(
+    () => {
+      const restored = availableHoldings.find(
+        (holding) =>
+          holding.locationId === initialPayload.sourceLocationId
+          && (holding.condition || "unspecified") === initialPayload.condition,
+      );
+      return restored ? holdingKey(restored) : availableHoldings[0] ? holdingKey(availableHoldings[0]) : "";
+    },
+  );
+  const source = availableHoldings.find((holding) => holdingKey(holding) === sourceKey) ?? null;
+  const destinationLocations = locations.filter((location) => location.id !== source?.locationId);
+  const [destinationLocationId, setDestinationLocationId] = useState(
+    typeof initialPayload.destinationLocationId === "string" ? initialPayload.destinationLocationId : "",
+  );
+  const effectiveDestinationId = destinationLocations.some(
+    (location) => location.id === destinationLocationId,
+  ) ? destinationLocationId : destinationLocations[0]?.id || "";
+  const destinationHolding = source
+    ? detail.holdings.find(
+      (holding) =>
+        holding.locationId === effectiveDestinationId
+        && (holding.condition || "unspecified") === (source.condition || "unspecified"),
+    )
+    : null;
+  const [quantity, setQuantity] = useState(() => String(initialPayload.quantity ?? 1));
+  const [occurredAt, setOccurredAt] = useState(
+    typeof initialPayload.occurredAt === "string" ? initialPayload.occurredAt : todayInKyiv(),
+  );
+  const [documentNumber, setDocumentNumber] = useState(
+    typeof initialPayload.documentNumber === "string" ? initialPayload.documentNumber : "",
+  );
+  const [notes, setNotes] = useState(
+    typeof initialPayload.notes === "string" ? initialPayload.notes : "",
+  );
+  const [requestId, setRequestId] = useState(() => initialIntent?.requestId || crypto.randomUUID());
+  const [pendingIntent, setPendingIntent] = useState(initialIntent);
+  const [retryPending, setRetryPending] = useState(Boolean(initialIntent));
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState(
+    initialIntent ? "Результат попереднього переміщення не підтверджено. Повторіть перевірку з тим самим номером операції." : "",
+  );
+  const [success, setSuccess] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  function renewRequest() {
+    if (retryPending) return;
+    setRequestId(crypto.randomUUID());
+    setMessage("");
+    setSuccess(false);
+  }
+
+  function chooseSource(value: string) {
+    setSourceKey(value);
+    const nextSource = availableHoldings.find((holding) => holdingKey(holding) === value);
+    if (nextSource?.locationId === destinationLocationId) setDestinationLocationId("");
+    setQuantity("1");
+    renewRequest();
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!writesEnabled || (!retryPending && (!source || !effectiveDestinationId))) return;
+    setSaving(true);
+    setSuccess(false);
+    setMessage("");
+    setFieldErrors({});
+    const payload = retryPending && pendingIntent
+      ? pendingIntent.payload
+      : {
+        requestId,
+        materialId: detail.id,
+        sourceLocationId: source?.locationId,
+        destinationLocationId: effectiveDestinationId,
+        condition: source?.condition || "unspecified",
+        quantity: Number(quantity),
+        expectedSourceQuantity: source?.quantity,
+        expectedDestinationQuantity: destinationHolding?.quantity ?? 0,
+        occurredAt,
+        documentNumber: documentNumber.trim() || null,
+        notes: notes.trim() || null,
+      };
+    const intent = { kind: "transfer" as const, materialId: detail.id, requestId, payload };
+    if (!writePendingInventoryIntent(intent)) {
+      setMessage("Браузер не дозволив безпечно зберегти номер операції. Запис не виконувався; звільніть місце у сховищі вкладки й повторіть.");
+      setSaving(false);
+      return;
+    }
+    setPendingIntent(intent);
+    try {
+      const response = await apiJson<MutationEnvelope<{
+        quantityMoved: number;
+        sourceQuantityAfter: number;
+        destinationQuantityAfter: number;
+      }>>("/api/librarian/transfers", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      clearPendingInventoryIntent("transfer", detail.id);
+      setPendingIntent(null);
+      setRetryPending(false);
+      setSuccess(true);
+      setMessage(
+        `Переміщено ${response.result.quantityMoved}. Залишок: ${response.result.sourceQuantityAfter} → ${response.result.destinationQuantityAfter}.`,
+      );
+      setRequestId(crypto.randomUUID());
+      await onSaved();
+    } catch (requestError) {
+      if (requestError instanceof ApiError) setFieldErrors(requestError.fieldErrors);
+      if (isDefinitiveInventoryFailure(requestError)) {
+        clearPendingInventoryIntent("transfer", detail.id);
+        setPendingIntent(null);
+        setRetryPending(false);
+        setRequestId(crypto.randomUUID());
+        if (requestError instanceof ApiError && requestError.code === "stock_quantity_conflict") {
+          setMessage("Залишок уже змінився. Картку оновлено — перевірте кількість і повторіть дію.");
+          await onSaved();
+        } else {
+          setMessage(errorMessage(requestError));
+        }
+      } else {
+        setRetryPending(true);
+        setMessage(`Результат переміщення не підтверджено. Не створюйте нову операцію — повторіть цю перевірку: ${errorMessage(requestError)}`);
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className={styles.receiptCard} onSubmit={submit} aria-busy={saving}>
+      <div className={styles.formHeading}>
+        <div>
+          <p>{detail.id}</p>
+          <h2>Перемістити примірники</h2>
+          <small>{detail.title}</small>
+        </div>
+      </div>
+      <div className={styles.selectedSummary}>
+        <Cover material={detail} />
+        <div>
+          <strong>{detail.title}</strong>
+          <small>Одна операція одночасно зменшить залишок у джерелі та збільшить у новому місці.</small>
+        </div>
+      </div>
+
+      {availableHoldings.length && destinationLocations.length ? (
+        <div className={styles.formGrid}>
+          <EditField label="Звідки" required wide error={fieldErrors.sourceLocationId}>
+            <select value={sourceKey} onChange={(event) => chooseSource(event.target.value)} disabled={retryPending} required aria-invalid={Boolean(fieldErrors.sourceLocationId)}>
+              {availableHoldings.map((holding) => (
+                <option key={holdingKey(holding)} value={holdingKey(holding)}>
+                  {holding.locationName} · {conditionLabel(holding.condition)} · {holding.quantity}
+                </option>
+              ))}
+            </select>
+          </EditField>
+          <EditField label="Куди" required wide error={fieldErrors.destinationLocationId}>
+            <select
+              value={effectiveDestinationId}
+              onChange={(event) => {
+                setDestinationLocationId(event.target.value);
+                renewRequest();
+              }}
+              disabled={retryPending}
+              required
+              aria-invalid={Boolean(fieldErrors.destinationLocationId)}
+            >
+              {destinationLocations.map((location) => (
+                <option key={location.id} value={location.id}>{location.name}</option>
+              ))}
+            </select>
+          </EditField>
+          <EditField label="Стан примірників" error={fieldErrors.condition}>
+            <input value={conditionLabel(source?.condition ?? null)} readOnly />
+          </EditField>
+          <EditField label="У джерелі зараз">
+            <input value={source?.quantity ?? 0} readOnly />
+          </EditField>
+          <EditField label="У місці призначення зараз">
+            <input value={destinationHolding?.quantity ?? 0} readOnly />
+          </EditField>
+          <EditField label="Перемістити" required error={fieldErrors.quantity}>
+            <input
+              type="number"
+              min="1"
+              max={source?.quantity ?? 1}
+              value={quantity}
+              onChange={(event) => {
+                setQuantity(event.target.value);
+                renewRequest();
+              }}
+              disabled={retryPending}
+              required
+              aria-invalid={Boolean(fieldErrors.quantity)}
+            />
+          </EditField>
+          <EditField label="Дата" required error={fieldErrors.occurredAt}>
+            <input
+              type="date"
+              value={occurredAt}
+              onChange={(event) => {
+                setOccurredAt(event.target.value);
+                renewRequest();
+              }}
+              disabled={retryPending}
+              required
+              aria-invalid={Boolean(fieldErrors.occurredAt)}
+            />
+          </EditField>
+          <EditField label="Документ" error={fieldErrors.documentNumber}>
+            <input
+              value={documentNumber}
+              onChange={(event) => {
+                setDocumentNumber(event.target.value);
+                renewRequest();
+              }}
+              placeholder="Номер акта або накладної"
+              maxLength={160}
+              disabled={retryPending}
+              aria-invalid={Boolean(fieldErrors.documentNumber)}
+            />
+          </EditField>
+          <EditField label="Примітка" wide error={fieldErrors.notes}>
+            <textarea
+              rows={3}
+              maxLength={2000}
+              value={notes}
+              disabled={retryPending}
+              aria-invalid={Boolean(fieldErrors.notes)}
+              onChange={(event) => {
+                setNotes(event.target.value);
+                renewRequest();
+              }}
+            />
+          </EditField>
+        </div>
+      ) : (
+        <InlineMessage tone="info">
+          Потрібні ненульовий залишок і щонайменше два активні місця зберігання.
+        </InlineMessage>
+      )}
+
+      {message ? <InlineMessage tone={success ? "success" : "error"}>{message}</InlineMessage> : null}
+      <div className={styles.formActions}>
+        <span>Повтор після втрати зв’язку не створить другу операцію.</span>
+        <button
+          className={styles.primaryButton}
+          type="submit"
+          disabled={!writesEnabled || (!retryPending && (!source || !effectiveDestinationId || !quantity)) || saving}
+        >
+          {saving ? "Перевіряємо…" : retryPending ? "Перевірити результат" : "Перемістити примірники"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function WriteoffPanel({
+  detail,
+  state,
+  error,
+  writesEnabled,
+  locations,
+  referenceState,
+  referenceError,
+  onSaved,
+}: {
+  detail: MaterialDetail | null;
+  state: LoadState;
+  error: string;
+  writesEnabled: boolean;
+  locations: LibraryLocation[];
+  referenceState: LoadState;
+  referenceError: string;
+  onSaved: () => Promise<void>;
+}) {
+  if (state === "idle") return <ChooseMaterial />;
+  if (state === "loading" || referenceState === "loading") return <PanelLoading />;
+  if (state === "error" || !detail) return <InlineMessage tone="error">{error}</InlineMessage>;
+  if (referenceState === "error") return <InlineMessage tone="error">{referenceError}</InlineMessage>;
+  return (
+    <WriteoffForm
+      key={detail.id}
+      detail={detail}
+      writesEnabled={writesEnabled}
+      locations={locations.filter((location) => location.type !== "service")}
+      onSaved={onSaved}
+    />
+  );
+}
+
+function WriteoffForm({
+  detail,
+  writesEnabled,
+  locations,
+  onSaved,
+}: {
+  detail: MaterialDetail;
+  writesEnabled: boolean;
+  locations: LibraryLocation[];
+  onSaved: () => Promise<void>;
+}) {
+  const initialIntent = useMemo(
+    () => readPendingInventoryIntent("writeoff", detail.id),
+    [detail.id],
+  );
+  const initialPayload = initialIntent?.payload ?? {};
+  const locationIds = new Set(locations.map((location) => location.id));
+  const availableHoldings = detail.holdings.filter(
+    (holding) =>
+      holding.locationStatus === "active"
+      && holding.locationType !== "service"
+      && locationIds.has(holding.locationId)
+      && holding.quantity > 0,
+  );
+  const [sourceKey, setSourceKey] = useState(
+    () => {
+      const restored = availableHoldings.find(
+        (holding) =>
+          holding.locationId === initialPayload.locationId
+          && (holding.condition || "unspecified") === initialPayload.condition,
+      );
+      return restored ? holdingKey(restored) : availableHoldings[0] ? holdingKey(availableHoldings[0]) : "";
+    },
+  );
+  const source = availableHoldings.find((holding) => holdingKey(holding) === sourceKey) ?? null;
+  const [quantity, setQuantity] = useState(() => String(initialPayload.quantity ?? 1));
+  const [reason, setReason] = useState(
+    typeof initialPayload.reason === "string" ? initialPayload.reason : "damaged",
+  );
+  const [occurredAt, setOccurredAt] = useState(
+    typeof initialPayload.occurredAt === "string" ? initialPayload.occurredAt : todayInKyiv(),
+  );
+  const [documentNumber, setDocumentNumber] = useState(
+    typeof initialPayload.documentNumber === "string" ? initialPayload.documentNumber : "",
+  );
+  const [notes, setNotes] = useState(
+    typeof initialPayload.notes === "string" ? initialPayload.notes : "",
+  );
+  const [requestId, setRequestId] = useState(() => initialIntent?.requestId || crypto.randomUUID());
+  const [pendingIntent, setPendingIntent] = useState(initialIntent);
+  const [retryPending, setRetryPending] = useState(Boolean(initialIntent));
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState(
+    initialIntent ? "Результат попереднього списання не підтверджено. Повторіть перевірку з тим самим номером операції." : "",
+  );
+  const [success, setSuccess] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  function renewRequest() {
+    if (retryPending) return;
+    setRequestId(crypto.randomUUID());
+    setMessage("");
+    setSuccess(false);
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!writesEnabled || (!retryPending && !source)) return;
+    const amount = Number(quantity);
+    const confirmed = retryPending || window.confirm(
+      `Списати ${amount} прим. «${detail.title}» з місця «${source.locationName}»? Залишок зменшиться одразу.`,
+    );
+    if (!confirmed) return;
+    setSaving(true);
+    setSuccess(false);
+    setMessage("");
+    setFieldErrors({});
+    const payload = retryPending && pendingIntent
+      ? pendingIntent.payload
+      : {
+        requestId,
+        materialId: detail.id,
+        locationId: source?.locationId,
+        condition: source?.condition || "unspecified",
+        quantity: amount,
+        expectedQuantity: source?.quantity,
+        reason,
+        occurredAt,
+        documentNumber: documentNumber.trim() || null,
+        notes: notes.trim() || null,
+      };
+    const intent = { kind: "writeoff" as const, materialId: detail.id, requestId, payload };
+    if (!writePendingInventoryIntent(intent)) {
+      setMessage("Браузер не дозволив безпечно зберегти номер операції. Списання не виконувалося; звільніть місце у сховищі вкладки й повторіть.");
+      setSaving(false);
+      return;
+    }
+    setPendingIntent(intent);
+    try {
+      const response = await apiJson<MutationEnvelope<{
+        quantityWrittenOff: number;
+        quantityAfter: number;
+      }>>("/api/librarian/writeoffs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      clearPendingInventoryIntent("writeoff", detail.id);
+      setPendingIntent(null);
+      setRetryPending(false);
+      setSuccess(true);
+      setMessage(
+        `Списано ${response.result.quantityWrittenOff}. Новий залишок у вибраному місці: ${response.result.quantityAfter}.`,
+      );
+      setRequestId(crypto.randomUUID());
+      await onSaved();
+    } catch (requestError) {
+      if (requestError instanceof ApiError) setFieldErrors(requestError.fieldErrors);
+      if (isDefinitiveInventoryFailure(requestError)) {
+        clearPendingInventoryIntent("writeoff", detail.id);
+        setPendingIntent(null);
+        setRetryPending(false);
+        setRequestId(crypto.randomUUID());
+        if (requestError instanceof ApiError && requestError.code === "stock_quantity_conflict") {
+          setMessage("Залишок уже змінився. Картку оновлено — перевірте кількість і повторіть дію.");
+          await onSaved();
+        } else {
+          setMessage(errorMessage(requestError));
+        }
+      } else {
+        setRetryPending(true);
+        setMessage(`Результат списання не підтверджено. Не створюйте нову операцію — повторіть цю перевірку: ${errorMessage(requestError)}`);
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className={styles.receiptCard} onSubmit={submit} aria-busy={saving}>
+      <div className={styles.formHeading}>
+        <div>
+          <p>{detail.id}</p>
+          <h2>Списати примірники</h2>
+          <small>{detail.title}</small>
+        </div>
+      </div>
+      <div className={styles.selectedSummary}>
+        <Cover material={detail} />
+        <div>
+          <strong>{detail.title}</strong>
+          <small>Списання зменшує фактичний фонд і залишається в незмінному журналі операцій.</small>
+        </div>
+      </div>
+
+      {availableHoldings.length ? (
+        <div className={styles.formGrid}>
+          <EditField label="Звідки списати" required wide error={fieldErrors.locationId}>
+            <select
+              value={sourceKey}
+              disabled={retryPending}
+              aria-invalid={Boolean(fieldErrors.locationId)}
+              onChange={(event) => {
+                setSourceKey(event.target.value);
+                setQuantity("1");
+                renewRequest();
+              }}
+              required
+            >
+              {availableHoldings.map((holding) => (
+                <option key={holdingKey(holding)} value={holdingKey(holding)}>
+                  {holding.locationName} · {conditionLabel(holding.condition)} · {holding.quantity}
+                </option>
+              ))}
+            </select>
+          </EditField>
+          <EditField label="Поточний залишок">
+            <input value={source?.quantity ?? 0} readOnly />
+          </EditField>
+          <EditField label="Списати" required error={fieldErrors.quantity}>
+            <input
+              type="number"
+              min="1"
+              max={source?.quantity ?? 1}
+              value={quantity}
+              disabled={retryPending}
+              aria-invalid={Boolean(fieldErrors.quantity)}
+              onChange={(event) => {
+                setQuantity(event.target.value);
+                renewRequest();
+              }}
+              required
+            />
+          </EditField>
+          <EditField label="Причина" required error={fieldErrors.reason}>
+            <select
+              value={reason}
+              disabled={retryPending}
+              aria-invalid={Boolean(fieldErrors.reason)}
+              onChange={(event) => {
+                setReason(event.target.value);
+                renewRequest();
+              }}
+            >
+              <option value="worn">Зношено</option>
+              <option value="damaged">Пошкоджено</option>
+              <option value="lost">Втрачено</option>
+              <option value="obsolete">Застаріло</option>
+              <option value="inventory_shortage">Нестача за підрахунком</option>
+              <option value="other">Інша причина</option>
+            </select>
+          </EditField>
+          <EditField label="Дата" required error={fieldErrors.occurredAt}>
+            <input
+              type="date"
+              value={occurredAt}
+              disabled={retryPending}
+              aria-invalid={Boolean(fieldErrors.occurredAt)}
+              onChange={(event) => {
+                setOccurredAt(event.target.value);
+                renewRequest();
+              }}
+              required
+            />
+          </EditField>
+          <EditField label="Документ" error={fieldErrors.documentNumber}>
+            <input
+              value={documentNumber}
+              onChange={(event) => {
+                setDocumentNumber(event.target.value);
+                renewRequest();
+              }}
+              placeholder="Номер акта"
+              maxLength={160}
+              disabled={retryPending}
+              aria-invalid={Boolean(fieldErrors.documentNumber)}
+            />
+          </EditField>
+          <EditField label="Примітка" wide error={fieldErrors.notes}>
+            <textarea
+              rows={3}
+              maxLength={2000}
+              value={notes}
+              disabled={retryPending}
+              aria-invalid={Boolean(fieldErrors.notes)}
+              onChange={(event) => {
+                setNotes(event.target.value);
+                renewRequest();
+              }}
+              required={reason === "other"}
+              placeholder={reason === "other" ? "Опишіть іншу причину" : "За потреби"}
+            />
+          </EditField>
+        </div>
+      ) : (
+        <InlineMessage tone="info">Для матеріалу немає ненульового залишку, який можна списати.</InlineMessage>
+      )}
+
+      {message ? <InlineMessage tone={success ? "success" : "error"}>{message}</InlineMessage> : null}
+      <div className={styles.formActions}>
+        <span>Перед записом система ще раз перевірить актуальний залишок.</span>
+        <button
+          className={styles.primaryButton}
+          type="submit"
+          disabled={!writesEnabled || (!retryPending && (!source || !quantity)) || saving}
+        >
+          {saving ? "Перевіряємо…" : retryPending ? "Перевірити результат" : "Списати примірники"}
         </button>
       </div>
     </form>
@@ -1586,6 +2604,7 @@ function LoanIssueForm({
   const [quantity, setQuantity] = useState("1");
   const [issuedAt, setIssuedAt] = useState(() => todayInKyiv());
   const [dueAt, setDueAt] = useState("");
+  const dueAtInputRef = useRef<HTMLInputElement>(null);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -1594,9 +2613,11 @@ function LoanIssueForm({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!writesEnabled || !source || !teacherUserId) return;
-    const submittedDueAt = String(
-      new FormData(event.currentTarget).get("dueAt") ?? "",
-    ).trim();
+    const submittedDueAt = resolveLoanDueAtForSubmission(
+      dueAtInputRef.current?.value,
+      new FormData(event.currentTarget).get("dueAt"),
+      dueAt,
+    );
     setSaving(true);
     setSuccess(false);
     setMessage("");
@@ -1610,7 +2631,7 @@ function LoanIssueForm({
             requestId: crypto.randomUUID(),
             teacherUserId,
             issuedAt,
-            dueAt: submittedDueAt || null,
+            dueAt: submittedDueAt,
             notes: notes.trim() || null,
             items: [{
               materialId: detail.id,
@@ -1683,11 +2704,12 @@ function LoanIssueForm({
           </EditField>
           <EditField label="Повернути до">
             <input
+              ref={dueAtInputRef}
               name="dueAt"
               type="date"
               min={issuedAt}
               value={dueAt}
-              onChange={(event) => setDueAt(event.target.value)}
+              onInput={(event) => setDueAt(event.currentTarget.value)}
             />
           </EditField>
           <EditField label="Примітка" wide>
@@ -2154,6 +3176,86 @@ function LinkEditor({
   );
 }
 
+function IsbnLookupAssist({
+  isbn,
+  onApply,
+  disabled,
+}: {
+  isbn: string;
+  onApply: (candidate: BookLookupCandidate) => void;
+  disabled: boolean;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [candidates, setCandidates] = useState<BookLookupCandidate[]>([]);
+
+  async function lookup() {
+    const query = isbn.trim();
+    if (!query || loading) return;
+    setLoading(true);
+    setMessage("");
+    setCandidates([]);
+    try {
+      const response = await apiJson<BookLookupEnvelope>(
+        `/api/librarian/isbn-lookup?isbn=${encodeURIComponent(query)}`,
+      );
+      setCandidates(response.candidates);
+      setMessage(
+        response.found
+          ? "Оберіть знайдений опис. Заповнені вами поля не буде перезаписано."
+          : "За цим ISBN опису не знайдено — заповніть поля вручну.",
+      );
+    } catch (lookupError) {
+      setMessage(errorMessage(lookupError));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function apply(candidate: BookLookupCandidate) {
+    onApply(candidate);
+    setCandidates([]);
+    setMessage("Дані видання додано до порожніх полів; перевірте їх перед збереженням.");
+  }
+
+  return (
+    <section className={styles.isbnLookup} aria-live="polite">
+      <div>
+        <strong>Автозаповнення за ISBN</strong>
+        <small>Назва, автор, рік, видавництво та інформаційне посилання.</small>
+      </div>
+      <button
+        className={styles.secondaryButton}
+        type="button"
+        disabled={disabled || loading || !isbn.trim()}
+        onClick={() => void lookup()}
+      >
+        {loading ? "Шукаємо…" : "Знайти опис"}
+      </button>
+      {message ? <p>{message}</p> : null}
+      {candidates.length ? (
+        <div className={styles.isbnCandidates}>
+          {candidates.map((candidate, index) => (
+            <button
+              key={`${candidate.provider}-${candidate.title}-${index}`}
+              type="button"
+              onClick={() => apply(candidate)}
+            >
+              <strong>{candidate.title}</strong>
+              <small>
+                {[candidate.authors.join(", "), candidate.publishedYear, candidate.publisher]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </small>
+              <span>{candidate.provider === "google_books" ? "Google Books" : "Open Library"}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function ConditionSelect({ value, onValue }: { value: string; onValue: (value: string) => void }) {
   return (
     <select value={value} onChange={(event) => onValue(event.target.value)}>
@@ -2184,17 +3286,94 @@ function PanelLoading() {
 }
 
 function InlineMessage({ children, tone }: { children: React.ReactNode; tone: "error" | "success" | "info" }) {
-  return <div className={`${styles.message} ${styles[`message${capitalize(tone)}`]}`}>{children}</div>;
+  return (
+    <div
+      className={`${styles.message} ${styles[`message${capitalize(tone)}`]}`}
+      role={tone === "error" ? "alert" : "status"}
+      aria-live={tone === "error" ? "assertive" : "polite"}
+    >
+      {children}
+    </div>
+  );
 }
 
 class ApiError extends Error {
   fieldErrors: Record<string, string>;
+  status: number;
+  code: string;
 
-  constructor(message: string, fieldErrors: Record<string, string> = {}) {
+  constructor(
+    message: string,
+    fieldErrors: Record<string, string> = {},
+    status = 0,
+    code = "",
+  ) {
     super(message);
     this.name = "ApiError";
     this.fieldErrors = fieldErrors;
+    this.status = status;
+    this.code = code;
   }
+}
+
+function readPendingInventoryIntent(
+  kind: PendingInventoryIntent["kind"],
+  materialId: string,
+): PendingInventoryIntent | null {
+  if (typeof window === "undefined") return null;
+  return readStoredInventoryIntent(window.sessionStorage, kind, materialId);
+}
+
+function writePendingInventoryIntent(intent: PendingInventoryIntent): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    writeStoredInventoryIntent(window.sessionStorage, intent);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearPendingInventoryIntent(
+  kind: PendingInventoryIntent["kind"],
+  materialId: string,
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    clearStoredInventoryIntent(window.sessionStorage, kind, materialId);
+  } catch {
+    // The completed/terminal response remains authoritative even if browser cleanup is blocked.
+  }
+}
+
+const DEFINITIVE_INVENTORY_FAILURES = new Set([
+  "validation_failed",
+  "authentication_required",
+  "access_denied",
+  "allowlist_not_configured",
+  "cross_origin_request",
+  "actor_not_mapped",
+  "material_not_found",
+  "source_location_not_found",
+  "destination_location_not_found",
+  "location_not_found",
+  "stock_quantity_conflict",
+  "insufficient_stock",
+  "request_id_conflict",
+  "unsupported_media_type",
+  "invalid_json",
+]);
+
+function isDefinitiveInventoryFailure(error: unknown): boolean {
+  return error instanceof ApiError
+    && error.status !== 408
+    && error.status !== 425
+    && error.status !== 429
+    && DEFINITIVE_INVENTORY_FAILURES.has(error.code);
+}
+
+function coverCleanupPending(error: unknown): boolean {
+  return error instanceof ApiError && error.code === "cover_cleanup_pending";
 }
 
 async function apiJson<T>(url: string, init: RequestInit = {}): Promise<T> {
@@ -2207,6 +3386,8 @@ async function apiJson<T>(url: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError(
       body?.error || body?.message || `Запит не виконано (${response.status}).`,
       body?.fieldErrors || {},
+      response.status,
+      body?.code || "",
     );
   }
   return body;
@@ -2215,18 +3396,32 @@ async function apiJson<T>(url: string, init: RequestInit = {}): Promise<T> {
 function toolTitle(tool: Tool): string {
   if (tool === "create") return "Новий матеріал";
   if (tool === "receipt") return "Надходження";
+  if (tool === "transfer") return "Переміщення";
+  if (tool === "writeoff") return "Списання";
   if (tool === "count") return "Фактична кількість";
   if (tool === "issue") return "Видача вчителю";
   if (tool === "return") return "Повернення";
+  if (tool === "academic-year") return "Новий навчальний рік";
+  if (tool === "class-create") return "Відкрити клас";
+  if (tool === "class-update") return "Змінити клас";
+  if (tool === "class-close") return "Закрити клас";
+  if (tool === "rollover") return "Перехід на новий рік";
   return "Каталог матеріалів";
 }
 
 function toolDescription(tool: Tool): string {
   if (tool === "create") return "Додайте видання напряму в нову базу; CAT-ID створиться автоматично.";
   if (tool === "receipt") return "Оберіть матеріал і додайте нові примірники на баланс.";
+  if (tool === "transfer") return "Перемістіть примірники між двома місцями однією атомарною операцією.";
+  if (tool === "writeoff") return "Зафіксуйте пошкодження, втрату, застарілість або нестачу.";
   if (tool === "count") return "Оберіть матеріал і запишіть те, що порахували на місці.";
   if (tool === "issue") return "Оформіть видачу з конкретного місця зберігання.";
   if (tool === "return") return "Знайдіть відкриту видачу та прийміть повернення.";
+  if (tool === "academic-year") return "Підготуйте наступний навчальний період напряму в D1.";
+  if (tool === "class-create") return "Створіть клас у навчальному році та призначте керівника й кабінет.";
+  if (tool === "class-update") return "Оновіть назву, керівника, кабінет або примітку без чернетки.";
+  if (tool === "class-close") return "Завершіть клас без видалення його історії.";
+  if (tool === "rollover") return "Завершіть поточний рік і перенесіть усі класи контрольованою операцією.";
   return "Швидкий пошук, усі посилання, примірники та пряме редагування.";
 }
 
@@ -2284,6 +3479,38 @@ function linkPayload(links: EditableLinkDraft[]) {
     isPublic: link.isPublic,
     sortOrder: index,
   }));
+}
+
+function mergeBookLookupDraft(
+  current: MaterialEditDraft,
+  candidate: BookLookupCandidate,
+): MaterialEditDraft {
+  return {
+    ...current,
+    title: current.title.trim() || candidate.title,
+    author: current.author.trim() || candidate.authors.join(", "),
+    publicationYear: current.publicationYear || (candidate.publishedYear ? String(candidate.publishedYear) : ""),
+    isbn: current.isbn.trim() || candidate.isbn,
+    publisher: current.publisher.trim() || candidate.publisher,
+  };
+}
+
+function mergeBookLookupLink(
+  current: EditableLinkDraft[],
+  candidate: BookLookupCandidate,
+): EditableLinkDraft[] {
+  if (!candidate.sourceUrl || current.some((link) => link.url === candidate.sourceUrl)) return current;
+  return [
+    ...current,
+    {
+      key: crypto.randomUUID(),
+      id: null,
+      kind: "details",
+      label: `Інформація про видання · ${candidate.provider === "google_books" ? "Google Books" : "Open Library"}`,
+      url: candidate.sourceUrl,
+      isPublic: true,
+    },
+  ];
 }
 
 function isLinkKind(value: string): value is EditableLinkDraft["kind"] {

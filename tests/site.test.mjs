@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import worker from "../dist-catalog/server/index.js";
 import {
+  catalogDetailApiUrl,
   materialIdFromUrl,
   materialIssueText,
   materialShareText,
   newestMaterialsByCatalogId,
+  normalizeCatalogApiUrl,
   urlWithMaterial,
   urlWithoutMaterial,
 } from "../source/app.js";
@@ -44,6 +46,17 @@ test("creates safe direct links and honest latest-catalog selections", () => {
   assert.match(materialShareText(item, direct), /https:\/\/example\.test\/library-site/);
   assert.match(materialIssueText(item, direct), /Що потрібно виправити:/);
   assert.match(materialIssueText(item, direct), /CAT-0112/);
+
+  const api = normalizeCatalogApiUrl(
+    "https://library.example/api/catalog-v2/?stale=1#fragment",
+  );
+  assert.equal(api, "https://library.example/api/catalog-v2");
+  assert.equal(
+    catalogDetailApiUrl(api, "cat-0112"),
+    "https://library.example/api/catalog-v2/CAT-0112",
+  );
+  assert.equal(normalizeCatalogApiUrl("https://script.google.com/macros/s/demo/exec"), "");
+  assert.equal(catalogDetailApiUrl(api, "../CAT-0112"), "");
 });
 
 test("wires teacher collections, sharing, error reporting, and mobile dialog safety", async () => {
@@ -65,6 +78,10 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(app, /addEventListener\("popstate"/);
   assert.match(app, /navigator\.share/);
   assert.match(app, /data-report-error/);
+  assert.match(app, /class="material-links"/);
+  assert.match(app, /target="_blank" rel="noopener noreferrer"/);
+  assert.match(app, /raw\.thumbnailUrl/);
+  assert.match(app, /raw\.publicationType/);
   assert.match(css, /max-height:calc\(100dvh - 12px\)/);
   assert.match(css, /env\(safe-area-inset-bottom\)/);
   assert.match(css, /min-height:44px/);
@@ -83,16 +100,47 @@ test("serves the official logo and live placement data", async () => {
   assert.match(text, /"other":/);
 });
 
-test("ships an opt-in Google Sheets sync with a local fallback", async () => {
+test("ships paginated public D1 sync with a GitHub Pages fallback", async () => {
   const home = await worker.fetch(new Request("https://example.test/"));
   const html = await home.text();
-  assert.match(html, /Показано перевірену копію бази/);
+  assert.match(html, /Показано локальну резервну копію каталогу/);
   assert.match(html, /<script src="\/config\.js"><\/script>/);
 
   const configResponse = await worker.fetch(new Request("https://example.test/config.js"));
   assert.equal(configResponse.status, 200);
-  assert.match(await configResponse.text(), /apiUrl:\s*"(?:https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec)?"/);
-  assert.match(home.headers.get("content-security-policy"), /https:\/\/script\.google\.com/);
+  assert.match(
+    await configResponse.text(),
+    /catalogApiUrl:\s*"https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/api\/catalog-v2"/,
+  );
+  assert.match(home.headers.get("content-security-policy"), /connect-src 'self' https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site/);
+  assert.doesNotMatch(home.headers.get("content-security-policy"), /script\.google\.com/);
+
+  const app = await (await worker.fetch(new Request("https://example.test/app.js"))).text();
+  assert.match(app, /schemaVersion\) !== 2/);
+  assert.match(app, /url\.searchParams\.set\("limit", "48"\)/);
+  assert.match(app, /catalogDetailApiUrl/);
+  assert.doesNotMatch(app, /jsonpPayload|libraryCatalogCallback/);
+});
+
+test("keeps D1 catalog reads cross-origin while librarian APIs remain app-guarded", async () => {
+  const [listRoute, detailRoute, coverRoute, librarianRoute] = await Promise.all([
+    readFile(new URL("../app/api/catalog-v2/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/catalog-v2/[id]/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/catalog-v2/covers/[id]/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/librarian/materials/search/route.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(listRoute, /"Access-Control-Allow-Origin": "\*"/);
+  assert.match(detailRoute, /"Access-Control-Allow-Origin": "\*"/);
+  assert.match(coverRoute, /"Access-Control-Allow-Origin": "\*"/);
+  assert.match(librarianRoute, /authorizeLibrarianApi\(\)/);
+});
+
+test("landing page describes the implemented direct D1 workflow", async () => {
+  const landing = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(landing, /Фактичний залишок/);
+  assert.match(landing, /Видача вчителям/);
+  assert.match(landing, /відразу зберігаються у захищеній базі/);
+  assert.doesNotMatch(landing, /Спочатку чернетка|<strong>Ревізія<\/strong>|<strong>Переміщення<\/strong>/);
 });
 
 test("public Apps Script API is read-only and excludes private sheets", async () => {

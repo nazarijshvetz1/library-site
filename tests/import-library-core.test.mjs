@@ -20,6 +20,29 @@ async function fixture() {
   return JSON.parse(await readFile(fixturePath, "utf8"));
 }
 
+function addAcademicSheets(input) {
+  input.sheets.academicYears = { rows: [
+    { academic_year_id: "YR-2026-2027", label: "2026/2027", start_date: "01.09.2026", end_date: "30.06.2027", status: "closed", notes: "" },
+    { academic_year_id: "YR-2027-2028", label: "2027/2028", start_date: "01.09.2027", end_date: "30.06.2028", status: "draft", notes: "" },
+  ] };
+  input.sheets.cohorts = { rows: [
+    { cohort_id: "COH-001", status: "active", notes: "fixture cohort" },
+  ] };
+  input.sheets.classYears = { rows: [
+    {
+      class_year_id: "CY-2026-001", academic_year_id: "YR-2026-2027", cohort_id: "COH-001",
+      class_name: "9-А", grade: 9, code: "А", teacher_user_id: "USR-002", location_id: "LOC-001",
+      start_date: "01.09.2026", end_date: "30.06.2027", status: "closed", actual_closed_date: "30.06.2027", notes: "",
+    },
+    {
+      class_year_id: "CY-2027-001", academic_year_id: "YR-2027-2028", cohort_id: "COH-001",
+      class_name: "10-А", grade: 10, code: "А", teacher_user_id: "USR-002", location_id: "LOC-001",
+      start_date: "01.09.2027", end_date: "30.06.2028", status: "planned", actual_closed_date: "", notes: "",
+    },
+  ] };
+  return input;
+}
+
 test("normalizes canonical sheet wrappers and derives balances without formula sheets", async () => {
   const input = await fixture();
   const { bundle, report } = importCanonicalExport(input);
@@ -44,6 +67,40 @@ test("normalizes canonical sheet wrappers and derives balances without formula s
   assert.equal(bundle.tables.users[0].email, "librarian@example.com");
   assert.match(bundle.tables.materials[0].search_text, /cat 0590/u);
   assert.match(bundle.tables.materials[0].search_text, /українська література/u);
+});
+
+test("normalizes optional academic year, cohort and class history sheets", async () => {
+  const input = addAcademicSheets(await fixture());
+  input.sheets.cohorts.rows.push({ cohort_id: "COH-002", status: "Завершена", notes: "legacy status" });
+  const { bundle, report } = importCanonicalExport(input);
+
+  assert.equal(report.ok, true, stableStringify(report.diagnostics));
+  assert.equal(report.counts.academic_years, 2);
+  assert.equal(report.counts.cohorts, 2);
+  assert.equal(report.counts.class_years, 2);
+  assert.deepEqual(bundle.tables.academic_years.map((row) => [row.academic_year_id, row.status]), [
+    ["YR-2026-2027", "closed"],
+    ["YR-2027-2028", "draft"],
+  ]);
+  assert.deepEqual(bundle.tables.class_years.map((row) => [row.class_year_id, row.class_name, row.status]), [
+    ["CY-2026-001", "9-А", "closed"],
+    ["CY-2027-001", "10-А", "planned"],
+  ]);
+  assert.equal(bundle.tables.cohorts.find((row) => row.cohort_id === "COH-002").status, "closed");
+  assert.equal(report.ignored_sheets.includes("academicYears"), false);
+  assert.equal(report.ignored_sheets.includes("cohorts"), false);
+  assert.equal(report.ignored_sheets.includes("classYears"), false);
+});
+
+test("rejects more than one active academic year before building a D1 plan", async () => {
+  const input = addAcademicSheets(await fixture());
+  input.sheets.academicYears.rows.forEach((row) => {
+    row.status = "active";
+  });
+  const { report } = importCanonicalExport(input);
+
+  assert.equal(report.ok, false);
+  assert.equal(report.diagnostics.errors.some((item) => item.code === "academic_year_active_duplicate"), true);
 });
 
 test("classifies a store as a commercial page, never as an ebook", async () => {

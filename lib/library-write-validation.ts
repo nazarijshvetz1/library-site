@@ -83,6 +83,42 @@ export type StockAdjustmentInput = {
   notes: string | null;
 };
 
+export type StockTransferInput = {
+  requestId: string;
+  materialId: string;
+  sourceLocationId: string;
+  destinationLocationId: string;
+  condition: "unspecified" | "good" | "worn" | "damaged";
+  quantity: number;
+  expectedSourceQuantity: number;
+  expectedDestinationQuantity: number;
+  occurredAt: string;
+  documentNumber: string | null;
+  notes: string | null;
+};
+
+export const WRITEOFF_REASONS = [
+  "worn",
+  "damaged",
+  "lost",
+  "obsolete",
+  "inventory_shortage",
+  "other",
+] as const;
+
+export type StockWriteoffInput = {
+  requestId: string;
+  materialId: string;
+  locationId: string;
+  condition: "unspecified" | "good" | "worn" | "damaged";
+  quantity: number;
+  expectedQuantity: number;
+  reason: (typeof WRITEOFF_REASONS)[number];
+  occurredAt: string;
+  documentNumber: string | null;
+  notes: string | null;
+};
+
 export type LoanCreateInput = {
   requestId: string;
   teacherUserId: string;
@@ -399,6 +435,177 @@ export function validateStockAdjustmentInput(
     countedQuantity,
     reason,
     occurredAt,
+    notes,
+  });
+}
+
+export function validateStockTransferInput(
+  input: unknown,
+): ValidationResult<StockTransferInput> {
+  const errors: Record<string, string> = {};
+  if (!isRecord(input)) {
+    return invalid("body", "Очікується об’єкт переміщення.");
+  }
+  assertExactKeys(
+    input,
+    [
+      "requestId",
+      "materialId",
+      "sourceLocationId",
+      "destinationLocationId",
+      "condition",
+      "quantity",
+      "expectedSourceQuantity",
+      "expectedDestinationQuantity",
+      "occurredAt",
+      "documentNumber",
+      "notes",
+    ],
+    errors,
+  );
+  const requestId = readUuid(input.requestId, "requestId", errors);
+  const materialId = readPatternText(
+    input.materialId,
+    CAT_ID_RE,
+    "materialId",
+    "Некоректний CAT-ID.",
+    errors,
+  );
+  const sourceLocationId = readPatternText(
+    input.sourceLocationId,
+    LOCATION_ID_RE,
+    "sourceLocationId",
+    "Некоректне початкове місце.",
+    errors,
+  );
+  const destinationLocationId = readPatternText(
+    input.destinationLocationId,
+    LOCATION_ID_RE,
+    "destinationLocationId",
+    "Некоректне кінцеве місце.",
+    errors,
+  );
+  if (
+    sourceLocationId &&
+    destinationLocationId &&
+    sourceLocationId === destinationLocationId
+  ) {
+    errors.destinationLocationId = "Початкове й кінцеве місце мають відрізнятися.";
+  }
+  const condition = readCondition(input.condition, "condition", errors);
+  const quantity = readBoundedInteger(input.quantity, "quantity", errors, 1, 1_000_000);
+  const expectedSourceQuantity = readBoundedInteger(
+    input.expectedSourceQuantity,
+    "expectedSourceQuantity",
+    errors,
+    0,
+    1_000_000,
+  );
+  const expectedDestinationQuantity = readBoundedInteger(
+    input.expectedDestinationQuantity,
+    "expectedDestinationQuantity",
+    errors,
+    0,
+    1_000_000,
+  );
+  if (quantity > expectedSourceQuantity) {
+    errors.quantity = "Кількість переміщення перевищує очікуваний залишок.";
+  }
+  const occurredAt = readIsoDate(input.occurredAt, "occurredAt", errors);
+  const documentNumber = readOptionalText(
+    input.documentNumber,
+    "documentNumber",
+    errors,
+    160,
+  );
+  const notes = readOptionalText(input.notes, "notes", errors, 2000);
+  return finish(errors, {
+    requestId,
+    materialId,
+    sourceLocationId,
+    destinationLocationId,
+    condition,
+    quantity,
+    expectedSourceQuantity,
+    expectedDestinationQuantity,
+    occurredAt,
+    documentNumber,
+    notes,
+  });
+}
+
+export function validateStockWriteoffInput(
+  input: unknown,
+): ValidationResult<StockWriteoffInput> {
+  const errors: Record<string, string> = {};
+  if (!isRecord(input)) {
+    return invalid("body", "Очікується об’єкт списання.");
+  }
+  assertExactKeys(
+    input,
+    [
+      "requestId",
+      "materialId",
+      "locationId",
+      "condition",
+      "quantity",
+      "expectedQuantity",
+      "reason",
+      "occurredAt",
+      "documentNumber",
+      "notes",
+    ],
+    errors,
+  );
+  const requestId = readUuid(input.requestId, "requestId", errors);
+  const materialId = readPatternText(
+    input.materialId,
+    CAT_ID_RE,
+    "materialId",
+    "Некоректний CAT-ID.",
+    errors,
+  );
+  const locationId = readPatternText(
+    input.locationId,
+    LOCATION_ID_RE,
+    "locationId",
+    "Некоректне місце списання.",
+    errors,
+  );
+  const condition = readCondition(input.condition, "condition", errors);
+  const quantity = readBoundedInteger(input.quantity, "quantity", errors, 1, 1_000_000);
+  const expectedQuantity = readBoundedInteger(
+    input.expectedQuantity,
+    "expectedQuantity",
+    errors,
+    0,
+    1_000_000,
+  );
+  if (quantity > expectedQuantity) {
+    errors.quantity = "Кількість списання перевищує очікуваний залишок.";
+  }
+  const reason = readEnum(input.reason, WRITEOFF_REASONS, "reason", errors);
+  const occurredAt = readIsoDate(input.occurredAt, "occurredAt", errors);
+  const documentNumber = readOptionalText(
+    input.documentNumber,
+    "documentNumber",
+    errors,
+    160,
+  );
+  const notes = readOptionalText(input.notes, "notes", errors, 2000);
+  if (reason === "other" && !notes) {
+    errors.notes = "Опишіть причину списання.";
+  }
+  return finish(errors, {
+    requestId,
+    materialId,
+    locationId,
+    condition,
+    quantity,
+    expectedQuantity,
+    reason,
+    occurredAt,
+    documentNumber,
     notes,
   });
 }

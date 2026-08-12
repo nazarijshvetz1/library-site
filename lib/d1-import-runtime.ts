@@ -7,12 +7,45 @@
  */
 
 export const HOSTED_IMPORT_PLAN_FORMAT = "library-d1-load-plan";
-export const HOSTED_IMPORT_PLAN_VERSION = 1;
+export const HOSTED_IMPORT_PLAN_VERSION = 2;
 export const HOSTED_IMPORT_TARGET_SCHEMA = "0003";
 export const HOSTED_IMPORT_MAX_BYTES = 6 * 1024 * 1024;
 export const HOSTED_IMPORT_MAX_INSERT_SQL_BYTES = 72_000;
 export const HOSTED_IMPORT_MAX_BATCH_STATEMENTS = 45;
 export const HOSTED_IMPORT_MAX_ROWS = 20_000;
+
+/**
+ * Static, FK-safe deletion order for the disposable staging database.
+ *
+ * This deliberately excludes schema/migration tables and the legacy draft
+ * tables. `migration_import_runs` is included so the same pinned plan can be
+ * uploaded again after a reset.
+ */
+export const STAGING_IMPORT_RESET_TABLES = Object.freeze([
+  "inventory_transaction_lines",
+  "inventory_transactions",
+  "loan_items",
+  "loans",
+  "holdings",
+  "material_stock_totals",
+  "material_links",
+  "material_cover_assets",
+  "class_years",
+  "audit_events",
+  "mutation_commands",
+  "materials",
+  "academic_years",
+  "cohorts",
+  "locations",
+  "users",
+  "migration_import_runs",
+] as const);
+
+const ACADEMIC_YEAR_ID_RE = /^YR-(20\d{2})-(20\d{2})$/u;
+const ACADEMIC_YEAR_LABEL_RE = /^(20\d{2})\/(20\d{2})$/u;
+const COHORT_ID_RE = /^COH-\d{3,}$/u;
+const CLASS_YEAR_ID_RE = /^CY-(20\d{2})-\d{3,}$/u;
+const CLASS_CODE_RE = /^[\p{L}\p{N}().'_-]{1,16}$/u;
 
 type ScalarKind = "string" | "integer" | "nullable-string" | "nullable-integer";
 
@@ -33,6 +66,22 @@ export const HOSTED_IMPORT_TABLE_SPECS: readonly TableSpec[] = Object.freeze([
     auth_user_id: "nullable-string", role: "string", status: "string",
     created_at: "string", updated_at: "string",
   }, ["id"], [["email"], ["auth_user_id"]]),
+  tableSpec("academic_years", {
+    id: "string", label: "string", start_date: "string", end_date: "string",
+    status: "string", notes: "string", version: "integer",
+    created_at: "string", updated_at: "string",
+  }, ["id"], [["label"]]),
+  tableSpec("cohorts", {
+    id: "string", status: "string", notes: "string",
+    created_at: "string", updated_at: "string",
+  }, ["id"]),
+  tableSpec("class_years", {
+    id: "string", academic_year_id: "string", cohort_id: "string", class_name: "string",
+    grade: "integer", code: "string", teacher_user_id: "nullable-string",
+    location_id: "nullable-string", start_date: "string", end_date: "string",
+    status: "string", actual_closed_date: "nullable-string", notes: "string",
+    version: "integer", created_at: "string", updated_at: "string",
+  }, ["id"], [["academic_year_id", "cohort_id"], ["academic_year_id", "class_name"]]),
   tableSpec("materials", {
     id: "string", catalog_number: "integer", title: "string", sort_title: "string",
     search_text: "string", rubric: "string", publication_type: "string", subject: "string",
@@ -135,6 +184,96 @@ export class HostedImportError extends Error {
     this.status = status;
     this.details = details;
   }
+}
+
+export type StagingImportResetResult = {
+  batchStatements: number;
+  clearedReversalLinks: number;
+  deletedRows: number;
+  deletedByTable: Record<(typeof STAGING_IMPORT_RESET_TABLES)[number], number>;
+};
+
+export type HostedImportCommitProof = {
+  runId: string;
+  planSha256: string;
+  expectedRows: number;
+  insertStatements: number;
+  expiresAt: string;
+  committedAt: string;
+};
+
+/** Abort the entire import batch if its exact committed run proof vanished. */
+export function bindHostedImportCommitGuard(
+  db: D1DatabaseLike,
+  proof: HostedImportCommitProof,
+): D1StatementLike {
+  const statement = db.prepare(`
+    INSERT INTO migration_import_runs (id)
+    SELECT '__invalid_missing_commit_proof__'
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM migration_import_runs
+      WHERE id = ?
+        AND plan_sha256 = ?
+        AND status = 'committed'
+        AND expected_rows = ?
+        AND insert_statements = ?
+        AND expires_at = ?
+        AND committed_at = ?
+    )
+  `);
+  if (!statement.bind) {
+    throw new HostedImportError("d1_adapter_invalid", "D1 adapter не підтримує bind().", 500);
+  }
+  return statement.bind(
+    proof.runId,
+    proof.planSha256,
+    proof.expectedRows,
+    proof.insertStatements,
+    proof.expiresAt,
+    proof.committedAt,
+  );
+}
+
+/**
+ * Clears only disposable D1 domain rows in one D1 batch. The FTS command and
+ * every DELETE participate in the same transaction, so a failed statement
+ * restores both the content rows and the search index.
+ */
+export async function resetStagingImportTarget(
+  db: D1DatabaseLike,
+): Promise<StagingImportResetResult> {
+  const statements = [
+    db.prepare("INSERT INTO materials_fts(materials_fts) VALUES('delete-all')"),
+    // The schema requires `kind='reversal'` and `reversal_of_id` together, so
+    // both disposable fields must be neutralized in the same UPDATE.
+    db.prepare("UPDATE inventory_transactions SET kind = 'import', reversal_of_id = NULL WHERE reversal_of_id IS NOT NULL"),
+    ...STAGING_IMPORT_RESET_TABLES.map((table) => db.prepare(`DELETE FROM "${table}"`)),
+  ];
+  let results: Array<{ meta?: { changes?: number } }>;
+  try {
+    results = await db.batch(statements);
+  } catch {
+    throw new HostedImportError(
+      "staging_reset_atomic_batch_failed",
+      "Тестову D1 не очищено: атомарний batch скасовано без часткових змін.",
+      409,
+    );
+  }
+
+  const deletedByTable = Object.fromEntries(
+    STAGING_IMPORT_RESET_TABLES.map((table, index) => [
+      table,
+      Number(results[index + 2]?.meta?.changes ?? 0),
+    ]),
+  ) as StagingImportResetResult["deletedByTable"];
+
+  return {
+    batchStatements: statements.length,
+    clearedReversalLinks: Number(results[1]?.meta?.changes ?? 0),
+    deletedRows: Object.values(deletedByTable).reduce((total, count) => total + count, 0),
+    deletedByTable,
+  };
 }
 
 export type BoundedRequestBodyOptions = {
@@ -436,6 +575,7 @@ export function validateHostedImportPlan(value: unknown): HostedImportPlan {
   if (totalRows === 0) fail("plan_empty", "Порожній план імпорту не дозволено.");
 
   validateReferences(tables as HostedImportPlan["tables"], ids);
+  validateAcademicTables(tables as HostedImportPlan["tables"]);
   validateStockTotals(tables as HostedImportPlan["tables"]);
 
   const reconciliation = requireRecord(plan.reconciliation, "plan.reconciliation");
@@ -479,7 +619,19 @@ function validateReferences(
   const materialIds = ids.get("materials") ?? new Set();
   const userIds = ids.get("users") ?? new Set();
   const locationIds = ids.get("locations") ?? new Set();
+  const academicYearIds = ids.get("academic_years") ?? new Set();
+  const cohortIds = ids.get("cohorts") ?? new Set();
   const transactionIds = ids.get("inventory_transactions") ?? new Set();
+  for (const [index, row] of tables.class_years.entries()) {
+    requireReference(academicYearIds, row.academic_year_id, `plan.tables.class_years[${index}].academic_year_id`);
+    requireReference(cohortIds, row.cohort_id, `plan.tables.class_years[${index}].cohort_id`);
+    if (row.teacher_user_id !== null) {
+      requireReference(userIds, row.teacher_user_id, `plan.tables.class_years[${index}].teacher_user_id`);
+    }
+    if (row.location_id !== null) {
+      requireReference(locationIds, row.location_id, `plan.tables.class_years[${index}].location_id`);
+    }
+  }
   for (const table of ["material_links", "material_cover_assets", "inventory_transaction_lines", "holdings", "material_stock_totals"]) {
     for (const [index, row] of tables[table].entries()) {
       requireReference(materialIds, row.material_id, `plan.tables.${table}[${index}].material_id`);
@@ -498,6 +650,135 @@ function validateReferences(
   for (const [index, row] of tables.audit_events.entries()) {
     if (row.actor_user_id !== null) requireReference(userIds, row.actor_user_id, `plan.tables.audit_events[${index}].actor_user_id`);
   }
+}
+
+function validateAcademicTables(tables: HostedImportPlan["tables"]): void {
+  const academicYears = new Map<string, Record<string, string | number | null>>();
+  let activeYearCount = 0;
+  for (const [index, row] of tables.academic_years.entries()) {
+    const path = `plan.tables.academic_years[${index}]`;
+    const id = String(row.id);
+    const label = String(row.label);
+    const idMatch = id.match(ACADEMIC_YEAR_ID_RE);
+    const labelMatch = label.match(ACADEMIC_YEAR_LABEL_RE);
+    if (!idMatch || Number(idMatch[2]) !== Number(idMatch[1]) + 1) {
+      fail("plan_academic_year_invalid", `${path}.id має бути послідовним ID YR-2026-2027.`);
+    }
+    if (!labelMatch
+      || Number(labelMatch[2]) !== Number(labelMatch[1]) + 1
+      || labelMatch[1] !== idMatch[1]
+      || labelMatch[2] !== idMatch[2]) {
+      fail("plan_academic_year_invalid", `${path}.label не відповідає ID навчального року.`);
+    }
+    if (!isCalendarDate(row.start_date) || !isCalendarDate(row.end_date) || String(row.start_date) >= String(row.end_date)) {
+      fail("plan_academic_year_invalid", `${path} містить некоректний діапазон календарних дат.`);
+    }
+    if (String(row.start_date).slice(0, 4) !== idMatch[1] || String(row.end_date).slice(0, 4) !== idMatch[2]) {
+      fail("plan_academic_year_invalid", `${path} містить дати, що не відповідають ID навчального року.`);
+    }
+    if (!(["draft", "active", "closed"] as unknown[]).includes(row.status)) {
+      fail("plan_academic_year_invalid", `${path}.status має бути draft, active або closed.`);
+    }
+    if (!Number.isSafeInteger(row.version) || Number(row.version) < 1) {
+      fail("plan_academic_year_invalid", `${path}.version має бути додатним цілим числом.`);
+    }
+    if (row.status === "active") activeYearCount += 1;
+    academicYears.set(id, row);
+  }
+  if (activeYearCount > 1) {
+    fail("plan_academic_state_invalid", "План містить більше одного активного навчального року.");
+  }
+
+  const cohorts = new Map<string, Record<string, string | number | null>>();
+  for (const [index, row] of tables.cohorts.entries()) {
+    const path = `plan.tables.cohorts[${index}]`;
+    const id = String(row.id);
+    if (!COHORT_ID_RE.test(id)) {
+      fail("plan_cohort_invalid", `${path}.id має формат COH-001.`);
+    }
+    if (!(["active", "graduated", "closed"] as unknown[]).includes(row.status)) {
+      fail("plan_cohort_invalid", `${path}.status має бути active, graduated або closed.`);
+    }
+    cohorts.set(id, row);
+  }
+
+  const users = new Map(tables.users.map((row) => [String(row.id), row]));
+  const locations = new Map(tables.locations.map((row) => [String(row.id), row]));
+  const openCohorts = new Set<string>();
+  for (const [index, row] of tables.class_years.entries()) {
+    const path = `plan.tables.class_years[${index}]`;
+    const id = String(row.id);
+    const academicYearId = String(row.academic_year_id);
+    const cohortId = String(row.cohort_id);
+    const idMatch = id.match(CLASS_YEAR_ID_RE);
+    const year = academicYears.get(academicYearId);
+    const cohort = cohorts.get(cohortId);
+    if (!idMatch || !year || idMatch[1] !== academicYearId.slice(3, 7)) {
+      fail("plan_class_year_invalid", `${path}.id не відповідає навчальному року.`);
+    }
+    if (!cohort) fail("plan_class_year_invalid", `${path}.cohort_id не знайдено.`);
+    if (!Number.isSafeInteger(row.grade) || Number(row.grade) < 1 || Number(row.grade) > 11) {
+      fail("plan_class_year_invalid", `${path}.grade має бути цілим числом від 1 до 11.`);
+    }
+    if (typeof row.code !== "string" || !CLASS_CODE_RE.test(row.code)) {
+      fail("plan_class_year_invalid", `${path}.code містить недозволені символи.`);
+    }
+    if (row.class_name !== `${row.grade}-${row.code}`) {
+      fail("plan_class_year_invalid", `${path}.class_name не відповідає grade і code.`);
+    }
+    if (!isCalendarDate(row.start_date) || !isCalendarDate(row.end_date) || String(row.start_date) >= String(row.end_date)) {
+      fail("plan_class_year_invalid", `${path} містить некоректний діапазон календарних дат.`);
+    }
+    if (String(row.start_date) < String(year.start_date) || String(row.end_date) > String(year.end_date)) {
+      fail("plan_class_year_invalid", `${path} містить дати поза межами навчального року.`);
+    }
+    if (!(["planned", "active", "closed"] as unknown[]).includes(row.status)) {
+      fail("plan_class_year_invalid", `${path}.status має бути planned, active або closed.`);
+    }
+    if (!Number.isSafeInteger(row.version) || Number(row.version) < 1) {
+      fail("plan_class_year_invalid", `${path}.version має бути додатним цілим числом.`);
+    }
+    const isClosed = row.status === "closed";
+    if (isClosed !== (row.actual_closed_date !== null)
+      || (row.actual_closed_date !== null && !isCalendarDate(row.actual_closed_date))) {
+      fail("plan_class_year_invalid", `${path} має неузгоджені status та actual_closed_date.`);
+    }
+    if (row.actual_closed_date !== null && String(row.actual_closed_date) < String(row.start_date)) {
+      fail("plan_class_year_invalid", `${path}.actual_closed_date передує даті початку.`);
+    }
+    if (row.teacher_user_id !== null) {
+      const teacher = users.get(String(row.teacher_user_id));
+      if (!teacher || teacher.role !== "teacher" || teacher.status !== "active") {
+        fail("plan_class_teacher_invalid", `${path}.teacher_user_id має посилатися на активного вчителя.`);
+      }
+    }
+    if (row.location_id !== null) {
+      const location = locations.get(String(row.location_id));
+      if (!location || location.status !== "active" || location.type === "service") {
+        fail("plan_class_location_invalid", `${path}.location_id має посилатися на активне неслужбове місце.`);
+      }
+    }
+    if (row.status !== "closed" && cohort.status !== "active") {
+      fail("plan_academic_state_invalid", `${path}: відкритий клас належить неактивній групі.`);
+    }
+    if (row.status !== "closed") {
+      if (openCohorts.has(cohortId)) {
+        fail("plan_academic_state_invalid", `${path}: класна група використовується більш ніж одним відкритим класом.`);
+      }
+      openCohorts.add(cohortId);
+    }
+    if ((row.status === "active" && year.status !== "active")
+      || (row.status === "planned" && year.status !== "draft")
+      || (year.status === "closed" && row.status !== "closed")) {
+      fail("plan_academic_state_invalid", `${path}: статус класу не узгоджений зі статусом навчального року.`);
+    }
+  }
+}
+
+function isCalendarDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
+  const timestamp = Date.parse(`${value}T00:00:00.000Z`);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
 }
 
 function validateStockTotals(tables: HostedImportPlan["tables"]): void {
@@ -774,7 +1055,7 @@ export function buildHostedImportInsertSql(plan: HostedImportPlan): string[] {
   for (const spec of HOSTED_IMPORT_TABLE_SPECS) {
     statements.push(...buildInsertStatements(spec, plan.tables[spec.name]));
   }
-  if (statements.length + 2 > HOSTED_IMPORT_MAX_BATCH_STATEMENTS) {
+  if (statements.length + 3 > HOSTED_IMPORT_MAX_BATCH_STATEMENTS) {
     throw new HostedImportError(
       "import_statement_limit",
       "План потребує забагато D1 batch statements.",

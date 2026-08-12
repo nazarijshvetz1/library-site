@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 
 import {
+  catalogCoverCacheDecision,
   type CatalogD1Database,
   getCatalogCoverAsset,
   normalizeCatalogId,
@@ -39,17 +40,22 @@ export async function GET(
       return imageError(404);
     }
 
+    const cache = catalogCoverCacheDecision(asset.sha256, request.url);
+    if (cache.redirect) {
+      return canonicalCoverRedirect(id, cache.canonicalVersion);
+    }
+
     const object = await env.COVER_UPLOADS.get(asset.storageKey);
     if (!object) return imageError(404);
     const etag = object.httpEtag || (asset.sha256 ? `"${asset.sha256}"` : "");
     if (etag && request.headers.get("If-None-Match") === etag) {
       return new Response(null, {
         status: 304,
-        headers: imageHeaders(asset.mimeType, etag, object.size),
+        headers: imageHeaders(asset.mimeType, etag, object.size, cache.immutable),
       });
     }
     return new Response(object.body, {
-      headers: imageHeaders(asset.mimeType, etag, object.size),
+      headers: imageHeaders(asset.mimeType, etag, object.size, cache.immutable),
     });
   } catch {
     return imageError(503);
@@ -60,10 +66,13 @@ function imageHeaders(
   mimeType: string,
   etag: string,
   size: number,
+  immutable: boolean,
 ): Headers {
   const headers = new Headers({
     "Access-Control-Allow-Origin": "*",
-    "Cache-Control": "public, max-age=31536000, immutable",
+    "Cache-Control": immutable
+      ? "public, max-age=31536000, immutable"
+      : "no-store",
     "Content-Disposition": "inline",
     "Content-Type": mimeType,
     "X-Content-Type-Options": "nosniff",
@@ -71,6 +80,18 @@ function imageHeaders(
   if (etag) headers.set("ETag", etag);
   if (Number.isInteger(size) && size >= 0) headers.set("Content-Length", String(size));
   return headers;
+}
+
+function canonicalCoverRedirect(id: string, version: string): Response {
+  return new Response(null, {
+    status: 307,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Cache-Control": "no-store",
+      Location: `/api/catalog-v2/covers/${encodeURIComponent(id)}?v=${version}`,
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
 }
 
 function imageError(status: number): Response {

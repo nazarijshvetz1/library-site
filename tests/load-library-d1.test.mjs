@@ -26,6 +26,32 @@ async function fixtureBundle() {
   return bundle;
 }
 
+async function academicFixtureBundle() {
+  const canonical = JSON.parse(await readFile(fixturePath, "utf8"));
+  canonical.sheets.academicYears = { rows: [
+    { academic_year_id: "YR-2026-2027", label: "2026/2027", start_date: "01.09.2026", end_date: "30.06.2027", status: "closed", notes: "" },
+    { academic_year_id: "YR-2027-2028", label: "2027/2028", start_date: "01.09.2027", end_date: "30.06.2028", status: "draft", notes: "" },
+  ] };
+  canonical.sheets.cohorts = { rows: [
+    { cohort_id: "COH-001", status: "active", notes: "fixture cohort" },
+  ] };
+  canonical.sheets.classYears = { rows: [
+    {
+      class_year_id: "CY-2026-001", academic_year_id: "YR-2026-2027", cohort_id: "COH-001",
+      class_name: "9-А", grade: 9, code: "А", teacher_user_id: "USR-002", location_id: "LOC-001",
+      start_date: "01.09.2026", end_date: "30.06.2027", status: "closed", actual_closed_date: "30.06.2027", notes: "",
+    },
+    {
+      class_year_id: "CY-2027-001", academic_year_id: "YR-2027-2028", cohort_id: "COH-001",
+      class_name: "10-А", grade: 10, code: "А", teacher_user_id: "USR-002", location_id: "LOC-001",
+      start_date: "01.09.2027", end_date: "30.06.2028", status: "planned", actual_closed_date: "", notes: "",
+    },
+  ] };
+  const { bundle, report } = importCanonicalExport(canonical);
+  assert.equal(report.ok, true, JSON.stringify(report.diagnostics));
+  return bundle;
+}
+
 async function databaseWithSchema(t) {
   const database = new DatabaseSync(":memory:");
   t.after(() => database.close());
@@ -59,6 +85,67 @@ test("maps the complete staging fixture to schema 0003 without inventing ebook l
   assert.equal(links.get("CAT-0591"), "ebook");
   assert.equal(links.get("CAT-0599"), "preview");
   assert.equal([...links.values()].filter((kind) => kind === "ebook").length, 1);
+});
+
+test("maps and atomically loads optional academic history into existing schema 0003 tables", async (t) => {
+  const { plan, report } = buildD1LoadPlan(await academicFixtureBundle());
+
+  assert.equal(report.ok, true, JSON.stringify(report.diagnostics));
+  assert.equal(report.staging_counts.academic_years, 2);
+  assert.equal(report.staging_counts.cohorts, 1);
+  assert.equal(report.staging_counts.class_years, 2);
+  assert.equal(report.target_counts.academic_years, 2);
+  assert.equal(report.target_counts.cohorts, 1);
+  assert.equal(report.target_counts.class_years, 2);
+  assert.equal(plan.format_version, 2);
+
+  const database = await databaseWithSchema(t);
+  const result = await loadD1Plan(createNodeSqliteD1Adapter(database), plan, { dryRun: false });
+  assert.equal(result.applied, true);
+  assert.equal(count(database, "academic_years"), 2);
+  assert.equal(count(database, "cohorts"), 1);
+  assert.equal(count(database, "class_years"), 2);
+  assert.deepEqual(
+    { ...database.prepare("SELECT class_name, status, teacher_user_id, location_id FROM class_years WHERE id = 'CY-2026-001'").get() },
+    { class_name: "9-А", status: "closed", teacher_user_id: "USR-002", location_id: "LOC-001" },
+  );
+});
+
+test("rejects inconsistent academic lifecycle in plan construction and direct local loading", async () => {
+  const bundle = await academicFixtureBundle();
+  bundle.tables.academic_years.forEach((row) => { row.status = "active"; });
+  const invalidBuild = buildD1LoadPlan(bundle);
+  assert.equal(invalidBuild.report.ok, false);
+  assert.equal(
+    invalidBuild.report.diagnostics.errors.some((item) => item.code === "target_academic_year_active_duplicate"),
+    true,
+  );
+
+  const valid = buildD1LoadPlan(await academicFixtureBundle(), { throwOnError: true }).plan;
+  valid.tables.academic_years.forEach((row) => { row.status = "active"; });
+  await assert.rejects(
+    loadD1Plan({}, valid, { dryRun: true }),
+    (error) => error?.code === "D1_PLAN_INVALID"
+      && error.report.diagnostics.some((item) => item.code === "target_academic_year_active_duplicate"),
+  );
+
+  const invalidTeacher = buildD1LoadPlan(await academicFixtureBundle(), { throwOnError: true }).plan;
+  invalidTeacher.tables.class_years[0].teacher_user_id = invalidTeacher.tables.users.find(
+    (row) => row.role === "admin" || row.role === "librarian",
+  ).id;
+  await assert.rejects(
+    loadD1Plan({}, invalidTeacher, { dryRun: true }),
+    (error) => error?.code === "D1_PLAN_INVALID"
+      && error.report.diagnostics.some((item) => item.code === "target_class_teacher_invalid"),
+  );
+
+  const invalidDates = buildD1LoadPlan(await academicFixtureBundle(), { throwOnError: true }).plan;
+  invalidDates.tables.academic_years[0].start_date = "2030-09-01";
+  await assert.rejects(
+    loadD1Plan({}, invalidDates, { dryRun: true }),
+    (error) => error?.code === "D1_PLAN_INVALID"
+      && error.report.diagnostics.some((item) => item.code === "target_academic_year_invalid"),
+  );
 });
 
 test("dry-run reconciles an empty schema without writing", async (t) => {

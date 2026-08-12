@@ -114,6 +114,43 @@ export function todayInKyiv(date = new Date()): string {
   return `${value.year}-${value.month}-${value.day}`;
 }
 
+export function suggestNextAcademicYearStart(
+  academicYears: ReadonlyArray<{ endDate?: unknown; label?: unknown }>,
+  fallbackYear = new Date().getFullYear(),
+): number {
+  const storedEndYears = academicYears.flatMap((year) => [
+    ...academicYearCandidates(year.endDate, /^((?:19|20|21)\d{2})-\d{2}-\d{2}$/gu),
+    ...academicYearCandidates(year.label, /(?:19|20|21)\d{2}/gu),
+  ]);
+  return storedEndYears.length ? Math.max(...storedEndYears) : fallbackYear;
+}
+
+export function resolveLoanDueAtForSubmission(
+  ...candidates: unknown[]
+): string | null {
+  return resolveLiveFormTextForSubmission(...candidates);
+}
+
+export function resolveLiveFormTextForSubmission(
+  ...candidates: unknown[]
+): string | null {
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+    const normalized = candidate.trim();
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
+function academicYearCandidates(value: unknown, pattern: RegExp): number[] {
+  if (typeof value !== "string") return [];
+  return [...value.matchAll(pattern)]
+    .flatMap((match) => {
+      const parsed = Number(match[1] ?? match[0]);
+      return Number.isInteger(parsed) ? [parsed] : [];
+    });
+}
+
 function appendText(params: URLSearchParams, key: string, value: string) {
   const normalized = value.trim();
   if (normalized) params.set(key, normalized);

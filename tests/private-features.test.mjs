@@ -95,6 +95,8 @@ test("private lookup and upload routes keep authentication and same-origin check
   assert.match(lookupRoute, /authorizeLibrarianApi\(\)/);
   assert.match(lookupRoute, /lookupBookByIsbn/);
   assert.match(uploadRoute, /authorizeLibrarianApi\(\)/);
+  assert.equal((uploadRoute.match(/!authorization\.value\.access\.writesEnabled/g) || []).length, 2);
+  assert.match(uploadRoute, /"writes_disabled"/);
   assert.match(uploadRoute, /isSameOriginRequest\(request\)/);
   assert.match(uploadRoute, /MAX_COVER_PHOTO_BYTES/);
   assert.match(uploadRoute, /request\.body\.getReader\(\)/);
@@ -106,6 +108,8 @@ test("private lookup and upload routes keep authentication and same-origin check
   assert.match(uploadRoute, /cover_in_use/);
   assert.match(draftRoute, /verifyOwnedCoverPhoto/);
   assert.match(draftRoute, /action === "submit"/);
+  assert.equal((draftRoute.match(/if \(!access\.writesEnabled\)/g) || []).length, 2);
+  assert.match(draftRoute, /"writes_disabled"/);
   assert.match(draftStore, /json_extract\(\$\{librarianDrafts\.payloadJson\}, '\$\.coverPhotoKey'\)/);
   assert.match(draftStore, /json_extract\(\$\{librarianDrafts\.payloadJson\}, '\$\.changes\.coverPhotoKey'\)/);
   assert.match(coverStorage, /bucket\.head\(key\)/);

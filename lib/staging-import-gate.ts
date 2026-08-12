@@ -1,5 +1,19 @@
 const MAX_GATE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 const EXPIRED_CLEANUP_GRACE_MS = 30 * 24 * 60 * 60 * 1000;
+const PRODUCTION_CUTOVER_MODE = "production_cutover";
+
+export type LibraryImportTarget = "staging" | "production";
+
+export function resolveLibraryImportTarget(
+  appEnv: string | null,
+  importMode: string | null,
+): LibraryImportTarget | null {
+  if (appEnv === "staging") return "staging";
+  if (appEnv === "production" && importMode === PRODUCTION_CUTOVER_MODE) {
+    return "production";
+  }
+  return null;
+}
 
 export function isStagingImportGateActive(expiresAt: string, nowMs = Date.now()): boolean {
   const expiresAtMs = Date.parse(expiresAt);
@@ -19,7 +33,9 @@ export function isImportRunExpiryAccepted(
 
 export type StagingImportGateInput = {
   appEnv: string | null;
+  importMode: string | null;
   enabled: boolean;
+  librarianWritesEnabled: boolean;
   allowedOrigin: string | null;
   pinnedPlanSha256: string | null;
   expiresAt: string | null;
@@ -32,6 +48,7 @@ export type StagingImportGateInput = {
 export type StagingImportGateResult =
   | {
     ok: true;
+    target: LibraryImportTarget;
     allowedOrigin: string;
     pinnedPlanSha256: string;
     expiresAt: string;
@@ -49,7 +66,10 @@ export type StagingImportGateResult =
 export function evaluateStagingImportGate(
   input: StagingImportGateInput,
 ): StagingImportGateResult {
-  if (input.appEnv !== "staging" || !input.enabled) {
+  const target = resolveLibraryImportTarget(input.appEnv, input.importMode);
+  if (!target
+    || !input.enabled
+    || (target === "production" && input.librarianWritesEnabled)) {
     return { ok: false, status: 503, code: "staging_import_disabled" };
   }
 
@@ -78,6 +98,7 @@ export function evaluateStagingImportGate(
 
   return {
     ok: true,
+    target,
     allowedOrigin,
     pinnedPlanSha256,
     expiresAt: new Date(expiresAtMs).toISOString(),

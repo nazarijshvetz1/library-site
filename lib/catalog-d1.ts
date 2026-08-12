@@ -101,6 +101,7 @@ export type CatalogDetail = CatalogSummary & {
     mimeType: string;
     width: number | null;
     height: number | null;
+    version?: number;
   } | null;
 };
 
@@ -117,6 +118,39 @@ export type CatalogCoverAsset = {
   mimeType: string;
   sha256: string;
 };
+
+export type CatalogCoverCacheDecision = {
+  canonicalVersion: string;
+  redirect: boolean;
+  immutable: boolean;
+};
+
+export function catalogCoverCacheDecision(
+  sha256: string,
+  requestUrl: string,
+): CatalogCoverCacheDecision {
+  const canonicalVersion = /^[0-9a-f]{64}$/iu.test(sha256)
+    ? sha256.slice(0, 12).toLowerCase()
+    : "";
+  const url = new URL(requestUrl);
+  const requestedVersions = url.searchParams.getAll("v");
+  const requestedVersion = requestedVersions[0]?.toLowerCase() ?? "";
+  const hasExtraParameters = requestedVersions.length !== 1
+    || [...url.searchParams.keys()].some((key) => key !== "v");
+  const redirect = Boolean(
+    canonicalVersion
+    && (requestedVersion !== canonicalVersion || hasExtraParameters),
+  );
+  return {
+    canonicalVersion,
+    redirect,
+    immutable: Boolean(
+      canonicalVersion
+      && !redirect
+      && requestedVersion === canonicalVersion,
+    ),
+  };
+}
 
 export class CatalogQueryValidationError extends Error {
   readonly field: string;
@@ -263,6 +297,9 @@ export async function getCatalogMaterialDetail(
         mimeType,
         width: nullablePositiveInteger(rawMaterial.cover_width),
         height: nullablePositiveInteger(rawMaterial.cover_height),
+        ...(scope === "librarian"
+          ? { version: positiveInteger(rawMaterial.cover_version) }
+          : {}),
       }
     : null;
 
@@ -471,6 +508,7 @@ function detailMaterialSql(scope: "public" | "librarian"): string {
       c.width AS cover_width,
       c.height AS cover_height,
       c.sha256 AS cover_sha256,
+      ${scope === "librarian" ? "c.version" : "NULL"} AS cover_version,
       COALESCE(st.total_quantity, 0) AS total_quantity,
       COALESCE(st.library_quantity, 0) AS library_quantity,
       COALESCE(st.other_location_quantity, 0) AS other_location_quantity,

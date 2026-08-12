@@ -7,6 +7,8 @@ import type {
   ReceiptCreateDetails,
   ReceiptCreateInput,
   StockAdjustmentInput,
+  StockTransferInput,
+  StockWriteoffInput,
 } from "@/lib/library-write-validation";
 
 type D1Value = string | number | null;
@@ -98,6 +100,34 @@ export type StockAdjustmentResult = {
   quantityBefore: number;
   countedQuantity: number;
   quantityDelta: number;
+  holdingVersion: number | null;
+  transactionId: string;
+  occurredAt: string;
+};
+
+export type StockTransferResult = {
+  materialId: string;
+  sourceLocationId: string;
+  destinationLocationId: string;
+  condition: string;
+  quantityMoved: number;
+  sourceQuantityBefore: number;
+  sourceQuantityAfter: number;
+  sourceHoldingVersion: number | null;
+  destinationQuantityBefore: number;
+  destinationQuantityAfter: number;
+  destinationHoldingVersion: number;
+  transactionId: string;
+  occurredAt: string;
+};
+
+export type StockWriteoffResult = {
+  materialId: string;
+  locationId: string;
+  condition: string;
+  quantityBefore: number;
+  quantityWrittenOff: number;
+  quantityAfter: number;
   holdingVersion: number | null;
   transactionId: string;
   occurredAt: string;
@@ -1064,6 +1094,589 @@ export async function adjustHoldingToActualCount(
     {
       code: "stock_quantity_conflict",
       message: "Залишок уже змінився. Оновіть картку матеріалу.",
+    },
+  );
+  return replayed ?? result;
+}
+
+export async function transferStockDirect(
+  user: ChatGPTUser,
+  input: StockTransferInput,
+  providedDb?: LibraryD1Database,
+): Promise<StockTransferResult> {
+  const db = database(providedDb);
+  const actor = await resolveMutationActor(db, user);
+  const requestHash = await mutationHash({
+    kind: "stock.transfer",
+    actorUserId: actor.id,
+    input,
+  });
+  const replay = await replayCompletedCommand<StockTransferResult>(
+    db,
+    input.requestId,
+    requestHash,
+  );
+  if (replay) return replay;
+
+  const [material, sourceLocation, destinationLocation, sourceHolding, destinationHolding] =
+    await Promise.all([
+      db.prepare(`
+        SELECT id FROM materials
+        WHERE id = ? AND status = 'active' AND archived_at IS NULL
+        LIMIT 1
+      `).bind(input.materialId).first<{ id: string }>(),
+      db.prepare(`
+        SELECT id, type FROM locations
+        WHERE id = ? AND status = 'active'
+        LIMIT 1
+      `).bind(input.sourceLocationId).first<{ id: string; type: string }>(),
+      db.prepare(`
+        SELECT id, type FROM locations
+        WHERE id = ? AND status = 'active'
+        LIMIT 1
+      `).bind(input.destinationLocationId).first<{ id: string; type: string }>(),
+      db.prepare(`
+        SELECT quantity, version FROM holdings
+        WHERE material_id = ? AND location_id = ? AND condition = ?
+        LIMIT 1
+      `).bind(
+        input.materialId,
+        input.sourceLocationId,
+        input.condition,
+      ).first<{ quantity: number; version: number }>(),
+      db.prepare(`
+        SELECT quantity, version FROM holdings
+        WHERE material_id = ? AND location_id = ? AND condition = ?
+        LIMIT 1
+      `).bind(
+        input.materialId,
+        input.destinationLocationId,
+        input.condition,
+      ).first<{ quantity: number; version: number }>(),
+    ]);
+  if (!material) {
+    throw new LibraryMutationError("material_not_found", 404, "Матеріал не знайдено.");
+  }
+  if (!sourceLocation || sourceLocation.type === "service") {
+    throw new LibraryMutationError(
+      "source_location_not_found",
+      404,
+      "Початкове місце переміщення не знайдено або воно недоступне.",
+    );
+  }
+  if (!destinationLocation || destinationLocation.type === "service") {
+    throw new LibraryMutationError(
+      "destination_location_not_found",
+      404,
+      "Кінцеве місце переміщення не знайдено або воно недоступне.",
+    );
+  }
+
+  const sourceQuantityBefore = sourceHolding ? Number(sourceHolding.quantity) : 0;
+  const sourceVersionBefore = sourceHolding ? Number(sourceHolding.version) : 0;
+  const destinationQuantityBefore = destinationHolding
+    ? Number(destinationHolding.quantity)
+    : 0;
+  const destinationVersionBefore = destinationHolding
+    ? Number(destinationHolding.version)
+    : 0;
+  if (
+    sourceQuantityBefore !== input.expectedSourceQuantity ||
+    destinationQuantityBefore !== input.expectedDestinationQuantity
+  ) {
+    throw new LibraryMutationError(
+      "stock_quantity_conflict",
+      409,
+      "Залишок у початковому або кінцевому місці вже змінився. Оновіть картку матеріалу.",
+      {
+        currentSourceQuantity: sourceQuantityBefore,
+        currentDestinationQuantity: destinationQuantityBefore,
+      },
+    );
+  }
+  if (sourceQuantityBefore < input.quantity) {
+    throw new LibraryMutationError(
+      "insufficient_stock",
+      409,
+      "У початковому місці недостатньо примірників.",
+      { availableQuantity: sourceQuantityBefore },
+    );
+  }
+
+  const sourceQuantityAfter = sourceQuantityBefore - input.quantity;
+  const destinationQuantityAfter = destinationQuantityBefore + input.quantity;
+  const createdAt = new Date().toISOString();
+  const transactionId = `TX-${crypto.randomUUID()}`;
+  const result: StockTransferResult = {
+    materialId: input.materialId,
+    sourceLocationId: input.sourceLocationId,
+    destinationLocationId: input.destinationLocationId,
+    condition: input.condition,
+    quantityMoved: input.quantity,
+    sourceQuantityBefore,
+    sourceQuantityAfter,
+    sourceHoldingVersion: sourceQuantityAfter > 0 ? sourceVersionBefore + 1 : null,
+    destinationQuantityBefore,
+    destinationQuantityAfter,
+    destinationHoldingVersion: destinationVersionBefore + 1,
+    transactionId,
+    occurredAt: input.occurredAt,
+  };
+  const statements: D1Statement[] = [
+    insertCommandStatement(
+      db,
+      input.requestId,
+      requestHash,
+      actor.id,
+      "stock.transfer",
+      "material",
+      input.materialId,
+      createdAt,
+    ),
+    db.prepare(`
+      INSERT INTO inventory_transactions (
+        id, request_id, kind, occurred_at, document_number, reason, notes,
+        loan_id, actor_user_id, reversal_of_id, status, created_at
+      ) VALUES (?, ?, 'transfer', ?, ?, NULL, ?, NULL, ?, NULL, 'posted', ?)
+    `).bind(
+      transactionId,
+      input.requestId,
+      input.occurredAt,
+      input.documentNumber,
+      input.notes ?? "",
+      actor.id,
+      createdAt,
+    ),
+  ];
+
+  if (sourceQuantityAfter === 0) {
+    statements.push(
+      db.prepare(`
+        DELETE FROM holdings
+        WHERE material_id = ? AND location_id = ? AND condition = ?
+          AND quantity = ? AND version = ?
+          AND EXISTS (
+            SELECT 1 FROM materials
+            WHERE id = ? AND status = 'active' AND archived_at IS NULL
+          )
+          AND EXISTS (
+            SELECT 1 FROM locations
+            WHERE id = ? AND status = 'active' AND type != 'service'
+          )
+      `).bind(
+        input.materialId,
+        input.sourceLocationId,
+        input.condition,
+        sourceQuantityBefore,
+        sourceVersionBefore,
+        input.materialId,
+        input.sourceLocationId,
+      ),
+    );
+  } else {
+    statements.push(
+      db.prepare(`
+        UPDATE holdings
+        SET quantity = ?, version = ?, updated_at = ?
+        WHERE material_id = ? AND location_id = ? AND condition = ?
+          AND quantity = ? AND version = ?
+          AND EXISTS (
+            SELECT 1 FROM materials
+            WHERE id = ? AND status = 'active' AND archived_at IS NULL
+          )
+          AND EXISTS (
+            SELECT 1 FROM locations
+            WHERE id = ? AND status = 'active' AND type != 'service'
+          )
+      `).bind(
+        sourceQuantityAfter,
+        sourceVersionBefore + 1,
+        createdAt,
+        input.materialId,
+        input.sourceLocationId,
+        input.condition,
+        sourceQuantityBefore,
+        sourceVersionBefore,
+        input.materialId,
+        input.sourceLocationId,
+      ),
+    );
+  }
+  statements.push(
+    guardedInventoryLineStatement(db, {
+      lineId: `LINE-${crypto.randomUUID()}`,
+      transactionId,
+      materialId: input.materialId,
+      locationId: input.sourceLocationId,
+      condition: input.condition,
+      quantityDelta: -input.quantity,
+      quantityBefore: sourceQuantityBefore,
+      quantityAfter: sourceQuantityAfter,
+      countedQuantity: null,
+      createdAt,
+      guardSql: `
+        SELECT id FROM materials
+        WHERE id = ? AND status = 'active' AND archived_at IS NULL
+          AND changes() = 1
+      `,
+      guardBindings: [input.materialId],
+    }),
+  );
+
+  if (destinationQuantityBefore === 0) {
+    statements.push(
+      db.prepare(`
+        INSERT INTO holdings (
+          material_id, location_id, condition, quantity, version, updated_at
+        ) VALUES (
+          (SELECT id FROM materials
+           WHERE id = ? AND status = 'active' AND archived_at IS NULL),
+          (SELECT id FROM locations
+           WHERE id = ? AND status = 'active' AND type != 'service'),
+          ?, ?, 1, ?
+        )
+      `).bind(
+        input.materialId,
+        input.destinationLocationId,
+        input.condition,
+        destinationQuantityAfter,
+        createdAt,
+      ),
+    );
+  } else {
+    statements.push(
+      db.prepare(`
+        UPDATE holdings
+        SET quantity = ?, version = ?, updated_at = ?
+        WHERE material_id = ? AND location_id = ? AND condition = ?
+          AND quantity = ? AND version = ?
+          AND EXISTS (
+            SELECT 1 FROM materials
+            WHERE id = ? AND status = 'active' AND archived_at IS NULL
+          )
+          AND EXISTS (
+            SELECT 1 FROM locations
+            WHERE id = ? AND status = 'active' AND type != 'service'
+          )
+      `).bind(
+        destinationQuantityAfter,
+        destinationVersionBefore + 1,
+        createdAt,
+        input.materialId,
+        input.destinationLocationId,
+        input.condition,
+        destinationQuantityBefore,
+        destinationVersionBefore,
+        input.materialId,
+        input.destinationLocationId,
+      ),
+    );
+  }
+  statements.push(
+    guardedInventoryLineStatement(db, {
+      lineId: `LINE-${crypto.randomUUID()}`,
+      transactionId,
+      materialId: input.materialId,
+      locationId: input.destinationLocationId,
+      condition: input.condition,
+      quantityDelta: input.quantity,
+      quantityBefore: destinationQuantityBefore,
+      quantityAfter: destinationQuantityAfter,
+      countedQuantity: null,
+      createdAt,
+      guardSql: `
+        SELECT h.material_id FROM holdings h
+        JOIN materials m ON m.id = h.material_id
+        JOIN locations l ON l.id = h.location_id
+        WHERE h.material_id = ? AND h.location_id = ? AND h.condition = ?
+          AND h.quantity = ? AND h.version = ? AND changes() = 1
+          AND m.status = 'active' AND m.archived_at IS NULL
+          AND l.status = 'active' AND l.type != 'service'
+      `,
+      guardBindings: [
+        input.materialId,
+        input.destinationLocationId,
+        input.condition,
+        destinationQuantityAfter,
+        destinationVersionBefore + 1,
+      ],
+    }),
+    rebuildStockTotalsStatement(db, input.materialId, createdAt),
+    db.prepare(`
+      INSERT INTO audit_events (
+        id, actor_user_id, actor_email, action, entity_type, entity_id,
+        request_id, before_json, after_json, metadata_json, created_at
+      ) VALUES (?, ?, ?, 'stock.transferred', 'material', ?, ?, ?, ?, ?, ?)
+    `).bind(
+      crypto.randomUUID(),
+      actor.id,
+      actor.email,
+      input.materialId,
+      input.requestId,
+      JSON.stringify({
+        sourceLocationId: input.sourceLocationId,
+        sourceQuantity: sourceQuantityBefore,
+        destinationLocationId: input.destinationLocationId,
+        destinationQuantity: destinationQuantityBefore,
+        condition: input.condition,
+      }),
+      JSON.stringify({
+        sourceLocationId: input.sourceLocationId,
+        sourceQuantity: sourceQuantityAfter,
+        destinationLocationId: input.destinationLocationId,
+        destinationQuantity: destinationQuantityAfter,
+        condition: input.condition,
+      }),
+      JSON.stringify({
+        transactionId,
+        quantityMoved: input.quantity,
+        documentNumber: input.documentNumber,
+        notes: input.notes,
+      }),
+      createdAt,
+    ),
+    completeCommandStatement(db, input.requestId, result, createdAt),
+  );
+
+  const replayed = await executeIdempotentBatch<StockTransferResult>(
+    db,
+    statements,
+    input.requestId,
+    requestHash,
+    {
+      code: "stock_quantity_conflict",
+      message: "Залишок змінився під час переміщення. Оновіть картку матеріалу.",
+    },
+  );
+  return replayed ?? result;
+}
+
+export async function writeOffStockDirect(
+  user: ChatGPTUser,
+  input: StockWriteoffInput,
+  providedDb?: LibraryD1Database,
+): Promise<StockWriteoffResult> {
+  const db = database(providedDb);
+  const actor = await resolveMutationActor(db, user);
+  const requestHash = await mutationHash({
+    kind: "stock.writeoff",
+    actorUserId: actor.id,
+    input,
+  });
+  const replay = await replayCompletedCommand<StockWriteoffResult>(
+    db,
+    input.requestId,
+    requestHash,
+  );
+  if (replay) return replay;
+
+  const [material, location, holding] = await Promise.all([
+    db.prepare(`
+      SELECT id FROM materials
+      WHERE id = ? AND status = 'active' AND archived_at IS NULL
+      LIMIT 1
+    `).bind(input.materialId).first<{ id: string }>(),
+    db.prepare(`
+      SELECT id, type FROM locations
+      WHERE id = ? AND status = 'active'
+      LIMIT 1
+    `).bind(input.locationId).first<{ id: string; type: string }>(),
+    db.prepare(`
+      SELECT quantity, version FROM holdings
+      WHERE material_id = ? AND location_id = ? AND condition = ?
+      LIMIT 1
+    `).bind(
+      input.materialId,
+      input.locationId,
+      input.condition,
+    ).first<{ quantity: number; version: number }>(),
+  ]);
+  if (!material) {
+    throw new LibraryMutationError("material_not_found", 404, "Матеріал не знайдено.");
+  }
+  if (!location || location.type === "service") {
+    throw new LibraryMutationError(
+      "location_not_found",
+      404,
+      "Місце списання не знайдено або воно недоступне.",
+    );
+  }
+
+  const quantityBefore = holding ? Number(holding.quantity) : 0;
+  const versionBefore = holding ? Number(holding.version) : 0;
+  if (quantityBefore !== input.expectedQuantity) {
+    throw new LibraryMutationError(
+      "stock_quantity_conflict",
+      409,
+      "Залишок уже змінився. Оновіть картку матеріалу.",
+      { currentQuantity: quantityBefore },
+    );
+  }
+  if (quantityBefore < input.quantity) {
+    throw new LibraryMutationError(
+      "insufficient_stock",
+      409,
+      "Недостатньо примірників для списання.",
+      { availableQuantity: quantityBefore },
+    );
+  }
+
+  const quantityAfter = quantityBefore - input.quantity;
+  const createdAt = new Date().toISOString();
+  const transactionId = `TX-${crypto.randomUUID()}`;
+  const result: StockWriteoffResult = {
+    materialId: input.materialId,
+    locationId: input.locationId,
+    condition: input.condition,
+    quantityBefore,
+    quantityWrittenOff: input.quantity,
+    quantityAfter,
+    holdingVersion: quantityAfter > 0 ? versionBefore + 1 : null,
+    transactionId,
+    occurredAt: input.occurredAt,
+  };
+  const statements: D1Statement[] = [
+    insertCommandStatement(
+      db,
+      input.requestId,
+      requestHash,
+      actor.id,
+      "stock.writeoff",
+      "material",
+      input.materialId,
+      createdAt,
+    ),
+    db.prepare(`
+      INSERT INTO inventory_transactions (
+        id, request_id, kind, occurred_at, document_number, reason, notes,
+        loan_id, actor_user_id, reversal_of_id, status, created_at
+      ) VALUES (?, ?, 'writeoff', ?, ?, ?, ?, NULL, ?, NULL, 'posted', ?)
+    `).bind(
+      transactionId,
+      input.requestId,
+      input.occurredAt,
+      input.documentNumber,
+      input.reason,
+      input.notes ?? "",
+      actor.id,
+      createdAt,
+    ),
+  ];
+
+  if (quantityAfter === 0) {
+    statements.push(
+      db.prepare(`
+        DELETE FROM holdings
+        WHERE material_id = ? AND location_id = ? AND condition = ?
+          AND quantity = ? AND version = ?
+          AND EXISTS (
+            SELECT 1 FROM materials
+            WHERE id = ? AND status = 'active' AND archived_at IS NULL
+          )
+          AND EXISTS (
+            SELECT 1 FROM locations
+            WHERE id = ? AND status = 'active' AND type != 'service'
+          )
+      `).bind(
+        input.materialId,
+        input.locationId,
+        input.condition,
+        quantityBefore,
+        versionBefore,
+        input.materialId,
+        input.locationId,
+      ),
+    );
+  } else {
+    statements.push(
+      db.prepare(`
+        UPDATE holdings
+        SET quantity = ?, version = ?, updated_at = ?
+        WHERE material_id = ? AND location_id = ? AND condition = ?
+          AND quantity = ? AND version = ?
+          AND EXISTS (
+            SELECT 1 FROM materials
+            WHERE id = ? AND status = 'active' AND archived_at IS NULL
+          )
+          AND EXISTS (
+            SELECT 1 FROM locations
+            WHERE id = ? AND status = 'active' AND type != 'service'
+          )
+      `).bind(
+        quantityAfter,
+        versionBefore + 1,
+        createdAt,
+        input.materialId,
+        input.locationId,
+        input.condition,
+        quantityBefore,
+        versionBefore,
+        input.materialId,
+        input.locationId,
+      ),
+    );
+  }
+  statements.push(
+    guardedInventoryLineStatement(db, {
+      lineId: `LINE-${crypto.randomUUID()}`,
+      transactionId,
+      materialId: input.materialId,
+      locationId: input.locationId,
+      condition: input.condition,
+      quantityDelta: -input.quantity,
+      quantityBefore,
+      quantityAfter,
+      countedQuantity: null,
+      createdAt,
+      guardSql: `
+        SELECT id FROM materials
+        WHERE id = ? AND status = 'active' AND archived_at IS NULL
+          AND changes() = 1
+      `,
+      guardBindings: [input.materialId],
+    }),
+    rebuildStockTotalsStatement(db, input.materialId, createdAt),
+    db.prepare(`
+      INSERT INTO audit_events (
+        id, actor_user_id, actor_email, action, entity_type, entity_id,
+        request_id, before_json, after_json, metadata_json, created_at
+      ) VALUES (?, ?, ?, 'stock.written_off', 'material', ?, ?, ?, ?, ?, ?)
+    `).bind(
+      crypto.randomUUID(),
+      actor.id,
+      actor.email,
+      input.materialId,
+      input.requestId,
+      JSON.stringify({
+        locationId: input.locationId,
+        condition: input.condition,
+        quantity: quantityBefore,
+      }),
+      JSON.stringify({
+        locationId: input.locationId,
+        condition: input.condition,
+        quantity: quantityAfter,
+      }),
+      JSON.stringify({
+        transactionId,
+        quantityWrittenOff: input.quantity,
+        reason: input.reason,
+        documentNumber: input.documentNumber,
+        notes: input.notes,
+      }),
+      createdAt,
+    ),
+    completeCommandStatement(db, input.requestId, result, createdAt),
+  );
+
+  const replayed = await executeIdempotentBatch<StockWriteoffResult>(
+    db,
+    statements,
+    input.requestId,
+    requestHash,
+    {
+      code: "stock_quantity_conflict",
+      message: "Залишок змінився під час списання. Оновіть картку матеріалу.",
     },
   );
   return replayed ?? result;

@@ -6,12 +6,14 @@ import test from "node:test";
 import {
   assertFreshImportInspection,
   assertVerifiedImportInspection,
+  bindHostedImportCommitGuard,
   buildHostedImportInsertSql,
   HOSTED_IMPORT_MAX_BATCH_STATEMENTS,
   HOSTED_IMPORT_MAX_INSERT_SQL_BYTES,
   inspectHostedImportPlan,
   parseAndValidateHostedImportPlan,
   readBoundedRequestBytes,
+  resetStagingImportTarget,
   settleHostedImportUploadReplay,
   totalHostedImportRows,
   validateHostedImportPlan,
@@ -23,6 +25,7 @@ import {
   evaluateStagingImportGate,
   isImportRunExpiryAccepted,
   isStagingImportGateActive,
+  resolveLibraryImportTarget,
 } from "../lib/staging-import-gate.ts";
 
 const fixtureUrl = new URL("./fixtures/library-core-canonical.json", import.meta.url);
@@ -42,6 +45,27 @@ async function fixturePlan() {
   const { bundle, report } = importCanonicalExport(canonical);
   assert.equal(report.ok, true);
   return buildD1LoadPlan(bundle, { throwOnError: true }).plan;
+}
+
+function withAcademicRows(plan) {
+  const timestamp = plan.imported_at;
+  plan.tables.academic_years = [{
+    id: "YR-2026-2027", label: "2026/2027", start_date: "2026-09-01", end_date: "2027-08-31",
+    status: "active", notes: "", version: 1, created_at: timestamp, updated_at: timestamp,
+  }];
+  plan.tables.cohorts = [{
+    id: "COH-001", status: "active", notes: "", created_at: timestamp, updated_at: timestamp,
+  }];
+  plan.tables.class_years = [{
+    id: "CY-2026-001", academic_year_id: "YR-2026-2027", cohort_id: "COH-001",
+    class_name: "9-А", grade: 9, code: "А", teacher_user_id: "USR-002", location_id: "LOC-001",
+    start_date: "2026-09-01", end_date: "2027-08-31", status: "active", actual_closed_date: null,
+    notes: "", version: 1, created_at: timestamp, updated_at: timestamp,
+  }];
+  plan.reconciliation.target_counts.academic_years = 1;
+  plan.reconciliation.target_counts.cohorts = 1;
+  plan.reconciliation.target_counts.class_years = 1;
+  return plan;
 }
 
 async function migratedDatabase(t) {
@@ -112,6 +136,36 @@ test("strict hosted contract accepts the deterministic local load plan and rejec
   assert.throws(() => validateHostedImportPlan(brokenTotal), (error) => error?.code === "plan_stock_equation_invalid");
 });
 
+test("hosted academic rows revalidate identities, directory roles and lifecycle consistency", async () => {
+  const plan = withAcademicRows(structuredClone(await fixturePlan()));
+  assert.equal(validateHostedImportPlan(plan), plan);
+
+  const invalidName = structuredClone(plan);
+  invalidName.tables.class_years[0].class_name = "9-Б";
+  assert.throws(
+    () => validateHostedImportPlan(invalidName),
+    (error) => error?.code === "plan_class_year_invalid",
+  );
+
+  const invalidTeacher = structuredClone(plan);
+  invalidTeacher.tables.users.find((row) => row.id === "USR-002").role = "librarian";
+  assert.throws(
+    () => validateHostedImportPlan(invalidTeacher),
+    (error) => error?.code === "plan_class_teacher_invalid",
+  );
+
+  const duplicateActiveYear = structuredClone(plan);
+  duplicateActiveYear.tables.academic_years.push({
+    ...duplicateActiveYear.tables.academic_years[0],
+    id: "YR-2027-2028", label: "2027/2028", start_date: "2027-09-01", end_date: "2028-08-31",
+  });
+  duplicateActiveYear.reconciliation.target_counts.academic_years = 2;
+  assert.throws(
+    () => validateHostedImportPlan(duplicateActiveYear),
+    (error) => error?.code === "plan_academic_state_invalid",
+  );
+});
+
 test("fresh preflight, one atomic batch, FTS rebuild and post-verify agree", async (t) => {
   const plan = await fixturePlan();
   const database = await migratedDatabase(t);
@@ -121,7 +175,7 @@ test("fresh preflight, one atomic batch, FTS rebuild and post-verify agree", asy
 
   const insertSql = buildHostedImportInsertSql(plan);
   assert.ok(insertSql.length > 0);
-  assert.ok(insertSql.length + 2 <= HOSTED_IMPORT_MAX_BATCH_STATEMENTS);
+  assert.ok(insertSql.length + 3 <= HOSTED_IMPORT_MAX_BATCH_STATEMENTS);
   const digest = "a".repeat(64);
   database.prepare(`
     INSERT INTO migration_import_runs (
@@ -176,6 +230,115 @@ test("fresh preflight, one atomic batch, FTS rebuild and post-verify agree", asy
   await assert.rejects(
     verifyHostedImportFts(db, plan),
     (error) => error?.code === "import_fts_integrity_failed",
+  );
+});
+
+test("staging reset atomically clears domain/import rows while preserving migrations and legacy drafts", async (t) => {
+  const plan = withAcademicRows(structuredClone(await fixturePlan()));
+  const database = await migratedDatabase(t);
+  const db = d1Adapter(database);
+  const insertSql = buildHostedImportInsertSql(plan);
+  await db.batch([
+    ...insertSql.map((sql) => db.prepare(sql)),
+    db.prepare("INSERT INTO materials_fts(materials_fts) VALUES('rebuild')"),
+  ]);
+  database.prepare(`
+    INSERT INTO librarian_drafts (
+      id, owner_user_id, owner_email, kind, payload_json, status, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    "legacy-draft-1", "legacy-owner", "owner@example.test", "receipt", "{}", "draft",
+    "2026-08-11T00:00:00.000Z", "2026-08-11T00:00:00.000Z",
+  );
+  database.prepare(`
+    INSERT INTO librarian_draft_events (
+      id, draft_id, actor_user_id, actor_email, action, from_status, to_status, revision, created_at
+    ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
+  `).run(
+    "legacy-event-1", "legacy-draft-1", "legacy-owner", "owner@example.test",
+    "created", "draft", 1, "2026-08-11T00:00:00.000Z",
+  );
+  database.prepare(`
+    INSERT INTO mutation_commands (
+      id, draft_id, kind, actor_user_id, status, request_hash, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, 'processing', ?, ?, ?)
+  `).run(
+    "CMD-reset-1", "legacy-draft-1", "receipt", "USR-001", "a".repeat(64),
+    "2026-08-11T00:00:00.000Z", "2026-08-11T00:00:00.000Z",
+  );
+  const digest = "9".repeat(64);
+  database.prepare(`
+    INSERT INTO migration_import_runs (
+      id, plan_sha256, source_bundle_sha256, object_key, status, plan_bytes,
+      created_by_user_id, created_by_email, expires_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, 'uploaded', 100, ?, ?, ?, ?, ?)
+  `).run(
+    "MIG-reset", digest, plan.source_bundle_sha256,
+    `_migration/library-d1/${digest}/MIG-reset.json`, "owner-1", "owner@example.test",
+    "2026-08-12T00:00:00.000Z", "2026-08-11T00:00:00.000Z", "2026-08-11T00:00:00.000Z",
+  );
+  database.prepare(`
+    INSERT INTO inventory_transactions (
+      id, request_id, kind, occurred_at, document_number, reason, notes,
+      loan_id, actor_user_id, reversal_of_id, status, created_at
+    ) VALUES (?, ?, 'reversal', ?, NULL, ?, '', NULL, ?, ?, 'posted', ?)
+  `).run(
+    "TX-RESET-REVERSAL",
+    "99999999-9999-4999-8999-999999999999",
+    "2026-08-11T00:00:00.000Z",
+    "Fixture reversal",
+    "USR-001",
+    plan.tables.inventory_transactions[0].id,
+    "2026-08-11T00:00:00.000Z",
+  );
+  const schemaBefore = database.prepare(`
+    SELECT name, type, sql FROM sqlite_schema ORDER BY type, name
+  `).all();
+
+  const report = await resetStagingImportTarget(db);
+  assert.ok(report.deletedRows > totalHostedImportRows(plan));
+  assert.equal(report.clearedReversalLinks, 1);
+  assert.equal(
+    report.deletedByTable.inventory_transactions,
+    plan.tables.inventory_transactions.length + 1,
+  );
+  assert.equal(report.deletedByTable.migration_import_runs, 1);
+  assert.equal(report.deletedByTable.mutation_commands, 1);
+  assert.equal(database.prepare("SELECT count(*) AS count FROM librarian_drafts").get().count, 1);
+  assert.equal(database.prepare("SELECT count(*) AS count FROM librarian_draft_events").get().count, 1);
+  assert.deepEqual(database.prepare(`
+    SELECT name, type, sql FROM sqlite_schema ORDER BY type, name
+  `).all(), schemaBefore);
+  const inspection = await inspectHostedImportPlan(db, plan);
+  assertFreshImportInspection(inspection, plan);
+  assert.equal(inspection.ftsContentRows, 0);
+});
+
+test("a failing staging reset rolls back content rows, FTS and import history", async (t) => {
+  const plan = await fixturePlan();
+  const database = await migratedDatabase(t);
+  const db = d1Adapter(database);
+  await db.batch([
+    ...buildHostedImportInsertSql(plan).map((sql) => db.prepare(sql)),
+    db.prepare("INSERT INTO materials_fts(materials_fts) VALUES('rebuild')"),
+  ]);
+  database.exec(`
+    CREATE TRIGGER fixture_abort_staging_reset
+    BEFORE DELETE ON materials
+    BEGIN
+      SELECT RAISE(ABORT, 'fixture reset failure');
+    END
+  `);
+
+  await assert.rejects(
+    resetStagingImportTarget(db),
+    (error) => error?.code === "staging_reset_atomic_batch_failed",
+  );
+  const inspection = await inspectHostedImportPlan(db, plan);
+  assertVerifiedImportInspection(inspection, plan);
+  assert.equal(
+    database.prepare("SELECT count(*) AS count FROM materials_fts WHERE materials_fts MATCH '9780306406157'").get().count,
+    1,
   );
 });
 
@@ -389,13 +552,16 @@ test("a failed hosted batch rolls back every imported row and the durable status
   assert.equal(database.prepare("SELECT status FROM migration_import_runs WHERE id = 'MIG-rollback'").get().status, "preflighted");
 });
 
-test("hosted runtime remains Worker-safe and routes keep all five gates", async () => {
-  const [runtime, api, upload, commit, consoleSource, migration, docs] = await Promise.all([
+test("hosted runtime remains Worker-safe and routes keep every import gate", async () => {
+  const [runtime, api, upload, commit, reset, resetContract, consoleSource, importPage, migration, docs] = await Promise.all([
     readFile(new URL("../lib/d1-import-runtime.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/staging-import-api.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/internal/library-import/upload/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/internal/library-import/commit/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/internal/library-import/reset/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/staging-reset-contract.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/librarian/import/staging-import-console.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/librarian/import/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0004_staging_import_runs.sql", import.meta.url), "utf8"),
     readFile(new URL("../docs/D1_IMPORTER_UK.md", import.meta.url), "utf8"),
   ]);
@@ -403,29 +569,58 @@ test("hosted runtime remains Worker-safe and routes keep all five gates", async 
   assert.doesNotMatch(runtime, /\bBuffer\b|\bprocess\b|\bfetch\s*\(/u);
   for (const marker of [
     "APP_ENV",
+    "LIBRARY_IMPORT_MODE",
     "LIBRARY_IMPORT_ENABLED",
     "LIBRARY_IMPORT_ALLOWED_ORIGIN",
     "LIBRARY_IMPORT_PLAN_SHA256",
     "LIBRARY_IMPORT_EXPIRES_AT",
   ]) assert.match(api, new RegExp(marker));
   assert.match(api, /authorizeLibrarianApi/u);
+  assert.match(api, /librarianWritesEnabled: authorization\.value\.access\.writesEnabled/u);
   assert.match(api, /created_by_user_id !== context\.user\.userId/u);
   assert.match(upload, /settleHostedImportUploadReplay/u);
   assert.match(upload, /assertStagingImportStillActive/u);
   assert.match(commit, /context\.db\.batch/u);
   assert.match(commit, /materials_fts/u);
+  assert.match(reset, /authorizeStagingImport/u);
+  assert.match(reset, /context\.target !== "staging"/u);
+  assert.match(reset, /context\.librarianWritesEnabled/u);
+  assert.match(reset, /readStagingResetAction/u);
+  assert.match(reset, /assertPinnedPlan/u);
+  assert.match(reset, /assertStagingImportStillActive/u);
+  assert.match(
+    reset,
+    /assertPinnedPlan\(context, action\.planSha256\);[\s\S]*assertStagingImportStillActive\(context\);[\s\S]*resetStagingImportTarget\(context\.db\)/u,
+  );
+  assert.match(reset, /resetStagingImportTarget/u);
+  assert.doesNotMatch(reset, /target === "production"|production_cutover/u);
+  assert.match(resetContract, /ОЧИСТИТИ ТЕСТОВУ D1/u);
+  assert.match(runtime, /INSERT INTO materials_fts\(materials_fts\) VALUES\('delete-all'\)/u);
+  assert.match(runtime, /UPDATE inventory_transactions SET kind = 'import', reversal_of_id = NULL/u);
+  assert.doesNotMatch(runtime, /DELETE FROM ["`]?(?:librarian_drafts|librarian_draft_events|d1_migrations|__drizzle_migrations)/u);
   assert.match(consoleSource, /shouldRestoreExpiredRun/u);
   assert.match(consoleSource, /await resumeStatus\(sha256, error\.message\)/u);
+  assert.match(consoleSource, /Підтверджую production cutover/u);
+  assert.match(consoleSource, /production && !productionConfirmed/u);
+  assert.match(consoleSource, /!production \? \(/u);
+  assert.match(consoleSource, /\/api\/internal\/library-import\/reset/u);
+  assert.match(consoleSource, /resetConfirmation !== STAGING_RESET_CONFIRMATION/u);
+  assert.match(importPage, /resolveLibraryImportTarget/u);
+  assert.match(importPage, /target === "production" && access\.writesEnabled/u);
+  assert.match(importPage, /target=\{target\}/u);
   assert.doesNotMatch(migration, /CREATE\s+TRIGGER/iu);
   assert.match(docs, /_migration\/library-d1\//u);
   assert.match(docs, /45 діб/u);
+  assert.match(docs, /LIBRARY_IMPORT_MODE=production_cutover/u);
 });
 
-test("pure staging gate fails closed for production, origin and expiry mistakes", () => {
+test("pure import gate preserves staging and requires exact production cutover mode", () => {
   const nowMs = Date.parse("2026-08-11T12:00:00.000Z");
   const valid = {
     appEnv: "staging",
+    importMode: null,
     enabled: true,
+    librarianWritesEnabled: false,
     allowedOrigin: "https://staging.example.test",
     pinnedPlanSha256: "a".repeat(64),
     expiresAt: "2026-08-12T12:00:00.000Z",
@@ -433,8 +628,30 @@ test("pure staging gate fails closed for production, origin and expiry mistakes"
     submittedOrigin: "https://staging.example.test",
     nowMs,
   };
-  assert.equal(evaluateStagingImportGate(valid).ok, true);
-  assert.equal(evaluateStagingImportGate({ ...valid, appEnv: "production" }).code, "staging_import_disabled");
+  const staging = evaluateStagingImportGate(valid);
+  assert.equal(staging.ok, true);
+  assert.equal(staging.target, "staging");
+  assert.equal(resolveLibraryImportTarget("staging", null), "staging");
+  assert.equal(resolveLibraryImportTarget("production", "production_cutover"), "production");
+  assert.equal(resolveLibraryImportTarget("production", null), null);
+  assert.equal(resolveLibraryImportTarget("production", "PRODUCTION_CUTOVER"), null);
+  assert.equal(resolveLibraryImportTarget("production", " production_cutover "), null);
+
+  const production = {
+    ...valid,
+    appEnv: "production",
+    importMode: "production_cutover",
+    allowedOrigin: "https://library.example.test",
+    requestUrl: "https://library.example.test/api/internal/library-import/upload",
+    submittedOrigin: "https://library.example.test",
+  };
+  const productionResult = evaluateStagingImportGate(production);
+  assert.equal(productionResult.ok, true);
+  assert.equal(productionResult.target, "production");
+  assert.equal(evaluateStagingImportGate({ ...production, importMode: null }).code, "staging_import_disabled");
+  assert.equal(evaluateStagingImportGate({ ...production, importMode: "production-cutover" }).code, "staging_import_disabled");
+  assert.equal(evaluateStagingImportGate({ ...production, librarianWritesEnabled: true }).code, "staging_import_disabled");
+  assert.equal(evaluateStagingImportGate({ ...valid, librarianWritesEnabled: true }).ok, true);
   assert.equal(evaluateStagingImportGate({ ...valid, enabled: false }).code, "staging_import_disabled");
   assert.equal(evaluateStagingImportGate({ ...valid, submittedOrigin: null }).code, "staging_import_origin_denied");
   assert.equal(evaluateStagingImportGate({ ...valid, submittedOrigin: "https://evil.example.test" }).code, "staging_import_origin_denied");
@@ -513,4 +730,78 @@ test("migration run key rejects traversal and commit guard loses safely to clean
   ]), /constraint/iu);
   assert.equal(database.prepare("SELECT status FROM migration_import_runs WHERE id='MIG-race'").get().status, "cleaned");
   assert.equal(database.prepare("SELECT count(*) AS count FROM materials").get().count, 0);
+});
+
+test("missing import run proof aborts a stale commit batch without importing any row", async (t) => {
+  const plan = await fixturePlan();
+  const database = await migratedDatabase(t);
+  const db = d1Adapter(database);
+  const insertSql = buildHostedImportInsertSql(plan);
+  const digest = "8".repeat(64);
+  const runId = "MIG-deleted-before-commit";
+  const expiresAt = "2026-08-12T00:00:00.000Z";
+  const committedAt = "2026-08-11T00:01:00.000Z";
+  database.prepare(`
+    INSERT INTO migration_import_runs (
+      id, plan_sha256, source_bundle_sha256, object_key, status, plan_bytes,
+      expected_rows, insert_statements, created_by_user_id, created_by_email,
+      expires_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, 'preflighted', 100, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    runId,
+    digest,
+    plan.source_bundle_sha256,
+    `_migration/library-d1/${digest}/${runId}.json`,
+    totalHostedImportRows(plan),
+    insertSql.length,
+    "owner-1",
+    "owner@example.test",
+    expiresAt,
+    "2026-08-11T00:00:00.000Z",
+    "2026-08-11T00:00:00.000Z",
+  );
+
+  // Reset wins after commit loaded its run but before the commit batch starts.
+  database.prepare("DELETE FROM migration_import_runs WHERE id = ?").run(runId);
+  const staleStateUpdate = db.prepare(`
+    UPDATE migration_import_runs
+    SET status = CASE
+          WHEN status = 'preflighted'
+            AND plan_sha256 = ?
+            AND expected_rows = ?
+            AND insert_statements = ?
+            AND expires_at = ?
+          THEN 'committed'
+          ELSE '__guard_failed__'
+        END,
+        committed_at = ?, updated_at = ?
+    WHERE id = ?
+  `).bind(
+    digest,
+    totalHostedImportRows(plan),
+    insertSql.length,
+    expiresAt,
+    committedAt,
+    committedAt,
+    runId,
+  );
+
+  await assert.rejects(db.batch([
+    staleStateUpdate,
+    bindHostedImportCommitGuard(db, {
+      runId,
+      planSha256: digest,
+      expectedRows: totalHostedImportRows(plan),
+      insertStatements: insertSql.length,
+      expiresAt,
+      committedAt,
+    }),
+    ...insertSql.map((sql) => db.prepare(sql)),
+    db.prepare("INSERT INTO materials_fts(materials_fts) VALUES('rebuild')"),
+  ]), /constraint/iu);
+
+  assert.equal(database.prepare("SELECT count(*) AS count FROM materials").get().count, 0);
+  assert.equal(database.prepare("SELECT count(*) AS count FROM holdings").get().count, 0);
+  assert.equal(database.prepare("SELECT count(*) AS count FROM materials_fts").get().count, 0);
+  assert.equal(database.prepare("SELECT count(*) AS count FROM migration_import_runs").get().count, 0);
 });
