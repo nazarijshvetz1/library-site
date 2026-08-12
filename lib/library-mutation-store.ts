@@ -1,5 +1,7 @@
 import type { ChatGPTUser } from "@/app/chatgpt-auth";
 import type {
+  ClassLoanCreateInput,
+  ClassLoanReturnInput,
   LoanCreateInput,
   LoanReturnInput,
   MaterialArchiveInput,
@@ -151,6 +153,25 @@ export type LoanMutationResult = {
   transactionId: string;
   items: Array<{
     loanItemId: string;
+    materialId: string;
+    quantityIssued: number;
+    quantityReturned: number;
+  }>;
+};
+
+export type ClassLoanMutationResult = {
+  classLoanId: string;
+  status: "open" | "closed";
+  classYearId: string;
+  responsibleTeacherUserId: string;
+  responsibleTeacherName: string;
+  issuedAt: string;
+  dueAt: string | null;
+  closedAt: string | null;
+  version: number;
+  transactionId: string;
+  items: Array<{
+    classLoanItemId: string;
     materialId: string;
     quantityIssued: number;
     quantityReturned: number;
@@ -873,6 +894,12 @@ export async function archiveMaterialDirect(
         JOIN loans lo ON lo.id = li.loan_id
         WHERE li.material_id = ? AND lo.status != 'cancelled'
           AND li.quantity_issued > li.quantity_returned
+      ), 0) + COALESCE((
+        SELECT SUM(cli.quantity_issued - cli.quantity_returned)
+        FROM class_loan_items cli
+        JOIN class_loans clo ON clo.id = cli.class_loan_id
+        WHERE cli.material_id = ? AND clo.status != 'cancelled'
+          AND cli.quantity_issued > cli.quantity_returned
       ), 0) AS total_quantity,
       COALESCE((
         SELECT SUM(li.quantity_issued - li.quantity_returned)
@@ -880,8 +907,14 @@ export async function archiveMaterialDirect(
         JOIN loans lo ON lo.id = li.loan_id
         WHERE li.material_id = ? AND lo.status != 'cancelled'
           AND li.quantity_issued > li.quantity_returned
+      ), 0) + COALESCE((
+        SELECT SUM(cli.quantity_issued - cli.quantity_returned)
+        FROM class_loan_items cli
+        JOIN class_loans clo ON clo.id = cli.class_loan_id
+        WHERE cli.material_id = ? AND clo.status != 'cancelled'
+          AND cli.quantity_issued > cli.quantity_returned
       ), 0) AS loaned_quantity
-  `).bind(materialId, materialId, materialId)
+  `).bind(materialId, materialId, materialId, materialId, materialId)
     .first<{ total_quantity: number; loaned_quantity: number }>();
   const totalQuantity = Number(stock?.total_quantity ?? 0);
   const loanedQuantity = Number(stock?.loaned_quantity ?? 0);
@@ -940,12 +973,20 @@ export async function archiveMaterialDirect(
           WHERE li.material_id = ? AND lo.status != 'cancelled'
             AND li.quantity_issued > li.quantity_returned
         )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM class_loan_items cli
+          JOIN class_loans clo ON clo.id = cli.class_loan_id
+          WHERE cli.material_id = ? AND clo.status != 'cancelled'
+            AND cli.quantity_issued > cli.quantity_returned
+        )
     `).bind(
       nextVersion,
       archivedAt,
       archivedAt,
       materialId,
       input.expectedVersion,
+      materialId,
       materialId,
       materialId,
     ),
@@ -2523,6 +2564,1056 @@ export async function returnLoanItems(
   return replayed ?? result;
 }
 
+export async function issueLoanToClass(
+  user: ChatGPTUser,
+  input: ClassLoanCreateInput,
+  providedDb?: LibraryD1Database,
+): Promise<ClassLoanMutationResult> {
+  const db = database(providedDb);
+  const actor = await resolveMutationActor(db, user);
+  const requestHash = await mutationHash({
+    kind: "class-loan.issue",
+    actorUserId: actor.id,
+    input,
+  });
+  const replay = await replayCompletedCommand<ClassLoanMutationResult>(
+    db,
+    input.requestId,
+    requestHash,
+  );
+  if (replay) return replay;
+
+  const classYear = await db.prepare(`
+    SELECT
+      cy.id, cy.class_name, cy.cohort_id, cy.version, cy.status,
+      cy.start_date, cy.end_date,
+      ay.id AS academic_year_id, ay.label AS academic_year_label,
+      ay.status AS academic_year_status, c.status AS cohort_status
+    FROM class_years cy
+    JOIN academic_years ay ON ay.id = cy.academic_year_id
+    JOIN cohorts c ON c.id = cy.cohort_id
+    WHERE cy.id = ?
+    LIMIT 1
+  `).bind(input.classYearId).first<{
+    id: string;
+    class_name: string;
+    cohort_id: string;
+    version: number;
+    status: string;
+    academic_year_id: string;
+    academic_year_label: string;
+    academic_year_status: string;
+    cohort_status: string;
+    start_date: string;
+    end_date: string;
+  }>();
+  if (!classYear) {
+    throw new LibraryMutationError(
+      "class_year_not_found",
+      404,
+      "Клас цього навчального року не знайдено.",
+    );
+  }
+  if (Number(classYear.version) !== input.expectedClassYearVersion) {
+    throw new LibraryMutationError(
+      "class_year_version_conflict",
+      409,
+      "Дані класу вже змінено. Оновіть список класів і повторіть видачу.",
+      { currentVersion: Number(classYear.version) },
+    );
+  }
+  if (
+    classYear.status !== "active"
+    || classYear.academic_year_status !== "active"
+    || classYear.cohort_status !== "active"
+  ) {
+    throw new LibraryMutationError(
+      "class_year_not_active",
+      409,
+      "Видачу можна оформити лише на активний клас активного навчального року.",
+    );
+  }
+  if (input.issuedAt < classYear.start_date || input.issuedAt > classYear.end_date) {
+    throw new LibraryMutationError(
+      "issue_date_outside_class_year",
+      400,
+      "Дата видачі має належати обраному навчальному року класу.",
+      { startDate: classYear.start_date, endDate: classYear.end_date },
+    );
+  }
+  if (input.dueAt !== null && input.dueAt > classYear.end_date) {
+    throw new LibraryMutationError(
+      "due_date_outside_class_year",
+      400,
+      "Строк повернення не може бути пізнішим за завершення навчального року класу.",
+      { endDate: classYear.end_date },
+    );
+  }
+
+  const responsibleTeacher = await db.prepare(`
+    SELECT id, full_name
+    FROM users
+    WHERE id = ? AND role = 'teacher' AND status = 'active'
+    LIMIT 1
+  `).bind(input.responsibleTeacherUserId).first<{ id: string; full_name: string }>();
+  if (!responsibleTeacher) {
+    throw new LibraryMutationError(
+      "responsible_teacher_not_found",
+      404,
+      "Відповідального вчителя не знайдено або його профіль неактивний. Оберіть іншого вчителя.",
+    );
+  }
+
+  const requestedItemsJson = JSON.stringify(input.items);
+  const itemStateResult = await db.prepare(`
+    WITH requested AS (
+      SELECT
+        CAST(key AS INTEGER) AS item_index,
+        json_extract(value, '$.materialId') AS material_id,
+        json_extract(value, '$.sourceLocationId') AS location_id,
+        json_extract(value, '$.condition') AS condition
+      FROM json_each(?)
+    )
+    SELECT
+      requested.item_index,
+      requested.material_id,
+      CASE WHEN m.status = 'active' AND m.archived_at IS NULL THEN m.id END
+        AS active_material_id,
+      CASE WHEN l.status = 'active' AND l.type != 'service' THEN l.id END
+        AS active_location_id,
+      h.quantity,
+      h.version
+    FROM requested
+    LEFT JOIN materials m ON m.id = requested.material_id
+    LEFT JOIN locations l ON l.id = requested.location_id
+    LEFT JOIN holdings h
+      ON h.material_id = requested.material_id
+      AND h.location_id = requested.location_id
+      AND h.condition = requested.condition
+    ORDER BY requested.item_index
+  `).bind(requestedItemsJson).all<{
+    item_index: number;
+    material_id: string;
+    active_material_id: string | null;
+    active_location_id: string | null;
+    quantity: number | null;
+    version: number | null;
+  }>();
+  const itemStates = (itemStateResult.results ?? []).map((state) => ({
+    quantity: state.active_material_id && state.active_location_id
+      ? Number(state.quantity ?? 0)
+      : 0,
+    version: state.active_material_id && state.active_location_id
+      ? Number(state.version ?? 0)
+      : 0,
+  }));
+  if (itemStates.length !== input.items.length) {
+    throw new LibraryMutationError(
+      "class_loan_items_invalid",
+      400,
+      "Не вдалося прочитати всі позиції видачі.",
+    );
+  }
+  input.items.forEach((item, index) => {
+    const state = itemStates[index];
+    const currentQuantity = state.quantity;
+    if (currentQuantity !== item.expectedAvailableQuantity) {
+      throw new LibraryMutationError(
+        "stock_quantity_conflict",
+        409,
+        "Залишок одного з матеріалів уже змінився. Оновіть видачу.",
+        { materialId: item.materialId, currentQuantity },
+      );
+    }
+    if (state.version < 1 || currentQuantity < item.quantity) {
+      throw new LibraryMutationError(
+        "insufficient_stock",
+        409,
+        "У вибраному місці недостатньо примірників.",
+        { materialId: item.materialId, currentQuantity },
+      );
+    }
+  });
+
+  const createdAt = new Date().toISOString();
+  const classLoanId = `CLOAN-${crypto.randomUUID()}`;
+  const transactionId = `CLTX-${crypto.randomUUID()}`;
+  const classLoanItemIds = input.items.map(() => `CLI-${crypto.randomUUID()}`);
+  const issueRows = input.items.map((item, index) => ({
+    ...item,
+    classLoanItemId: classLoanItemIds[index],
+    lineId: `CLINE-${crypto.randomUUID()}`,
+    quantityBefore: itemStates[index].quantity,
+    versionBefore: itemStates[index].version,
+    quantityAfter: itemStates[index].quantity - item.quantity,
+  }));
+  const issueRowsJson = JSON.stringify(issueRows);
+  const nonzeroHoldingCount = issueRows.filter((row) => row.quantityAfter > 0).length;
+  const deletedHoldingCount = issueRows.length - nonzeroHoldingCount;
+  const result: ClassLoanMutationResult = {
+    classLoanId,
+    status: "open",
+    classYearId: input.classYearId,
+    responsibleTeacherUserId: responsibleTeacher.id,
+    responsibleTeacherName: responsibleTeacher.full_name,
+    issuedAt: input.issuedAt,
+    dueAt: input.dueAt,
+    closedAt: null,
+    version: 1,
+    transactionId,
+    items: input.items.map((item, index) => ({
+      classLoanItemId: classLoanItemIds[index],
+      materialId: item.materialId,
+      quantityIssued: item.quantity,
+      quantityReturned: 0,
+    })),
+  };
+  const statements: D1Statement[] = [
+    insertCommandStatement(
+      db,
+      input.requestId,
+      requestHash,
+      actor.id,
+      "class-loan.issue",
+      "class_loan",
+      classLoanId,
+      createdAt,
+    ),
+    db.prepare(`
+      INSERT INTO class_loans (
+        id, class_year_id, responsible_teacher_user_id, status,
+        issued_at, due_at, closed_at, notes, issued_by_user_id,
+        closed_by_user_id, version, created_at, updated_at
+      ) VALUES (
+        ?, (
+          SELECT cy.id
+          FROM class_years cy
+          JOIN academic_years ay ON ay.id = cy.academic_year_id AND ay.status = 'active'
+          JOIN cohorts c ON c.id = cy.cohort_id AND c.status = 'active'
+          WHERE cy.id = ? AND cy.version = ? AND cy.status = 'active'
+            AND ? BETWEEN cy.start_date AND cy.end_date
+            AND (? IS NULL OR ? <= cy.end_date)
+        ), (
+          SELECT id FROM users
+          WHERE id = ? AND role = 'teacher' AND status = 'active'
+        ), 'open', ?, ?, NULL, ?, ?, NULL, 1, ?, ?
+      )
+    `).bind(
+      classLoanId,
+      input.classYearId,
+      input.expectedClassYearVersion,
+      input.issuedAt,
+      input.dueAt,
+      input.dueAt,
+      input.responsibleTeacherUserId,
+      input.issuedAt,
+      input.dueAt,
+      input.notes ?? "",
+      actor.id,
+      createdAt,
+      createdAt,
+    ),
+    db.prepare(`
+      INSERT INTO class_loan_transactions (
+        id, request_id, class_loan_id, kind, occurred_at, notes,
+        actor_user_id, created_at
+      ) VALUES (?, ?, ?, 'issue', ?, ?, ?, ?)
+    `).bind(
+      transactionId,
+      input.requestId,
+      classLoanId,
+      input.issuedAt,
+      input.notes ?? "",
+      actor.id,
+      createdAt,
+    ),
+  ];
+
+  statements.push(
+    db.prepare(`
+      WITH requested AS (
+        SELECT value FROM json_each(?)
+      )
+      INSERT INTO class_loan_items (
+        id, class_loan_id, material_id, source_location_id, condition,
+        quantity_issued, quantity_returned, notes, created_at, updated_at
+      )
+      SELECT
+        json_extract(value, '$.classLoanItemId'),
+        ?,
+        (
+          SELECT id FROM materials
+          WHERE id = json_extract(value, '$.materialId')
+            AND status = 'active' AND archived_at IS NULL
+        ),
+        (
+          SELECT id FROM locations
+          WHERE id = json_extract(value, '$.sourceLocationId')
+            AND status = 'active' AND type != 'service'
+        ),
+        json_extract(value, '$.condition'),
+        CAST(json_extract(value, '$.quantity') AS INTEGER),
+        0,
+        '',
+        ?,
+        ?
+      FROM requested
+    `).bind(issueRowsJson, classLoanId, createdAt, createdAt),
+  );
+  if (nonzeroHoldingCount > 0) {
+    statements.push(
+      db.prepare(`
+        WITH requested AS (
+          SELECT
+            json_extract(value, '$.materialId') AS material_id,
+            json_extract(value, '$.sourceLocationId') AS location_id,
+            json_extract(value, '$.condition') AS condition,
+            CAST(json_extract(value, '$.quantityBefore') AS INTEGER) AS quantity_before,
+            CAST(json_extract(value, '$.quantityAfter') AS INTEGER) AS quantity_after,
+            CAST(json_extract(value, '$.versionBefore') AS INTEGER) AS version_before
+          FROM json_each(?)
+          WHERE CAST(json_extract(value, '$.quantityAfter') AS INTEGER) > 0
+        )
+        UPDATE holdings AS holding
+        SET
+          quantity = (
+            SELECT quantity_after FROM requested
+            WHERE material_id = holding.material_id
+              AND location_id = holding.location_id
+              AND condition = holding.condition
+          ),
+          version = (
+            SELECT version_before + 1 FROM requested
+            WHERE material_id = holding.material_id
+              AND location_id = holding.location_id
+              AND condition = holding.condition
+          ),
+          updated_at = ?
+        WHERE EXISTS (
+          SELECT 1 FROM requested
+          WHERE material_id = holding.material_id
+            AND location_id = holding.location_id
+            AND condition = holding.condition
+            AND quantity_before = holding.quantity
+            AND version_before = holding.version
+        )
+          AND EXISTS (
+            SELECT 1 FROM materials
+            WHERE id = holding.material_id
+              AND status = 'active' AND archived_at IS NULL
+          )
+          AND EXISTS (
+            SELECT 1 FROM locations
+            WHERE id = holding.location_id
+              AND status = 'active' AND type != 'service'
+          )
+      `).bind(issueRowsJson, createdAt),
+      db.prepare(`
+        WITH requested AS (
+          SELECT value FROM json_each(?)
+          WHERE CAST(json_extract(value, '$.quantityAfter') AS INTEGER) > 0
+        )
+        INSERT INTO class_loan_transaction_lines (
+          id, transaction_id, class_loan_item_id, material_id, location_id,
+          condition, quantity_delta, quantity_before, quantity_after, created_at
+        )
+        SELECT
+          json_extract(value, '$.lineId'),
+          ?,
+          json_extract(value, '$.classLoanItemId'),
+          CASE WHEN changes() = ? THEN json_extract(value, '$.materialId') END,
+          json_extract(value, '$.sourceLocationId'),
+          json_extract(value, '$.condition'),
+          -CAST(json_extract(value, '$.quantity') AS INTEGER),
+          CAST(json_extract(value, '$.quantityBefore') AS INTEGER),
+          CAST(json_extract(value, '$.quantityAfter') AS INTEGER),
+          ?
+        FROM requested
+      `).bind(issueRowsJson, transactionId, nonzeroHoldingCount, createdAt),
+    );
+  }
+  if (deletedHoldingCount > 0) {
+    statements.push(
+      db.prepare(`
+        WITH requested AS (
+          SELECT
+            json_extract(value, '$.materialId') AS material_id,
+            json_extract(value, '$.sourceLocationId') AS location_id,
+            json_extract(value, '$.condition') AS condition,
+            CAST(json_extract(value, '$.quantityBefore') AS INTEGER) AS quantity_before,
+            CAST(json_extract(value, '$.versionBefore') AS INTEGER) AS version_before
+          FROM json_each(?)
+          WHERE CAST(json_extract(value, '$.quantityAfter') AS INTEGER) = 0
+        )
+        DELETE FROM holdings
+        WHERE EXISTS (
+          SELECT 1 FROM requested
+          WHERE material_id = holdings.material_id
+            AND location_id = holdings.location_id
+            AND condition = holdings.condition
+            AND quantity_before = holdings.quantity
+            AND version_before = holdings.version
+        )
+      `).bind(issueRowsJson),
+      db.prepare(`
+        WITH requested AS (
+          SELECT value FROM json_each(?)
+          WHERE CAST(json_extract(value, '$.quantityAfter') AS INTEGER) = 0
+        )
+        INSERT INTO class_loan_transaction_lines (
+          id, transaction_id, class_loan_item_id, material_id, location_id,
+          condition, quantity_delta, quantity_before, quantity_after, created_at
+        )
+        SELECT
+          json_extract(value, '$.lineId'),
+          ?,
+          json_extract(value, '$.classLoanItemId'),
+          CASE WHEN changes() = ? THEN json_extract(value, '$.materialId') END,
+          json_extract(value, '$.sourceLocationId'),
+          json_extract(value, '$.condition'),
+          -CAST(json_extract(value, '$.quantity') AS INTEGER),
+          CAST(json_extract(value, '$.quantityBefore') AS INTEGER),
+          0,
+          ?
+        FROM requested
+      `).bind(issueRowsJson, transactionId, deletedHoldingCount, createdAt),
+    );
+  }
+  statements.push(
+    rebuildStockTotalsBulkStatement(
+      db,
+      [...new Set(input.items.map((item) => item.materialId))],
+      createdAt,
+    ),
+  );
+  statements.push(
+    db.prepare(`
+      INSERT INTO audit_events (
+        id, actor_user_id, actor_email, action, entity_type, entity_id,
+        request_id, before_json, after_json, metadata_json, created_at
+      ) VALUES (?, ?, ?, 'class_loan.issued', 'class_loan', ?, ?, NULL, ?, ?, ?)
+    `).bind(
+      crypto.randomUUID(),
+      actor.id,
+      actor.email,
+      classLoanId,
+      input.requestId,
+      JSON.stringify({
+        ...result,
+        className: classYear.class_name,
+        academicYearId: classYear.academic_year_id,
+        academicYearLabel: classYear.academic_year_label,
+        cohortId: classYear.cohort_id,
+      }),
+      JSON.stringify({
+        transactionId,
+        responsibleTeacherName: responsibleTeacher.full_name,
+      }),
+      createdAt,
+    ),
+    completeCommandStatement(db, input.requestId, result, createdAt),
+  );
+
+  const replayed = await executeIdempotentBatch<ClassLoanMutationResult>(
+    db,
+    statements,
+    input.requestId,
+    requestHash,
+    {
+      code: "stock_quantity_conflict",
+      message: "Залишок або дані класу змінилися під час видачі. Оновіть форму.",
+      classify: classifyClassLoanIssueRace,
+    },
+  );
+  return replayed ?? result;
+}
+
+export async function returnClassLoanItems(
+  user: ChatGPTUser,
+  input: ClassLoanReturnInput,
+  providedDb?: LibraryD1Database,
+): Promise<ClassLoanMutationResult> {
+  const db = database(providedDb);
+  const actor = await resolveMutationActor(db, user);
+  const requestHash = await mutationHash({
+    kind: "class-loan.return",
+    actorUserId: actor.id,
+    input,
+  });
+  const replay = await replayCompletedCommand<ClassLoanMutationResult>(
+    db,
+    input.requestId,
+    requestHash,
+  );
+  if (replay) return replay;
+
+  const loan = await db.prepare(`
+    SELECT
+      cl.id, cl.class_year_id, cl.responsible_teacher_user_id,
+      teacher.full_name AS responsible_teacher_name, cl.status,
+      cl.issued_at, cl.due_at, cl.version,
+      (
+        SELECT MAX(tx.occurred_at)
+        FROM class_loan_transactions tx
+        WHERE tx.class_loan_id = cl.id AND tx.kind = 'return'
+      ) AS last_returned_at
+    FROM class_loans cl
+    JOIN users teacher ON teacher.id = cl.responsible_teacher_user_id
+    WHERE cl.id = ?
+    LIMIT 1
+  `).bind(input.classLoanId).first<{
+    id: string;
+    class_year_id: string;
+    responsible_teacher_user_id: string;
+    responsible_teacher_name: string;
+    status: string;
+    issued_at: string;
+    due_at: string | null;
+    version: number;
+    last_returned_at: string | null;
+  }>();
+  if (!loan) {
+    throw new LibraryMutationError(
+      "class_loan_not_found",
+      404,
+      "Видачу на клас не знайдено.",
+    );
+  }
+  if (loan.status !== "open") {
+    throw new LibraryMutationError(
+      "class_loan_already_closed",
+      409,
+      "Цю видачу на клас уже закрито або скасовано.",
+    );
+  }
+  if (Number(loan.version) !== input.expectedVersion) {
+    throw new LibraryMutationError(
+      "class_loan_version_conflict",
+      409,
+      "Видачу вже змінено в іншій вкладці. Оновіть відкриті видачі.",
+      { currentVersion: Number(loan.version) },
+    );
+  }
+  if (input.returnedAt < loan.issued_at) {
+    throw new LibraryMutationError(
+      "return_date_invalid",
+      400,
+      "Дата повернення не може передувати даті видачі.",
+    );
+  }
+  if (loan.last_returned_at && input.returnedAt < loan.last_returned_at) {
+    throw new LibraryMutationError(
+      "return_date_before_previous_return",
+      409,
+      "Дата повернення не може бути ранішою за вже збережене повернення цієї видачі.",
+      { lastReturnAt: loan.last_returned_at },
+    );
+  }
+
+  const requestedReturnsJson = JSON.stringify(input.items);
+  const stateResult = await db.prepare(`
+    WITH requested AS (
+      SELECT
+        CAST(key AS INTEGER) AS item_index,
+        json_extract(value, '$.classLoanItemId') AS class_loan_item_id,
+        json_extract(value, '$.returnLocationId') AS return_location_id,
+        json_extract(value, '$.condition') AS return_condition
+      FROM json_each(?)
+    )
+    SELECT
+      requested.item_index,
+      cli.id AS class_loan_item_id,
+      cli.material_id,
+      cli.quantity_issued,
+      cli.quantity_returned,
+      CASE WHEN loc.status = 'active' AND loc.type != 'service' THEN loc.id END
+        AS active_location_id,
+      h.quantity AS holding_quantity,
+      h.version AS holding_version
+    FROM requested
+    LEFT JOIN class_loan_items cli
+      ON cli.id = requested.class_loan_item_id AND cli.class_loan_id = ?
+    LEFT JOIN locations loc ON loc.id = requested.return_location_id
+    LEFT JOIN holdings h
+      ON h.material_id = cli.material_id
+      AND h.location_id = requested.return_location_id
+      AND h.condition = requested.return_condition
+    ORDER BY requested.item_index
+  `).bind(requestedReturnsJson, input.classLoanId).all<{
+    item_index: number;
+    class_loan_item_id: string | null;
+    material_id: string | null;
+    quantity_issued: number | null;
+    quantity_returned: number | null;
+    active_location_id: string | null;
+    holding_quantity: number | null;
+    holding_version: number | null;
+  }>();
+  const stateRows = stateResult.results ?? [];
+  if (stateRows.length !== input.items.length) {
+    throw new LibraryMutationError(
+      "class_loan_items_invalid",
+      400,
+      "Не вдалося прочитати всі позиції повернення.",
+    );
+  }
+  const states: Array<{
+    classLoanItemId: string;
+    materialId: string;
+    quantityIssued: number;
+    quantityReturned: number;
+    holdingQuantity: number;
+    holdingVersion: number;
+  }> = stateRows.map((row, index) => {
+    const item = input.items[index];
+    if (!row.class_loan_item_id || !row.material_id) {
+      throw new LibraryMutationError(
+        "class_loan_item_not_found",
+        404,
+        "Позицію видачі на клас не знайдено.",
+      );
+    }
+    const quantityIssued = Number(row.quantity_issued ?? 0);
+    const quantityReturned = Number(row.quantity_returned ?? 0);
+    const remaining = quantityIssued - quantityReturned;
+    if (item.quantity > remaining) {
+      throw new LibraryMutationError(
+        "return_quantity_exceeds_outstanding",
+        409,
+        "Кількість повернення перевищує неповернений залишок.",
+        { classLoanItemId: item.classLoanItemId, remaining },
+      );
+    }
+    if (!row.active_location_id) {
+      throw new LibraryMutationError(
+        "location_not_found",
+        404,
+        "Місце повернення не знайдено.",
+      );
+    }
+    return {
+      classLoanItemId: row.class_loan_item_id,
+      materialId: row.material_id,
+      quantityIssued,
+      quantityReturned,
+      holdingQuantity: Number(row.holding_quantity ?? 0),
+      holdingVersion: Number(row.holding_version ?? 0),
+    };
+  });
+
+  const allItems = await db.prepare(`
+    SELECT id, material_id, quantity_issued, quantity_returned
+    FROM class_loan_items WHERE class_loan_id = ?
+  `).bind(input.classLoanId).all<{
+    id: string;
+    material_id: string;
+    quantity_issued: number;
+    quantity_returned: number;
+  }>();
+  const returningById = new Map(
+    input.items.map((item) => [item.classLoanItemId, item.quantity]),
+  );
+  const willClose = (allItems.results ?? []).every((item) =>
+    Number(item.quantity_returned) + (returningById.get(item.id) ?? 0)
+      === Number(item.quantity_issued)
+  );
+  const createdAt = new Date().toISOString();
+  const transactionId = `CLTX-${crypto.randomUUID()}`;
+  const nextVersion = Number(loan.version) + 1;
+  const returnRows = input.items.map((item, index) => ({
+    ...item,
+    materialId: states[index].materialId,
+    quantityReturnedBefore: states[index].quantityReturned,
+    quantityReturnedAfter: states[index].quantityReturned + item.quantity,
+    auditId: crypto.randomUUID(),
+  }));
+  const returnRowsJson = JSON.stringify(returnRows);
+  const result: ClassLoanMutationResult = {
+    classLoanId: input.classLoanId,
+    status: willClose ? "closed" : "open",
+    classYearId: loan.class_year_id,
+    responsibleTeacherUserId: loan.responsible_teacher_user_id,
+    responsibleTeacherName: loan.responsible_teacher_name,
+    issuedAt: loan.issued_at,
+    dueAt: loan.due_at,
+    closedAt: willClose ? input.returnedAt : null,
+    version: nextVersion,
+    transactionId,
+    items: (allItems.results ?? []).map((item) => ({
+      classLoanItemId: item.id,
+      materialId: item.material_id,
+      quantityIssued: Number(item.quantity_issued),
+      quantityReturned:
+        Number(item.quantity_returned) + (returningById.get(item.id) ?? 0),
+    })),
+  };
+  const holdingGroups = new Map<string, {
+    materialId: string;
+    locationId: string;
+    condition: string;
+    quantityBefore: number;
+    versionBefore: number;
+    returnedQuantity: number;
+    entries: Array<{
+      classLoanItemId: string;
+      quantity: number;
+    }>;
+  }>();
+  input.items.forEach((item, index) => {
+    const state = states[index];
+    const key = `${state.materialId}\u0000${item.returnLocationId}\u0000${item.condition}`;
+    const existing = holdingGroups.get(key);
+    if (existing) {
+      existing.returnedQuantity += item.quantity;
+      existing.entries.push({ classLoanItemId: item.classLoanItemId, quantity: item.quantity });
+      return;
+    }
+    holdingGroups.set(key, {
+      materialId: state.materialId,
+      locationId: item.returnLocationId,
+      condition: item.condition,
+      quantityBefore: state.holdingQuantity,
+      versionBefore: state.holdingVersion,
+      returnedQuantity: item.quantity,
+      entries: [{ classLoanItemId: item.classLoanItemId, quantity: item.quantity }],
+    });
+  });
+  const holdingGroupRows = [...holdingGroups.values()].map((group) => {
+    let runningQuantity = group.quantityBefore;
+    const entries = group.entries.map((entry) => {
+      const quantityBefore = runningQuantity;
+      const quantityAfter = quantityBefore + entry.quantity;
+      runningQuantity = quantityAfter;
+      return {
+        ...entry,
+        lineId: `CLINE-${crypto.randomUUID()}`,
+        quantityBefore,
+        quantityAfter,
+      };
+    });
+    return {
+      ...group,
+      quantityAfter: group.quantityBefore + group.returnedQuantity,
+      entries,
+    };
+  });
+  const holdingGroupsJson = JSON.stringify(holdingGroupRows);
+  const existingHoldingGroupCount = holdingGroupRows.filter(
+    (group) => group.versionBefore > 0,
+  ).length;
+  const newHoldingGroupCount = holdingGroupRows.length - existingHoldingGroupCount;
+
+  const statements: D1Statement[] = [
+    insertCommandStatement(
+      db,
+      input.requestId,
+      requestHash,
+      actor.id,
+      "class-loan.return",
+      "class_loan",
+      input.classLoanId,
+      createdAt,
+    ),
+    db.prepare(`
+      INSERT INTO class_loan_transactions (
+        id, request_id, class_loan_id, kind, occurred_at, notes,
+        actor_user_id, created_at
+      ) VALUES (?, ?, ?, 'return', ?, ?, ?, ?)
+    `).bind(
+      transactionId,
+      input.requestId,
+      input.classLoanId,
+      input.returnedAt,
+      input.notes ?? "",
+      actor.id,
+      createdAt,
+    ),
+  ];
+
+  statements.push(
+    db.prepare(`
+      WITH requested AS (
+        SELECT
+          json_extract(value, '$.classLoanItemId') AS class_loan_item_id,
+          CAST(json_extract(value, '$.quantityReturnedBefore') AS INTEGER)
+            AS quantity_returned_before,
+          CAST(json_extract(value, '$.quantityReturnedAfter') AS INTEGER)
+            AS quantity_returned_after
+        FROM json_each(?)
+      )
+      UPDATE class_loan_items AS item
+      SET
+        quantity_returned = (
+          SELECT quantity_returned_after FROM requested
+          WHERE class_loan_item_id = item.id
+        ),
+        updated_at = ?
+      WHERE item.class_loan_id = ?
+        AND EXISTS (
+          SELECT 1 FROM requested
+          WHERE class_loan_item_id = item.id
+            AND quantity_returned_before = item.quantity_returned
+            AND quantity_returned_after <= item.quantity_issued
+        )
+    `).bind(returnRowsJson, createdAt, input.classLoanId),
+    db.prepare(`
+      WITH requested AS (
+        SELECT value FROM json_each(?)
+      )
+      INSERT INTO audit_events (
+        id, actor_user_id, actor_email, action, entity_type, entity_id,
+        request_id, before_json, after_json, metadata_json, created_at
+      )
+      SELECT
+        json_extract(value, '$.auditId'),
+        ?,
+        ?,
+        'class_loan_item.returned',
+        'class_loan_item',
+        CASE WHEN changes() = ? THEN json_extract(value, '$.classLoanItemId') END,
+        ?,
+        json_object(
+          'quantityReturned',
+          CAST(json_extract(value, '$.quantityReturnedBefore') AS INTEGER)
+        ),
+        json_object(
+          'quantityReturned',
+          CAST(json_extract(value, '$.quantityReturnedAfter') AS INTEGER)
+        ),
+        json_object(
+          'quantity', CAST(json_extract(value, '$.quantity') AS INTEGER),
+          'transactionId', ?
+        ),
+        ?
+      FROM requested
+    `).bind(
+      returnRowsJson,
+      actor.id,
+      actor.email,
+      returnRows.length,
+      input.requestId,
+      transactionId,
+      createdAt,
+    ),
+  );
+
+  if (existingHoldingGroupCount > 0) {
+    statements.push(
+      db.prepare(`
+        WITH requested AS (
+          SELECT
+            json_extract(value, '$.materialId') AS material_id,
+            json_extract(value, '$.locationId') AS location_id,
+            json_extract(value, '$.condition') AS condition,
+            CAST(json_extract(value, '$.quantityBefore') AS INTEGER) AS quantity_before,
+            CAST(json_extract(value, '$.quantityAfter') AS INTEGER) AS quantity_after,
+            CAST(json_extract(value, '$.versionBefore') AS INTEGER) AS version_before
+          FROM json_each(?)
+          WHERE CAST(json_extract(value, '$.versionBefore') AS INTEGER) > 0
+        )
+        UPDATE holdings AS holding
+        SET
+          quantity = (
+            SELECT quantity_after FROM requested
+            WHERE material_id = holding.material_id
+              AND location_id = holding.location_id
+              AND condition = holding.condition
+          ),
+          version = (
+            SELECT version_before + 1 FROM requested
+            WHERE material_id = holding.material_id
+              AND location_id = holding.location_id
+              AND condition = holding.condition
+          ),
+          updated_at = ?
+        WHERE EXISTS (
+          SELECT 1 FROM requested
+          WHERE material_id = holding.material_id
+            AND location_id = holding.location_id
+            AND condition = holding.condition
+            AND quantity_before = holding.quantity
+            AND version_before = holding.version
+        )
+          AND EXISTS (
+            SELECT 1 FROM materials
+            WHERE id = holding.material_id
+              AND status = 'active' AND archived_at IS NULL
+          )
+          AND EXISTS (
+            SELECT 1 FROM locations
+            WHERE id = holding.location_id
+              AND status = 'active' AND type != 'service'
+          )
+      `).bind(holdingGroupsJson, createdAt),
+      db.prepare(`
+        WITH groups AS (
+          SELECT value
+          FROM json_each(?)
+          WHERE CAST(json_extract(value, '$.versionBefore') AS INTEGER) > 0
+        ), lines AS (
+          SELECT groups.value AS group_value, entry.value AS line_value
+          FROM groups, json_each(json_extract(groups.value, '$.entries')) entry
+        )
+        INSERT INTO class_loan_transaction_lines (
+          id, transaction_id, class_loan_item_id, material_id, location_id,
+          condition, quantity_delta, quantity_before, quantity_after, created_at
+        )
+        SELECT
+          json_extract(line_value, '$.lineId'),
+          ?,
+          json_extract(line_value, '$.classLoanItemId'),
+          CASE WHEN changes() = ? THEN json_extract(group_value, '$.materialId') END,
+          json_extract(group_value, '$.locationId'),
+          json_extract(group_value, '$.condition'),
+          CAST(json_extract(line_value, '$.quantity') AS INTEGER),
+          CAST(json_extract(line_value, '$.quantityBefore') AS INTEGER),
+          CAST(json_extract(line_value, '$.quantityAfter') AS INTEGER),
+          ?
+        FROM lines
+      `).bind(
+        holdingGroupsJson,
+        transactionId,
+        existingHoldingGroupCount,
+        createdAt,
+      ),
+    );
+  }
+  if (newHoldingGroupCount > 0) {
+    statements.push(
+      db.prepare(`
+        WITH requested AS (
+          SELECT value
+          FROM json_each(?)
+          WHERE CAST(json_extract(value, '$.versionBefore') AS INTEGER) = 0
+        )
+        INSERT INTO holdings (
+          material_id, location_id, condition, quantity, version, updated_at
+        )
+        SELECT
+          (
+            SELECT id FROM materials
+            WHERE id = json_extract(value, '$.materialId')
+              AND status = 'active' AND archived_at IS NULL
+          ),
+          (
+            SELECT id FROM locations
+            WHERE id = json_extract(value, '$.locationId')
+              AND status = 'active' AND type != 'service'
+          ),
+          json_extract(value, '$.condition'),
+          CAST(json_extract(value, '$.quantityAfter') AS INTEGER),
+          1,
+          ?
+        FROM requested
+      `).bind(holdingGroupsJson, createdAt),
+      db.prepare(`
+        WITH groups AS (
+          SELECT value
+          FROM json_each(?)
+          WHERE CAST(json_extract(value, '$.versionBefore') AS INTEGER) = 0
+        ), lines AS (
+          SELECT groups.value AS group_value, entry.value AS line_value
+          FROM groups, json_each(json_extract(groups.value, '$.entries')) entry
+        )
+        INSERT INTO class_loan_transaction_lines (
+          id, transaction_id, class_loan_item_id, material_id, location_id,
+          condition, quantity_delta, quantity_before, quantity_after, created_at
+        )
+        SELECT
+          json_extract(line_value, '$.lineId'),
+          ?,
+          json_extract(line_value, '$.classLoanItemId'),
+          CASE WHEN changes() = ? THEN json_extract(group_value, '$.materialId') END,
+          json_extract(group_value, '$.locationId'),
+          json_extract(group_value, '$.condition'),
+          CAST(json_extract(line_value, '$.quantity') AS INTEGER),
+          CAST(json_extract(line_value, '$.quantityBefore') AS INTEGER),
+          CAST(json_extract(line_value, '$.quantityAfter') AS INTEGER),
+          ?
+        FROM lines
+      `).bind(
+        holdingGroupsJson,
+        transactionId,
+        newHoldingGroupCount,
+        createdAt,
+      ),
+    );
+  }
+
+  statements.push(
+    db.prepare(`
+      UPDATE class_loans
+      SET status = ?, closed_at = ?, closed_by_user_id = ?,
+        version = ?, updated_at = ?
+      WHERE id = ? AND status = 'open' AND version = ?
+        AND NOT EXISTS (
+          SELECT 1 FROM class_loan_transactions later
+          WHERE later.class_loan_id = ? AND later.kind = 'return'
+            AND later.occurred_at > ?
+        )
+    `).bind(
+      willClose ? "closed" : "open",
+      willClose ? input.returnedAt : null,
+      willClose ? actor.id : null,
+      nextVersion,
+      createdAt,
+      input.classLoanId,
+      input.expectedVersion,
+      input.classLoanId,
+      input.returnedAt,
+    ),
+    db.prepare(`
+      INSERT INTO audit_events (
+        id, actor_user_id, actor_email, action, entity_type, entity_id,
+        request_id, before_json, after_json, metadata_json, created_at
+      ) VALUES (
+        ?, ?, ?, 'class_loan.returned', 'class_loan',
+        (
+          SELECT id FROM class_loans
+          WHERE id = ? AND version = ? AND status = ? AND changes() = 1
+        ),
+        ?, ?, ?, ?, ?
+      )
+    `).bind(
+      crypto.randomUUID(),
+      actor.id,
+      actor.email,
+      input.classLoanId,
+      nextVersion,
+      willClose ? "closed" : "open",
+      input.requestId,
+      JSON.stringify({ status: "open", version: input.expectedVersion }),
+      JSON.stringify({ status: result.status, version: nextVersion }),
+      JSON.stringify({
+        transactionId,
+        responsibleTeacherUserId: loan.responsible_teacher_user_id,
+        responsibleTeacherName: loan.responsible_teacher_name,
+      }),
+      createdAt,
+    ),
+  );
+  statements.push(
+    rebuildStockTotalsBulkStatement(
+      db,
+      [...new Set(states.map((state) => state.materialId))],
+      createdAt,
+    ),
+    completeCommandStatement(db, input.requestId, result, createdAt),
+  );
+
+  const replayed = await executeIdempotentBatch<ClassLoanMutationResult>(
+    db,
+    statements,
+    input.requestId,
+    requestHash,
+    {
+      code: "class_loan_return_conflict",
+      message: "Дані видачі або залишку вже змінилися. Оновіть повернення.",
+    },
+  );
+  return replayed ?? result;
+}
+
 function database(value?: D1Binding): D1Binding {
   if (!value) {
     throw new LibraryMutationError(
@@ -2945,11 +4036,23 @@ function rebuildStockTotalsStatement(
     LEFT JOIN holdings h ON h.material_id = m.id
     LEFT JOIN locations l ON l.id = h.location_id
     LEFT JOIN (
-      SELECT li.material_id, SUM(li.quantity_issued - li.quantity_returned) AS quantity
-      FROM loan_items li
-      JOIN loans lo ON lo.id = li.loan_id
-      WHERE lo.status != 'cancelled' AND li.quantity_issued > li.quantity_returned
-      GROUP BY li.material_id
+      SELECT material_id, SUM(quantity) AS quantity
+      FROM (
+        SELECT
+          li.material_id,
+          li.quantity_issued - li.quantity_returned AS quantity
+        FROM loan_items li
+        JOIN loans lo ON lo.id = li.loan_id
+        WHERE lo.status != 'cancelled' AND li.quantity_issued > li.quantity_returned
+        UNION ALL
+        SELECT
+          cli.material_id,
+          cli.quantity_issued - cli.quantity_returned AS quantity
+        FROM class_loan_items cli
+        JOIN class_loans clo ON clo.id = cli.class_loan_id
+        WHERE clo.status != 'cancelled' AND cli.quantity_issued > cli.quantity_returned
+      ) outstanding_rows
+      GROUP BY material_id
     ) outstanding ON outstanding.material_id = m.id
     WHERE m.id = ?
     GROUP BY m.id, outstanding.quantity
@@ -2962,12 +4065,70 @@ function rebuildStockTotalsStatement(
   `).bind(updatedAt, materialId);
 }
 
+function rebuildStockTotalsBulkStatement(
+  db: D1Binding,
+  materialIds: string[],
+  updatedAt: string,
+): D1Statement {
+  return db.prepare(`
+    WITH requested AS (
+      SELECT DISTINCT CAST(value AS TEXT) AS material_id
+      FROM json_each(?)
+    )
+    INSERT INTO material_stock_totals (
+      material_id, total_quantity, library_quantity,
+      other_location_quantity, loaned_quantity, updated_at
+    )
+    SELECT
+      m.id,
+      COALESCE(SUM(h.quantity), 0) + COALESCE(outstanding.quantity, 0),
+      COALESCE(SUM(CASE WHEN l.type = 'library' THEN h.quantity ELSE 0 END), 0),
+      COALESCE(SUM(CASE WHEN l.type != 'library' THEN h.quantity ELSE 0 END), 0),
+      COALESCE(outstanding.quantity, 0),
+      ?
+    FROM requested
+    JOIN materials m ON m.id = requested.material_id
+    LEFT JOIN holdings h ON h.material_id = m.id
+    LEFT JOIN locations l ON l.id = h.location_id
+    LEFT JOIN (
+      SELECT material_id, SUM(quantity) AS quantity
+      FROM (
+        SELECT
+          li.material_id,
+          li.quantity_issued - li.quantity_returned AS quantity
+        FROM loan_items li
+        JOIN loans lo ON lo.id = li.loan_id
+        WHERE lo.status != 'cancelled' AND li.quantity_issued > li.quantity_returned
+        UNION ALL
+        SELECT
+          cli.material_id,
+          cli.quantity_issued - cli.quantity_returned AS quantity
+        FROM class_loan_items cli
+        JOIN class_loans clo ON clo.id = cli.class_loan_id
+        WHERE clo.status != 'cancelled' AND cli.quantity_issued > cli.quantity_returned
+      ) outstanding_rows
+      GROUP BY material_id
+    ) outstanding ON outstanding.material_id = m.id
+    GROUP BY m.id, outstanding.quantity
+    ON CONFLICT(material_id) DO UPDATE SET
+      total_quantity = excluded.total_quantity,
+      library_quantity = excluded.library_quantity,
+      other_location_quantity = excluded.other_location_quantity,
+      loaned_quantity = excluded.loaned_quantity,
+      updated_at = excluded.updated_at
+  `).bind(JSON.stringify(materialIds), updatedAt);
+}
+
 async function executeIdempotentBatch<T>(
   db: D1Binding,
   statements: D1Statement[],
   requestId: string,
   requestHash: string,
-  conflict: { code: string; message: string },
+  conflict: {
+    code: string;
+    message: string;
+    classify?: (error: unknown) => { code: string; message: string } | null;
+  },
 ): Promise<T | null> {
   try {
     await db.batch(statements);
@@ -2975,6 +4136,10 @@ async function executeIdempotentBatch<T>(
   } catch (error) {
     const replay = await replayCompletedCommand<T>(db, requestId, requestHash);
     if (replay) return replay;
+    const classified = conflict.classify?.(error) ?? null;
+    if (classified) {
+      throw new LibraryMutationError(classified.code, 409, classified.message);
+    }
     if (isOptimisticGuardFailure(error)) {
       throw new LibraryMutationError(
         conflict.code,
@@ -2990,11 +4155,35 @@ function isOptimisticGuardFailure(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? "");
   return message.includes("NOT NULL constraint failed: audit_events.entity_id")
     || message.includes("NOT NULL constraint failed: inventory_transaction_lines.material_id")
+    || message.includes("NOT NULL constraint failed: class_loan_transaction_lines.material_id")
+    || message.includes("NOT NULL constraint failed: class_loan_items.material_id")
+    || message.includes("NOT NULL constraint failed: class_loan_items.source_location_id")
+    || message.includes("NOT NULL constraint failed: class_loans.class_year_id")
+    || message.includes("NOT NULL constraint failed: class_loans.responsible_teacher_user_id")
     || message.includes("NOT NULL constraint failed: holdings.material_id")
     || message.includes("NOT NULL constraint failed: holdings.location_id")
     || message.includes(
       "UNIQUE constraint failed: holdings.material_id, holdings.location_id, holdings.condition",
     );
+}
+
+function classifyClassLoanIssueRace(
+  error: unknown,
+): { code: string; message: string } | null {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (message.includes("NOT NULL constraint failed: class_loans.class_year_id")) {
+    return {
+      code: "class_year_version_conflict",
+      message: "Дані класу змінилися під час видачі. Оновіть список класів.",
+    };
+  }
+  if (message.includes("NOT NULL constraint failed: class_loans.responsible_teacher_user_id")) {
+    return {
+      code: "responsible_teacher_not_found",
+      message: "Профіль відповідального вчителя став неактивним. Оберіть іншого вчителя.",
+    };
+  }
+  return null;
 }
 
 async function replayCompletedCommand<T>(

@@ -22,6 +22,10 @@ export const HOSTED_IMPORT_MAX_ROWS = 20_000;
  * uploaded again after a reset.
  */
 export const STAGING_IMPORT_RESET_TABLES = Object.freeze([
+  "class_loan_transaction_lines",
+  "class_loan_transactions",
+  "class_loan_items",
+  "class_loans",
   "inventory_transaction_lines",
   "inventory_transactions",
   "loan_items",

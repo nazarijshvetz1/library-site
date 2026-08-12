@@ -8,6 +8,7 @@ import {
   getCatalogCoverAsset,
   getCatalogMaterialDetail,
   listCatalogMaterials,
+  listCatalogRubrics,
   normalizeCatalogSearchText,
   parseCatalogListQuery,
 } from "../lib/catalog-d1.ts";
@@ -263,6 +264,20 @@ test("catalog list applies bounded filters and returns year, stock and thumbnail
   }
 });
 
+test("catalog rubrics are bounded, sorted and exclude archived materials", async () => {
+  const { sqlite, db } = fixture();
+  try {
+    assert.deepEqual(await listCatalogRubrics(db), [
+      "Збірники",
+      "Зошити",
+      "Підручники",
+    ]);
+    assert.deepEqual(await listCatalogRubrics(db, 2), ["Збірники", "Зошити"]);
+  } finally {
+    sqlite.close();
+  }
+});
+
 test("cursor pagination is stable, scoped to filters and supports newest sorting", async () => {
   const { sqlite, db } = fixture();
   try {
@@ -302,14 +317,26 @@ test("cursor pagination is stable, scoped to filters and supports newest sorting
   }
 });
 
-test("exact ISBN search and available filter use indexed canonical fields", async () => {
+test("author, exact ISBN and CAT searches keep their existing behavior", async () => {
   const { sqlite, db } = fixture();
   try {
+    const author = await listCatalogMaterials(
+      db,
+      parseCatalogListQuery("https://catalog.test/api/catalog-v2?q=Петренко"),
+    );
+    assert.deepEqual(author.items.map((item) => item.id), ["CAT-0001"]);
+
     const isbn = await listCatalogMaterials(
       db,
       parseCatalogListQuery("https://catalog.test/api/catalog-v2?q=978-617-000-000-2"),
     );
     assert.deepEqual(isbn.items.map((item) => item.id), ["CAT-0002"]);
+
+    const catalogId = await listCatalogMaterials(
+      db,
+      parseCatalogListQuery("https://catalog.test/api/catalog-v2?q=cat-0010"),
+    );
+    assert.deepEqual(catalogId.items.map((item) => item.id), ["CAT-0010"]);
 
     const available = await listCatalogMaterials(
       db,
@@ -403,11 +430,12 @@ test("cover asset lookup returns only safe ready R2 metadata", async () => {
 });
 
 test("public routes are cacheable and librarian material routes require authorization", async () => {
-  const [publicList, publicDetail, cover, privateSearch, privateDetail] = await Promise.all([
+  const [publicList, publicDetail, cover, privateSearch, privateFacets, privateDetail] = await Promise.all([
     read("app/api/catalog-v2/route.ts"),
     read("app/api/catalog-v2/[id]/route.ts"),
     read("app/api/catalog-v2/covers/[id]/route.ts"),
     read("app/api/librarian/materials/search/route.ts"),
+    read("app/api/librarian/materials/facets/route.ts"),
     read("app/api/librarian/materials/[id]/route.ts"),
   ]);
   assert.match(publicList, /stale-while-revalidate=300/);
@@ -415,6 +443,8 @@ test("public routes are cacheable and librarian material routes require authoriz
   assert.match(cover, /COVER_UPLOADS\.get\(asset\.storageKey\)/);
   assert.match(cover, /max-age=31536000, immutable/);
   assert.match(privateSearch, /authorizeLibrarianApi\(\)/);
+  assert.match(privateFacets, /authorizeLibrarianApi\(\)/);
+  assert.match(privateFacets, /listCatalogRubrics/u);
   assert.match(privateDetail, /authorizeLibrarianApi\(\)/);
   assert.match(privateDetail, /getCatalogMaterialDetail\([\s\S]*"librarian"/);
 });

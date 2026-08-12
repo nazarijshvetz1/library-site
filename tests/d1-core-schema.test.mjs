@@ -9,6 +9,7 @@ const migrationFiles = [
   "drizzle/0002_remove_legacy_audit_triggers.sql",
   "drizzle/0003_odd_the_order.sql",
   "drizzle/0004_staging_import_runs.sql",
+  "drizzle/0005_young_night_nurse.sql",
 ];
 
 async function migratedDatabase() {
@@ -58,6 +59,14 @@ test("core migration extends the existing draft database without recreating it",
     "academic_years",
     "audit_events",
     "class_years",
+    "class_loan_items",
+    "class_loan_transaction_lines",
+    "class_loan_transactions",
+    "class_loans",
+    "class_loan_items",
+    "class_loan_transaction_lines",
+    "class_loan_transactions",
+    "class_loans",
     "cohorts",
     "holdings",
     "inventory_transaction_lines",

@@ -152,6 +152,31 @@ export type LoanReturnInput = {
   }>;
 };
 
+export type ClassLoanCreateInput = {
+  requestId: string;
+  classYearId: string;
+  expectedClassYearVersion: number;
+  responsibleTeacherUserId: string;
+  issuedAt: string;
+  dueAt: string | null;
+  notes: string | null;
+  items: LoanCreateInput["items"];
+};
+
+export type ClassLoanReturnInput = {
+  requestId: string;
+  classLoanId: string;
+  expectedVersion: number;
+  returnedAt: string;
+  notes: string | null;
+  items: Array<{
+    classLoanItemId: string;
+    quantity: number;
+    returnLocationId: string;
+    condition: "unspecified" | "good" | "worn" | "damaged";
+  }>;
+};
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const CAT_ID_RE = /^CAT-\d{4,}$/u;
 const LOCATION_ID_RE = /^LOC-\d{3,}$/u;
@@ -738,6 +763,153 @@ export function validateLoanReturnInput(
     });
   }
   return finish(errors, { requestId, loanId, returnedAt, notes, items });
+}
+
+export function validateClassLoanCreateInput(
+  input: unknown,
+): ValidationResult<ClassLoanCreateInput> {
+  const errors: Record<string, string> = {};
+  if (!isRecord(input)) return invalid("body", "Очікуються дані видачі на клас.");
+  assertExactKeys(
+    input,
+    [
+      "requestId",
+      "classYearId",
+      "expectedClassYearVersion",
+      "responsibleTeacherUserId",
+      "issuedAt",
+      "dueAt",
+      "notes",
+      "items",
+    ],
+    errors,
+  );
+  const requestId = readUuid(input.requestId, "requestId", errors);
+  const classYearId = readPatternText(
+    input.classYearId,
+    SAFE_ID_RE,
+    "classYearId",
+    "Оберіть клас поточного навчального року.",
+    errors,
+  );
+  const expectedClassYearVersion = readBoundedInteger(
+    input.expectedClassYearVersion,
+    "expectedClassYearVersion",
+    errors,
+    1,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const responsibleTeacherUserId = readPatternText(
+    input.responsibleTeacherUserId,
+    SAFE_ID_RE,
+    "responsibleTeacherUserId",
+    "Оберіть відповідального вчителя.",
+    errors,
+  );
+  const issuedAt = readIsoDate(input.issuedAt, "issuedAt", errors);
+  const dueAt = input.dueAt === null
+    ? null
+    : readIsoDate(input.dueAt, "dueAt", errors);
+  if (issuedAt && dueAt && dueAt < issuedAt) {
+    errors.dueAt = "Строк повернення не може передувати даті видачі.";
+  }
+  const notes = readOptionalText(input.notes, "notes", errors, 2000);
+  const items = readLoanCreateItems(input.items, errors);
+  return finish(errors, {
+    requestId,
+    classYearId,
+    expectedClassYearVersion,
+    responsibleTeacherUserId,
+    issuedAt,
+    dueAt,
+    notes,
+    items,
+  });
+}
+
+export function validateClassLoanReturnInput(
+  input: unknown,
+): ValidationResult<ClassLoanReturnInput> {
+  const errors: Record<string, string> = {};
+  if (!isRecord(input)) return invalid("body", "Очікуються дані повернення від класу.");
+  assertExactKeys(
+    input,
+    ["requestId", "classLoanId", "expectedVersion", "returnedAt", "notes", "items"],
+    errors,
+  );
+  const requestId = readUuid(input.requestId, "requestId", errors);
+  const classLoanId = readPatternText(
+    input.classLoanId,
+    SAFE_ID_RE,
+    "classLoanId",
+    "Некоректний номер видачі на клас.",
+    errors,
+  );
+  const expectedVersion = readBoundedInteger(
+    input.expectedVersion,
+    "expectedVersion",
+    errors,
+    1,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const returnedAt = readIsoDate(input.returnedAt, "returnedAt", errors);
+  const notes = readOptionalText(input.notes, "notes", errors, 2000);
+  const items: ClassLoanReturnInput["items"] = [];
+  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 100) {
+    errors.items = "Додайте від 1 до 100 позицій повернення.";
+  } else {
+    const seen = new Set<string>();
+    input.items.forEach((item, index) => {
+      const prefix = `items.${index}.`;
+      if (!isRecord(item)) {
+        errors[`items.${index}`] = "Некоректна позиція повернення.";
+        return;
+      }
+      assertExactKeys(
+        item,
+        ["classLoanItemId", "quantity", "returnLocationId", "condition"],
+        errors,
+        prefix,
+      );
+      const classLoanItemId = readPatternText(
+        item.classLoanItemId,
+        SAFE_ID_RE,
+        `${prefix}classLoanItemId`,
+        "Некоректний номер позиції.",
+        errors,
+      );
+      if (seen.has(classLoanItemId)) {
+        errors[`${prefix}classLoanItemId`] = "Позицію додано двічі.";
+      }
+      seen.add(classLoanItemId);
+      items.push({
+        classLoanItemId,
+        quantity: readBoundedInteger(
+          item.quantity,
+          `${prefix}quantity`,
+          errors,
+          1,
+          1_000_000,
+        ),
+        returnLocationId: readPatternText(
+          item.returnLocationId,
+          LOCATION_ID_RE,
+          `${prefix}returnLocationId`,
+          "Некоректне місце повернення.",
+          errors,
+        ),
+        condition: readCondition(item.condition, `${prefix}condition`, errors),
+      });
+    });
+  }
+  return finish(errors, {
+    requestId,
+    classLoanId,
+    expectedVersion,
+    returnedAt,
+    notes,
+    items,
+  });
 }
 
 function readLinks(

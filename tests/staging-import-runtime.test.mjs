@@ -29,13 +29,14 @@ import {
 } from "../lib/staging-import-gate.ts";
 
 const fixtureUrl = new URL("./fixtures/library-core-canonical.json", import.meta.url);
-const migrationUrls = [0, 1, 2, 3, 4].map((index) => new URL(
+const migrationUrls = [0, 1, 2, 3, 4, 5].map((index) => new URL(
   `../drizzle/${[
     "0000_librarian_drafts.sql",
     "0001_draft_workflow.sql",
     "0002_remove_legacy_audit_triggers.sql",
     "0003_odd_the_order.sql",
     "0004_staging_import_runs.sql",
+    "0005_young_night_nurse.sql",
   ][index]}`,
   import.meta.url,
 ));
@@ -291,6 +292,42 @@ test("staging reset atomically clears domain/import rows while preserving migrat
     plan.tables.inventory_transactions[0].id,
     "2026-08-11T00:00:00.000Z",
   );
+  const classYearId = plan.tables.class_years[0].id;
+  const teacherId = plan.tables.users.find((row) => row.role === "teacher").id;
+  const actorId = plan.tables.users.find(
+    (row) => row.role === "librarian" || row.role === "admin",
+  ).id;
+  const materialId = plan.tables.materials[0].id;
+  const locationId = plan.tables.locations.find((row) => row.type !== "service").id;
+  database.prepare(`
+    INSERT INTO class_loans (
+      id, class_year_id, responsible_teacher_user_id, status, issued_at,
+      due_at, closed_at, notes, issued_by_user_id, closed_by_user_id,
+      version, created_at, updated_at
+    ) VALUES ('CLOAN-RESET', ?, ?, 'open', '2026-09-10', NULL, NULL, '', ?,
+      NULL, 1, '2026-09-10T00:00:00.000Z', '2026-09-10T00:00:00.000Z')
+  `).run(classYearId, teacherId, actorId);
+  database.prepare(`
+    INSERT INTO class_loan_items (
+      id, class_loan_id, material_id, source_location_id, condition,
+      quantity_issued, quantity_returned, notes, created_at, updated_at
+    ) VALUES ('CLI-RESET', 'CLOAN-RESET', ?, ?, 'unspecified', 1, 0, '',
+      '2026-09-10T00:00:00.000Z', '2026-09-10T00:00:00.000Z')
+  `).run(materialId, locationId);
+  database.prepare(`
+    INSERT INTO class_loan_transactions (
+      id, request_id, class_loan_id, kind, occurred_at, notes,
+      actor_user_id, created_at
+    ) VALUES ('CLTX-RESET', '88888888-8888-4888-8888-888888888888',
+      'CLOAN-RESET', 'issue', '2026-09-10', '', ?, '2026-09-10T00:00:00.000Z')
+  `).run(actorId);
+  database.prepare(`
+    INSERT INTO class_loan_transaction_lines (
+      id, transaction_id, class_loan_item_id, material_id, location_id,
+      condition, quantity_delta, quantity_before, quantity_after, created_at
+    ) VALUES ('CLINE-RESET', 'CLTX-RESET', 'CLI-RESET', ?, ?, 'unspecified',
+      -1, 1, 0, '2026-09-10T00:00:00.000Z')
+  `).run(materialId, locationId);
   const schemaBefore = database.prepare(`
     SELECT name, type, sql FROM sqlite_schema ORDER BY type, name
   `).all();
@@ -304,6 +341,11 @@ test("staging reset atomically clears domain/import rows while preserving migrat
   );
   assert.equal(report.deletedByTable.migration_import_runs, 1);
   assert.equal(report.deletedByTable.mutation_commands, 1);
+  assert.equal(report.deletedByTable.class_loan_transaction_lines, 1);
+  assert.equal(report.deletedByTable.class_loan_transactions, 1);
+  assert.equal(report.deletedByTable.class_loan_items, 1);
+  assert.equal(report.deletedByTable.class_loans, 1);
+  assert.ok(report.batchStatements <= 50, `reset used ${report.batchStatements} statements`);
   assert.equal(database.prepare("SELECT count(*) AS count FROM librarian_drafts").get().count, 1);
   assert.equal(database.prepare("SELECT count(*) AS count FROM librarian_draft_events").get().count, 1);
   assert.deepEqual(database.prepare(`

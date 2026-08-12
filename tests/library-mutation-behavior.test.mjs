@@ -28,10 +28,12 @@ class PreparedStatement {
   }
 
   async first() {
+    this.database.queryCount += 1;
     return this.database.sqlite.prepare(this.sql).get(...this.bindings) ?? null;
   }
 
   async all() {
+    this.database.queryCount += 1;
     const results = this.database.sqlite.prepare(this.sql).all(...this.bindings);
     return { success: true, results };
   }
@@ -46,6 +48,8 @@ class TestD1 {
   constructor(sqlite) {
     this.sqlite = sqlite;
     this.beforeBatch = null;
+    this.queryCount = 0;
+    this.batchStatementCounts = [];
   }
 
   prepare(sql) {
@@ -58,6 +62,7 @@ class TestD1 {
       this.beforeBatch = null;
       callback();
     }
+    this.batchStatementCounts.push(statements.length);
     this.sqlite.exec("BEGIN IMMEDIATE");
     try {
       const results = statements.map((statement) => statement.execute());
@@ -78,6 +83,7 @@ function openDatabase() {
     "0001_draft_workflow.sql",
     "0002_remove_legacy_audit_triggers.sql",
     "0003_odd_the_order.sql",
+    "0005_young_night_nurse.sql",
   ]) {
     const sql = fs.readFileSync(path.join(root, "drizzle", file), "utf8");
     for (const statement of sql.split(/-->\s*statement-breakpoint/gu)) {
@@ -133,6 +139,31 @@ function seed(sqlite) {
     ) VALUES ('CAT-0001', 5, 5, 0, 0, ?)
   `).run(now);
   sqlite.exec("INSERT INTO materials_fts(materials_fts) VALUES('rebuild')");
+}
+
+function seedActiveClassYear(sqlite) {
+  const now = "2026-08-11T08:00:00.000Z";
+  sqlite.prepare(`
+    INSERT INTO academic_years (
+      id, label, start_date, end_date, status, notes, version, created_at, updated_at
+    ) VALUES ('YR-2026-2027', '2026/2027', '2026-09-01', '2027-06-30',
+      'active', '', 1, ?, ?)
+  `).run(now, now);
+  sqlite.prepare(`
+    INSERT INTO cohorts (id, status, notes, created_at, updated_at)
+    VALUES ('COH-001', 'active', '', ?, ?)
+  `).run(now, now);
+  sqlite.prepare(`
+    INSERT INTO class_years (
+      id, academic_year_id, cohort_id, class_name, grade, code,
+      teacher_user_id, location_id, start_date, end_date, status,
+      actual_closed_date, notes, version, created_at, updated_at
+    ) VALUES (
+      'CY-2026-001', 'YR-2026-2027', 'COH-001', '5-А клас', 5, 'А',
+      'USR-TCH', NULL, '2026-09-01', '2027-06-30', 'active',
+      NULL, '', 1, ?, ?
+    )
+  `).run(now, now);
 }
 
 const actor = {
@@ -922,6 +953,467 @@ test("one return can merge two loan items into the same holding atomically", asy
       loaned_quantity: 0,
     },
   );
+});
+
+test("class issue and partial/full return are idempotent, chronological and balanced", async () => {
+  const { sqlite, d1 } = openDatabase();
+  seedActiveClassYear(sqlite);
+  sqlite.prepare(`
+    UPDATE holdings SET quantity = 5, version = 2
+    WHERE material_id = 'CAT-0001' AND location_id = 'LOC-001'
+  `).run();
+
+  const issueInput = {
+    requestId: "20000000-0000-4000-8000-000000000001",
+    classYearId: "CY-2026-001",
+    expectedClassYearVersion: 1,
+    responsibleTeacherUserId: "USR-TCH",
+    issuedAt: "2026-09-10",
+    dueAt: "2027-06-30",
+    notes: "Комплект для класу",
+    items: [{
+      materialId: "CAT-0001",
+      sourceLocationId: "LOC-001",
+      condition: "unspecified",
+      quantity: 2,
+      expectedAvailableQuantity: 5,
+    }],
+  };
+  const issued = await mutation.issueLoanToClass(actor, issueInput, d1);
+  assert.deepEqual(await mutation.issueLoanToClass(actor, issueInput, d1), issued);
+  assert.equal(issued.responsibleTeacherName, "Ірина Вчитель");
+  assert.equal(issued.version, 1);
+  assert.equal(sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 3);
+  assert.deepEqual(
+    plainRow(sqlite.prepare(`
+      SELECT total_quantity, library_quantity, loaned_quantity
+      FROM material_stock_totals WHERE material_id = 'CAT-0001'
+    `).get()),
+    { total_quantity: 5, library_quantity: 3, loaned_quantity: 2 },
+  );
+  const open = await directory.listOpenClassLoans(d1, { classYearId: "CY-2026-001" });
+  assert.equal(open.length, 1);
+  assert.equal(open[0].responsibleTeacherUserId, "USR-TCH");
+  assert.equal(open[0].items[0].quantityOutstanding, 2);
+
+  const classLoanItemId = issued.items[0].classLoanItemId;
+  const partial = await mutation.returnClassLoanItems(actor, {
+    requestId: "20000000-0000-4000-8000-000000000002",
+    classLoanId: issued.classLoanId,
+    expectedVersion: 1,
+    returnedAt: "2026-10-10",
+    notes: null,
+    items: [{
+      classLoanItemId,
+      quantity: 1,
+      returnLocationId: "LOC-001",
+      condition: "unspecified",
+    }],
+  }, d1);
+  assert.equal(partial.status, "open");
+  assert.equal(partial.version, 2);
+  assert.deepEqual(
+    plainRow(sqlite.prepare(`
+      SELECT total_quantity, library_quantity, loaned_quantity
+      FROM material_stock_totals WHERE material_id = 'CAT-0001'
+    `).get()),
+    { total_quantity: 5, library_quantity: 4, loaned_quantity: 1 },
+  );
+
+  const commandsBefore = sqlite.prepare("SELECT count(*) AS count FROM mutation_commands").get().count;
+  await assert.rejects(
+    mutation.returnClassLoanItems(actor, {
+      requestId: "20000000-0000-4000-8000-000000000003",
+      classLoanId: issued.classLoanId,
+      expectedVersion: 2,
+      returnedAt: "2026-10-09",
+      notes: null,
+      items: [{
+        classLoanItemId,
+        quantity: 1,
+        returnLocationId: "LOC-001",
+        condition: "unspecified",
+      }],
+    }, d1),
+    (error) => error?.code === "return_date_before_previous_return" && error?.status === 409,
+  );
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM mutation_commands").get().count, commandsBefore);
+  assert.equal(sqlite.prepare("SELECT quantity_returned FROM class_loan_items").get().quantity_returned, 1);
+
+  const closed = await mutation.returnClassLoanItems(actor, {
+    requestId: "20000000-0000-4000-8000-000000000004",
+    classLoanId: issued.classLoanId,
+    expectedVersion: 2,
+    returnedAt: "2026-10-11",
+    notes: "Повернено",
+    items: [{
+      classLoanItemId,
+      quantity: 1,
+      returnLocationId: "LOC-001",
+      condition: "unspecified",
+    }],
+  }, d1);
+  assert.equal(closed.status, "closed");
+  assert.equal(closed.version, 3);
+  assert.equal((await directory.listOpenClassLoans(d1)).length, 0);
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM class_loan_transactions").get().count, 3);
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM class_loan_transaction_lines").get().count, 3);
+  assert.deepEqual(
+    plainRow(sqlite.prepare(`
+      SELECT total_quantity, library_quantity, loaned_quantity
+      FROM material_stock_totals WHERE material_id = 'CAT-0001'
+    `).get()),
+    { total_quantity: 5, library_quantity: 5, loaned_quantity: 0 },
+  );
+});
+
+test("class circulation keeps a constant D1 query and batch budget for 100 items", async () => {
+  const { sqlite, d1 } = openDatabase();
+  seedActiveClassYear(sqlite);
+  const now = "2026-08-11T08:00:00.000Z";
+  const items = [];
+  for (let index = 0; index < 100; index += 1) {
+    const catalogNumber = 1000 + index;
+    const materialId = `CAT-${catalogNumber}`;
+    sqlite.prepare(`
+      INSERT INTO materials (
+        id, catalog_number, title, sort_title, search_text, rubric,
+        publication_type, subject, author, publication_year, isbn,
+        isbn_normalized, publisher, notes, status, version,
+        created_at, updated_at, archived_at
+      ) VALUES (?, ?, ?, ?, ?, 'Підручники', 'Підручник', '', '', 2026,
+        '', '', '', '', 'active', 1, ?, ?, NULL)
+    `).run(materialId, catalogNumber, `Книга ${index}`, `книга ${index}`, `книга ${index}`, now, now);
+    sqlite.prepare(`
+      INSERT INTO holdings (material_id, location_id, condition, quantity, version, updated_at)
+      VALUES (?, 'LOC-001', 'good', 1, 1, ?)
+    `).run(materialId, now);
+    items.push({
+      materialId,
+      sourceLocationId: "LOC-001",
+      condition: "good",
+      quantity: 1,
+      expectedAvailableQuantity: 1,
+    });
+  }
+  d1.queryCount = 0;
+  d1.batchStatementCounts = [];
+  const issued = await mutation.issueLoanToClass(actor, {
+    requestId: "20000000-0000-4000-8000-000000000010",
+    classYearId: "CY-2026-001",
+    expectedClassYearVersion: 1,
+    responsibleTeacherUserId: "USR-TCH",
+    issuedAt: "2026-09-10",
+    dueAt: null,
+    notes: null,
+    items,
+  }, d1);
+  assert.equal(issued.items.length, 100);
+  assert.ok(d1.queryCount <= 10, `issue query count ${d1.queryCount}`);
+  assert.ok(Math.max(...d1.batchStatementCounts) <= 15, d1.batchStatementCounts);
+
+  d1.queryCount = 0;
+  d1.batchStatementCounts = [];
+  const returned = await mutation.returnClassLoanItems(actor, {
+    requestId: "20000000-0000-4000-8000-000000000011",
+    classLoanId: issued.classLoanId,
+    expectedVersion: 1,
+    returnedAt: "2026-10-01",
+    notes: null,
+    items: issued.items.map((item) => ({
+      classLoanItemId: item.classLoanItemId,
+      quantity: 1,
+      returnLocationId: "LOC-001",
+      condition: "good",
+    })),
+  }, d1);
+  assert.equal(returned.status, "closed");
+  assert.ok(d1.queryCount <= 10, `return query count ${d1.queryCount}`);
+  assert.ok(Math.max(...d1.batchStatementCounts) <= 15, d1.batchStatementCounts);
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM holdings WHERE quantity = 1").get().count, 100);
+});
+
+test("class issue enforces class-year dates and outstanding class stock blocks archive", async () => {
+  const { sqlite, d1 } = openDatabase();
+  seedActiveClassYear(sqlite);
+  const base = {
+    classYearId: "CY-2026-001",
+    expectedClassYearVersion: 1,
+    responsibleTeacherUserId: "USR-TCH",
+    notes: null,
+    items: [{
+      materialId: "CAT-0001",
+      sourceLocationId: "LOC-001",
+      condition: "unspecified",
+      quantity: 1,
+      expectedAvailableQuantity: 5,
+    }],
+  };
+  await assert.rejects(
+    mutation.issueLoanToClass(actor, {
+      ...base,
+      requestId: "20000000-0000-4000-8000-000000000020",
+      issuedAt: "2026-08-31",
+      dueAt: null,
+    }, d1),
+    (error) => error?.code === "issue_date_outside_class_year",
+  );
+  await assert.rejects(
+    mutation.issueLoanToClass(actor, {
+      ...base,
+      requestId: "20000000-0000-4000-8000-000000000021",
+      issuedAt: "2026-09-01",
+      dueAt: "2027-07-01",
+    }, d1),
+    (error) => error?.code === "due_date_outside_class_year",
+  );
+  sqlite.prepare("UPDATE holdings SET quantity = 1, version = 2 WHERE material_id = 'CAT-0001'").run();
+  const issued = await mutation.issueLoanToClass(actor, {
+    ...base,
+    requestId: "20000000-0000-4000-8000-000000000022",
+    issuedAt: "2026-09-01",
+    dueAt: "2027-06-30",
+    items: [{ ...base.items[0], expectedAvailableQuantity: 1 }],
+  }, d1);
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM holdings WHERE material_id = 'CAT-0001'").get().count, 0);
+  await assert.rejects(
+    mutation.archiveMaterialDirect(actor, "CAT-0001", {
+      requestId: "20000000-0000-4000-8000-000000000023",
+      expectedVersion: 1,
+    }, d1),
+    (error) => error?.code === "material_has_stock"
+      && error.details.totalQuantity === 1
+      && error.details.loanedQuantity === 1,
+  );
+  assert.equal(sqlite.prepare("SELECT status FROM class_loans WHERE id = ?").get(issued.classLoanId).status, "open");
+});
+
+test("class issue loses atomically when its source material or location is deactivated", async () => {
+  const issueInput = {
+    classYearId: "CY-2026-001",
+    expectedClassYearVersion: 1,
+    responsibleTeacherUserId: "USR-TCH",
+    issuedAt: "2026-09-10",
+    dueAt: null,
+    notes: null,
+    items: [{
+      materialId: "CAT-0001",
+      sourceLocationId: "LOC-001",
+      condition: "unspecified",
+      quantity: 1,
+      expectedAvailableQuantity: 5,
+    }],
+  };
+
+  for (const scenario of ["material", "location"]) {
+    const { sqlite, d1 } = openDatabase();
+    seedActiveClassYear(sqlite);
+    d1.beforeBatch = () => {
+      if (scenario === "material") {
+        sqlite.prepare(`
+          UPDATE materials
+          SET status = 'archived', archived_at = '2026-09-10T00:00:00.000Z'
+          WHERE id = 'CAT-0001'
+        `).run();
+      } else {
+        sqlite.prepare("UPDATE locations SET status = 'inactive' WHERE id = 'LOC-001'").run();
+      }
+    };
+    await assert.rejects(
+      mutation.issueLoanToClass(actor, {
+        ...issueInput,
+        requestId: scenario === "material"
+          ? "20000000-0000-4000-8000-000000000024"
+          : "20000000-0000-4000-8000-000000000025",
+      }, d1),
+      (error) => error?.code === "stock_quantity_conflict" && error?.status === 409,
+    );
+    assert.equal(sqlite.prepare("SELECT count(*) AS count FROM class_loans").get().count, 0);
+    assert.equal(sqlite.prepare("SELECT count(*) AS count FROM class_loan_items").get().count, 0);
+    assert.equal(sqlite.prepare("SELECT count(*) AS count FROM class_loan_transactions").get().count, 0);
+    assert.equal(sqlite.prepare("SELECT count(*) AS count FROM class_loan_transaction_lines").get().count, 0);
+    assert.equal(sqlite.prepare("SELECT count(*) AS count FROM mutation_commands").get().count, 0);
+    assert.equal(sqlite.prepare("SELECT count(*) AS count FROM audit_events").get().count, 0);
+    assert.equal(sqlite.prepare("SELECT quantity FROM holdings WHERE material_id = 'CAT-0001'").get().quantity, 5);
+  }
+});
+
+test("class return loses atomically when a later return wins the chronology race", async () => {
+  const { sqlite, d1 } = openDatabase();
+  seedActiveClassYear(sqlite);
+  const issued = await mutation.issueLoanToClass(actor, {
+    requestId: "20000000-0000-4000-8000-000000000026",
+    classYearId: "CY-2026-001",
+    expectedClassYearVersion: 1,
+    responsibleTeacherUserId: "USR-TCH",
+    issuedAt: "2026-09-10",
+    dueAt: null,
+    notes: null,
+    items: [{
+      materialId: "CAT-0001",
+      sourceLocationId: "LOC-001",
+      condition: "unspecified",
+      quantity: 2,
+      expectedAvailableQuantity: 5,
+    }],
+  }, d1);
+  d1.beforeBatch = () => {
+    sqlite.prepare(`
+      INSERT INTO class_loan_transactions (
+        id, request_id, class_loan_id, kind, occurred_at, notes,
+        actor_user_id, created_at
+      ) VALUES (
+        'CLTX-CONCURRENT', '20000000-0000-4000-8000-000000000027', ?,
+        'return', '2026-10-06', '', 'USR-LIB', '2026-10-06T00:00:00.000Z'
+      )
+    `).run(issued.classLoanId);
+  };
+  await assert.rejects(
+    mutation.returnClassLoanItems(actor, {
+      requestId: "20000000-0000-4000-8000-000000000028",
+      classLoanId: issued.classLoanId,
+      expectedVersion: 1,
+      returnedAt: "2026-10-05",
+      notes: null,
+      items: [{
+        classLoanItemId: issued.items[0].classLoanItemId,
+        quantity: 1,
+        returnLocationId: "LOC-001",
+        condition: "unspecified",
+      }],
+    }, d1),
+    (error) => error?.code === "class_loan_return_conflict" && error?.status === 409,
+  );
+  assert.equal(sqlite.prepare("SELECT quantity_returned FROM class_loan_items").get().quantity_returned, 0);
+  assert.deepEqual(
+    plainRow(sqlite.prepare("SELECT status, version FROM class_loans").get()),
+    { status: "open", version: 1 },
+  );
+  assert.equal(sqlite.prepare("SELECT quantity FROM holdings WHERE material_id = 'CAT-0001'").get().quantity, 3);
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM class_loan_transactions").get().count, 2);
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM class_loan_transaction_lines").get().count, 1);
+  assert.equal(sqlite.prepare(`
+    SELECT count(*) AS count FROM mutation_commands
+    WHERE id = '20000000-0000-4000-8000-000000000028'
+  `).get().count, 0);
+});
+
+test("class return merges destinations and destination deactivation aborts atomically", async () => {
+  const { sqlite, d1 } = openDatabase();
+  seedActiveClassYear(sqlite);
+  const now = "2026-08-11T08:00:00.000Z";
+  sqlite.prepare(`
+    INSERT INTO locations (
+      id, name, type, status, is_public, sort_order, created_at, updated_at
+    ) VALUES ('LOC-002', 'Кабінет 2', 'classroom', 'active', 1, 2, ?, ?)
+  `).run(now, now);
+  sqlite.prepare(`
+    INSERT INTO holdings (
+      material_id, location_id, condition, quantity, version, updated_at
+    ) VALUES ('CAT-0001', 'LOC-002', 'unspecified', 3, 1, ?)
+  `).run(now);
+  sqlite.prepare(`
+    UPDATE material_stock_totals
+    SET total_quantity = 8, library_quantity = 5, other_location_quantity = 3
+    WHERE material_id = 'CAT-0001'
+  `).run();
+  const issued = await mutation.issueLoanToClass(actor, {
+    requestId: "20000000-0000-4000-8000-000000000030",
+    classYearId: "CY-2026-001",
+    expectedClassYearVersion: 1,
+    responsibleTeacherUserId: "USR-TCH",
+    issuedAt: "2026-09-10",
+    dueAt: null,
+    notes: null,
+    items: [
+      {
+        materialId: "CAT-0001",
+        sourceLocationId: "LOC-001",
+        condition: "unspecified",
+        quantity: 1,
+        expectedAvailableQuantity: 5,
+      },
+      {
+        materialId: "CAT-0001",
+        sourceLocationId: "LOC-002",
+        condition: "unspecified",
+        quantity: 1,
+        expectedAvailableQuantity: 3,
+      },
+    ],
+  }, d1);
+  const returned = await mutation.returnClassLoanItems(actor, {
+    requestId: "20000000-0000-4000-8000-000000000031",
+    classLoanId: issued.classLoanId,
+    expectedVersion: 1,
+    returnedAt: "2026-10-01",
+    notes: null,
+    items: issued.items.map((item) => ({
+      classLoanItemId: item.classLoanItemId,
+      quantity: 1,
+      returnLocationId: "LOC-001",
+      condition: "unspecified",
+    })),
+  }, d1);
+  assert.equal(returned.status, "closed");
+  assert.equal(sqlite.prepare(`
+    SELECT quantity FROM holdings
+    WHERE material_id = 'CAT-0001' AND location_id = 'LOC-001'
+  `).get().quantity, 6);
+  assert.deepEqual(
+    sqlite.prepare(`
+      SELECT quantity_before, quantity_after
+      FROM class_loan_transaction_lines line
+      JOIN class_loan_transactions tx ON tx.id = line.transaction_id
+      WHERE tx.kind = 'return'
+      ORDER BY line.rowid
+    `).all().map(plainRow),
+    [
+      { quantity_before: 4, quantity_after: 5 },
+      { quantity_before: 5, quantity_after: 6 },
+    ],
+  );
+
+  sqlite.prepare("UPDATE locations SET status = 'active' WHERE id = 'LOC-001'").run();
+  sqlite.prepare("UPDATE holdings SET quantity = 5, version = version + 1 WHERE material_id = 'CAT-0001' AND location_id = 'LOC-001'").run();
+  const second = await mutation.issueLoanToClass(actor, {
+    requestId: "20000000-0000-4000-8000-000000000032",
+    classYearId: "CY-2026-001",
+    expectedClassYearVersion: 1,
+    responsibleTeacherUserId: "USR-TCH",
+    issuedAt: "2026-10-02",
+    dueAt: null,
+    notes: null,
+    items: [{
+      materialId: "CAT-0001",
+      sourceLocationId: "LOC-001",
+      condition: "unspecified",
+      quantity: 1,
+      expectedAvailableQuantity: 5,
+    }],
+  }, d1);
+  d1.beforeBatch = () => {
+    sqlite.prepare("UPDATE locations SET status = 'inactive' WHERE id = 'LOC-001'").run();
+  };
+  await assert.rejects(
+    mutation.returnClassLoanItems(actor, {
+      requestId: "20000000-0000-4000-8000-000000000033",
+      classLoanId: second.classLoanId,
+      expectedVersion: 1,
+      returnedAt: "2026-10-03",
+      notes: null,
+      items: [{
+        classLoanItemId: second.items[0].classLoanItemId,
+        quantity: 1,
+        returnLocationId: "LOC-001",
+        condition: "unspecified",
+      }],
+    }, d1),
+    (error) => error?.code === "class_loan_return_conflict" && error?.status === 409,
+  );
+  assert.equal(sqlite.prepare("SELECT quantity_returned FROM class_loan_items WHERE id = ?").get(second.items[0].classLoanItemId).quantity_returned, 0);
+  assert.equal(sqlite.prepare("SELECT status FROM class_loans WHERE id = ?").get(second.classLoanId).status, "open");
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM class_loan_transactions WHERE class_loan_id = ?").get(second.classLoanId).count, 1);
 });
 
 test("transfer and writeoff commit atomically, rebuild totals and replay once", async () => {

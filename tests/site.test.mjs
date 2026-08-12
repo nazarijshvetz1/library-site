@@ -9,9 +9,21 @@ import {
   materialShareText,
   newestMaterialsByCatalogId,
   normalizeCatalogApiUrl,
+  titleSuggestions,
   urlWithMaterial,
   urlWithoutMaterial,
 } from "../source/app.js";
+
+test("offers bounded title suggestions with stable relevance", () => {
+  const items = [
+    { id: "CAT-0001", title: "Математика. 5 клас", author: "Іваненко", year: 2024 },
+    { id: "CAT-0002", title: "Збірник задач з математики", author: "Петренко", year: 2023 },
+    { id: "CAT-0003", title: "Українська мова", author: "Коваленко", year: 2022 },
+  ];
+  assert.deepEqual(titleSuggestions(items, "матем", 6).map((item) => item.id), ["CAT-0001", "CAT-0002"]);
+  assert.deepEqual(titleSuggestions(items, "збір задач", 6).map((item) => item.id), ["CAT-0002"]);
+  assert.deepEqual(titleSuggestions(items, "м", 6), []);
+});
 
 test("serves the Ukrainian catalog homepage", async () => {
   const response = await worker.fetch(new Request("https://example.test/"));
@@ -66,6 +78,8 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
     readFile(new URL("../source/styles.css", import.meta.url), "utf8"),
   ]);
   assert.match(html, /id="collectionGrid"/);
+  assert.match(html, /id="titleSuggestions" role="listbox"/);
+  assert.match(html, /<option value="">Усі<\/option>/);
   assert.match(html, /type="module" src="\/app\.js"/);
   assert.match(html, /href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/librarian"/);
   assert.match(html, /rel="noopener noreferrer"/);
@@ -77,6 +91,9 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(app, /history\.replaceState/);
   assert.match(app, /addEventListener\("popstate"/);
   assert.match(app, /navigator\.share/);
+  assert.match(app, /data-title-suggestion/);
+  assert.match(app, /item\.author \|\| "Автор не вказаний"/);
+  assert.match(app, /item\.year \|\| "Рік не вказаний"/);
   assert.match(app, /data-report-error/);
   assert.match(app, /class="material-links"/);
   assert.match(app, /target="_blank" rel="noopener noreferrer"/);
@@ -85,6 +102,7 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(css, /max-height:calc\(100dvh - 12px\)/);
   assert.match(css, /env\(safe-area-inset-bottom\)/);
   assert.match(css, /min-height:44px/);
+  assert.match(css, /\.title-suggestions/);
 });
 
 test("serves the official logo and live placement data", async () => {

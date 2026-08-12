@@ -5,6 +5,7 @@
 import Link from "next/link";
 import {
   type FormEvent,
+  type KeyboardEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -14,14 +15,20 @@ import {
 
 import {
   buildCatalogSearchUrl,
+  clearPendingClassCirculationIntent as clearStoredClassCirculationIntent,
   editDraftToChanges,
   gradeLabel,
   holdingKey,
   type CatalogSearchFilters,
+  type ClassCirculationIntentKind,
   type MaterialEditDraft,
+  type PendingClassCirculationIntent,
   materialToEditDraft,
+  readPendingClassCirculationIntent as readStoredClassCirculationIntent,
   resolveLoanDueAtForSubmission,
+  resolveLiveFormTextForSubmission,
   todayInKyiv,
+  writePendingClassCirculationIntent as writeStoredClassCirculationIntent,
 } from "@/lib/librarian-d1-client";
 import { normalizeCoverPhotoForUpload } from "@/lib/cover-client";
 import {
@@ -46,6 +53,8 @@ type Tool =
   | "count"
   | "issue"
   | "return"
+  | "class-issue"
+  | "class-return"
   | AcademicTool;
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -117,6 +126,11 @@ type SearchEnvelope = {
   page: { hasMore: boolean; nextCursor: string | null };
 };
 
+type CatalogFacetsEnvelope = {
+  success: boolean;
+  rubrics: string[];
+};
+
 type DetailEnvelope = {
   success: boolean;
   material: MaterialDetail;
@@ -145,6 +159,7 @@ type LibraryLocation = {
   name: string;
   type: string;
   isPublic: boolean;
+  status?: string;
 };
 
 type ReferenceEnvelope = {
@@ -199,6 +214,134 @@ type LoansEnvelope = {
   loans: OpenLoan[];
 };
 
+type CopyCondition = "unspecified" | "good" | "worn" | "damaged";
+
+type AcademicReferenceYear = {
+  id: string;
+  status: string;
+};
+
+type AcademicReferenceCohort = {
+  id: string;
+  status: string;
+};
+
+type AcademicReferenceClassYear = {
+  id: string;
+  academicYearId: string;
+  academicYearLabel: string;
+  cohortId: string;
+  className: string;
+  grade: number;
+  code: string;
+  teacherUserId: string | null;
+  teacherName: string;
+  locationId: string | null;
+  locationName: string;
+  startDate: string;
+  endDate: string;
+  status: string;
+  actualClosedDate: string | null;
+  notes: string;
+  version: number;
+};
+
+type AcademicReferenceEnvelope = {
+  success: boolean;
+  referenceData: {
+    classYears: AcademicReferenceClassYear[];
+    academicYears: AcademicReferenceYear[];
+    cohorts: AcademicReferenceCohort[];
+  };
+  writesEnabled: boolean;
+};
+
+type ClassIssueItem = {
+  materialId: string;
+  sourceLocationId: string;
+  condition: CopyCondition;
+  quantity: number;
+  expectedAvailableQuantity: number;
+};
+
+type ClassIssuePayload = {
+  requestId: string;
+  classYearId: string;
+  expectedClassYearVersion: number;
+  responsibleTeacherUserId: string;
+  issuedAt: string;
+  dueAt: string | null;
+  notes: string | null;
+  items: ClassIssueItem[];
+};
+
+type ClassIssueCartRow = ClassIssueItem & {
+  key: string;
+  materialTitle: string;
+  materialAuthor: string;
+  materialYear: number | null;
+  thumbnailUrl: string;
+  sourceLocationName: string;
+};
+
+type OpenClassLoanItem = {
+  classLoanItemId: string;
+  materialId: string;
+  materialTitle: string;
+  materialYear: number | null;
+  sourceLocationId: string;
+  sourceLocationName: string;
+  condition: CopyCondition;
+  quantityIssued: number;
+  quantityReturned: number;
+  quantityOutstanding: number;
+};
+
+type OpenClassLoan = {
+  classLoanId: string;
+  classYearId: string;
+  className: string;
+  academicYearId: string;
+  academicYearLabel: string;
+  cohortId: string;
+  responsibleTeacherUserId: string;
+  responsibleTeacherName: string;
+  status: "open";
+  issuedAt: string;
+  dueAt: string | null;
+  notes: string;
+  version: number;
+  items: OpenClassLoanItem[];
+};
+
+type ClassLoansEnvelope = {
+  success: boolean;
+  classLoans: OpenClassLoan[];
+  writesEnabled: boolean;
+};
+
+type ClassReturnItem = {
+  classLoanItemId: string;
+  quantity: number;
+  returnLocationId: string;
+  condition: CopyCondition;
+};
+
+type ClassReturnPayload = {
+  requestId: string;
+  classLoanId: string;
+  expectedVersion: number;
+  returnedAt: string;
+  notes: string | null;
+  items: ClassReturnItem[];
+};
+
+type ClassLoanMutationResult = {
+  classLoanId: string;
+  status: "open" | "closed";
+  version: number;
+};
+
 type LibrarianWorkspaceProps = {
   displayName: string;
   role: string;
@@ -218,6 +361,17 @@ const EMPTY_FILTERS: CatalogSearchFilters = {
   available: false,
 };
 
+function catalogFiltersKey(filters: CatalogSearchFilters): string {
+  return JSON.stringify([
+    filters.q.trim(),
+    filters.rubric.trim(),
+    filters.grade.trim(),
+    filters.subject.trim(),
+    filters.publicationType.trim(),
+    filters.available,
+  ]);
+}
+
 const TOOLS: Array<{ id: Tool; icon: string; label: string; hint: string }> = [
   { id: "catalog", icon: "⌕", label: "Каталог", hint: "Пошук і картка" },
   { id: "create", icon: "+", label: "Новий матеріал", hint: "Додати без чернетки" },
@@ -232,6 +386,8 @@ const TOOLS: Array<{ id: Tool; icon: string; label: string; hint: string }> = [
   },
   { id: "issue", icon: "→", label: "Видача", hint: "Видати вчителю" },
   { id: "return", icon: "↩", label: "Повернення", hint: "Прийняти книги" },
+  { id: "class-issue", icon: "⇥", label: "Видача класу", hint: "Кілька матеріалів класу" },
+  { id: "class-return", icon: "⇤", label: "Повернення класу", hint: "Частково або повністю" },
   { id: "academic-year", icon: "▣", label: "Новий навчальний рік", hint: "Створити період" },
   { id: "class-create", icon: "+", label: "Відкрити клас", hint: "Додати до року" },
   { id: "class-update", icon: "↻", label: "Змінити клас", hint: "Керівник і кабінет" },
@@ -250,8 +406,11 @@ export default function D1LibrarianWorkspace({
   const [items, setItems] = useState<CatalogMaterial[]>([]);
   const [searchState, setSearchState] = useState<LoadState>("loading");
   const [searchError, setSearchError] = useState("");
+  const [resolvedSearchScope, setResolvedSearchScope] = useState("");
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [rubrics, setRubrics] = useState<string[]>([]);
+  const [rubricState, setRubricState] = useState<LoadState>("loading");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selectedIdRef = useRef<string | null>(null);
   const detailRequestRef = useRef(0);
@@ -290,6 +449,7 @@ export default function D1LibrarianWorkspace({
 
   useEffect(() => {
     const controller = new AbortController();
+    const requestScope = catalogFiltersKey(filters);
     const timer = window.setTimeout(async () => {
       setSearchState("loading");
       setSearchError("");
@@ -300,11 +460,13 @@ export default function D1LibrarianWorkspace({
         );
         setItems(response.items);
         setNextCursor(response.page.nextCursor);
+        setResolvedSearchScope(requestScope);
         setSearchState("ready");
       } catch (error) {
         if (controller.signal.aborted) return;
         setItems([]);
         setNextCursor(null);
+        setResolvedSearchScope("");
         setSearchState("error");
         setSearchError(errorMessage(error));
       }
@@ -314,6 +476,20 @@ export default function D1LibrarianWorkspace({
       controller.abort();
     };
   }, [filters, refreshToken]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void apiJson<CatalogFacetsEnvelope>("/api/librarian/materials/facets", {
+      signal: controller.signal,
+    }).then((response) => {
+      setRubrics(response.rubrics);
+      setRubricState("ready");
+    }).catch(() => {
+      if (controller.signal.aborted) return;
+      setRubricState("error");
+    });
+    return () => controller.abort();
+  }, [refreshToken]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -393,6 +569,8 @@ export default function D1LibrarianWorkspace({
     setWorkspaceNoticeTone("success");
     window.queueMicrotask(() => workspaceTitleRef.current?.focus());
   }
+
+  const showCatalogSearch = !isAcademicTool(tool) && tool !== "class-return";
 
   return (
     <main className={styles.shell}>
@@ -501,14 +679,17 @@ export default function D1LibrarianWorkspace({
             </div>
           ) : null}
 
-          <div className={isAcademicTool(tool) ? styles.workGridWide : styles.workGrid}>
-            {!isAcademicTool(tool) ? (
+          <div className={showCatalogSearch ? styles.workGrid : styles.workGridWide}>
+            {showCatalogSearch ? (
               <CatalogSearch
                 filters={filters}
                 onFilters={setFilters}
                 items={items}
                 state={searchState}
                 error={searchError}
+                rubrics={rubrics}
+                rubricState={rubricState}
+                suggestionsReady={resolvedSearchScope === catalogFiltersKey(filters)}
                 selectedId={selectedId}
                 onSelect={selectMaterial}
                 nextCursor={nextCursor}
@@ -617,6 +798,27 @@ export default function D1LibrarianWorkspace({
                 <LoanReturnPanel
                   writesEnabled={writesEnabled}
                   teachers={teachers}
+                  referenceState={referenceState}
+                  referenceError={referenceError}
+                  onSaved={refreshSelected}
+                />
+              ) : null}
+              {tool === "class-issue" ? (
+                <ClassIssueWorkspace
+                  detail={detail}
+                  detailState={detailState}
+                  detailError={detailError}
+                  writesEnabled={writesEnabled}
+                  teachers={teachers}
+                  referenceState={referenceState}
+                  referenceError={referenceError}
+                  onSaved={refreshSelected}
+                  onChooseReturn={() => chooseTool("class-return")}
+                />
+              ) : null}
+              {tool === "class-return" ? (
+                <ClassReturnWorkspace
+                  writesEnabled={writesEnabled}
                   locations={locations}
                   referenceState={referenceState}
                   referenceError={referenceError}
@@ -645,6 +847,9 @@ function CatalogSearch({
   items,
   state,
   error,
+  rubrics,
+  rubricState,
+  suggestionsReady,
   selectedId,
   onSelect,
   nextCursor,
@@ -656,17 +861,79 @@ function CatalogSearch({
   items: CatalogMaterial[];
   state: LoadState;
   error: string;
+  rubrics: string[];
+  rubricState: LoadState;
+  suggestionsReady: boolean;
   selectedId: string | null;
   onSelect: (id: string) => void;
   nextCursor: string | null;
   loadingMore: boolean;
   onLoadMore: () => void;
 }) {
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [activeSuggestion, setActiveSuggestion] = useState(-1);
+  const normalizedQuery = filters.q.trim();
+  const titleQueryTokens = normalizedQuery.toLocaleLowerCase("uk-UA").split(/\s+/u).filter(Boolean);
+  const suggestions = normalizedQuery.length >= 2 && suggestionsReady
+    ? items.filter((item) => {
+      const normalizedTitle = item.title.toLocaleLowerCase("uk-UA");
+      return titleQueryTokens.every((token) => normalizedTitle.includes(token));
+    }).slice(0, 6)
+    : [];
+  const suggestionsVisible = suggestionsOpen && suggestions.length > 0;
+  const activeSuggestionItem = activeSuggestion >= 0
+    ? suggestions[activeSuggestion] ?? null
+    : null;
+
   function update<K extends keyof CatalogSearchFilters>(
     key: K,
     value: CatalogSearchFilters[K],
   ) {
+    setActiveSuggestion(-1);
     onFilters({ ...filters, [key]: value });
+  }
+
+  function selectSuggestion(item: CatalogMaterial) {
+    setSuggestionsOpen(false);
+    setActiveSuggestion(-1);
+    onSelect(item.id);
+  }
+
+  function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      if (suggestionsOpen) event.preventDefault();
+      setSuggestionsOpen(false);
+      setActiveSuggestion(-1);
+      return;
+    }
+    if (event.key === "Tab") {
+      setSuggestionsOpen(false);
+      setActiveSuggestion(-1);
+      return;
+    }
+    if (!suggestions.length) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setSuggestionsOpen(true);
+      setActiveSuggestion((current) => (current + 1) % suggestions.length);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setSuggestionsOpen(true);
+      setActiveSuggestion((current) =>
+        current <= 0 ? suggestions.length - 1 : current - 1
+      );
+      return;
+    }
+    if (
+      event.key === "Enter"
+      && suggestionsVisible
+      && activeSuggestionItem
+    ) {
+      event.preventDefault();
+      selectSuggestion(activeSuggestionItem);
+    }
   }
 
   const hasFilters = Object.entries(filters).some(([, value]) => Boolean(value));
@@ -685,28 +952,98 @@ function CatalogSearch({
         ) : null}
       </div>
 
-      <label className={styles.searchField}>
-        <span className={styles.srOnly}>Пошук за назвою, ISBN або CAT-ID</span>
-        <span aria-hidden="true">⌕</span>
-        <input
-          type="search"
-          value={filters.q}
-          onChange={(event) => update("q", event.target.value)}
-          placeholder="Назва, автор, ISBN або CAT-ID"
-          autoComplete="off"
-        />
-      </label>
+      <div
+        className={styles.searchCombobox}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) {
+            setSuggestionsOpen(false);
+            setActiveSuggestion(-1);
+          }
+        }}
+      >
+        <label className={styles.searchField}>
+          <span className={styles.srOnly}>Пошук за назвою, автором, ISBN або CAT-ID</span>
+          <span aria-hidden="true">⌕</span>
+          <input
+            type="search"
+            role="combobox"
+            value={filters.q}
+            onChange={(event) => {
+              update("q", event.target.value);
+              setSuggestionsOpen(true);
+              setActiveSuggestion(-1);
+            }}
+            onFocus={() => setSuggestionsOpen(true)}
+            onKeyDown={handleSearchKeyDown}
+            placeholder="Назва, автор, ISBN або CAT-ID"
+            autoComplete="off"
+            aria-autocomplete="list"
+            aria-expanded={suggestionsVisible}
+            aria-controls="catalog-title-suggestions"
+            aria-activedescendant={
+              suggestionsVisible && activeSuggestionItem
+                ? `catalog-suggestion-${activeSuggestionItem.id}`
+                : undefined
+            }
+            aria-describedby="catalog-suggestion-help"
+          />
+        </label>
+        <span id="catalog-suggestion-help" className={styles.srOnly}>
+          Під час введення з’являться підказки. Переміщуйтеся стрілками та натисніть Enter, щоб відкрити матеріал.
+        </span>
+        {suggestionsVisible ? (
+          <div
+            id="catalog-title-suggestions"
+            className={styles.suggestions}
+            role="listbox"
+            aria-label="Підказки матеріалів"
+          >
+            {suggestions.map((item, index) => (
+              <button
+                id={`catalog-suggestion-${item.id}`}
+                key={item.id}
+                className={index === activeSuggestion ? styles.suggestionActive : styles.suggestion}
+                type="button"
+                role="option"
+                aria-selected={index === activeSuggestion}
+                onMouseEnter={() => setActiveSuggestion(index)}
+                onClick={() => selectSuggestion(item)}
+              >
+                <Cover material={item} />
+                <span>
+                  <strong>{item.title}</strong>
+                  <small>
+                    {[item.author || "Автор не вказаний", item.year ? String(item.year) : "Рік не вказано"]
+                      .join(" · ")}
+                  </small>
+                  <code>{item.id}</code>
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
 
       <details className={styles.filters}>
         <summary>Фільтри рубрики, класу, предмета й типу</summary>
         <div className={styles.filterGrid}>
           <label>
             <span>Рубрика</span>
-            <input
+            <select
               value={filters.rubric}
               onChange={(event) => update("rubric", event.target.value)}
-              placeholder="Наприклад, Підручники"
-            />
+            >
+              <option value="">Усі</option>
+              {rubrics.map((rubric) => (
+                <option key={rubric} value={rubric}>{rubric}</option>
+              ))}
+            </select>
+            {rubricState === "loading" ? (
+              <small className={styles.filterHint}>Оновлюємо список рубрик…</small>
+            ) : null}
+            {rubricState === "error" ? (
+              <small className={styles.filterError}>Рубрики тимчасово недоступні.</small>
+            ) : null}
           </label>
           <label>
             <span>Клас</span>
@@ -2245,7 +2582,7 @@ function WriteoffForm({
     if (!writesEnabled || (!retryPending && !source)) return;
     const amount = Number(quantity);
     const confirmed = retryPending || window.confirm(
-      `Списати ${amount} прим. «${detail.title}» з місця «${source.locationName}»? Залишок зменшиться одразу.`,
+      `Списати ${amount} прим. «${detail.title}» з місця «${source?.locationName || ""}»? Залишок зменшиться одразу.`,
     );
     if (!confirmed) return;
     setSaving(true);
@@ -2870,6 +3207,521 @@ function LoanIssueForm({
   );
 }
 
+function ClassIssueWorkspace({
+  detail,
+  detailState,
+  detailError,
+  writesEnabled,
+  teachers,
+  referenceState,
+  referenceError,
+  onSaved,
+  onChooseReturn,
+}: {
+  detail: MaterialDetail | null;
+  detailState: LoadState;
+  detailError: string;
+  writesEnabled: boolean;
+  teachers: LibraryTeacher[];
+  referenceState: LoadState;
+  referenceError: string;
+  onSaved: () => Promise<void>;
+  onChooseReturn: () => void;
+}) {
+  const [academicReference, setAcademicReference] = useState<AcademicReferenceEnvelope["referenceData"] | null>(null);
+  const [academicState, setAcademicState] = useState<LoadState>("loading");
+  const [academicError, setAcademicError] = useState("");
+  const [academicReloadToken, setAcademicReloadToken] = useState(0);
+  const [classYearId, setClassYearId] = useState("");
+  const [responsibleTeacherUserId, setResponsibleTeacherUserId] = useState("");
+  const [issuedAt, setIssuedAt] = useState(() => todayInKyiv());
+  const [dueAt, setDueAt] = useState("");
+  const issuedAtInputRef = useRef<HTMLInputElement>(null);
+  const classDueAtInputRef = useRef<HTMLInputElement>(null);
+  const [notes, setNotes] = useState("");
+  const [sourceKey, setSourceKey] = useState("");
+  const [quantity, setQuantity] = useState("1");
+  const [cart, setCart] = useState<ClassIssueCartRow[]>([]);
+  const [pendingIntent, setPendingIntent] = useState<PendingClassCirculationIntent<ClassIssuePayload> | null>(
+    () => readPendingClassCirculationIntent<ClassIssuePayload>("class-issue"),
+  );
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"error" | "success" | "info">("info");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void apiJson<AcademicReferenceEnvelope>("/api/librarian/academic-reference", {
+      signal: controller.signal,
+    }).then((response) => {
+      setAcademicReference(response.referenceData);
+      setAcademicState("ready");
+    }).catch((requestError) => {
+      if (controller.signal.aborted) return;
+      setAcademicState("error");
+      setAcademicError(errorMessage(requestError));
+    });
+    return () => controller.abort();
+  }, [academicReloadToken]);
+
+  const activeClassYears = useMemo(() => {
+    if (!academicReference) return [];
+    const activeYears = new Set(
+      academicReference.academicYears.filter((year) => year.status === "active").map((year) => year.id),
+    );
+    const activeCohorts = new Set(
+      academicReference.cohorts.filter((cohort) => cohort.status === "active").map((cohort) => cohort.id),
+    );
+    return academicReference.classYears
+      .filter((classYear) => (
+        classYear.status === "active"
+        && activeYears.has(classYear.academicYearId)
+        && activeCohorts.has(classYear.cohortId)
+      ))
+      .sort((left, right) => left.className.localeCompare(right.className, "uk"));
+  }, [academicReference]);
+
+  const classYearSelectionIsCurrent = activeClassYears.some(
+    (classYear) => classYear.id === classYearId,
+  );
+  const effectiveClassYearId = classYearSelectionIsCurrent
+    ? classYearId
+    : activeClassYears[0]?.id || "";
+  const selectedClassYear = activeClassYears.find(
+    (classYear) => classYear.id === effectiveClassYearId,
+  ) ?? null;
+  const assignedTeacherUserId = selectedClassYear?.teacherUserId
+    && teachers.some((teacher) => teacher.id === selectedClassYear.teacherUserId)
+    ? selectedClassYear.teacherUserId
+    : "";
+  const effectiveResponsibleTeacherUserId = classYearSelectionIsCurrent
+    ? responsibleTeacherUserId
+    : assignedTeacherUserId;
+  const defaultIssuedAt = selectedClassYear
+    ? todayInKyiv() < selectedClassYear.startDate
+      ? selectedClassYear.startDate
+      : todayInKyiv() > selectedClassYear.endDate
+        ? selectedClassYear.endDate
+        : todayInKyiv()
+    : issuedAt;
+  const effectiveIssuedAt = classYearSelectionIsCurrent ? issuedAt : defaultIssuedAt;
+  const effectiveDueAt = classYearSelectionIsCurrent ? dueAt : selectedClassYear?.endDate || dueAt;
+
+  function chooseClassYear(nextClassYearId: string) {
+    const nextClassYear = activeClassYears.find((classYear) => classYear.id === nextClassYearId) ?? null;
+    setClassYearId(nextClassYearId);
+    setResponsibleTeacherUserId(
+      nextClassYear?.teacherUserId
+      && teachers.some((teacher) => teacher.id === nextClassYear.teacherUserId)
+        ? nextClassYear.teacherUserId
+        : "",
+    );
+    if (!nextClassYear) return;
+    const today = todayInKyiv();
+    setIssuedAt(
+      today < nextClassYear.startDate
+        ? nextClassYear.startDate
+        : today > nextClassYear.endDate
+          ? nextClassYear.endDate
+          : today,
+    );
+    setDueAt(nextClassYear.endDate);
+  }
+
+  const availableHoldings = useMemo(() => detail?.holdings.filter(
+    (holding) => (
+      holding.locationStatus === "active"
+      && holding.locationType !== "service"
+      && holding.quantity > 0
+    ),
+  ) ?? [], [detail]);
+
+  const effectiveSourceKey = availableHoldings.some((holding) => holdingKey(holding) === sourceKey)
+    ? sourceKey
+    : availableHoldings[0] ? holdingKey(availableHoldings[0]) : "";
+  const source = availableHoldings.find((holding) => holdingKey(holding) === effectiveSourceKey) ?? null;
+  const locked = saving || Boolean(pendingIntent);
+  const cartCopies = cart.reduce((total, item) => total + item.quantity, 0);
+
+  function addSelectedMaterial() {
+    if (!detail || !source) return;
+    const parsedQuantity = Number(quantity);
+    if (!Number.isInteger(parsedQuantity) || parsedQuantity < 1 || parsedQuantity > source.quantity) {
+      setMessageTone("error");
+      setMessage(`Вкажіть від 1 до ${source.quantity} примірників.`);
+      return;
+    }
+    const condition = normalizeCopyCondition(source.condition);
+    const key = `${detail.id}\u001e${source.locationId}\u001e${condition}`;
+    if (!cart.some((item) => item.key === key) && cart.length >= 100) {
+      setMessageTone("error");
+      setMessage("Одна видача може містити не більше 100 позицій.");
+      return;
+    }
+    const row: ClassIssueCartRow = {
+      key,
+      materialId: detail.id,
+      materialTitle: detail.title,
+      materialAuthor: detail.author,
+      materialYear: detail.year,
+      thumbnailUrl: detail.thumbnailUrl,
+      sourceLocationId: source.locationId,
+      sourceLocationName: source.locationName,
+      condition,
+      quantity: parsedQuantity,
+      expectedAvailableQuantity: source.quantity,
+    };
+    setCart((current) => (
+      current.some((item) => item.key === key)
+        ? current.map((item) => item.key === key ? row : item)
+        : [...current, row]
+    ));
+    setMessageTone("success");
+    setMessage(current => current === "Видачу на клас оформлено." ? current : `${detail.title} додано до видачі.`);
+  }
+
+  function updateCartQuantity(key: string, nextQuantity: number) {
+    setCart((current) => current.map((item) => (
+      item.key === key ? { ...item, quantity: nextQuantity } : item
+    )));
+  }
+
+  async function sendIssueIntent(
+    intent: PendingClassCirculationIntent<ClassIssuePayload>,
+    alreadyStored: boolean,
+  ) {
+    if (!alreadyStored && !writePendingClassCirculationIntent(intent)) {
+      setMessageTone("error");
+      setMessage("Не вдалося зберегти безпечний повтор запиту в цьому браузері. Видачу не надіслано.");
+      return;
+    }
+    setPendingIntent(intent);
+    setSaving(true);
+    setMessageTone("info");
+    setMessage(alreadyStored ? "Перевіряємо результат тим самим запитом…" : "Оформлюємо видачу на клас…");
+    try {
+      const response = await apiJson<MutationEnvelope<ClassLoanMutationResult>>(
+        "/api/librarian/class-loans",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(intent.payload),
+        },
+      );
+      clearPendingClassCirculationIntent("class-issue");
+      setPendingIntent(null);
+      setCart([]);
+      setMessageTone("success");
+      setMessage(response.result.status === "open" ? "Видачу на клас оформлено." : "Операцію збережено.");
+      await onSaved();
+    } catch (requestError) {
+      if (isDefinitiveClassCirculationFailure(requestError)) {
+        clearPendingClassCirculationIntent("class-issue");
+        setPendingIntent(null);
+        setAcademicState("loading");
+        setAcademicError("");
+        setAcademicReloadToken((value) => value + 1);
+        await onSaved();
+        setMessageTone("error");
+        setMessage(
+          requestError instanceof ApiError && requestError.code === "stock_quantity_conflict"
+            ? `${errorMessage(requestError)} Приберіть змінену позицію з кошика, виберіть її у каталозі та додайте знову.`
+            : `${errorMessage(requestError)} Дані оновлено; перевірте видачу й надішліть її знову.`,
+        );
+      } else {
+        setMessageTone("info");
+        setMessage("Відповідь сервера не підтверджена. Не створюйте нову видачу: натисніть «Перевірити результат».");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!writesEnabled || !selectedClassYear || !effectiveResponsibleTeacherUserId || !cart.length || pendingIntent) return;
+    const submittedForm = new FormData(event.currentTarget);
+    const submittedIssuedAt = resolveLiveFormTextForSubmission(
+      issuedAtInputRef.current?.value,
+      submittedForm.get("issuedAt"),
+      effectiveIssuedAt,
+    ) || effectiveIssuedAt;
+    const submittedDueAt = resolveLoanDueAtForSubmission(
+      classDueAtInputRef.current?.value,
+      submittedForm.get("dueAt"),
+      effectiveDueAt,
+    );
+    if (cart.some((item) => (
+      !Number.isInteger(item.quantity)
+      || item.quantity < 1
+      || item.quantity > item.expectedAvailableQuantity
+    ))) {
+      setMessageTone("error");
+      setMessage("Перевірте кількість у кожній позиції видачі.");
+      return;
+    }
+    if (submittedIssuedAt < selectedClassYear.startDate || submittedIssuedAt > selectedClassYear.endDate) {
+      setMessageTone("error");
+      setMessage("Дата видачі має бути в межах навчання вибраного класу.");
+      return;
+    }
+    if (submittedDueAt && (submittedDueAt < submittedIssuedAt || submittedDueAt > selectedClassYear.endDate)) {
+      setMessageTone("error");
+      setMessage("Дата повернення має бути не раніше видачі й не пізніше завершення класу.");
+      return;
+    }
+    const teacherName = teachers.find(
+      (teacher) => teacher.id === effectiveResponsibleTeacherUserId,
+    )?.fullName || "обраний учитель";
+    if (!window.confirm(
+      `Видати класу «${selectedClassYear.className}» ${cartCopies} прим. у ${cart.length} поз. Відповідальний: ${teacherName}?`,
+    )) return;
+
+    const requestId = crypto.randomUUID();
+    const payload: ClassIssuePayload = {
+      requestId,
+      classYearId: selectedClassYear.id,
+      expectedClassYearVersion: selectedClassYear.version,
+      responsibleTeacherUserId: effectiveResponsibleTeacherUserId,
+      issuedAt: submittedIssuedAt,
+      dueAt: submittedDueAt,
+      notes: notes.trim() || null,
+      items: cart.map((item) => ({
+        materialId: item.materialId,
+        sourceLocationId: item.sourceLocationId,
+        condition: item.condition,
+        quantity: item.quantity,
+        expectedAvailableQuantity: item.expectedAvailableQuantity,
+      })),
+    };
+    await sendIssueIntent({ kind: "class-issue", requestId, payload }, false);
+  }
+
+  if (!pendingIntent && (referenceState === "loading" || academicState === "loading")) return <PanelLoading />;
+  if (!pendingIntent && referenceState === "error") return <InlineMessage tone="error">{referenceError}</InlineMessage>;
+  if (!pendingIntent && academicState === "error") return <InlineMessage tone="error">{academicError}</InlineMessage>;
+
+  return (
+    <form className={styles.classCirculationCard} aria-busy={saving} onSubmit={submit}>
+      <div className={styles.formHeading}>
+        <div>
+          <p>Групова операція</p>
+          <h2>Видати підручники класу</h2>
+          <small>Додавайте матеріали з каталогу до одного кошика, а потім підтвердьте видачу.</small>
+        </div>
+      </div>
+
+      {pendingIntent ? (
+        <div className={styles.pendingRecovery}>
+          <InlineMessage tone="info">
+            Є непідтверджена видача: {pendingIntent.payload.items.length} поз., клас {pendingIntent.payload.classYearId}.
+          </InlineMessage>
+          <button
+            className={styles.secondaryButton}
+            type="button"
+            disabled={saving || !writesEnabled}
+            onClick={() => void sendIssueIntent(pendingIntent, true)}
+          >
+            {saving ? "Перевіряємо…" : "Перевірити результат"}
+          </button>
+        </div>
+      ) : null}
+
+      <fieldset className={styles.editFields} disabled={locked}>
+        {!activeClassYears.length ? (
+          <InlineMessage tone="info">Немає активного класу в активному навчальному році.</InlineMessage>
+        ) : (
+          <div className={styles.formGrid}>
+            <EditField label="Клас" required wide>
+              <select value={effectiveClassYearId} onChange={(event) => chooseClassYear(event.target.value)} required>
+                {activeClassYears.map((classYear) => (
+                  <option key={classYear.id} value={classYear.id}>
+                    {classYear.className} · {classYear.academicYearLabel}
+                  </option>
+                ))}
+              </select>
+            </EditField>
+            <EditField label="Відповідальний учитель" required wide>
+              <select
+                value={effectiveResponsibleTeacherUserId}
+                onChange={(event) => {
+                  setClassYearId(effectiveClassYearId);
+                  setResponsibleTeacherUserId(event.target.value);
+                }}
+                required
+              >
+                <option value="">Оберіть активного вчителя</option>
+                {teachers.map((teacher) => (
+                  <option key={teacher.id} value={teacher.id}>{teacher.fullName}</option>
+                ))}
+              </select>
+            </EditField>
+            <EditField label="Дата видачі" required>
+              <input
+                ref={issuedAtInputRef}
+                name="issuedAt"
+                type="date"
+                min={selectedClassYear?.startDate}
+                max={selectedClassYear?.endDate}
+                value={effectiveIssuedAt}
+                onInput={(event) => {
+                  setClassYearId(effectiveClassYearId);
+                  setIssuedAt(event.currentTarget.value);
+                }}
+                required
+              />
+            </EditField>
+            <EditField label="Повернути до">
+              <input
+                ref={classDueAtInputRef}
+                name="dueAt"
+                type="date"
+                min={effectiveIssuedAt}
+                max={selectedClassYear?.endDate}
+                value={effectiveDueAt}
+                onInput={(event) => {
+                  setClassYearId(effectiveClassYearId);
+                  setDueAt(event.currentTarget.value);
+                }}
+              />
+            </EditField>
+          </div>
+        )}
+
+        <section className={styles.classMaterialPicker} aria-labelledby="class-material-picker-title">
+          <div>
+            <h3 id="class-material-picker-title">Додати вибраний матеріал</h3>
+            <p>Оберіть матеріал ліворуч, місце та кількість, тоді додайте його до кошика.</p>
+          </div>
+          {detailState === "idle" ? <ChooseMaterial /> : null}
+          {detailState === "loading" ? <PanelLoading /> : null}
+          {detailState === "error" ? <InlineMessage tone="error">{detailError}</InlineMessage> : null}
+          {detailState === "ready" && detail ? (
+            <div className={styles.classSelectedMaterial}>
+              <div className={styles.selectedSummary}>
+                <Cover material={detail} />
+                <div>
+                  <strong>{detail.title}</strong>
+                  <small>{[detail.author, detail.year, detail.id].filter(Boolean).join(" · ")}</small>
+                </div>
+              </div>
+              {availableHoldings.length ? (
+                <div className={styles.classAddRow}>
+                  <label>
+                    <span>Звідки</span>
+                    <select value={effectiveSourceKey} onChange={(event) => setSourceKey(event.target.value)}>
+                      {availableHoldings.map((holding) => (
+                        <option key={holdingKey(holding)} value={holdingKey(holding)}>
+                          {holding.locationName} · {conditionLabel(holding.condition)} · {holding.quantity} доступно
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Кількість</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max={source?.quantity ?? 1}
+                      value={quantity}
+                      onChange={(event) => setQuantity(event.target.value)}
+                    />
+                  </label>
+                  <button className={styles.secondaryButton} type="button" onClick={addSelectedMaterial}>
+                    Додати або оновити
+                  </button>
+                </div>
+              ) : (
+                <InlineMessage tone="info">У цього матеріалу немає доступних примірників.</InlineMessage>
+              )}
+            </div>
+          ) : null}
+        </section>
+
+        <section className={styles.classCart} aria-labelledby="class-cart-title">
+          <div className={styles.classCartHeading}>
+            <div>
+              <h3 id="class-cart-title">Кошик видачі</h3>
+              <p>{cart.length} поз. · {cartCopies} прим.</p>
+            </div>
+          </div>
+          {!cart.length ? (
+            <InlineMessage tone="info">Додайте щонайменше один матеріал.</InlineMessage>
+          ) : (
+            <div className={styles.classCartRows}>
+              {cart.map((item) => (
+                <article key={item.key}>
+                  <span className={styles.classCartCover}>
+                    {item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" /> : <span aria-hidden="true">Б</span>}
+                  </span>
+                  <div>
+                    <strong>{item.materialTitle}</strong>
+                    <small>{[item.materialAuthor, item.materialYear, item.materialId].filter(Boolean).join(" · ")}</small>
+                    <small>{item.sourceLocationName} · {conditionLabel(item.condition)} · доступно {item.expectedAvailableQuantity}</small>
+                  </div>
+                  <label>
+                    <span>Кількість</span>
+                    <input
+                      aria-label={`Кількість для ${item.materialTitle}`}
+                      type="number"
+                      min="1"
+                      max={item.expectedAvailableQuantity}
+                      value={item.quantity}
+                      onChange={(event) => updateCartQuantity(item.key, Number(event.target.value))}
+                    />
+                  </label>
+                  <button
+                    className={styles.removeCartButton}
+                    type="button"
+                    aria-label={`Прибрати ${item.materialTitle} з кошика`}
+                    onClick={() => setCart((current) => current.filter((row) => row.key !== item.key))}
+                  >
+                    ×
+                  </button>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <div className={styles.formGrid}>
+          <EditField label="Примітка" wide>
+            <textarea
+              rows={3}
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Наприклад, комплект підручників на навчальний рік"
+            />
+          </EditField>
+        </div>
+      </fieldset>
+
+      {message ? <InlineMessage tone={messageTone}>{message}</InlineMessage> : null}
+
+      <div className={styles.formActions}>
+        {messageTone === "success" && message === "Видачу на клас оформлено." ? (
+          <button className={styles.secondaryButton} type="button" onClick={onChooseReturn}>
+            Перейти до повернень класу
+          </button>
+        ) : <span>Одна видача може містити до 100 позицій.</span>}
+        <button
+          className={styles.primaryButton}
+          type="submit"
+          disabled={
+            !writesEnabled
+            || locked
+            || !selectedClassYear
+            || !effectiveResponsibleTeacherUserId
+            || !cart.length
+          }
+        >
+          {saving ? "Оформлюємо…" : `Підтвердити видачу (${cartCopies} прим.)`}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function LoanReturnPanel({
   writesEnabled,
   teachers,
@@ -3094,7 +3946,7 @@ function LoanReturnForm({
   }
 
   return (
-    <form className={styles.returnForm} onSubmit={submit}>
+    <form className={styles.returnForm} aria-busy={saving} onSubmit={submit}>
       <div className={styles.loanSummary}>
         <div>
           <span>Учитель</span>
@@ -3179,6 +4031,469 @@ function LoanReturnForm({
           disabled={!writesEnabled || !returnLocationId || !selectedItems.length || saving}
         >
           {saving ? "Зберігаємо…" : "Зберегти повернення"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function ClassReturnWorkspace({
+  writesEnabled,
+  locations,
+  referenceState,
+  referenceError,
+  onSaved,
+}: {
+  writesEnabled: boolean;
+  locations: LibraryLocation[];
+  referenceState: LoadState;
+  referenceError: string;
+  onSaved: () => Promise<void>;
+}) {
+  const usableLocations = useMemo(
+    () => locations.filter((location) => (
+      location.type !== "service"
+      && (location.status === undefined || location.status === "active")
+    )),
+    [locations],
+  );
+  const [loans, setLoans] = useState<OpenClassLoan[]>([]);
+  const [classDirectory, setClassDirectory] = useState<AcademicReferenceClassYear[]>([]);
+  const [classFilter, setClassFilter] = useState("");
+  const [selectedLoanId, setSelectedLoanId] = useState("");
+  const [state, setState] = useState<LoadState>("loading");
+  const [error, setError] = useState("");
+  const [reloadToken, setReloadToken] = useState(0);
+  const [pendingIntent, setPendingIntent] = useState<PendingClassCirculationIntent<ClassReturnPayload> | null>(
+    () => readPendingClassCirculationIntent<ClassReturnPayload>("class-return"),
+  );
+  const [saving, setSaving] = useState(false);
+  const [completionMessage, setCompletionMessage] = useState("");
+  const [completionTone, setCompletionTone] = useState<"error" | "success" | "info">("success");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void Promise.all([
+      apiJson<ClassLoansEnvelope>("/api/librarian/class-loans?limit=200", {
+        signal: controller.signal,
+      }),
+      apiJson<AcademicReferenceEnvelope>("/api/librarian/academic-reference", {
+        signal: controller.signal,
+      }),
+    ]).then(([loanResponse, academicResponse]) => {
+      setLoans(loanResponse.classLoans);
+      setClassDirectory(academicResponse.referenceData.classYears);
+      setState("ready");
+    }).catch((requestError) => {
+      if (controller.signal.aborted) return;
+      setState("error");
+      setError(errorMessage(requestError));
+    });
+    return () => controller.abort();
+  }, [reloadToken]);
+
+  const classOptions = useMemo(() => {
+    const byId = new Map<string, { id: string; label: string }>();
+    for (const loan of loans) {
+      const classYear = classDirectory.find((candidate) => candidate.id === loan.classYearId);
+      byId.set(loan.classYearId, {
+        id: loan.classYearId,
+        label: classYear
+          ? `${classYear.className} · ${classYear.academicYearLabel}`
+          : `${loan.className} · ${loan.academicYearLabel}`,
+      });
+    }
+    return [...byId.values()].sort((left, right) => left.label.localeCompare(right.label, "uk"));
+  }, [classDirectory, loans]);
+
+  const filteredLoans = useMemo(
+    () => loans.filter((loan) => !classFilter || loan.classYearId === classFilter),
+    [classFilter, loans],
+  );
+
+  const effectiveSelectedLoanId = filteredLoans.some((loan) => loan.classLoanId === selectedLoanId)
+    ? selectedLoanId
+    : filteredLoans[0]?.classLoanId || "";
+  const selectedLoan = filteredLoans.find(
+    (loan) => loan.classLoanId === effectiveSelectedLoanId,
+  ) ?? null;
+  const locked = saving || Boolean(pendingIntent);
+
+  async function sendReturnIntent(
+    intent: PendingClassCirculationIntent<ClassReturnPayload>,
+    alreadyStored: boolean,
+  ) {
+    if (!alreadyStored && !writePendingClassCirculationIntent(intent)) {
+      setCompletionTone("error");
+      setCompletionMessage("Не вдалося зберегти безпечний повтор у цьому браузері. Повернення не надіслано.");
+      return;
+    }
+    setPendingIntent(intent);
+    setSaving(true);
+    setCompletionTone("info");
+    setCompletionMessage(alreadyStored ? "Перевіряємо результат тим самим запитом…" : "Зберігаємо повернення класу…");
+    try {
+      const response = await apiJson<MutationEnvelope<ClassLoanMutationResult>>(
+        "/api/librarian/class-loans/returns",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(intent.payload),
+        },
+      );
+      clearPendingClassCirculationIntent("class-return");
+      setPendingIntent(null);
+      setCompletionTone("success");
+      setCompletionMessage(
+        response.result.status === "closed"
+          ? "Усю видачу класу повернено."
+          : "Часткове повернення класу збережено.",
+      );
+      await onSaved();
+      setState("loading");
+      setReloadToken((value) => value + 1);
+    } catch (requestError) {
+      if (isDefinitiveClassCirculationFailure(requestError)) {
+        clearPendingClassCirculationIntent("class-return");
+        setPendingIntent(null);
+        setCompletionTone("error");
+        setCompletionMessage(`${errorMessage(requestError)} Список відкритих видач оновлено.`);
+        await onSaved();
+        setState("loading");
+        setReloadToken((value) => value + 1);
+      } else {
+        setCompletionTone("info");
+        setCompletionMessage("Відповідь сервера не підтверджена. Не створюйте нове повернення: перевірте цей самий запит.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className={styles.classCirculationCard}>
+      <div className={styles.formHeading}>
+        <div>
+          <p>Відкриті видачі класам</p>
+          <h2>Повернути підручники класу</h2>
+          <small>Оберіть клас, видачу та фактично повернені позиції.</small>
+        </div>
+        <button
+          type="button"
+          aria-label="Оновити відкриті видачі класам"
+          disabled={locked}
+          onClick={() => {
+            setState("loading");
+            setError("");
+            setReloadToken((value) => value + 1);
+          }}
+        >
+          ↻
+        </button>
+      </div>
+
+      {pendingIntent ? (
+        <div className={styles.pendingRecovery}>
+          <InlineMessage tone="info">
+            Є непідтверджене повернення: {pendingIntent.payload.items.length} поз. у видачі {pendingIntent.payload.classLoanId}.
+          </InlineMessage>
+          <button
+            className={styles.secondaryButton}
+            type="button"
+            disabled={saving || !writesEnabled}
+            onClick={() => void sendReturnIntent(pendingIntent, true)}
+          >
+            {saving ? "Перевіряємо…" : "Перевірити результат"}
+          </button>
+        </div>
+      ) : null}
+
+      {referenceState === "error" ? <InlineMessage tone="error">{referenceError}</InlineMessage> : null}
+      {state === "loading" ? <PanelLoading /> : null}
+      {state === "error" ? <InlineMessage tone="error">{error}</InlineMessage> : null}
+      {completionMessage ? <InlineMessage tone={completionTone}>{completionMessage}</InlineMessage> : null}
+
+      {state === "ready" ? (
+        <fieldset className={styles.editFields} disabled={locked || referenceState === "loading"}>
+          <label className={styles.returnFilter}>
+            <span>Клас</span>
+            <select
+              value={classFilter}
+              onChange={(event) => {
+                setClassFilter(event.target.value);
+                setCompletionMessage("");
+              }}
+            >
+              <option value="">Усі класи з відкритими видачами</option>
+              {classOptions.map((classOption) => (
+                <option key={classOption.id} value={classOption.id}>{classOption.label}</option>
+              ))}
+            </select>
+          </label>
+
+          {!filteredLoans.length ? (
+            <div className={styles.noLoans}>
+              <span aria-hidden="true">✓</span>
+              <strong>Відкритих видач класу немає</strong>
+              <p>Усі зафіксовані підручники вже повернено.</p>
+            </div>
+          ) : (
+            <label className={styles.returnFilter}>
+              <span>Видача</span>
+              <select value={effectiveSelectedLoanId} onChange={(event) => setSelectedLoanId(event.target.value)}>
+                {filteredLoans.map((loan) => (
+                  <option key={loan.classLoanId} value={loan.classLoanId}>
+                    {loan.className} · {loan.responsibleTeacherName} · {formatDate(loan.issuedAt)} · {loan.items.length} поз.
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </fieldset>
+      ) : null}
+
+      {selectedLoan && !pendingIntent ? (
+        <ClassReturnForm
+          key={`${selectedLoan.classLoanId}-${selectedLoan.version}`}
+          loan={selectedLoan}
+          locations={usableLocations}
+          writesEnabled={writesEnabled}
+          locked={saving}
+          onSubmitIntent={(intent) => sendReturnIntent(intent, false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+type ClassReturnRow = {
+  selected: boolean;
+  quantity: string;
+  condition: CopyCondition;
+  returnLocationId: string;
+};
+
+function ClassReturnForm({
+  loan,
+  locations,
+  writesEnabled,
+  locked,
+  onSubmitIntent,
+}: {
+  loan: OpenClassLoan;
+  locations: LibraryLocation[];
+  writesEnabled: boolean;
+  locked: boolean;
+  onSubmitIntent: (intent: PendingClassCirculationIntent<ClassReturnPayload>) => Promise<void>;
+}) {
+  const defaultLocationId = locations.find((location) => location.type === "library")?.id || locations[0]?.id || "";
+  const [returnedAt, setReturnedAt] = useState(() => todayInKyiv());
+  const classReturnedAtInputRef = useRef<HTMLInputElement>(null);
+  const [notes, setNotes] = useState("");
+  const [rows, setRows] = useState<Record<string, ClassReturnRow>>(() => Object.fromEntries(
+    loan.items.map((item) => [item.classLoanItemId, {
+      selected: true,
+      quantity: String(item.quantityOutstanding),
+      condition: normalizeCopyCondition(item.condition),
+      returnLocationId: locations.some((location) => location.id === item.sourceLocationId)
+        ? item.sourceLocationId
+        : defaultLocationId,
+    }]),
+  ));
+  const [message, setMessage] = useState("");
+
+  function updateRow(classLoanItemId: string, changes: Partial<ClassReturnRow>) {
+    setRows((current) => ({
+      ...current,
+      [classLoanItemId]: { ...current[classLoanItemId], ...changes },
+    }));
+  }
+
+  const selectedItems = loan.items.filter((item) => rows[item.classLoanItemId]?.selected);
+  const selectedCopies = selectedItems.reduce(
+    (total, item) => total + (Number(rows[item.classLoanItemId]?.quantity) || 0),
+    0,
+  );
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!writesEnabled || locked || !selectedItems.length) return;
+    const submittedReturnedAt = resolveLiveFormTextForSubmission(
+      classReturnedAtInputRef.current?.value,
+      new FormData(event.currentTarget).get("returnedAt"),
+      returnedAt,
+    ) || returnedAt;
+    const invalidItem = selectedItems.find((item) => {
+      const row = rows[item.classLoanItemId];
+      const itemQuantity = Number(row.quantity);
+      return !row.returnLocationId
+        || !Number.isInteger(itemQuantity)
+        || itemQuantity < 1
+        || itemQuantity > item.quantityOutstanding;
+    });
+    if (invalidItem) {
+      setMessage("Перевірте кількість і місце повернення кожної обраної позиції.");
+      return;
+    }
+    const returnsEverything = selectedItems.length === loan.items.length
+      && selectedItems.every((item) => Number(rows[item.classLoanItemId].quantity) === item.quantityOutstanding);
+    if (!window.confirm(
+      `${returnsEverything ? "Повністю закрити" : "Зберегти часткове повернення для"} видачі класу «${loan.className}»: ${selectedCopies} прим. у ${selectedItems.length} поз.?`,
+    )) return;
+
+    const requestId = crypto.randomUUID();
+    const payload: ClassReturnPayload = {
+      requestId,
+      classLoanId: loan.classLoanId,
+      expectedVersion: loan.version,
+      returnedAt: submittedReturnedAt,
+      notes: notes.trim() || null,
+      items: selectedItems.map((item) => ({
+        classLoanItemId: item.classLoanItemId,
+        quantity: Number(rows[item.classLoanItemId].quantity),
+        returnLocationId: rows[item.classLoanItemId].returnLocationId,
+        condition: rows[item.classLoanItemId].condition,
+      })),
+    };
+    setMessage("");
+    await onSubmitIntent({ kind: "class-return", requestId, payload });
+  }
+
+  return (
+    <form className={styles.returnForm} aria-busy={locked} onSubmit={submit}>
+      <fieldset className={styles.editFields} disabled={locked}>
+        <div className={styles.loanSummary}>
+          <div>
+            <span>Клас</span>
+            <strong>{loan.className} · {loan.academicYearLabel}</strong>
+          </div>
+          <div>
+            <span>Відповідальний</span>
+            <strong>{loan.responsibleTeacherName}</strong>
+          </div>
+          <div>
+            <span>Видано / повернути до</span>
+            <strong>{formatDate(loan.issuedAt)} / {loan.dueAt ? formatDate(loan.dueAt) : "без строку"}</strong>
+          </div>
+        </div>
+
+        <div className={styles.returnSelectionActions}>
+          <button
+            className={styles.secondaryButton}
+            type="button"
+            onClick={() => setRows((current) => Object.fromEntries(
+              Object.entries(current).map(([key, value]) => [key, { ...value, selected: true }]),
+            ))}
+          >
+            Позначити все
+          </button>
+          <button
+            className={styles.secondaryButton}
+            type="button"
+            onClick={() => setRows((current) => Object.fromEntries(
+              Object.entries(current).map(([key, value]) => [key, { ...value, selected: false }]),
+            ))}
+          >
+            Зняти позначки
+          </button>
+        </div>
+
+        <div className={styles.classReturnItems}>
+          {loan.items.map((item) => {
+            const row = rows[item.classLoanItemId];
+            return (
+              <article key={item.classLoanItemId} className={row?.selected ? styles.returnItemSelected : ""}>
+                <label className={styles.classReturnToggle}>
+                  <input
+                    aria-label={`Повернути ${item.materialTitle}`}
+                    type="checkbox"
+                    checked={row?.selected ?? false}
+                    onChange={(event) => updateRow(item.classLoanItemId, { selected: event.target.checked })}
+                  />
+                </label>
+                <div>
+                  <strong>{item.materialTitle}</strong>
+                  <small>{[item.materialId, item.materialYear, item.sourceLocationName].filter(Boolean).join(" · ")}</small>
+                  <small>Видано {item.quantityIssued} · уже повернено {item.quantityReturned} · залишилося {item.quantityOutstanding}</small>
+                </div>
+                <label>
+                  <span>Кількість</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max={item.quantityOutstanding}
+                    value={row?.quantity ?? ""}
+                    disabled={!row?.selected}
+                    onChange={(event) => updateRow(item.classLoanItemId, { quantity: event.target.value })}
+                  />
+                </label>
+                <label>
+                  <span>Куди повернуто</span>
+                  <select
+                    value={row?.returnLocationId ?? ""}
+                    disabled={!row?.selected}
+                    onChange={(event) => updateRow(item.classLoanItemId, { returnLocationId: event.target.value })}
+                  >
+                    <option value="">Оберіть місце</option>
+                    {locations.map((location) => (
+                      <option key={location.id} value={location.id}>{location.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>Стан</span>
+                  <select
+                    value={row?.condition ?? "unspecified"}
+                    disabled={!row?.selected}
+                    onChange={(event) => updateRow(item.classLoanItemId, {
+                      condition: normalizeCopyCondition(event.target.value),
+                    })}
+                  >
+                    <option value="unspecified">Не уточнено</option>
+                    <option value="good">Добрий</option>
+                    <option value="worn">Зношений</option>
+                    <option value="damaged">Пошкоджений</option>
+                  </select>
+                </label>
+              </article>
+            );
+          })}
+        </div>
+
+        <div className={styles.formGrid}>
+          <EditField label="Дата повернення" required>
+            <input
+              ref={classReturnedAtInputRef}
+              name="returnedAt"
+              type="date"
+              min={loan.issuedAt}
+              value={returnedAt}
+              onInput={(event) => setReturnedAt(event.currentTarget.value)}
+              required
+            />
+          </EditField>
+          <EditField label="Примітка" wide>
+            <textarea
+              rows={3}
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Стан комплектів або пояснення часткового повернення"
+            />
+          </EditField>
+        </div>
+      </fieldset>
+
+      {!locations.length ? <InlineMessage tone="info">Немає активного місця для повернення.</InlineMessage> : null}
+      {message ? <InlineMessage tone="error">{message}</InlineMessage> : null}
+
+      <div className={styles.formActions}>
+        <span>Обрано: {selectedItems.length} поз. · {selectedCopies} прим.</span>
+        <button
+          className={styles.primaryButton}
+          type="submit"
+          disabled={!writesEnabled || locked || !locations.length || !selectedItems.length}
+        >
+          Підтвердити повернення
         </button>
       </div>
     </form>
@@ -3476,6 +4791,38 @@ function clearPendingInventoryIntent(
   }
 }
 
+function readPendingClassCirculationIntent<Payload extends Record<string, unknown>>(
+  kind: ClassCirculationIntentKind,
+): PendingClassCirculationIntent<Payload> | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return readStoredClassCirculationIntent<Payload>(window.sessionStorage, kind);
+  } catch {
+    return null;
+  }
+}
+
+function writePendingClassCirculationIntent<Payload extends Record<string, unknown>>(
+  intent: PendingClassCirculationIntent<Payload>,
+): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    writeStoredClassCirculationIntent(window.sessionStorage, intent);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearPendingClassCirculationIntent(kind: ClassCirculationIntentKind): void {
+  if (typeof window === "undefined") return;
+  try {
+    clearStoredClassCirculationIntent(window.sessionStorage, kind);
+  } catch {
+    // A completed or terminal server response remains authoritative.
+  }
+}
+
 const DEFINITIVE_INVENTORY_FAILURES = new Set([
   "validation_failed",
   "authentication_required",
@@ -3510,6 +4857,37 @@ const DEFINITIVE_ARCHIVE_FAILURES = new Set([
   "invalid_json",
 ]);
 
+const DEFINITIVE_CLASS_CIRCULATION_FAILURES = new Set([
+  "validation_failed",
+  "authentication_required",
+  "access_denied",
+  "allowlist_not_configured",
+  "cross_origin_request",
+  "actor_not_mapped",
+  "class_year_not_found",
+  "class_year_not_active",
+  "class_year_version_conflict",
+  "responsible_teacher_not_found",
+  "stock_quantity_conflict",
+  "insufficient_stock",
+  "class_loan_not_found",
+  "class_loan_already_closed",
+  "class_loan_version_conflict",
+  "class_loan_item_not_found",
+  "return_quantity_exceeds_outstanding",
+  "location_not_found",
+  "return_date_invalid",
+  "issue_date_outside_class_year",
+  "due_date_outside_class_year",
+  "return_date_before_previous_return",
+  "writes_disabled",
+  "class_loan_items_invalid",
+  "class_loan_return_conflict",
+  "request_id_conflict",
+  "unsupported_media_type",
+  "invalid_json",
+]);
+
 function isDefinitiveArchiveFailure(error: unknown): boolean {
   return error instanceof ApiError
     && error.status !== 408
@@ -3524,6 +4902,17 @@ function isDefinitiveInventoryFailure(error: unknown): boolean {
     && error.status !== 425
     && error.status !== 429
     && DEFINITIVE_INVENTORY_FAILURES.has(error.code);
+}
+
+function isDefinitiveClassCirculationFailure(error: unknown): boolean {
+  return error instanceof ApiError
+    && error.status !== 408
+    && error.status !== 425
+    && error.status !== 429
+    && (
+      DEFINITIVE_CLASS_CIRCULATION_FAILURES.has(error.code)
+      || (error.status >= 400 && error.status < 500)
+    );
 }
 
 function coverCleanupPending(error: unknown): boolean {
@@ -3555,6 +4944,8 @@ function toolTitle(tool: Tool): string {
   if (tool === "count") return "Фактична кількість";
   if (tool === "issue") return "Видача вчителю";
   if (tool === "return") return "Повернення";
+  if (tool === "class-issue") return "Видача підручників класу";
+  if (tool === "class-return") return "Повернення підручників класу";
   if (tool === "academic-year") return "Новий навчальний рік";
   if (tool === "class-create") return "Відкрити клас";
   if (tool === "class-update") return "Змінити клас";
@@ -3571,6 +4962,8 @@ function toolDescription(tool: Tool): string {
   if (tool === "count") return "Оберіть матеріал і запишіть те, що порахували на місці.";
   if (tool === "issue") return "Оформіть видачу з конкретного місця зберігання.";
   if (tool === "return") return "Знайдіть відкриту видачу та прийміть повернення.";
+  if (tool === "class-issue") return "Зберіть кілька матеріалів і видайте їх активному класу однією операцією.";
+  if (tool === "class-return") return "Прийміть повне або часткове повернення комплектів від класу.";
   if (tool === "academic-year") return "Підготуйте наступний навчальний період напряму в D1.";
   if (tool === "class-create") return "Створіть клас у навчальному році та призначте керівника й кабінет.";
   if (tool === "class-update") return "Оновіть назву, керівника, кабінет або примітку без чернетки.";
@@ -3584,6 +4977,11 @@ function conditionLabel(value: string | null): string {
   if (value === "worn") return "зношений";
   if (value === "damaged") return "пошкоджений";
   return "стан не уточнено";
+}
+
+function normalizeCopyCondition(value: string | null): CopyCondition {
+  if (value === "good" || value === "worn" || value === "damaged") return value;
+  return "unspecified";
 }
 
 function linkKindLabel(value: string): string {

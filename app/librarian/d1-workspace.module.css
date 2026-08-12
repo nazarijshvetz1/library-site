@@ -383,9 +383,14 @@
   text-decoration: underline;
 }
 
-.searchField {
+.searchCombobox {
   position: relative;
   margin-top: 16px;
+  z-index: 4;
+}
+
+.searchField {
+  position: relative;
   display: block;
 }
 
@@ -416,6 +421,91 @@
   border-color: var(--green-700);
   outline: none;
   box-shadow: 0 0 0 3px rgba(64, 124, 69, 0.1);
+}
+
+.suggestions {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  max-height: min(390px, 58vh);
+  padding: 6px;
+  display: grid;
+  gap: 3px;
+  overflow-y: auto;
+  border: 1px solid #cfdacf;
+  border-radius: 13px;
+  background: white;
+  box-shadow: 0 18px 42px rgba(16, 51, 30, 0.17);
+}
+
+.suggestion,
+.suggestionActive {
+  width: 100%;
+  min-height: 70px;
+  padding: 7px;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: white;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.suggestion:hover,
+.suggestionActive {
+  border-color: #c9d8c6;
+  background: var(--green-50);
+}
+
+.suggestion:focus-visible,
+.suggestionActive:focus-visible {
+  outline: 3px solid rgba(64, 124, 69, 0.2);
+  outline-offset: 1px;
+}
+
+.suggestion .cover,
+.suggestionActive .cover {
+  width: 40px;
+  height: 56px;
+}
+
+.suggestion > span,
+.suggestionActive > span {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.suggestion strong,
+.suggestionActive strong,
+.suggestion small,
+.suggestionActive small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggestion strong,
+.suggestionActive strong {
+  font-size: 10px;
+}
+
+.suggestion small,
+.suggestionActive small {
+  color: #6d7a71;
+  font-size: 8px;
+}
+
+.suggestion code,
+.suggestionActive code {
+  color: var(--green-700);
+  font-size: 8px;
+  font-weight: 800;
 }
 
 .filters {
@@ -474,6 +564,15 @@
   height: 38px;
   padding: 0 10px;
 }
+
+.filterHint,
+.filterError {
+  font-size: 8px;
+  line-height: 1.35;
+}
+
+.filterHint { color: #6d7a71; }
+.filterError { color: #a33a2c; }
 
 .filterGrid .checkField {
   grid-column: 1 / -1;
@@ -1658,6 +1757,243 @@
   font-size: 8px;
 }
 
+.classCirculationCard {
+  min-width: 0;
+}
+
+.classCirculationCard .primaryButton,
+.classCirculationCard .secondaryButton,
+.classCirculationCard input,
+.classCirculationCard select {
+  min-height: 44px;
+}
+
+.classCirculationCard fieldset:disabled {
+  opacity: 0.72;
+}
+
+.pendingRecovery {
+  margin: 18px 0;
+  padding: 12px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #cbd9e2;
+  border-radius: 12px;
+  background: #f5f9fc;
+}
+
+.pendingRecovery .message {
+  flex: 1;
+  margin: 0;
+}
+
+.classMaterialPicker,
+.classCart {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid #e7ece5;
+}
+
+.classMaterialPicker > div:first-child h3,
+.classCartHeading h3 {
+  margin: 0;
+  color: var(--green-950);
+  font: 650 18px/1.2 Georgia, serif;
+}
+
+.classMaterialPicker > div:first-child p,
+.classCartHeading p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.classMaterialPicker .chooseMaterial,
+.classMaterialPicker .loading {
+  min-height: 160px;
+}
+
+.classSelectedMaterial {
+  margin-top: 14px;
+}
+
+.classAddRow {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 100px auto;
+  gap: 9px;
+  align-items: end;
+}
+
+.classAddRow label,
+.classCartRows label,
+.classReturnItems article > label:not(.classReturnToggle) {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.classAddRow label > span,
+.classCartRows label > span,
+.classReturnItems article > label > span {
+  color: var(--muted);
+  font-size: 7px;
+  font-weight: 800;
+}
+
+.classAddRow input,
+.classAddRow select,
+.classCartRows input,
+.classReturnItems input[type="number"],
+.classReturnItems select {
+  width: 100%;
+  padding: 0 10px;
+  border: 1px solid #d4ddd3;
+  border-radius: 9px;
+  background: white;
+  color: var(--ink);
+  font-size: 9px;
+}
+
+.classCartHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.classCartRows,
+.classReturnItems {
+  margin-top: 13px;
+  display: grid;
+  gap: 8px;
+}
+
+.classCartRows article {
+  min-width: 0;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 40px minmax(140px, 1fr) 90px 44px;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #dce5d9;
+  border-radius: 11px;
+  background: #fafbf8;
+}
+
+.classCartCover {
+  width: 40px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #e5ece2;
+  color: var(--green-700);
+  font: 700 18px/1 Georgia, serif;
+}
+
+.classCartCover img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: white;
+}
+
+.classCartRows article > div,
+.classReturnItems article > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.classCartRows article > div strong,
+.classReturnItems article > div strong {
+  overflow: hidden;
+  color: var(--green-950);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.classCartRows article > div small,
+.classReturnItems article > div small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.removeCartButton,
+.classReturnToggle {
+  width: 44px;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+}
+
+.removeCartButton {
+  border: 1px solid #ebcbc5;
+  border-radius: 9px;
+  background: #fff7f5;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 17px;
+}
+
+.returnSelectionActions {
+  margin-top: 13px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.classReturnItems article {
+  min-width: 0;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 44px minmax(170px, 1fr) 86px minmax(130px, 0.8fr) 105px;
+  gap: 9px;
+  align-items: center;
+  border: 1px solid #e1e7df;
+  border-radius: 11px;
+  background: #fafbf8;
+  opacity: 0.66;
+}
+
+.classReturnItems .returnItemSelected {
+  border-color: #cdddc9;
+  background: var(--green-50);
+  opacity: 1;
+}
+
+.classReturnToggle {
+  cursor: pointer;
+}
+
+.classReturnToggle input {
+  width: 18px;
+  min-height: 18px;
+  height: 18px;
+  accent-color: var(--green-700);
+}
+
+.classCirculationCard button:disabled,
+.classCirculationCard fieldset:disabled button {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.classCirculationCard button:focus-visible,
+.classCirculationCard input:focus-visible,
+.classCirculationCard select:focus-visible,
+.classCirculationCard textarea:focus-visible {
+  outline: 3px solid rgba(64, 124, 69, 0.18);
+  outline-offset: 2px;
+}
+
 .message {
   margin: 13px 0;
   padding: 11px 13px;
@@ -1705,6 +2041,8 @@
   .publicLinkToggle { grid-column: 2; }
   .academicRows article { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
   .academicRows article .fieldWide { grid-column: 1 / -1; }
+  .classReturnItems article { grid-template-columns: 44px minmax(160px, 1fr) 86px 130px; }
+  .classReturnItems article > label:last-child { grid-column: 3 / -1; }
 }
 
 @media (max-width: 900px) {
@@ -1722,7 +2060,7 @@
   }
   .mobileTools button {
     min-width: 105px;
-    min-height: 42px;
+    min-height: 44px;
     padding: 5px 8px;
     display: grid;
     grid-template-columns: auto 1fr;
@@ -1772,6 +2110,12 @@
   .primaryButton, .secondaryButton { width: 100%; }
   .returnItems article { grid-template-columns: auto minmax(0, 1fr); }
   .returnItems label { grid-column: 2; }
+  .pendingRecovery { align-items: stretch; flex-direction: column; }
+  .classAddRow { grid-template-columns: 1fr 110px; }
+  .classAddRow .secondaryButton { grid-column: 1 / -1; }
+  .classCartRows article { grid-template-columns: 40px minmax(0, 1fr) 82px 44px; }
+  .classReturnItems article { grid-template-columns: 44px minmax(0, 1fr); }
+  .classReturnItems article > label:not(.classReturnToggle) { grid-column: 2; }
   .linkEditorHeading { align-items: stretch; flex-direction: column; }
   .academicRows article { grid-template-columns: 1fr 1fr; }
 }
@@ -1783,6 +2127,12 @@
   .result, .resultActive { grid-template-columns: 42px minmax(0, 1fr); }
   .resultAside { grid-column: 2; grid-row: 2; justify-items: start; grid-template-columns: auto auto; gap: 8px; }
   .cover { width: 40px; height: 57px; }
+  .suggestions {
+    right: -4px;
+    left: -4px;
+    max-height: min(360px, 56vh);
+  }
+  .suggestion, .suggestionActive { min-height: 72px; }
   .detailHero { display: block; }
   .detailCover { width: 112px; margin-bottom: 16px; }
   .stockStrip { grid-template-columns: repeat(3, minmax(80px, 1fr)); overflow-x: auto; }
@@ -1791,6 +2141,13 @@
   .dangerZone { align-items: stretch; flex-direction: column; }
   .dangerZone .dangerButton { width: 100%; }
   .loanSummary { grid-template-columns: 1fr; }
+  .classAddRow { grid-template-columns: 1fr; }
+  .classAddRow .secondaryButton { grid-column: auto; }
+  .classCartRows article { grid-template-columns: 40px minmax(0, 1fr) 44px; }
+  .classCartRows article > label { grid-column: 2; }
+  .classCartRows .removeCartButton { grid-column: 3; grid-row: 1; }
+  .returnSelectionActions { flex-direction: column; }
+  .returnSelectionActions .secondaryButton { width: 100%; }
   .linkEditor article { grid-template-columns: 1fr; }
   .linkNumber, .linkUrlField, .publicLinkToggle { grid-column: auto; }
   .directCoverField { grid-template-columns: 66px minmax(0, 1fr); }

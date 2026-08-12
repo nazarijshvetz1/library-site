@@ -7,6 +7,54 @@ export type CatalogSearchFilters = {
   available: boolean;
 };
 
+export type ClassCirculationIntentKind = "class-issue" | "class-return";
+
+export type PendingClassCirculationIntent<Payload extends Record<string, unknown> = Record<string, unknown>> = {
+  kind: ClassCirculationIntentKind;
+  requestId: string;
+  payload: Payload;
+};
+
+type ClassCirculationStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+const CLASS_CIRCULATION_STORAGE_PREFIX = "library.class-circulation.pending.v1";
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+export function readPendingClassCirculationIntent<Payload extends Record<string, unknown>>(
+  storage: ClassCirculationStorage,
+  kind: ClassCirculationIntentKind,
+): PendingClassCirculationIntent<Payload> | null {
+  try {
+    const raw = storage.getItem(classCirculationStorageKey(kind));
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<PendingClassCirculationIntent<Payload>>;
+    if (
+      value.kind !== kind
+      || typeof value.requestId !== "string"
+      || !UUID_PATTERN.test(value.requestId)
+      || !isPlainObject(value.payload)
+      || value.payload.requestId !== value.requestId
+    ) return null;
+    return value as PendingClassCirculationIntent<Payload>;
+  } catch {
+    return null;
+  }
+}
+
+export function writePendingClassCirculationIntent<Payload extends Record<string, unknown>>(
+  storage: ClassCirculationStorage,
+  intent: PendingClassCirculationIntent<Payload>,
+): void {
+  storage.setItem(classCirculationStorageKey(intent.kind), JSON.stringify(intent));
+}
+
+export function clearPendingClassCirculationIntent(
+  storage: ClassCirculationStorage,
+  kind: ClassCirculationIntentKind,
+): void {
+  storage.removeItem(classCirculationStorageKey(kind));
+}
+
 export type MaterialEditDraft = {
   title: string;
   rubric: string;
@@ -170,4 +218,12 @@ function optionalInteger(value: string): number | null {
   if (!normalized) return null;
   const parsed = Number(normalized);
   return Number.isInteger(parsed) ? parsed : Number.NaN;
+}
+
+function classCirculationStorageKey(kind: ClassCirculationIntentKind): string {
+  return `${CLASS_CIRCULATION_STORAGE_PREFIX}.${kind}`;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

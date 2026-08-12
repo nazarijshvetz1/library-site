@@ -253,6 +253,39 @@ test("teacher loan validation rejects duplicate items and an earlier due date", 
   assert.match(result.fieldErrors["items.1"], /двічі/u);
 });
 
+test("class loan validation requires accountability, versions and bounded dates", () => {
+  const valid = validation.validateClassLoanCreateInput({
+    requestId: REQUEST_ID,
+    classYearId: "CY-2026-001",
+    expectedClassYearVersion: 2,
+    responsibleTeacherUserId: "USR-002",
+    issuedAt: "2026-09-01",
+    dueAt: null,
+    notes: null,
+    items: [{
+      materialId: "CAT-1279",
+      sourceLocationId: "LOC-001",
+      condition: "good",
+      quantity: 3,
+      expectedAvailableQuantity: 5,
+    }],
+  });
+  assert.equal(valid.ok, true);
+  assert.equal(valid.value.responsibleTeacherUserId, "USR-002");
+
+  const invalid = validation.validateClassLoanReturnInput({
+    requestId: REQUEST_ID,
+    classLoanId: "CLOAN-001",
+    expectedVersion: 0,
+    returnedAt: "2026-10-01",
+    notes: null,
+    items: [],
+  });
+  assert.equal(invalid.ok, false);
+  assert.ok(invalid.fieldErrors.expectedVersion);
+  assert.ok(invalid.fieldErrors.items);
+});
+
 test("direct write routes remain authenticated, same-origin and fail closed", () => {
   const materialRoute = fs.readFileSync(
     path.join(root, "app/api/librarian/materials/[id]/route.ts"),
@@ -278,6 +311,14 @@ test("direct write routes remain authenticated, same-origin and fail closed", ()
     path.join(root, "app/api/librarian/loans/returns/route.ts"),
     "utf8",
   );
+  const classLoanRoute = fs.readFileSync(
+    path.join(root, "app/api/librarian/class-loans/route.ts"),
+    "utf8",
+  );
+  const classReturnRoute = fs.readFileSync(
+    path.join(root, "app/api/librarian/class-loans/returns/route.ts"),
+    "utf8",
+  );
   const transferRoute = fs.readFileSync(
     path.join(root, "app/api/librarian/transfers/route.ts"),
     "utf8",
@@ -293,6 +334,8 @@ test("direct write routes remain authenticated, same-origin and fail closed", ()
     stockRoute,
     loanRoute,
     returnRoute,
+    classLoanRoute,
+    classReturnRoute,
     transferRoute,
     writeoffRoute,
   ]) {
