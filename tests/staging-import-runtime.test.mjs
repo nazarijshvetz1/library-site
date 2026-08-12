@@ -29,7 +29,7 @@ import {
 } from "../lib/staging-import-gate.ts";
 
 const fixtureUrl = new URL("./fixtures/library-core-canonical.json", import.meta.url);
-const migrationUrls = [0, 1, 2, 3, 4, 5].map((index) => new URL(
+const migrationUrls = [0, 1, 2, 3, 4, 5, 6].map((index) => new URL(
   `../drizzle/${[
     "0000_librarian_drafts.sql",
     "0001_draft_workflow.sql",
@@ -37,6 +37,7 @@ const migrationUrls = [0, 1, 2, 3, 4, 5].map((index) => new URL(
     "0003_odd_the_order.sql",
     "0004_staging_import_runs.sql",
     "0005_young_night_nurse.sql",
+    "0006_pale_sauron.sql",
   ][index]}`,
   import.meta.url,
 ));

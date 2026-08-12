@@ -9,9 +9,20 @@ import {
   materialShareText,
   newestMaterialsByCatalogId,
   normalizeCatalogApiUrl,
+  normalizeVisitSchedule,
+  normalizeVisitsApiUrl,
+  startOfVisitWeek,
   titleSuggestions,
   urlWithMaterial,
   urlWithoutMaterial,
+  visitBookingSelection,
+  visitHorizonEnd,
+  visitScheduleQueryRange,
+  visitSegmentsForDate,
+  visitWeekNavigation,
+  visitsBookingUrl,
+  visitsPublicApiUrl,
+  visitWeekDates,
 } from "../source/app.js";
 
 test("offers bounded title suggestions with stable relevance", () => {
@@ -71,6 +82,96 @@ test("creates safe direct links and honest latest-catalog selections", () => {
   assert.equal(catalogDetailApiUrl(api, "../CAT-0112"), "");
 });
 
+test("normalizes the privacy-safe weekly visit schedule and derives free intervals", () => {
+  const schedule = normalizeVisitSchedule({
+    schemaVersion: 1,
+    success: true,
+    timeZone: "Europe/Kyiv",
+    slotMinutes: 5,
+    hours: {
+      1: [{ startTime: "08:00", endTime: "12:00" }],
+      2: [], 3: [], 4: [], 5: [], 6: [], 7: [],
+    },
+    closures: [{ date: "2026-08-10", startTime: "10:30", endTime: "11:00", status: "closed" }],
+    busy: [{ date: "2026-08-10", startTime: "09:00", endTime: "09:40", status: "busy" }],
+    generatedAt: "2026-08-10T06:00:00.000Z",
+    privateTeacherName: "must be discarded",
+  }, "2026-08-10", "2026-08-16");
+
+  assert.deepEqual(
+    visitSegmentsForDate(schedule, "2026-08-10").map(({ startTime, endTime, status }) => ({ startTime, endTime, status })),
+    [
+      { startTime: "08:00", endTime: "09:00", status: "free" },
+      { startTime: "09:00", endTime: "09:40", status: "busy" },
+      { startTime: "09:40", endTime: "10:30", status: "free" },
+      { startTime: "10:30", endTime: "11:00", status: "closed" },
+      { startTime: "11:00", endTime: "12:00", status: "free" },
+    ],
+  );
+  assert.equal(schedule.privateTeacherName, undefined);
+  assert.throws(() => normalizeVisitSchedule({ ...schedule, slotMinutes: 15 }), /точність/);
+  assert.throws(() => normalizeVisitSchedule({ ...schedule, timeZone: "UTC" }), /відповідь/);
+});
+
+test("creates bounded week requests and PII-free protected booking handoffs", () => {
+  assert.equal(startOfVisitWeek("2026-08-12"), "2026-08-10");
+  assert.deepEqual(visitWeekDates("2026-08-12"), [
+    "2026-08-10", "2026-08-11", "2026-08-12", "2026-08-13", "2026-08-14", "2026-08-15", "2026-08-16",
+  ]);
+  assert.equal(
+    visitsPublicApiUrl("https://library.example/api/visits/public", "2026-08-10", "2026-08-16"),
+    "https://library.example/api/visits/public?from=2026-08-10&to=2026-08-16",
+  );
+  assert.equal(normalizeVisitsApiUrl("https://library.example/api/visits/private"), "");
+  const selection = visitBookingSelection({ date: "2026-08-10", startTime: "09:40", endTime: "11:30", status: "free" });
+  assert.deepEqual(selection, { date: "2026-08-10", startTime: "09:40", endTime: "10:20" });
+  const bookingUrl = visitsBookingUrl("https://library.example/visits", selection);
+  assert.equal(bookingUrl, "https://library.example/visits?date=2026-08-10&start=09%3A40&end=10%3A20");
+  assert.doesNotMatch(bookingUrl, /teacher|class|name|note/i);
+  assert.equal(visitsBookingUrl("https://library.example/librarian", selection), "");
+});
+
+test("never advertises elapsed, too-short, or out-of-horizon visit slots", () => {
+  const constraints = { today: "2026-08-12", currentTime: "10:01", horizonEnd: "2026-11-10" };
+  assert.equal(visitBookingSelection(
+    { date: "2026-08-11", startTime: "09:00", endTime: "10:00", status: "free" },
+    40,
+    constraints,
+  ), null);
+  assert.equal(visitBookingSelection(
+    { date: "2026-08-12", startTime: "09:00", endTime: "10:20", status: "free" },
+    40,
+    constraints,
+  ), null);
+  assert.equal(visitBookingSelection(
+    { date: "2026-08-13", startTime: "09:00", endTime: "09:15", status: "free" },
+    40,
+    constraints,
+  ), null);
+  assert.equal(visitBookingSelection(
+    { date: "2026-11-11", startTime: "09:00", endTime: "10:00", status: "free" },
+    40,
+    constraints,
+  ), null);
+  assert.deepEqual(visitBookingSelection(
+    { date: "2026-08-12", startTime: "08:00", endTime: "12:00", status: "free" },
+    40,
+    constraints,
+  ), { date: "2026-08-12", startTime: "10:05", endTime: "10:45" });
+});
+
+test("bounds public week navigation and API reads to the 90-day booking horizon", () => {
+  assert.equal(visitHorizonEnd("2026-08-12"), "2026-11-10");
+  assert.deepEqual(visitWeekNavigation("2026-08-10", "2026-08-12"), {
+    firstWeek: "2026-08-10", lastWeek: "2026-11-09", canPrevious: false, canNext: true,
+  });
+  assert.deepEqual(visitWeekNavigation("2026-11-09", "2026-08-12"), {
+    firstWeek: "2026-08-10", lastWeek: "2026-11-09", canPrevious: true, canNext: false,
+  });
+  assert.deepEqual(visitScheduleQueryRange("2026-08-10", "2026-08-12"), { from: "2026-08-12", to: "2026-08-16" });
+  assert.deepEqual(visitScheduleQueryRange("2026-11-09", "2026-08-12"), { from: "2026-11-09", to: "2026-11-10" });
+});
+
 test("wires teacher collections, sharing, error reporting, and mobile dialog safety", async () => {
   const [html, app, css] = await Promise.all([
     readFile(new URL("../source/index.html", import.meta.url), "utf8"),
@@ -103,6 +204,36 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(css, /env\(safe-area-inset-bottom\)/);
   assert.match(css, /min-height:44px/);
   assert.match(css, /\.title-suggestions/);
+});
+
+test("ships an accessible responsive public visit schedule and protected handoff", async () => {
+  const [html, app, css, config] = await Promise.all([
+    readFile(new URL("../source/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../source/app.js", import.meta.url), "utf8"),
+    readFile(new URL("../source/styles.css", import.meta.url), "utf8"),
+    readFile(new URL("../source/config.js", import.meta.url), "utf8"),
+  ]);
+  assert.match(html, /href="#visit-schedule"[^>]*>Графік відвідування бібліотеки<\/a>/);
+  assert.match(html, /id="visit-schedule" aria-labelledby="visit-schedule-title"/);
+  assert.match(html, /Перевірте вільний час і забронюйте відвідування класом/);
+  assert.match(html, /id="visitScheduleStatus"[^>]*role="status"[^>]*aria-live="polite"/);
+  assert.match(html, /id="visitScheduleContent"[^>]*aria-busy="true"/);
+  assert.match(html, /data-visit-status="free"[\s\S]*Вільно/);
+  assert.match(html, /data-visit-status="busy"[\s\S]*Заброньовано/);
+  assert.match(html, /data-visit-status="closed"[\s\S]*Бібліотека зачинена/);
+  assert.match(html, /data-visit-status="unavailable"[\s\S]*Недоступно для запису/);
+  assert.match(app, /fetch\(url, \{ headers: \{ Accept: "application\/json" \}, cache: "no-store" \}\)/);
+  assert.match(app, /target="_blank" rel="noopener noreferrer"/);
+  assert.match(app, /visitsBookingUrl\(config\.visitsBookingUrl/);
+  assert.match(app, /elements\.visitPrevWeek\.disabled = !navigation\.canPrevious/);
+  assert.match(app, /data-visit-booking="true"/);
+  assert.doesNotMatch(app, /localStorage.*visit|sessionStorage.*visit|fetch\([^\n]*method:\s*"POST"/);
+  assert.match(config, /visitsApiUrl:\s*"https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/api\/visits\/public"/);
+  assert.match(config, /visitsBookingUrl:\s*"https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/visits"/);
+  assert.match(css, /\.site-header \.site-nav a\[data-primary-section\]\{display:flex\}/);
+  assert.match(css, /\.visit-slot>a,[^{]+\{display:flex;min-height:54px/);
+  assert.match(css, /@media\(max-width:560px\)[\s\S]*\.visit-days[^}]*grid-template-columns:1fr/);
+  assert.match(css, /@media\(min-width:821px\) and \(max-width:1180px\)[\s\S]*grid-template-areas:"brand librarian" "nav nav"/);
 });
 
 test("serves the official logo and live placement data", async () => {

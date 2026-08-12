@@ -115,12 +115,260 @@ export function materialIssueText(item, directUrl) {
   ].filter(Boolean).join("\n");
 }
 
+const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+const VISIT_TIME_PATTERN = /^(\d{2}):(\d{2})$/;
+const VISIT_MIN_BOOKING_MINUTES = 20;
+const VISIT_HORIZON_DAYS = 90;
+
+function isoDateValue(value) {
+  const candidate = String(value || "").trim();
+  const match = candidate.match(ISO_DATE_PATTERN);
+  if (!match) return "";
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return date.getUTCFullYear() === Number(match[1])
+    && date.getUTCMonth() === Number(match[2]) - 1
+    && date.getUTCDate() === Number(match[3]) ? candidate : "";
+}
+
+function visitTimeMinutes(value) {
+  const match = String(value || "").trim().match(VISIT_TIME_PATTERN);
+  if (!match) return -1;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (minutes > 59 || hours > 24 || (hours === 24 && minutes !== 0)) return -1;
+  return hours * 60 + minutes;
+}
+
+function visitTimeValue(minutes) {
+  const bounded = Math.max(0, Math.min(1440, Math.floor(Number(minutes)) || 0));
+  return `${String(Math.floor(bounded / 60)).padStart(2, "0")}:${String(bounded % 60).padStart(2, "0")}`;
+}
+
+function normalizedVisitEndpoint(value, expectedPath, baseUrl) {
+  try {
+    const url = new URL(String(value || "").trim(), String(baseUrl || "https://catalog.invalid/"));
+    const localDevelopment = url.protocol === "http:"
+      && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+    if ((url.protocol !== "https:" && !localDevelopment) || url.username || url.password) return "";
+    if (url.pathname.replace(/\/$/, "") !== expectedPath) return "";
+    url.pathname = expectedPath;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+export function normalizeVisitsApiUrl(value, baseUrl = "https://catalog.invalid/") {
+  return normalizedVisitEndpoint(value, "/api/visits/public", baseUrl);
+}
+
+export function normalizeVisitsBookingUrl(value, baseUrl = "https://catalog.invalid/") {
+  return normalizedVisitEndpoint(value, "/visits", baseUrl);
+}
+
+export function visitsPublicApiUrl(value, from, to, baseUrl = "https://catalog.invalid/") {
+  const endpoint = normalizeVisitsApiUrl(value, baseUrl);
+  const firstDate = isoDateValue(from);
+  const lastDate = isoDateValue(to);
+  if (!endpoint || !firstDate || !lastDate || firstDate > lastDate) return "";
+  const url = new URL(endpoint);
+  url.searchParams.set("from", firstDate);
+  url.searchParams.set("to", lastDate);
+  return url.toString();
+}
+
+export function startOfVisitWeek(value) {
+  const candidate = isoDateValue(value);
+  if (!candidate) return "";
+  const date = new Date(`${candidate}T00:00:00.000Z`);
+  const weekday = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() - weekday + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+export function visitWeekDates(monday) {
+  const firstDate = startOfVisitWeek(monday);
+  if (!firstDate) return [];
+  const start = new Date(`${firstDate}T00:00:00.000Z`);
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(start);
+    date.setUTCDate(start.getUTCDate() + index);
+    return date.toISOString().slice(0, 10);
+  });
+}
+
+export function visitHorizonEnd(today, days = VISIT_HORIZON_DAYS) {
+  const candidate = isoDateValue(today);
+  const boundedDays = Number(days);
+  if (!candidate || !Number.isInteger(boundedDays) || boundedDays < 0 || boundedDays > 366) return "";
+  const end = new Date(`${candidate}T00:00:00.000Z`);
+  end.setUTCDate(end.getUTCDate() + boundedDays);
+  return end.toISOString().slice(0, 10);
+}
+
+export function visitWeekNavigation(weekStart, today) {
+  const currentWeek = startOfVisitWeek(weekStart);
+  const firstWeek = startOfVisitWeek(today);
+  const lastDate = visitHorizonEnd(today);
+  const lastWeek = startOfVisitWeek(lastDate);
+  if (!currentWeek || !firstWeek || !lastWeek) {
+    return { firstWeek: "", lastWeek: "", canPrevious: false, canNext: false };
+  }
+  return {
+    firstWeek,
+    lastWeek,
+    canPrevious: currentWeek > firstWeek,
+    canNext: currentWeek < lastWeek,
+  };
+}
+
+export function visitScheduleQueryRange(weekStart, today) {
+  const dates = visitWeekDates(weekStart);
+  const firstDate = isoDateValue(today);
+  const lastDate = visitHorizonEnd(firstDate);
+  if (!dates.length || !firstDate || !lastDate) return null;
+  const from = dates[0] < firstDate ? firstDate : dates[0];
+  const to = dates.at(-1) > lastDate ? lastDate : dates.at(-1);
+  return from <= to ? { from, to } : null;
+}
+
+function normalizeVisitInterval(raw, expectedStatus = "") {
+  if (!raw || typeof raw !== "object") return null;
+  const startTime = String(raw.startTime || "").trim();
+  const endTime = String(raw.endTime || "").trim();
+  const start = visitTimeMinutes(startTime);
+  const end = visitTimeMinutes(endTime);
+  if (start < 0 || end <= start) return null;
+  if (expectedStatus && raw.status !== expectedStatus) return null;
+  return { startTime, endTime, start, end };
+}
+
+function normalizeVisitBlockers(items, status, from, to) {
+  if (!Array.isArray(items)) throw new Error("Некоректні інтервали графіка");
+  return items.map((raw) => {
+    const date = isoDateValue(raw && raw.date);
+    const interval = normalizeVisitInterval(raw, status);
+    if (!date || !interval || (from && date < from) || (to && date > to)) {
+      throw new Error("Некоректний інтервал графіка");
+    }
+    return { date, startTime: interval.startTime, endTime: interval.endTime, start: interval.start, end: interval.end, status };
+  }).sort((left, right) => left.date.localeCompare(right.date) || left.start - right.start || left.end - right.end);
+}
+
+export function normalizeVisitSchedule(payload, from = "", to = "") {
+  const firstDate = from ? isoDateValue(from) : "";
+  const lastDate = to ? isoDateValue(to) : "";
+  if (!payload || typeof payload !== "object" || payload.success === false || Number(payload.schemaVersion) !== 1
+    || payload.timeZone !== "Europe/Kyiv" || !payload.hours || typeof payload.hours !== "object") {
+    throw new Error("Некоректна відповідь графіка");
+  }
+  const slotMinutes = Number(payload.slotMinutes);
+  if (!Number.isInteger(slotMinutes) || slotMinutes !== 5 || (firstDate && lastDate && firstDate > lastDate)) {
+    throw new Error("Некоректна точність графіка");
+  }
+  const hours = {};
+  for (let weekday = 1; weekday <= 7; weekday += 1) {
+    const rawIntervals = payload.hours[String(weekday)];
+    if (!Array.isArray(rawIntervals)) throw new Error("Некоректні години бібліотеки");
+    hours[String(weekday)] = rawIntervals.map((raw) => normalizeVisitInterval(raw)).map((interval) => {
+      if (!interval) throw new Error("Некоректні години бібліотеки");
+      return interval;
+    }).sort((left, right) => left.start - right.start || left.end - right.end);
+  }
+  const generatedAt = String(payload.generatedAt || "").trim();
+  if (generatedAt && Number.isNaN(new Date(generatedAt).getTime())) throw new Error("Некоректний час оновлення графіка");
+  return {
+    schemaVersion: 1,
+    timeZone: "Europe/Kyiv",
+    slotMinutes,
+    hours,
+    closures: normalizeVisitBlockers(payload.closures, "closed", firstDate, lastDate),
+    busy: normalizeVisitBlockers(payload.busy, "busy", firstDate, lastDate),
+    generatedAt,
+  };
+}
+
+function mergeVisitSegments(segments) {
+  return segments.reduce((result, segment) => {
+    const previous = result.at(-1);
+    if (previous && previous.status === segment.status && previous.end === segment.start) {
+      previous.end = segment.end;
+      previous.endTime = segment.endTime;
+    } else result.push({ ...segment });
+    return result;
+  }, []);
+}
+
+export function visitSegmentsForDate(schedule, value) {
+  const date = isoDateValue(value);
+  if (!date || !schedule || typeof schedule !== "object") return [];
+  const weekday = new Date(`${date}T00:00:00.000Z`).getUTCDay() || 7;
+  const openings = Array.isArray(schedule.hours && schedule.hours[String(weekday)]) ? schedule.hours[String(weekday)] : [];
+  const blockers = [
+    ...(Array.isArray(schedule.busy) ? schedule.busy : []),
+    ...(Array.isArray(schedule.closures) ? schedule.closures : []),
+  ].filter((item) => item.date === date);
+  const segments = [];
+  openings.forEach((opening) => {
+    const overlapping = blockers.filter((item) => item.start < opening.end && item.end > opening.start);
+    const boundaries = new Set([opening.start, opening.end]);
+    overlapping.forEach((item) => {
+      boundaries.add(Math.max(opening.start, item.start));
+      boundaries.add(Math.min(opening.end, item.end));
+    });
+    const points = [...boundaries].sort((left, right) => left - right);
+    for (let index = 0; index < points.length - 1; index += 1) {
+      const start = points[index];
+      const end = points[index + 1];
+      if (end <= start) continue;
+      const active = overlapping.filter((item) => item.start < end && item.end > start);
+      const status = active.some((item) => item.status === "closed") ? "closed"
+        : active.some((item) => item.status === "busy") ? "busy" : "free";
+      segments.push({ date, startTime: visitTimeValue(start), endTime: visitTimeValue(end), start, end, status });
+    }
+  });
+  return mergeVisitSegments(segments.sort((left, right) => left.start - right.start || left.end - right.end));
+}
+
+export function visitBookingSelection(segment, preferredMinutes = 40, constraints = {}) {
+  if (!segment || segment.status !== "free" || !isoDateValue(segment.date)) return null;
+  let start = visitTimeMinutes(segment.startTime);
+  const segmentEnd = visitTimeMinutes(segment.endTime);
+  const today = constraints && isoDateValue(constraints.today);
+  const horizonEnd = constraints && isoDateValue(constraints.horizonEnd);
+  if ((today && segment.date < today) || (horizonEnd && segment.date > horizonEnd)) return null;
+  if (today && segment.date === today) {
+    const currentTime = visitTimeMinutes(constraints.currentTime);
+    if (currentTime >= 0) start = Math.max(start, Math.floor(currentTime / 5) * 5 + 5);
+  }
+  const duration = Math.max(VISIT_MIN_BOOKING_MINUTES, Math.floor(Number(preferredMinutes)) || 40);
+  if (start < 0 || segmentEnd <= start) return null;
+  if (segmentEnd - start < VISIT_MIN_BOOKING_MINUTES) return null;
+  return { date: segment.date, startTime: visitTimeValue(start), endTime: visitTimeValue(Math.min(segmentEnd, start + duration)) };
+}
+
+export function visitsBookingUrl(value, selection, baseUrl = "https://catalog.invalid/") {
+  const endpoint = normalizeVisitsBookingUrl(value, baseUrl);
+  const date = isoDateValue(selection && selection.date);
+  const startTime = String(selection && selection.startTime || "").trim();
+  const endTime = String(selection && selection.endTime || "").trim();
+  if (!endpoint || !date || visitTimeMinutes(startTime) < 0 || visitTimeMinutes(endTime) <= visitTimeMinutes(startTime)) return "";
+  const url = new URL(endpoint);
+  url.searchParams.set("date", date);
+  url.searchParams.set("start", startTime);
+  url.searchParams.set("end", endTime);
+  return url.toString();
+}
+
 if (typeof window !== "undefined" && typeof document !== "undefined") {
 
 const config = window.LIBRARY_CONFIG && typeof window.LIBRARY_CONFIG === "object" ? window.LIBRARY_CONFIG : {};
 const balanceData = window.BALANCE_DATA && typeof window.BALANCE_DATA === "object" ? window.BALANCE_DATA : {};
 const collator = new Intl.Collator("uk", { sensitivity: "base", numeric: true });
 const state = { search: "", grade: "", rubric: "", subject: "", type: "", available: false, collection: "", sort: "recommended", limit: 18 };
+const visitState = { weekStart: "", view: "week", schedule: null, loading: false, requestVersion: 0 };
 const emptyStock = () => ({ total: 0, available: 0, library: 0, other: 0, loaned: 0, locations: [] });
 
 const COLLECTIONS = Object.freeze([
@@ -152,6 +400,11 @@ const elements = {
   dataSync: document.querySelector("#dataSync"), dataSyncText: document.querySelector("#dataSyncText"), syncRetry: document.querySelector("#syncRetry"),
   collectionGrid: document.querySelector("#collectionGrid"),
   suggestions: document.querySelector("#titleSuggestions"),
+  visitContent: document.querySelector("#visitScheduleContent"), visitEmpty: document.querySelector("#visitScheduleEmpty"),
+  visitStatus: document.querySelector("#visitScheduleStatus"), visitStatusText: document.querySelector("#visitScheduleStatusText"),
+  visitRetry: document.querySelector("#visitScheduleRetry"), visitWeekLabel: document.querySelector("#visitWeekLabel"),
+  visitPrevWeek: document.querySelector("#visitPrevWeek"), visitNextWeek: document.querySelector("#visitNextWeek"),
+  visitThisWeek: document.querySelector("#visitThisWeek"),
 };
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#039;", '"': "&quot;" })[character]);
@@ -643,6 +896,172 @@ function setSyncStatus(status, message, retry = false) {
   elements.syncRetry.hidden = !retry;
 }
 
+const visitDateFormatter = new Intl.DateTimeFormat("uk-UA", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
+const visitShortDateFormatter = new Intl.DateTimeFormat("uk-UA", { day: "numeric", month: "short", timeZone: "UTC" });
+
+function localVisitNow() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+    hourCycle: "h23", timeZone: "Europe/Kyiv",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    date: `${values.year}-${values.month}-${values.day}`,
+    time: `${values.hour}:${values.minute}`,
+  };
+}
+
+function localVisitDate() {
+  return localVisitNow().date;
+}
+
+function shiftedVisitWeek(weekStart, amount) {
+  const dates = visitWeekDates(weekStart);
+  if (!dates.length) return "";
+  const date = new Date(`${dates[0]}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + amount * 7);
+  return date.toISOString().slice(0, 10);
+}
+
+function formatVisitWeekLabel(dates) {
+  if (!dates.length) return "";
+  return `${visitShortDateFormatter.format(new Date(`${dates[0]}T00:00:00.000Z`))} – ${visitShortDateFormatter.format(new Date(`${dates.at(-1)}T00:00:00.000Z`))}`;
+}
+
+function visitSegmentLabel(segment) {
+  const day = visitDateFormatter.format(new Date(`${segment.date}T00:00:00.000Z`));
+  const prefix = day.charAt(0).toLocaleUpperCase("uk") + day.slice(1);
+  const status = segment.status === "free" ? "Вільно" : segment.status === "busy" ? "Заброньовано" : "Бібліотека зачинена";
+  return `${status}: ${prefix}, ${segment.startTime}–${segment.endTime}${segment.status === "free" ? ". Забронювати відвідування" : ""}`;
+}
+
+function unavailableVisitReason(segment, now, horizonEnd) {
+  const end = visitTimeMinutes(segment.endTime);
+  if (segment.date < now.date || (segment.date === now.date && end <= visitTimeMinutes(now.time))) return "Час минув";
+  if (segment.date > horizonEnd) return "Поза періодом запису";
+  return "Замало часу для запису";
+}
+
+function visitSegmentMarkup(segment, now, horizonEnd) {
+  let time = `${escapeHtml(segment.startTime)}–${escapeHtml(segment.endTime)}`;
+  if (segment.status !== "free") {
+    return `<li class="visit-slot" data-status="${segment.status}" aria-label="${escapeHtml(visitSegmentLabel(segment))}"><strong>${time}</strong><span>${segment.status === "busy" ? "Заброньовано" : "Зачинено"}</span></li>`;
+  }
+  const constraints = { today: now.date, currentTime: now.time, horizonEnd };
+  const selection = visitBookingSelection(segment, 40, constraints);
+  if (!selection) {
+    const reason = unavailableVisitReason(segment, now, horizonEnd);
+    return `<li class="visit-slot" data-status="unavailable" aria-label="${escapeHtml(`${reason}: ${visitSegmentLabel(segment)}`)}"><strong>${time}</strong><span>${escapeHtml(reason)}</span></li>`;
+  }
+  const remainingSegment = { ...segment, startTime: selection.startTime };
+  time = `${escapeHtml(remainingSegment.startTime)}–${escapeHtml(remainingSegment.endTime)}`;
+  return `<li class="visit-slot" data-status="free"><a data-visit-booking="true" data-visit-date="${segment.date}" data-visit-start="${segment.startTime}" data-visit-end="${segment.endTime}" href="${escapeHtml(visitsBookingUrl(config.visitsBookingUrl, selection, window.location.href))}" target="_blank" rel="noopener noreferrer" aria-label="${escapeHtml(visitSegmentLabel(remainingSegment))}"><strong>${time}</strong><span>Забронювати <i aria-hidden="true">↗</i></span></a></li>`;
+}
+
+function renderVisitSchedule() {
+  const dates = visitWeekDates(visitState.weekStart);
+  const now = localVisitNow();
+  const horizonEnd = visitHorizonEnd(now.date);
+  const navigation = visitWeekNavigation(visitState.weekStart, now.date);
+  elements.visitPrevWeek.disabled = !navigation.canPrevious;
+  elements.visitNextWeek.disabled = !navigation.canNext;
+  elements.visitWeekLabel.textContent = formatVisitWeekLabel(dates);
+  elements.visitContent.dataset.view = visitState.view;
+  document.querySelectorAll("[data-visit-view]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.visitView === visitState.view)));
+  if (!visitState.schedule) return;
+  const days = dates.map((date) => ({ date, segments: visitSegmentsForDate(visitState.schedule, date) }));
+  const hasPublishedHours = days.some((day) => day.segments.length);
+  elements.visitEmpty.hidden = hasPublishedHours;
+  elements.visitContent.hidden = !hasPublishedHours;
+  if (!hasPublishedHours) {
+    elements.visitContent.innerHTML = "";
+    return;
+  }
+  elements.visitContent.innerHTML = `<div class="visit-days">${days.map(({ date, segments }) => {
+    const dateLabel = visitDateFormatter.format(new Date(`${date}T00:00:00.000Z`));
+    const heading = dateLabel.charAt(0).toLocaleUpperCase("uk") + dateLabel.slice(1);
+    return `<article class="visit-day${date === localVisitDate() ? " is-today" : ""}">
+      <h3><time datetime="${date}">${escapeHtml(heading)}</time>${date === localVisitDate() ? "<span>Сьогодні</span>" : ""}</h3>
+      ${segments.length ? `<ul>${segments.map((segment) => visitSegmentMarkup(segment, now, horizonEnd)).join("")}</ul>` : `<p class="visit-day-closed">Бібліотека зачинена</p>`}
+    </article>`;
+  }).join("")}</div>`;
+}
+
+function setVisitStatus(status, message, retry = false) {
+  elements.visitStatus.dataset.state = status;
+  elements.visitStatus.setAttribute("role", status === "error" ? "alert" : "status");
+  elements.visitStatusText.textContent = message;
+  elements.visitRetry.hidden = !retry;
+}
+
+async function synchronizeVisitSchedule() {
+  const dates = visitWeekDates(visitState.weekStart);
+  const now = localVisitNow();
+  const queryRange = visitScheduleQueryRange(visitState.weekStart, now.date);
+  const url = queryRange
+    ? visitsPublicApiUrl(config.visitsApiUrl, queryRange.from, queryRange.to, window.location.href)
+    : "";
+  const requestVersion = ++visitState.requestVersion;
+  const navigation = visitWeekNavigation(visitState.weekStart, now.date);
+  elements.visitPrevWeek.disabled = !navigation.canPrevious;
+  elements.visitNextWeek.disabled = !navigation.canNext;
+  elements.visitWeekLabel.textContent = formatVisitWeekLabel(dates);
+  if (!url) {
+    visitState.schedule = null;
+    elements.visitContent.hidden = true;
+    elements.visitEmpty.hidden = true;
+    elements.visitContent.setAttribute("aria-busy", "false");
+    setVisitStatus("error", "Графік тимчасово недоступний. Спробуйте ще раз за кілька хвилин.", false);
+    return;
+  }
+  visitState.loading = true;
+  elements.visitContent.hidden = false;
+  elements.visitEmpty.hidden = true;
+  elements.visitContent.setAttribute("aria-busy", "true");
+  elements.visitContent.innerHTML = `<div class="visit-loading" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>`;
+  setVisitStatus("loading", "Завантажуємо графік…");
+  try {
+    const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const schedule = normalizeVisitSchedule(await response.json(), queryRange.from, queryRange.to);
+    if (requestVersion !== visitState.requestVersion) return;
+    visitState.schedule = schedule;
+    renderVisitSchedule();
+    setVisitStatus("live", `Графік оновлено · ${formattedUpdatedAt(visitState.schedule.generatedAt)}`);
+  } catch {
+    if (requestVersion !== visitState.requestVersion) return;
+    visitState.schedule = null;
+    elements.visitContent.hidden = true;
+    elements.visitEmpty.hidden = true;
+    setVisitStatus("error", "Графік тимчасово недоступний. Спробуйте ще раз за кілька хвилин.", true);
+  } finally {
+    if (requestVersion === visitState.requestVersion) {
+      visitState.loading = false;
+      elements.visitContent.setAttribute("aria-busy", "false");
+    }
+  }
+}
+
+function selectVisitWeek(amount) {
+  const today = localVisitDate();
+  const navigation = visitWeekNavigation(visitState.weekStart, today);
+  if ((amount < 0 && !navigation.canPrevious) || (amount > 0 && !navigation.canNext)) return;
+  const next = amount === 0 ? navigation.firstWeek : shiftedVisitWeek(visitState.weekStart, amount);
+  if (!next || next === visitState.weekStart) return;
+  visitState.weekStart = next;
+  synchronizeVisitSchedule();
+}
+
+function updatePrimaryNavigation() {
+  const activeId = window.location.hash === "#visit-schedule" ? "visit-schedule" : "catalog";
+  document.querySelectorAll("[data-primary-section]").forEach((link) => {
+    const active = link.dataset.primarySection === activeId;
+    link.classList.toggle("nav-active", active);
+    if (active) link.setAttribute("aria-current", "location");
+    else link.removeAttribute("aria-current");
+  });
+}
+
 async function fetchCatalogPage(apiUrl, cursor = "") {
   const url = new URL(apiUrl);
   url.searchParams.set("limit", "48");
@@ -761,11 +1180,44 @@ window.addEventListener("popstate", () => {
   else closeMaterial({ fromHistory: true });
 });
 elements.filterToggle.addEventListener("click", () => { const open = elements.filters.classList.toggle("open"); elements.filterToggle.setAttribute("aria-expanded", String(open)); });
+elements.visitRetry.addEventListener("click", synchronizeVisitSchedule);
+elements.visitPrevWeek.addEventListener("click", () => selectVisitWeek(-1));
+elements.visitNextWeek.addEventListener("click", () => selectVisitWeek(1));
+elements.visitThisWeek.addEventListener("click", () => selectVisitWeek(0));
+document.querySelectorAll("[data-visit-view]").forEach((button) => button.addEventListener("click", () => {
+  visitState.view = button.dataset.visitView === "list" ? "list" : "week";
+  renderVisitSchedule();
+}));
+elements.visitContent.addEventListener("click", (event) => {
+  const link = event.target instanceof Element ? event.target.closest("[data-visit-booking]") : null;
+  if (!(link instanceof HTMLAnchorElement)) return;
+  const now = localVisitNow();
+  const selection = visitBookingSelection({
+    date: link.dataset.visitDate,
+    startTime: link.dataset.visitStart,
+    endTime: link.dataset.visitEnd,
+    status: "free",
+  }, 40, { today: now.date, currentTime: now.time, horizonEnd: visitHorizonEnd(now.date) });
+  const url = visitsBookingUrl(config.visitsBookingUrl, selection, window.location.href);
+  if (!url) {
+    event.preventDefault();
+    renderVisitSchedule();
+    setVisitStatus("live", "Графік оновлено · оберіть інший вільний час");
+    return;
+  }
+  link.href = url;
+});
+window.addEventListener("hashchange", updatePrimaryNavigation);
 
 const snapshot = localSnapshot();
 fallbackLocationCount = datasetStats(snapshot).locations;
 applyDataset(snapshot, { locations: fallbackLocationCount });
 synchronizeCatalog();
+visitState.weekStart = startOfVisitWeek(localVisitDate());
+updatePrimaryNavigation();
+synchronizeVisitSchedule();
 const refreshMinutes = Math.min(60, Math.max(5, nonNegativeInteger(config.refreshMinutes) || 10));
 if (normalizeCatalogApiUrl(config.catalogApiUrl, window.location.href)) window.setInterval(synchronizeCatalog, refreshMinutes * 60 * 1000);
+if (normalizeVisitsApiUrl(config.visitsApiUrl, window.location.href)) window.setInterval(synchronizeVisitSchedule, refreshMinutes * 60 * 1000);
+window.setInterval(() => { if (visitState.schedule) renderVisitSchedule(); }, 60 * 1000);
 }

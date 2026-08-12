@@ -151,6 +151,7 @@ npm test
 
 ## Документація
 
+- [Графік відвідування бібліотеки](docs/VISIT_SCHEDULE_UK.md)
 - [Контрольований rollout D1 Phase 1](docs/D1_CORE_ROLLOUT_UK.md)
 - [Підготовка, dry-run і loader для D1](docs/D1_IMPORTER_UK.md)
 - [Legacy-контур кабінету й Google Sheets](docs/LIBRARIAN_PORTAL_UK.md)

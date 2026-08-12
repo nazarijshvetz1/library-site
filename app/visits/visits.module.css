@@ -1,0 +1,57 @@
+.shell { min-height: 100vh; background: radial-gradient(circle at 85% 8%, rgba(224,173,53,.15), transparent 30rem), #f4f5f0; color: var(--ink); }
+.header { min-height: 76px; padding: 0 max(24px, calc((100vw - 1180px) / 2)); display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); background: rgba(255,254,250,.95); }
+.brand, .account { display: flex; align-items: center; gap: 12px; }
+.brand img { border-radius: 50%; object-fit: cover; }
+.brand > span, .account > span { display: grid; gap: 2px; }
+.brand strong { font: 650 19px/1 Georgia, serif; color: var(--green-950); }
+.brand small, .account small { color: var(--muted); font-size: 11px; }
+.account { gap: 18px; text-align: right; font-size: 12px; }
+.account > a { min-height: 40px; padding: 0 14px; display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 11px; background: white; color: var(--green-900); font-weight: 800; }
+.page { width: min(1180px, calc(100% - 40px)); margin: auto; padding: 52px 0 80px; }
+.intro { max-width: 710px; margin-bottom: 28px; }
+.eyebrow, .cardHeading span { margin: 0; color: var(--green-700); font-size: 10px; font-weight: 850; letter-spacing: .12em; text-transform: uppercase; }
+.intro h1 { margin: 9px 0 12px; font: 650 clamp(38px, 6vw, 58px)/1 Georgia, serif; color: var(--green-950); }
+.intro > p:last-child, .empty, .hours { color: var(--muted); line-height: 1.55; }
+.intro .accessHint { margin: 10px 0 0; color: #728078; font-size: 12px; line-height: 1.5; }
+.teacherGrid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(300px, .75fr); gap: 20px; align-items: start; }
+.card { padding: clamp(20px, 3vw, 32px); border: 1px solid var(--line); border-radius: 22px; background: var(--paper); box-shadow: 0 16px 44px rgba(23,53,34,.07); }
+.cardHeading { display: flex; justify-content: space-between; align-items: flex-start; gap: 15px; margin-bottom: 23px; }
+.cardHeading h2 { margin: 5px 0 0; font: 650 27px/1.05 Georgia, serif; color: var(--green-950); }
+.cardHeading .enabled, .cardHeading .disabled { padding: 8px 10px; border-radius: 999px; letter-spacing: .04em; }
+.cardHeading .enabled { background: var(--green-100); color: var(--green-900); }
+.cardHeading .disabled { background: #f8e9e5; color: var(--danger); }
+.fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.fields label { display: grid; gap: 7px; color: #53645a; font-size: 11px; font-weight: 800; }
+.fields .wide { grid-column: 1 / -1; }
+.fields input, .fields select, .fields textarea { width: 100%; min-height: 48px; border: 1px solid #d5ded4; border-radius: 11px; background: #fff; padding: 11px 13px; color: var(--ink); }
+.fields textarea { min-height: 82px; resize: vertical; }
+.fields [aria-invalid="true"] { border-color: #cf8176; background: #fff8f6; }
+.fieldError { color: var(--danger); font-size: 10px; line-height: 1.35; }
+.primary, .danger, .quiet, .pending button { min-height: 44px; border-radius: 11px; padding: 0 16px; cursor: pointer; font-weight: 800; }
+.primary { width: 100%; margin-top: 20px; border: 0; background: var(--green-900); color: #fff; }
+.primary:disabled, .danger:disabled, .quiet:disabled, .pending button:disabled { opacity: .55; cursor: not-allowed; }
+.busyList { margin: 0; padding: 0; display: grid; gap: 9px; list-style: none; }
+.busyList li { min-height: 54px; padding: 10px 12px; display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 10px; border-radius: 11px; background: #f6eee8; }
+.busyList li > span { width: 8px; height: 8px; border-radius: 50%; background: var(--gold); }
+.busyList small { color: #8e675e; }
+.hours { margin: 18px 0 0; font-size: 11px; }
+.bookings { margin-top: 20px; }
+.bookingList { display: grid; gap: 10px; }
+.bookingList article { min-height: 70px; padding: 13px 15px; display: flex; justify-content: space-between; align-items: center; gap: 16px; border: 1px solid var(--line); border-radius: 13px; }
+.bookingList article > div { display: grid; gap: 5px; }
+.bookingList article span { color: var(--muted); font-size: 12px; }
+.danger { border: 1px solid #e6c4bd; background: #fff5f2; color: var(--danger); }
+.quiet { border: 1px solid var(--line); background: #fff; color: var(--green-900); }
+.pending, .success, .error, .info { margin: 0 0 18px; padding: 14px 16px; border-radius: 13px; }
+.pending { display: flex; justify-content: space-between; align-items: center; gap: 15px; background: #fff4d8; color: #765716; }
+.pending button { border: 1px solid #d7b865; background: #fff; color: inherit; }
+.success { background: #e5f1e2; color: var(--green-900); }
+.error { background: #fff0ed; color: var(--danger); }
+.info { background: #eaf1f5; color: #345769; }
+.adminFilters { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
+.adminFilters label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; font-weight: 800; }
+.adminFilters input, .adminFilters select { min-height: 42px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: white; }
+.adminTable { width: 100%; border-collapse: collapse; font-size: 12px; }
+.adminTable th, .adminTable td { padding: 13px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+.adminTable th { color: var(--muted); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+@media (max-width: 760px) { .teacherGrid { display: block; } .teacherGrid > * + * { margin-top: 16px; } .account > span { display: none; } .page { width: min(100% - 26px, 1180px); padding-top: 34px; } .fields { grid-template-columns: 1fr; } .fields .wide { grid-column: auto; } .bookingList article { align-items: flex-start; flex-direction: column; } .danger { width: 100%; } .adminTable, .adminTable tbody, .adminTable tr, .adminTable td { display: block; } .adminTable thead { display: none; } .adminTable tr { margin-bottom: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; } .adminTable td { border: 0; padding: 6px; } }
