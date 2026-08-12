@@ -1144,7 +1144,10 @@ export const visitSlotClaims = sqliteTable(
     ),
     check(
       "visit_slot_claims_key_valid",
-      sql`${table.segmentKey} glob '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]T[0-9][0-9]:[0-5][0-9]'
+      sql`length(${table.segmentKey}) = 16
+        and substr(${table.segmentKey}, 1, 10) glob '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'
+        and substr(${table.segmentKey}, 11, 1) = 'T'
+        and substr(${table.segmentKey}, 12, 5) glob '[0-9][0-9]:[0-5][0-9]'
         and date(substr(${table.segmentKey}, 1, 10), '+0 days') = substr(${table.segmentKey}, 1, 10)
         and cast(substr(${table.segmentKey}, 12, 2) as integer) between 0 and 23
         and cast(substr(${table.segmentKey}, 15, 2) as integer) % 5 = 0`,
