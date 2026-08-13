@@ -122,7 +122,19 @@ function fixture() {
       total_quantity INTEGER NOT NULL,
       library_quantity INTEGER NOT NULL,
       other_location_quantity INTEGER NOT NULL,
-      loaned_quantity INTEGER NOT NULL
+      loaned_quantity INTEGER NOT NULL,
+      reserved_quantity INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE material_request_reservations (
+      id TEXT PRIMARY KEY,
+      request_id TEXT NOT NULL,
+      request_item_id TEXT NOT NULL,
+      material_id TEXT NOT NULL,
+      source_location_id TEXT NOT NULL,
+      condition TEXT NOT NULL,
+      reserved_quantity INTEGER NOT NULL,
+      issued_quantity INTEGER NOT NULL DEFAULT 0,
+      released_quantity INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX idx_materials_status_sort ON materials(status, sort_title, id);
     CREATE INDEX idx_holdings_material ON holdings(material_id);
@@ -206,12 +218,12 @@ function fixture() {
 
   const insertTotals = sqlite.prepare(`
     INSERT INTO material_stock_totals
-      (material_id, total_quantity, library_quantity, other_location_quantity, loaned_quantity)
-    VALUES (?, ?, ?, ?, ?)
+      (material_id, total_quantity, library_quantity, other_location_quantity, loaned_quantity, reserved_quantity)
+    VALUES (?, ?, ?, ?, ?, ?)
   `);
-  insertTotals.run("CAT-0001", 8, 3, 3, 2);
-  insertTotals.run("CAT-0002", 0, 0, 0, 0);
-  insertTotals.run("CAT-0010", 2, 0, 0, 2);
+  insertTotals.run("CAT-0001", 8, 3, 3, 2, 1);
+  insertTotals.run("CAT-0002", 0, 0, 0, 0, 0);
+  insertTotals.run("CAT-0010", 2, 0, 0, 2, 0);
 
   sqlite.exec(`
     INSERT INTO locations VALUES ('LOC-001', 'Бібліотека', 'library', 'active', 1, 1);
@@ -219,6 +231,9 @@ function fixture() {
     INSERT INTO holdings VALUES ('CAT-0001', 'LOC-001', 'good', 2, '${time}');
     INSERT INTO holdings VALUES ('CAT-0001', 'LOC-001', 'worn', 1, '${time}');
     INSERT INTO holdings VALUES ('CAT-0001', 'LOC-007', 'good', 3, '${time}');
+    INSERT INTO material_request_reservations VALUES (
+      'RES-001', 'REQ-001', 'MRI-001', 'CAT-0001', 'LOC-001', 'good', 1, 0, 0
+    );
     INSERT INTO material_links VALUES (
       'link-1', 'CAT-0001', 'ebook', 'Електронна книга',
       'https://example.com/book', 1, 1, 'active'
@@ -254,10 +269,11 @@ test("catalog list applies bounded filters and returns year, stock and thumbnail
       publisher: "Освіта",
       thumbnailUrl: "/api/catalog-v2/covers/CAT-0001?v=aaaaaaaaaaaa",
       totalQuantity: 8,
-      availableQuantity: 6,
+      availableQuantity: 5,
       libraryQuantity: 3,
       otherLocationQuantity: 3,
       loanedQuantity: 2,
+      reservedQuantity: 1,
     });
   } finally {
     sqlite.close();
@@ -375,7 +391,10 @@ test("public detail excludes notes, private links and service holdings", async (
     }]);
     assert.equal(material.holdings.length, 1);
     assert.equal(material.holdings[0].locationId, "LOC-001");
-    assert.equal(material.holdings[0].quantity, 3);
+    assert.equal(material.holdings[0].physicalQuantity, 3);
+    assert.equal(material.holdings[0].reservedQuantity, 1);
+    assert.equal(material.holdings[0].availableQuantity, 2);
+    assert.equal(material.holdings[0].quantity, 2);
     assert.equal(material.holdings[0].condition, null);
   } finally {
     sqlite.close();
@@ -393,11 +412,16 @@ test("librarian detail exposes notes, all links and condition-level holdings", a
     assert.deepEqual(
       material.holdings.map((holding) => [holding.locationId, holding.condition, holding.quantity]),
       [
-        ["LOC-001", "good", 2],
+        ["LOC-001", "good", 1],
         ["LOC-001", "worn", 1],
         ["LOC-007", "good", 3],
       ],
     );
+    const reservedHolding = material.holdings.find(
+      (holding) => holding.locationId === "LOC-001" && holding.condition === "good",
+    );
+    assert.equal(reservedHolding.physicalQuantity, 2);
+    assert.equal(reservedHolding.reservedQuantity, 1);
   } finally {
     sqlite.close();
   }

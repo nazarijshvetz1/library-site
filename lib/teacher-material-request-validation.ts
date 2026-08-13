@@ -38,6 +38,24 @@ export type MaterialRequestCompleteInput = CommonActionInput & {
   action: "complete";
 };
 
+export type MaterialRequestReservationQuantity = {
+  reservationId: string;
+  quantity: number;
+};
+
+export type MaterialRequestIssueInput = CommonActionInput & {
+  action: "issue";
+  issuedAt: string;
+  dueAt: string | null;
+  items: MaterialRequestReservationQuantity[];
+};
+
+export type MaterialRequestReleaseInput = CommonActionInput & {
+  action: "release";
+  reason: string;
+  items: MaterialRequestReservationQuantity[];
+};
+
 export type MaterialRequestReadyItem = {
   itemId: string;
   approvedQuantity: number;
@@ -57,7 +75,9 @@ export type MaterialRequestActionInput =
   | MaterialRequestStartReviewInput
   | MaterialRequestRejectInput
   | MaterialRequestCompleteInput
-  | MaterialRequestReadyInput;
+  | MaterialRequestReadyInput
+  | MaterialRequestIssueInput
+  | MaterialRequestReleaseInput;
 
 export type NotificationReadInput = {
   requestId: string;
@@ -125,7 +145,14 @@ export function validateMaterialRequestActionInput(
   const errors: Record<string, string> = {};
   if (!isRecord(input)) return invalid("body", "Очікуються дані зміни статусу.");
   const action = input.action;
-  if (action !== "start_review" && action !== "ready" && action !== "complete" && action !== "reject") {
+  if (
+    action !== "start_review"
+    && action !== "ready"
+    && action !== "complete"
+    && action !== "reject"
+    && action !== "issue"
+    && action !== "release"
+  ) {
     errors.action = "Оберіть підтримувану дію.";
     return { ok: false, fieldErrors: errors };
   }
@@ -142,6 +169,27 @@ export function validateMaterialRequestActionInput(
     exactKeys(input, ["requestId", "expectedVersion", "action", "reason"], errors);
     const reason = readRequiredText(input.reason, "reason", errors, 500);
     return finish(errors, { ...common, action, reason });
+  }
+
+  if (action === "issue") {
+    exactKeys(input, ["requestId", "expectedVersion", "action", "issuedAt", "dueAt", "items"], errors);
+    return finish(errors, {
+      ...common,
+      action,
+      issuedAt: readRequiredDate(input.issuedAt, "issuedAt", errors),
+      dueAt: readNullableDate(input.dueAt, "dueAt", errors),
+      items: readReservationQuantities(input.items, errors),
+    });
+  }
+
+  if (action === "release") {
+    exactKeys(input, ["requestId", "expectedVersion", "action", "reason", "items"], errors);
+    return finish(errors, {
+      ...common,
+      action,
+      reason: readRequiredText(input.reason, "reason", errors, 500),
+      items: readReservationQuantities(input.items, errors),
+    });
   }
 
   exactKeys(
@@ -185,9 +233,8 @@ export function validateMaterialRequestActionInput(
         0,
         MATERIAL_REQUEST_MAX_QUANTITY,
       );
-      if (approvedQuantity > expectedAvailableQuantity) {
-        errors[`${prefix}.approvedQuantity`] = "Підтверджена кількість перевищує поточний залишок.";
-      }
+      // approvedQuantity is the cumulative target. The store validates only
+      // its delta against the current effective (reservation-aware) stock.
       if (itemId && seen.has(itemId)) {
         errors[`${prefix}.itemId`] = "Позиція повторюється.";
       }
@@ -315,6 +362,46 @@ function readNullableDate(value: unknown, field: string, errors: Record<string, 
     return null;
   }
   return text;
+}
+
+function readRequiredDate(value: unknown, field: string, errors: Record<string, string>): string {
+  const date = readNullableDate(value, field, errors);
+  if (!date) errors[field] = "Вкажіть коректну дату.";
+  return date ?? "";
+}
+
+function readReservationQuantities(
+  value: unknown,
+  errors: Record<string, string>,
+): MaterialRequestReservationQuantity[] {
+  const items: MaterialRequestReservationQuantity[] = [];
+  if (!Array.isArray(value) || value.length < 1 || value.length > MATERIAL_REQUEST_MAX_ITEMS) {
+    errors.items = `Додайте від 1 до ${MATERIAL_REQUEST_MAX_ITEMS} резервів.`;
+    return items;
+  }
+  const seen = new Set<string>();
+  value.forEach((raw, index) => {
+    const prefix = `items.${index}`;
+    if (!isRecord(raw)) {
+      errors[prefix] = "Некоректний резерв.";
+      return;
+    }
+    exactKeys(raw, ["reservationId", "quantity"], errors, `${prefix}.`);
+    const reservationId = readResourceId(raw.reservationId, `${prefix}.reservationId`, errors);
+    const quantity = readInteger(
+      raw.quantity,
+      `${prefix}.quantity`,
+      errors,
+      1,
+      MATERIAL_REQUEST_MAX_QUANTITY,
+    );
+    if (reservationId && seen.has(reservationId)) {
+      errors[`${prefix}.reservationId`] = "Резерв повторюється.";
+    }
+    if (reservationId) seen.add(reservationId);
+    items.push({ reservationId, quantity });
+  });
+  return items;
 }
 
 function isCalendarDate(value: string): boolean {

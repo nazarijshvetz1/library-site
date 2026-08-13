@@ -317,10 +317,14 @@ test("new librarian route renders D1 workspace and keeps legacy workspace intact
   assert.match(workspace, /"\/api\/librarian\/materials"/u);
   assert.match(workspace, /\/api\/librarian\/receipts/u);
   assert.match(workspace, /\/api\/librarian\/transfers/u);
-  assert.match(workspace, /expectedSourceQuantity: source\?\.quantity/u);
-  assert.match(workspace, /expectedDestinationQuantity: destinationHolding\?\.quantity \?\? 0/u);
+  assert.match(workspace, /expectedSourceQuantity: source\?\.physicalQuantity/u);
+  assert.match(workspace, /expectedDestinationQuantity: destinationHolding\?\.physicalQuantity \?\? 0/u);
   assert.match(workspace, /\/api\/librarian\/writeoffs/u);
-  assert.match(workspace, /expectedQuantity: source\?\.quantity/u);
+  assert.match(workspace, /expectedQuantity: source\?\.physicalQuantity/u);
+  assert.match(workspace, /const expectedQuantity = holding\?\.physicalQuantity \?\? 0/u);
+  assert.match(workspace, /const expectedQuantity = selected\?\.physicalQuantity \?\? 0/u);
+  assert.match(workspace, /max=\{source\?\.quantity \?\? 1\}/u);
+  assert.match(workspace, /Фізично \{holding\.physicalQuantity\} · у резерві \{holding\.reservedQuantity\}/u);
   assert.match(workspace, /requestError\.code === "stock_quantity_conflict"/u);
   assert.match(workspace, /window\.confirm/u);
   assert.match(workspace, /selectedIdRef\.current !== materialId/u);

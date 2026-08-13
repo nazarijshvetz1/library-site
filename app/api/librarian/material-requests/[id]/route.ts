@@ -62,8 +62,14 @@ export async function PATCH(
       schemaVersion: 1,
       success: true,
       request: requestRecord,
-      ...(validated.value.action === "ready" && "loan" in result
+      ...((validated.value.action === "issue" || validated.value.action === "complete") && "loan" in result
         ? { loan: result.loan }
+        : {}),
+      ...(validated.value.action === "ready" && "reserved" in result
+        ? { reservation: result.reserved }
+        : {}),
+      ...(validated.value.action === "release"
+        ? { release: result }
         : {}),
       writesEnabled: true,
     });

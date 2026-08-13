@@ -421,6 +421,53 @@ export const users = sqliteTable(
   ],
 );
 
+/** Librarian-managed teacher details kept separate from authentication identity. */
+export const teacherProfiles = sqliteTable(
+  "teacher_profiles",
+  {
+    teacherUserId: text("teacher_user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    subjectPosition: text("subject_position").notNull().default(""),
+    primaryLocationId: text("primary_location_id").references(() => locations.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    serviceContact: text("service_contact").notNull().default(""),
+    librarianNote: text("librarian_note").notNull().default(""),
+    version: integer("version").notNull().default(1),
+    lastMutationRequestId: text("last_mutation_request_id"),
+    closedAt: text("closed_at"),
+    closedByUserId: text("closed_by_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    createdByUserId: text("created_by_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    updatedByUserId: text("updated_by_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("idx_teacher_profiles_location_teacher").on(table.primaryLocationId, table.teacherUserId),
+    index("idx_teacher_profiles_updated").on(table.updatedAt, table.teacherUserId),
+    check("teacher_profiles_subject_length", sql`length(${table.subjectPosition}) <= 160`),
+    check("teacher_profiles_contact_length", sql`length(${table.serviceContact}) <= 200`),
+    check("teacher_profiles_note_length", sql`length(${table.librarianNote}) <= 4000`),
+    check("teacher_profiles_version_positive", sql`${table.version} > 0`),
+    check(
+      "teacher_profiles_closed_fields_consistent",
+      sql`(${table.closedAt} is null and ${table.closedByUserId} is null)
+        or (${table.closedAt} is not null and ${table.closedByUserId} is not null)`,
+    ),
+  ],
+);
+
 /** App-owned credentials for teachers who use the public visit scheduler. */
 export const visitTeacherCredentials = sqliteTable(
   "visit_teacher_credentials",
@@ -617,12 +664,14 @@ export const materialStockTotals = sqliteTable(
     libraryQuantity: integer("library_quantity").notNull().default(0),
     otherLocationQuantity: integer("other_location_quantity").notNull().default(0),
     loanedQuantity: integer("loaned_quantity").notNull().default(0),
+    reservedQuantity: integer("reserved_quantity").notNull().default(0),
     updatedAt: text("updated_at").notNull(),
   },
   (table) => [
     index("idx_material_stock_totals_available").on(
       table.totalQuantity,
       table.loanedQuantity,
+      table.reservedQuantity,
       table.materialId,
     ),
     check(
@@ -630,7 +679,9 @@ export const materialStockTotals = sqliteTable(
       sql`${table.totalQuantity} >= 0
         and ${table.libraryQuantity} >= 0
         and ${table.otherLocationQuantity} >= 0
-        and ${table.loanedQuantity} >= 0`,
+        and ${table.loanedQuantity} >= 0
+        and ${table.reservedQuantity} >= 0
+        and ${table.reservedQuantity} <= ${table.libraryQuantity} + ${table.otherLocationQuantity}`,
     ),
     check(
       "material_stock_totals_balanced",
@@ -1514,7 +1565,7 @@ export const auditEvents = sqliteTable(
   ],
 );
 
-/** Teacher request workflow. Stock remains unchanged until the ready transition creates a loan. */
+/** Teacher request workflow. Preparation reserves stock; only physical issue creates a loan. */
 export const materialRequests = sqliteTable(
   "material_requests",
   {
@@ -1534,6 +1585,7 @@ export const materialRequests = sqliteTable(
       onDelete: "restrict",
       onUpdate: "cascade",
     }),
+    dueAt: text("due_at"),
     reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, {
       onDelete: "restrict",
       onUpdate: "cascade",
@@ -1558,7 +1610,7 @@ export const materialRequests = sqliteTable(
     check("material_requests_status_valid", sql`${table.status} in ('submitted','in_review','ready','partially_ready','completed','rejected','cancelled')`),
     check("material_requests_version_positive", sql`${table.version} > 0`),
     check("material_requests_terminal_times", sql`
-      (${table.status} not in ('ready','partially_ready','completed') or (${table.readyAt} is not null and ${table.resultingLoanId} is not null and ${table.pickupLocationId} is not null))
+      (${table.status} not in ('ready','partially_ready','completed') or (${table.readyAt} is not null and ${table.pickupLocationId} is not null))
       and (${table.status} != 'completed' or ${table.completedAt} is not null)
       and (${table.status} != 'rejected' or ${table.rejectedAt} is not null)
       and (${table.status} != 'cancelled' or ${table.cancelledAt} is not null)`),
@@ -1593,6 +1645,54 @@ export const materialRequestItems = sqliteTable(
       and ${table.fulfilledQuantity} >= 0
       and (${table.approvedQuantity} is null or ${table.fulfilledQuantity} <= ${table.approvedQuantity})`),
     check("material_request_items_sort_order_nonnegative", sql`${table.sortOrder} >= 0`),
+  ],
+);
+
+/**
+ * Physical copies put aside for a teacher request. Holdings remain physical
+ * until issue; the active amount is reserved - issued - released.
+ */
+export const materialRequestReservations = sqliteTable(
+  "material_request_reservations",
+  {
+    id: text("id").primaryKey(),
+    requestId: text("request_id")
+      .notNull()
+      .references(() => materialRequests.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    requestItemId: text("request_item_id")
+      .notNull()
+      .references(() => materialRequestItems.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    materialId: text("material_id")
+      .notNull()
+      .references(() => materials.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    sourceLocationId: text("source_location_id")
+      .notNull()
+      .references(() => locations.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    condition: text("condition", { enum: holdingConditions }).notNull(),
+    reservedQuantity: integer("reserved_quantity").notNull(),
+    issuedQuantity: integer("issued_quantity").notNull().default(0),
+    releasedQuantity: integer("released_quantity").notNull().default(0),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("idx_request_reservations_request_item").on(table.requestId, table.requestItemId),
+    index("idx_request_reservations_stock").on(
+      table.materialId,
+      table.sourceLocationId,
+      table.condition,
+    ),
+    check(
+      "material_request_reservations_condition_valid",
+      sql`${table.condition} in ('unspecified', 'good', 'worn', 'damaged')`,
+    ),
+    check(
+      "material_request_reservations_quantities_valid",
+      sql`${table.reservedQuantity} > 0
+        and ${table.issuedQuantity} >= 0
+        and ${table.releasedQuantity} >= 0
+        and ${table.issuedQuantity} + ${table.releasedQuantity} <= ${table.reservedQuantity}`,
+    ),
   ],
 );
 

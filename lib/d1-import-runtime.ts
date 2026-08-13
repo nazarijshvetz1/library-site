@@ -24,8 +24,10 @@ export const HOSTED_IMPORT_MAX_ROWS = 20_000;
 export const STAGING_IMPORT_RESET_TABLES = Object.freeze([
   "portal_notifications",
   "material_request_events",
+  "material_request_reservations",
   "material_request_items",
   "material_requests",
+  "teacher_profiles",
   "visit_slot_claims",
   "visit_bookings",
   "visit_guest_sessions",
@@ -835,6 +837,7 @@ export async function inspectHostedImportPlan(
   validateHostedImportPlan(plan);
   const required = [
     ...HOSTED_IMPORT_TABLE_SPECS.map((spec) => spec.name),
+    "teacher_profiles",
     "materials_fts",
   ];
   const schemaRows = await queryRows(
@@ -1073,6 +1076,14 @@ export function buildHostedImportInsertSql(plan: HostedImportPlan): string[] {
   const statements: string[] = [];
   for (const spec of HOSTED_IMPORT_TABLE_SPECS) {
     statements.push(...buildInsertStatements(spec, plan.tables[spec.name]));
+  }
+  if (plan.tables.users.some((row) => row.role === "teacher")) {
+    statements.push(`INSERT INTO teacher_profiles (
+      teacher_user_id, subject_position, primary_location_id, service_contact,
+      librarian_note, version, last_mutation_request_id, closed_at,
+      closed_by_user_id, created_by_user_id, updated_by_user_id, created_at, updated_at
+    ) SELECT id, '', NULL, '', '', 1, NULL, NULL, NULL, NULL, NULL, created_at, updated_at
+      FROM users WHERE role = 'teacher'`);
   }
   if (statements.length + 3 > HOSTED_IMPORT_MAX_BATCH_STATEMENTS) {
     throw new HostedImportError(

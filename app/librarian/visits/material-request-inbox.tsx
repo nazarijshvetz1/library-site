@@ -21,6 +21,19 @@ type RequestItem = {
   requestedQuantity: number;
   approvedQuantity: number;
   fulfilledQuantity: number;
+  reservedQuantity: number;
+  reservations: RequestReservation[];
+};
+
+type RequestReservation = {
+  id: string;
+  sourceLocationId: string;
+  sourceLocationName: string;
+  condition: string;
+  reservedQuantity: number;
+  issuedQuantity: number;
+  releasedQuantity: number;
+  remainingQuantity: number;
 };
 
 type LibrarianRequest = {
@@ -32,6 +45,7 @@ type LibrarianRequest = {
   rejectionReason: string | null;
   pickupLocation: { id: string; name: string } | null;
   resultingLoanId: string | null;
+  dueAt: string | null;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -56,6 +70,9 @@ type Holding = {
   locationStatus: string;
   condition: string | null;
   quantity: number;
+  physicalQuantity?: number;
+  reservedQuantity?: number;
+  availableQuantity?: number;
 };
 
 type MaterialDetailEnvelope = {
@@ -68,7 +85,7 @@ type ReadyRow = {
   sourceKey: string;
 };
 
-type RequestAction = "start_review" | "ready" | "complete" | "reject";
+type RequestAction = "start_review" | "ready" | "complete" | "reject" | "issue" | "release";
 type RequestActionIntent = {
   kind: "librarian-request-action";
   requestId: string;
@@ -79,6 +96,7 @@ type RequestActionIntent = {
     action: RequestAction;
     pickupLocationId?: string;
     dueAt?: string | null;
+    issuedAt?: string;
     reason?: string;
     items?: Array<{
       itemId: string;
@@ -86,7 +104,7 @@ type RequestActionIntent = {
       sourceLocationId: string;
       condition: string;
       expectedAvailableQuantity: number;
-    }>;
+    } | { reservationId: string; quantity: number }>;
   };
 };
 
@@ -181,10 +199,9 @@ export default function MaterialRequestInbox({
     }
   }
 
-  function simpleAction(request: LibrarianRequest, action: "start_review" | "complete") {
-    if (action === "complete" && !window.confirm("Позначити це замовлення повністю виконаним?")) return;
+  function startReview(request: LibrarianRequest) {
     const requestId = crypto.randomUUID();
-    void sendAction({ kind: "librarian-request-action", requestId, resourceId: request.id, payload: { requestId, expectedVersion: request.version, action } });
+    void sendAction({ kind: "librarian-request-action", requestId, resourceId: request.id, payload: { requestId, expectedVersion: request.version, action: "start_review" } });
   }
 
   function reject(request: LibrarianRequest) {
@@ -192,6 +209,19 @@ export default function MaterialRequestInbox({
     if (!reason) return;
     const requestId = crypto.randomUUID();
     void sendAction({ kind: "librarian-request-action", requestId, resourceId: request.id, payload: { requestId, expectedVersion: request.version, action: "reject", reason } });
+  }
+
+  function completeLegacyRequest(request: LibrarianRequest) {
+    if (!window.confirm(
+      `Підтвердити отримання раніше оформленої видачі для ${request.teacher.fullName}? Позика та рух залишків уже були записані до оновлення системи; повторної видачі не буде.`,
+    )) return;
+    const requestId = crypto.randomUUID();
+    void sendAction({
+      kind: "librarian-request-action",
+      requestId,
+      resourceId: request.id,
+      payload: { requestId, expectedVersion: request.version, action: "complete" },
+    });
   }
 
   function changeStatus(nextStatus: string) {
@@ -212,18 +242,82 @@ export default function MaterialRequestInbox({
         <article key={request.id}>
           <header><div><span className={styles.requestStatus} data-status={request.status}>{statusLabel(request.status)}</span><h3>{request.teacher.fullName}</h3><time dateTime={request.createdAt}>{formatDate(request.createdAt)}</time></div><strong>{request.items.length} поз.</strong></header>
           {request.teacherNotes ? <p>{request.teacherNotes}</p> : null}
-          <ul>{request.items.map((item) => <li key={item.id}><span><strong>{item.material.title}</strong><small>{[item.material.author, item.material.year, item.material.id].filter(Boolean).join(" · ")}</small></span><span>{item.requestedQuantity} запитано{item.approvedQuantity ? ` · ${item.approvedQuantity} схвалено` : ""}</span></li>)}</ul>
+          <ul>{request.items.map((item) => <li key={item.id}><span><strong>{item.material.title}</strong><small>{[item.material.author, item.material.year, item.material.id].filter(Boolean).join(" · ")}</small></span><span>{item.requestedQuantity} запитано{item.reservedQuantity ? ` · ${item.reservedQuantity} у резерві` : ""}{item.fulfilledQuantity ? ` · ${item.fulfilledQuantity} видано` : ""}</span></li>)}</ul>
           {request.pickupLocation ? <p>Місце отримання: <strong>{request.pickupLocation.name}</strong></p> : null}
           <div className={styles.inboxActions}>
-            {request.status === "submitted" ? <button className={styles.quiet} type="button" onClick={() => simpleAction(request, "start_review")} disabled={!writesEnabled || !data?.writesEnabled || submitting || Boolean(pending)}>Взяти в роботу</button> : null}
-            {request.status === "submitted" || request.status === "in_review" ? <ReadyRequestForm request={request} locations={locations} disabled={!writesEnabled || !data?.writesEnabled || submitting || Boolean(pending)} onSubmit={sendAction} /> : null}
+            {request.status === "submitted" ? <button className={styles.quiet} type="button" onClick={() => startReview(request)} disabled={!writesEnabled || !data?.writesEnabled || submitting || Boolean(pending)}>Взяти в роботу</button> : null}
+            {request.status === "submitted" || request.status === "in_review" || request.status === "partially_ready" ? <ReadyRequestForm request={request} locations={locations} disabled={!writesEnabled || !data?.writesEnabled || submitting || Boolean(pending)} onSubmit={sendAction} /> : null}
             {request.status === "submitted" || request.status === "in_review" ? <button className={styles.danger} type="button" onClick={() => reject(request)} disabled={!writesEnabled || !data?.writesEnabled || submitting || Boolean(pending)}>Відхилити</button> : null}
-            {request.status === "ready" || request.status === "partially_ready" ? <button className={styles.primary} type="button" onClick={() => simpleAction(request, "complete")} disabled={!writesEnabled || !data?.writesEnabled || submitting || Boolean(pending)}>Видано вчителю</button> : null}
+            {(request.status === "ready" || request.status === "partially_ready") && request.items.some((item) => item.reservations.some((reservation) => reservation.remainingQuantity > 0)) ? <ReservationActionForm request={request} disabled={!writesEnabled || !data?.writesEnabled || submitting || Boolean(pending)} onSubmit={sendAction} /> : null}
+            {(request.status === "ready" || request.status === "partially_ready") && request.resultingLoanId && !request.items.some((item) => item.reservations.length > 0) ? <button className={styles.primary} type="button" onClick={() => completeLegacyRequest(request)} disabled={!writesEnabled || !data?.writesEnabled || submitting || Boolean(pending)}>Підтвердити отримання старої видачі</button> : null}
           </div>
         </article>
       ))}</div> : <p className={styles.empty}>За цим фільтром замовлень немає.</p>}
       {data?.page.hasMore && data.page.nextCursor ? <button className={styles.loadMore} type="button" onClick={() => void load(false, data.page.nextCursor)} disabled={loading || loadingMore || submitting}>{loadingMore ? "Завантажуємо…" : "Завантажити ще"}</button> : null}
     </section>
+  );
+}
+
+function ReservationActionForm({
+  request,
+  disabled,
+  onSubmit,
+}: {
+  request: LibrarianRequest;
+  disabled: boolean;
+  onSubmit: (intent: RequestActionIntent) => Promise<void>;
+}) {
+  const reservations = request.items.flatMap((item) => item.reservations
+    .filter((reservation) => reservation.remainingQuantity > 0)
+    .map((reservation) => ({ ...reservation, title: item.material.title })));
+  const [action, setAction] = useState<"issue" | "release" | null>(null);
+  const [issuedAt, setIssuedAt] = useState(() => todayInKyiv());
+  const [dueAt, setDueAt] = useState(request.dueAt ?? "");
+  const [reason, setReason] = useState("");
+  const [quantities, setQuantities] = useState<Record<string, number>>(() => Object.fromEntries(
+    reservations.map((reservation) => [reservation.id, reservation.remainingQuantity]),
+  ));
+  const [notice, setNotice] = useState("");
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!action) return;
+    const items = reservations.map((reservation) => ({
+      reservationId: reservation.id,
+      quantity: Math.min(reservation.remainingQuantity, Math.max(0, Number(quantities[reservation.id]) || 0)),
+    })).filter((item) => item.quantity > 0);
+    if (!items.length) {
+      setNotice("Вкажіть кількість щонайменше для одного резерву.");
+      return;
+    }
+    if (action === "release" && !reason.trim()) {
+      setNotice("Вкажіть причину звільнення резерву — її буде збережено в історії.");
+      return;
+    }
+    const totalQuantity = items.reduce((total, item) => total + item.quantity, 0);
+    if (action === "issue" && !window.confirm(`Підтвердити фактичну видачу для ${request.teacher.fullName}: ${totalQuantity} прим.? Залишок зменшиться, буде створено позику.`)) return;
+    if (action === "release" && !window.confirm("Звільнити вибрані примірники як не забрані? Вони знову стануть доступними для інших замовлень.")) return;
+    const requestId = crypto.randomUUID();
+    void onSubmit({
+      kind: "librarian-request-action",
+      requestId,
+      resourceId: request.id,
+      payload: action === "issue"
+        ? { requestId, expectedVersion: request.version, action, issuedAt, dueAt: dueAt || null, items }
+        : { requestId, expectedVersion: request.version, action, reason: reason.trim(), items },
+    });
+  }
+
+  if (!action) return <div className={styles.inboxActions}><button className={styles.primary} type="button" onClick={() => setAction("issue")} disabled={disabled}>Фактично видати</button><button className={styles.quiet} type="button" onClick={() => setAction("release")} disabled={disabled}>Не забрано</button></div>;
+  return (
+    <form className={styles.readyForm} onSubmit={submit}>
+      <div className={styles.cardHeading}><div><span>{action === "issue" ? "Фактична видача" : "Звільнення резерву"}</span><h4>{action === "issue" ? "Передати примірники вчителю" : "Позначити як не забране"}</h4></div><button className={styles.quiet} type="button" onClick={() => { setAction(null); setNotice(""); }} disabled={disabled}>×</button></div>
+      <p>{action === "issue" ? "Позика та рух залишків будуть створені лише після цієї дії." : "Фізичного руху примірників не буде: вони просто повернуться до доступного фонду."}</p>
+      {notice ? <div className={styles.error} role="alert">{notice}</div> : null}
+      {action === "issue" ? <div className={styles.fields}><label>Дата видачі *<input required type="date" max={todayInKyiv()} value={issuedAt} onChange={(event) => setIssuedAt(event.currentTarget.value)} /></label><label>Повернути до<input type="date" min={issuedAt} value={dueAt} onChange={(event) => setDueAt(event.currentTarget.value)} /></label></div> : <div className={styles.fields}><label>Причина *<textarea required maxLength={500} value={reason} onChange={(event) => setReason(event.currentTarget.value)} placeholder="Наприклад, учитель не забрав замовлення" /></label></div>}
+      <div className={styles.readyRows}>{reservations.map((reservation) => <fieldset key={reservation.id} disabled={disabled}><legend>{reservation.title}</legend><p>{reservation.sourceLocationName} · {conditionLabel(reservation.condition)} · у резерві {reservation.remainingQuantity}</p><label>{action === "issue" ? "Видати" : "Звільнити"}<input type="number" min="0" max={reservation.remainingQuantity} value={quantities[reservation.id] ?? 0} onChange={(event) => setQuantities((current) => ({ ...current, [reservation.id]: Number(event.currentTarget.value) }))} /></label></fieldset>)}</div>
+      <button className={action === "issue" ? styles.primary : styles.danger} type="submit" disabled={disabled}>{action === "issue" ? "Підтвердити фактичну видачу" : "Звільнити резерв"}</button>
+    </form>
   );
 }
 
@@ -255,10 +349,10 @@ function ReadyRequestForm({
       const nextHoldings: Record<string, Holding[]> = {};
       const nextRows: Record<string, ReadyRow> = {};
       request.items.forEach((item, index) => {
-        const available = details[index].material.holdings.filter((holding) => holding.locationStatus === "active" && holding.locationType !== "service" && holding.quantity > 0);
+        const available = details[index].material.holdings.filter((holding) => holding.locationStatus === "active" && holding.locationType !== "service" && holdingAvailable(holding) > 0);
         nextHoldings[item.id] = available;
         const first = available[0];
-        nextRows[item.id] = { approvedQuantity: first ? Math.min(item.requestedQuantity, first.quantity) : 0, sourceKey: first ? holdingKey(first) : "" };
+        nextRows[item.id] = { approvedQuantity: first ? item.approvedQuantity + Math.min(item.requestedQuantity - item.approvedQuantity, holdingAvailable(first)) : item.approvedQuantity, sourceKey: first ? holdingKey(first) : "" };
       });
       setHoldings(nextHoldings);
       setRows(nextRows);
@@ -284,7 +378,7 @@ function ReadyRequestForm({
         approvedQuantity: row.approvedQuantity,
         sourceLocationId: holding.locationId,
         condition: holding.condition || "unspecified",
-        expectedAvailableQuantity: holding.quantity,
+        expectedAvailableQuantity: holdingAvailable(holding),
       } : null;
     }).filter((item): item is NonNullable<typeof item> => Boolean(item));
     if (!pickupLocationId || !items.length) {
@@ -295,10 +389,10 @@ function ReadyRequestForm({
     void onSubmit({ kind: "librarian-request-action", requestId, resourceId: request.id, payload: { requestId, expectedVersion: request.version, action: "ready", pickupLocationId, dueAt: dueAt || null, items } });
   }
 
-  if (!open) return <button className={styles.quiet} type="button" onClick={() => void prepare()} disabled={disabled}>Підготувати видачу</button>;
+  if (!open) return <button className={styles.quiet} type="button" onClick={() => void prepare()} disabled={disabled}>{request.status === "partially_ready" ? "Додати до резерву" : "Підготувати резерв"}</button>;
   return (
     <form className={styles.readyForm} onSubmit={submit}>
-      <div className={styles.cardHeading}><div><span>Фактична видача</span><h4>Підготувати замовлення</h4></div><button className={styles.quiet} type="button" onClick={() => setOpen(false)} disabled={disabled}>×</button></div>
+      <div className={styles.cardHeading}><div><span>Резерв без видачі</span><h4>Підготувати замовлення</h4></div><button className={styles.quiet} type="button" onClick={() => setOpen(false)} disabled={disabled}>×</button></div>
       {notice ? <div className={styles.error} role="alert">{notice}</div> : null}
       {loading ? <p className={styles.empty}>Перевіряємо фактичні залишки…</p> : <>
         <div className={styles.fields}><label>Місце отримання *<select required value={pickupLocationId} onChange={(event) => setPickupLocationId(event.currentTarget.value)}><option value="">Оберіть активне публічне місце</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label><label>Повернути до<input type="date" min={todayInKyiv()} value={dueAt} onChange={(event) => setDueAt(event.currentTarget.value)} /></label></div>
@@ -306,9 +400,9 @@ function ReadyRequestForm({
           const options = holdings[item.id] ?? [];
           const row = rows[item.id] ?? { approvedQuantity: 0, sourceKey: "" };
           const holding = options.find((candidate) => holdingKey(candidate) === row.sourceKey);
-          return <fieldset key={item.id} disabled={disabled || !options.length}><legend>{item.material.title}</legend><label>Джерело<select value={row.sourceKey} onChange={(event) => { const next = options.find((candidate) => holdingKey(candidate) === event.currentTarget.value); changeRow(item.id, { sourceKey: event.currentTarget.value, approvedQuantity: next ? Math.min(item.requestedQuantity, next.quantity) : 0 }); }}><option value="">Немає доступного залишку</option>{options.map((option) => <option key={holdingKey(option)} value={holdingKey(option)}>{option.locationName} · {conditionLabel(option.condition)} · {option.quantity} доступно</option>)}</select></label><label>Схвалити<input type="number" min="0" max={Math.min(item.requestedQuantity, holding?.quantity ?? 0)} value={row.approvedQuantity} onChange={(event) => changeRow(item.id, { approvedQuantity: Number(event.currentTarget.value) })} /></label></fieldset>;
+          return <fieldset key={item.id} disabled={disabled || !options.length}><legend>{item.material.title}</legend><p>{item.approvedQuantity} уже підготовлено із {item.requestedQuantity}</p><label>Джерело<select value={row.sourceKey} onChange={(event) => { const next = options.find((candidate) => holdingKey(candidate) === event.currentTarget.value); changeRow(item.id, { sourceKey: event.currentTarget.value, approvedQuantity: next ? item.approvedQuantity + Math.min(item.requestedQuantity - item.approvedQuantity, holdingAvailable(next)) : item.approvedQuantity }); }}><option value="">Немає доступного залишку</option>{options.map((option) => <option key={holdingKey(option)} value={holdingKey(option)}>{option.locationName} · {conditionLabel(option.condition)} · {holdingAvailable(option)} доступно</option>)}</select></label><label>Підготувати загалом<input type="number" min={item.approvedQuantity} max={Math.min(item.requestedQuantity, item.approvedQuantity + (holding ? holdingAvailable(holding) : 0))} value={row.approvedQuantity} onChange={(event) => changeRow(item.id, { approvedQuantity: Number(event.currentTarget.value) })} /></label></fieldset>;
         })}</div>
-        <button className={styles.primary} type="submit" disabled={disabled}>Позначити готовим і створити видачу</button>
+        <button className={styles.primary} type="submit" disabled={disabled}>Зберегти резерв і повідомити вчителя</button>
       </>}
     </form>
   );
@@ -316,6 +410,10 @@ function ReadyRequestForm({
 
 function holdingKey(holding: Holding): string {
   return `${holding.locationId}\u001e${holding.condition || "unspecified"}`;
+}
+
+function holdingAvailable(holding: Holding): number {
+  return Math.max(0, Number(holding.availableQuantity ?? holding.quantity) || 0);
 }
 
 function conditionLabel(condition: string | null): string {
@@ -328,7 +426,9 @@ function statusLabel(status: RequestStatus): string {
 
 function actionSuccess(action: RequestAction): string {
   if (action === "start_review") return "Замовлення взято в роботу.";
-  if (action === "ready") return "Готовність і фактичну видачу збережено. Учитель отримає повідомлення.";
+  if (action === "ready") return "Резерв підготовлено без створення позики. Учитель отримає повідомлення.";
+  if (action === "issue") return "Фактичну видачу збережено, позику й рух примірників створено.";
+  if (action === "release") return "Незабраний резерв звільнено. Примірники знову доступні.";
   if (action === "complete") return "Замовлення позначено виконаним.";
   return "Замовлення відхилено. Учитель отримає причину.";
 }

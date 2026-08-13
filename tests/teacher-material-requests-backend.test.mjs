@@ -179,6 +179,16 @@ test("frozen request, ready and notification payloads validate with exact keys",
     requestId: commandId(), expectedVersion: 1, action: "start_review",
   }).ok, true);
   assert.equal(validation.validateMaterialRequestActionInput({
+    requestId: commandId(), expectedVersion: 2, action: "issue",
+    issuedAt: "2026-08-13", dueAt: "2026-09-30",
+    items: [{ reservationId: "MRR-one", quantity: 1 }],
+  }).ok, true);
+  assert.equal(validation.validateMaterialRequestActionInput({
+    requestId: commandId(), expectedVersion: 2, action: "release",
+    reason: "Не забрано",
+    items: [{ reservationId: "MRR-one", quantity: 1 }],
+  }).ok, true);
+  assert.equal(validation.validateMaterialRequestActionInput({
     requestId: commandId(), expectedVersion: 1, action: "ready",
     pickupLocationId: "LOC-205", dueAt: null,
     items: [{
@@ -252,7 +262,7 @@ test("teacher create caps active requests and atomically reasserts the cap", asy
   assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM material_request_events WHERE id LIKE 'MRE-%'").get().n, 0);
 });
 
-test("ready atomically creates loan, updates stock/request, and notifies once", async () => {
+test("ready reserves without a loan, then physical issue creates the loan atomically", async () => {
   const context = openDatabase();
   const request = await createRequest(context, 3);
   const command = commandId();
@@ -284,22 +294,48 @@ test("ready atomically creates loan, updates stock/request, and notifies once", 
   );
   assert.deepEqual(replay, first);
   assert.equal(first.status, "partially_ready");
-  assert.ok(context.db.batchStatementCounts.at(-1) <= 43);
+  assert.ok(context.db.batchStatementCounts.at(-1) <= 50);
   assert.deepEqual(
     { ...context.sqlite.prepare("SELECT status,resulting_loan_id,pickup_location_id FROM material_requests").get() },
     {
       status: "partially_ready",
-      resulting_loan_id: first.resultingLoanId,
+      resulting_loan_id: null,
       pickup_location_id: "LOC-205",
     },
   );
+  assert.equal(context.sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 5);
+  assert.equal(context.sqlite.prepare("SELECT reserved_quantity FROM material_stock_totals").get().reserved_quantity, 2);
+  assert.equal(context.sqlite.prepare("SELECT loaned_quantity FROM material_stock_totals").get().loaned_quantity, 0);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM loans").get().n, 0);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM inventory_transactions").get().n, 0);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM portal_notifications").get().n, 1);
+
+  const prepared = await store.getMaterialRequest(context.db, request.id);
+  assert.equal(prepared.items[0].reservedQuantity, 2);
+  const reservation = prepared.items[0].reservations[0];
+  const issued = await store.applyLibrarianMaterialRequestAction(
+    context.db,
+    librarian,
+    request.id,
+    {
+      requestId: commandId(),
+      expectedVersion: prepared.version,
+      action: "issue",
+      issuedAt: "2026-08-13",
+      dueAt: "2026-09-30",
+      items: [{ reservationId: reservation.id, quantity: 2 }],
+    },
+  );
+  assert.equal(issued.status, "completed");
   assert.equal(context.sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 3);
+  assert.equal(context.sqlite.prepare("SELECT reserved_quantity FROM material_stock_totals").get().reserved_quantity, 0);
   assert.equal(context.sqlite.prepare("SELECT loaned_quantity FROM material_stock_totals").get().loaned_quantity, 2);
   assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM loans").get().n, 1);
   assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM inventory_transactions").get().n, 1);
-  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM portal_notifications").get().n, 1);
 
-  const notification = (await store.listTeacherNotifications(context.db, "USR-T1")).notifications[0];
+  const notification = (await store.listTeacherNotifications(context.db, "USR-T1")).notifications
+    .find((item) => item.read === false);
+  assert.ok(notification);
   assert.equal(notification.read, false);
   const readInput = { requestId: commandId(), expectedVersion: notification.version, read: true };
   const marked = await store.markTeacherNotificationRead(
@@ -316,10 +352,13 @@ test("ready atomically creates loan, updates stock/request, and notifies once", 
   );
   assert.deepEqual(markedReplay, marked);
   assert.equal(marked.read, true);
-  assert.equal(context.sqlite.prepare("SELECT read_at FROM portal_notifications").get().read_at, marked.readAt);
+  assert.equal(
+    context.sqlite.prepare("SELECT read_at FROM portal_notifications WHERE id=?").get(notification.id).read_at,
+    marked.readAt,
+  );
 });
 
-test("ready stock race rolls back loan, request, command and notification", async () => {
+test("ready stock race rolls back reservation, request, command and notification", async () => {
   const context = openDatabase();
   const request = await createRequest(context, 2);
   const command = commandId();
@@ -349,16 +388,238 @@ test("ready stock race rolls back loan, request, command and notification", asyn
       },
     ),
     (error) => error instanceof store.TeacherMaterialRequestError
-      && error.code === "stock_quantity_conflict",
+      && error.code === "reservation_stock_conflict",
   );
   assert.equal(context.sqlite.prepare("SELECT status FROM material_requests").get().status, "submitted");
   assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM loans").get().n, 0);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM material_request_reservations").get().n, 0);
   assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM portal_notifications").get().n, 0);
   assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM mutation_commands WHERE id=?").get(command).n, 0);
   assert.deepEqual(
     { ...context.sqlite.prepare("SELECT quantity,version FROM holdings").get() },
     { quantity: 4, version: 2 },
   );
+});
+
+test("not-collected release frees stock without a loan and supports partial release", async () => {
+  const context = openDatabase();
+  const request = await createRequest(context, 3);
+  await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
+    requestId: commandId(), expectedVersion: request.version, action: "ready",
+    pickupLocationId: "LOC-205", dueAt: "2026-09-30",
+    items: [{
+      itemId: request.items[0].id, approvedQuantity: 3,
+      sourceLocationId: "LOC-LIB", condition: "good", expectedAvailableQuantity: 5,
+    }],
+  });
+  let prepared = await store.getMaterialRequest(context.db, request.id);
+  const reservationId = prepared.items[0].reservations[0].id;
+  const partial = await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
+    requestId: commandId(), expectedVersion: prepared.version, action: "release",
+    reason: "Не забрано вчасно",
+    items: [{ reservationId, quantity: 1 }],
+  });
+  assert.equal(partial.status, "partially_ready");
+  assert.equal(context.sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 5);
+  assert.equal(context.sqlite.prepare("SELECT reserved_quantity FROM material_stock_totals").get().reserved_quantity, 2);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM loans").get().n, 0);
+
+  prepared = await store.getMaterialRequest(context.db, request.id);
+  const released = await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
+    requestId: commandId(), expectedVersion: prepared.version, action: "release",
+    reason: "Замовлення не забрали",
+    items: [{ reservationId, quantity: 2 }],
+  });
+  assert.equal(released.status, "cancelled");
+  assert.equal(context.sqlite.prepare("SELECT reserved_quantity FROM material_stock_totals").get().reserved_quantity, 0);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM inventory_transactions").get().n, 0);
+});
+
+test("physical issue loses atomically when its reserved source is deactivated", async () => {
+  const context = openDatabase();
+  const request = await createRequest(context, 2);
+  await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
+    requestId: commandId(), expectedVersion: request.version, action: "ready",
+    pickupLocationId: "LOC-205", dueAt: null,
+    items: [{
+      itemId: request.items[0].id, approvedQuantity: 2,
+      sourceLocationId: "LOC-LIB", condition: "good", expectedAvailableQuantity: 5,
+    }],
+  });
+  const prepared = await store.getMaterialRequest(context.db, request.id);
+  const reservation = prepared.items[0].reservations[0];
+  const command = commandId();
+  context.db.beforeBatch = () => {
+    context.sqlite.prepare("UPDATE locations SET status='inactive' WHERE id='LOC-LIB'").run();
+  };
+  await assert.rejects(
+    () => store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
+      requestId: command, expectedVersion: prepared.version, action: "issue",
+      issuedAt: "2026-08-13", dueAt: null,
+      items: [{ reservationId: reservation.id, quantity: 2 }],
+    }),
+    (error) => error instanceof store.TeacherMaterialRequestError
+      && error.code === "reservation_stock_conflict",
+  );
+  assert.equal(context.sqlite.prepare("SELECT issued_quantity FROM material_request_reservations").get().issued_quantity, 0);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM loans").get().n, 0);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM inventory_transactions").get().n, 0);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM mutation_commands WHERE id=?").get(command).n, 0);
+  assert.equal(context.sqlite.prepare("SELECT status FROM material_requests WHERE id=?").get(request.id).status, "ready");
+});
+
+test("server rejects a future physical issue date", async () => {
+  const context = openDatabase();
+  const request = await createRequest(context, 1);
+  await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
+    requestId: commandId(), expectedVersion: request.version, action: "ready",
+    pickupLocationId: "LOC-205", dueAt: null,
+    items: [{ itemId: request.items[0].id, approvedQuantity: 1,
+      sourceLocationId: "LOC-LIB", condition: "good", expectedAvailableQuantity: 5 }],
+  });
+  const prepared = await store.getMaterialRequest(context.db, request.id);
+  await assert.rejects(
+    () => store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
+      requestId: commandId(), expectedVersion: prepared.version, action: "issue",
+      issuedAt: "2999-01-01", dueAt: null,
+      items: [{ reservationId: prepared.items[0].reservations[0].id, quantity: 1 }],
+    }),
+    (error) => error instanceof store.TeacherMaterialRequestError
+      && error.code === "invalid_issue_date" && error.status === 400,
+  );
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM loans").get().n, 0);
+});
+
+test("legacy ready request completes without issuing or decrementing stock twice", async () => {
+  const context = openDatabase();
+  const now = "2026-08-13T08:00:00.000Z";
+  context.sqlite.exec(`
+    UPDATE holdings SET quantity=3,version=2 WHERE material_id='CAT-0001' AND location_id='LOC-LIB' AND condition='good';
+    UPDATE material_stock_totals SET total_quantity=5,library_quantity=3,loaned_quantity=2,reserved_quantity=0
+      WHERE material_id='CAT-0001';
+    INSERT INTO loans(id,teacher_user_id,status,issued_at,due_at,closed_at,notes,issued_by_user_id,
+      closed_by_user_id,version,created_at,updated_at)
+      VALUES('LOAN-LEGACY','USR-T1','open','2026-08-12','2026-09-01',NULL,'','USR-LIB',NULL,1,'${now}','${now}');
+    INSERT INTO loan_items(id,loan_id,material_id,source_location_id,condition,quantity_issued,
+      quantity_returned,notes,created_at,updated_at)
+      VALUES('LI-LEGACY','LOAN-LEGACY','CAT-0001','LOC-LIB','good',2,0,'','${now}','${now}');
+    INSERT INTO material_requests(id,teacher_user_id,status,teacher_notes,librarian_note,rejection_reason,
+      pickup_location_id,resulting_loan_id,due_at,reviewed_by_user_id,cancelled_by_user_id,version,
+      submitted_at,ready_at,completed_at,rejected_at,cancelled_at,created_at,updated_at)
+      VALUES('MR-LEGACY','USR-T1','ready','','','', 'LOC-205','LOAN-LEGACY','2026-09-01','USR-LIB',NULL,2,
+        '${now}','${now}',NULL,NULL,NULL,'${now}','${now}');
+    INSERT INTO material_request_items(id,request_id,material_id,title_snapshot,author_snapshot,
+      requested_quantity,approved_quantity,fulfilled_quantity,sort_order,created_at,updated_at)
+      VALUES('MRI-LEGACY','MR-LEGACY','CAT-0001','Алгебра','Автор',2,2,2,0,'${now}','${now}');
+  `);
+  const command = commandId();
+  const result = await store.applyLibrarianMaterialRequestAction(context.db, librarian, "MR-LEGACY", {
+    requestId: command, expectedVersion: 2, action: "complete",
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(context.sqlite.prepare("SELECT status FROM material_requests WHERE id='MR-LEGACY'").get().status, "completed");
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM loans WHERE teacher_user_id='USR-T1'").get().n, 1);
+  assert.equal(context.sqlite.prepare("SELECT quantity FROM holdings WHERE material_id='CAT-0001' AND location_id='LOC-LIB'").get().quantity, 3);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM material_request_reservations WHERE request_id='MR-LEGACY'").get().n, 0);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE request_id=?").get(command).n, 1);
+});
+
+test("librarian revocation between pre-read and batch leaves reservation untouched", async () => {
+  const context = openDatabase();
+  const request = await createRequest(context, 1);
+  const command = commandId();
+  context.db.beforeBatch = () => {
+    context.sqlite.prepare("UPDATE users SET status='inactive' WHERE id='USR-LIB'").run();
+  };
+  await assert.rejects(
+    () => store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
+      requestId: command, expectedVersion: request.version, action: "ready",
+      pickupLocationId: "LOC-205", dueAt: null,
+      items: [{
+        itemId: request.items[0].id, approvedQuantity: 1,
+        sourceLocationId: "LOC-LIB", condition: "good", expectedAvailableQuantity: 5,
+      }],
+    }),
+    (error) => error instanceof store.TeacherMaterialRequestError
+      && error.code === "actor_access_revoked" && error.status === 403,
+  );
+  assert.equal(context.sqlite.prepare("SELECT status FROM material_requests WHERE id=?").get(request.id).status, "submitted");
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM material_request_reservations").get().n, 0);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM portal_notifications").get().n, 0);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM mutation_commands WHERE id=?").get(command).n, 0);
+});
+
+test("librarian role downgrade between pre-read and batch leaves reservation untouched", async () => {
+  const context = openDatabase();
+  const request = await createRequest(context, 1);
+  const command = commandId();
+  context.db.beforeBatch = () => {
+    context.sqlite.prepare("UPDATE users SET role='teacher' WHERE id='USR-LIB'").run();
+  };
+  await assert.rejects(
+    () => store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
+      requestId: command, expectedVersion: request.version, action: "ready",
+      pickupLocationId: "LOC-205", dueAt: null,
+      items: [{
+        itemId: request.items[0].id, approvedQuantity: 1,
+        sourceLocationId: "LOC-LIB", condition: "good", expectedAvailableQuantity: 5,
+      }],
+    }),
+    (error) => error instanceof store.TeacherMaterialRequestError
+      && error.code === "actor_access_revoked" && error.status === 403,
+  );
+  assert.equal(context.sqlite.prepare("SELECT status FROM material_requests WHERE id=?").get(request.id).status, "submitted");
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM material_request_reservations").get().n, 0);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM portal_notifications").get().n, 0);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM mutation_commands WHERE id=?").get(command).n, 0);
+});
+
+test("ten-item prepare and issue stay within the hosted D1 batch ceiling", async () => {
+  const context = openDatabase();
+  const now = "2026-08-13T08:00:00.000Z";
+  for (let index = 2; index <= 10; index += 1) {
+    const id = `CAT-${String(index).padStart(4, "0")}`;
+    context.sqlite.prepare(`INSERT INTO materials (
+      id,catalog_number,title,sort_title,search_text,rubric,publication_type,
+      subject,class_from,class_to,author,publication_year,isbn,isbn_normalized,
+      publisher,notes,status,version,created_at,updated_at,archived_at
+    ) SELECT ?,?,title||?,sort_title||?,search_text,rubric,publication_type,
+      subject,class_from,class_to,author,publication_year,'','','','',status,1,?,?,NULL
+      FROM materials WHERE id='CAT-0001'`).run(id, index, ` ${index}`, ` ${index}`, now, now);
+    context.sqlite.prepare(`INSERT INTO holdings
+      (material_id,location_id,condition,quantity,version,updated_at)
+      VALUES (?,'LOC-LIB','good',5,1,?)`).run(id, now);
+    context.sqlite.prepare(`INSERT INTO material_stock_totals
+      (material_id,total_quantity,library_quantity,other_location_quantity,loaned_quantity,reserved_quantity,updated_at)
+      VALUES (?,5,5,0,0,0,?)`).run(id, now);
+  }
+  const request = await store.createTeacherMaterialRequest(context.db, teacher, {
+    requestId: commandId(), notes: null,
+    items: Array.from({ length: 10 }, (_, index) => ({
+      materialId: `CAT-${String(index + 1).padStart(4, "0")}`,
+      quantity: 1,
+    })),
+  });
+  await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
+    requestId: commandId(), expectedVersion: request.version, action: "ready",
+    pickupLocationId: "LOC-205", dueAt: "2026-09-30",
+    items: request.items.map((item) => ({
+      itemId: item.id, approvedQuantity: 1, sourceLocationId: "LOC-LIB",
+      condition: "good", expectedAvailableQuantity: 5,
+    })),
+  });
+  const prepared = await store.getMaterialRequest(context.db, request.id);
+  await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
+    requestId: commandId(), expectedVersion: prepared.version, action: "issue",
+    issuedAt: "2026-08-13", dueAt: "2026-09-30",
+    items: prepared.items.map((item) => ({
+      reservationId: item.reservations[0].id,
+      quantity: 1,
+    })),
+  });
+  assert.ok(Math.max(...context.db.batchStatementCounts) <= 50, context.db.batchStatementCounts);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM loan_items").get().n, 10);
+  assert.equal(context.sqlite.prepare("SELECT SUM(reserved_quantity) AS n FROM material_stock_totals").get().n, 0);
 });
 
 test("zero-row races roll back cancel, transition, and notification mutations", async () => {
@@ -561,7 +822,7 @@ test("ready exact-zero race rolls back without relying on sqlite changes()", asy
       }],
     }),
     (error) => error instanceof store.TeacherMaterialRequestError
-      && error.code === "stock_quantity_conflict",
+      && error.code === "reservation_stock_conflict",
   );
   assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM loans").get().n, 0);
   assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM inventory_transactions").get().n, 0);
@@ -676,7 +937,7 @@ test("omitted ready items become zero and teacher cancellation is owner scoped",
   const rows = context.sqlite.prepare(`SELECT material_id,approved_quantity,fulfilled_quantity
     FROM material_request_items ORDER BY sort_order`).all();
   assert.deepEqual(rows.map((row) => ({ ...row })), [
-    { material_id: "CAT-0001", approved_quantity: 2, fulfilled_quantity: 2 },
+    { material_id: "CAT-0001", approved_quantity: 2, fulfilled_quantity: 0 },
     { material_id: "CAT-0002", approved_quantity: 0, fulfilled_quantity: 0 },
   ]);
 
