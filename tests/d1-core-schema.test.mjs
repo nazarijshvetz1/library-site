@@ -12,6 +12,7 @@ const migrationFiles = [
   "drizzle/0005_young_night_nurse.sql",
   "drizzle/0006_pale_sauron.sql",
   "drizzle/0007_cold_whiplash.sql",
+  "drizzle/0008_sudden_thunderbird.sql",
 ];
 
 async function migratedDatabase() {
@@ -91,6 +92,10 @@ test("core migration extends the existing draft database without recreating it",
     "visit_schedule_closures",
     "visit_schedule_hours",
     "visit_slot_claims",
+    "visit_teacher_credentials",
+    "visit_teacher_sessions",
+    "visit_teacher_login_limits",
+    "visit_teacher_access_commands",
   ]) {
     assert.ok(tableNames.includes(name), `missing table ${name}`);
   }

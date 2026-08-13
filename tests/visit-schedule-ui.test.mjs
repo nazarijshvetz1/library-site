@@ -7,6 +7,8 @@ import {
   clearVisitPendingIntent,
   readVisitPendingIntent,
   visitPendingKey,
+  teacherSearchUrl,
+  teacherSessionUrl,
   teacherVisitsUrl,
   isUncertainVisitFailure,
   VisitApiError,
@@ -17,24 +19,36 @@ import {
 const root = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 
-test("protected teacher and librarian pages use SIWC server guards", async () => {
+test("teacher booking is public-entry with app session while librarian keeps SIWC guard", async () => {
   const [teacher, librarian] = await Promise.all([
     read("app/visits/page.tsx"),
     read("app/librarian/visits/page.tsx"),
   ]);
-  assert.match(teacher, /const user = await requireChatGPTUser\(returnTo\)/u);
-  assert.match(teacher, /`\/visits\?\$\{query\.toString\(\)\}`/u);
-  assert.match(teacher, /async function AuthenticatedVisits/u);
+  assert.doesNotMatch(teacher, /requireChatGPTUser|chatGPTSignOutPath/u);
+  assert.match(teacher, /<VisitBookingWorkspace/u);
   assert.match(teacher, /dynamic = "force-dynamic"/u);
   assert.match(librarian, /requireChatGPTUser\("\/librarian\/visits"\)/u);
   assert.match(librarian, /getLibrarianAccess\(user\)/u);
   assert.match(librarian, /if \(!access\.allowed\)/u);
 });
 
-test("teacher booking UI collects bounded identity and uses only active class options", async () => {
+test("teacher booking UI selects canonical identity, authenticates with a personal code, and uses active classes", async () => {
   const source = await read("app/visits/visit-booking-workspace.tsx");
-  assert.match(source, /autoComplete="family-name"/u);
-  assert.match(source, /required maxLength=\{80\}/u);
+  assert.match(source, /teacherSearchUrl\(normalizedQuery\)/u);
+  assert.match(source, /normalizedQuery\.length < 3/u);
+  assert.match(source, /role="combobox"/u);
+  assert.match(source, /role="listbox"/u);
+  assert.match(source, /aria-activedescendant/u);
+  assert.match(source, /selected\.loginId, code/u);
+  assert.match(source, /JSON\.stringify\(\{ loginId, code \}\)/u);
+  assert.match(source, /error\.status === 429/u);
+  assert.match(source, /error\.status >= 500/u);
+  assert.match(source, /Не вдалося увійти\. Перевірте обране ім’я та особистий код/u);
+  assert.match(source, /autoComplete="one-time-code"/u);
+  assert.match(source, /placeholder="XXXXX-XXXXX"/u);
+  assert.match(source, /\[\^23456789ABCDEFGHJKMNPQRSTUVWXYZ\]/u);
+  assert.match(source, /code\.length !== 11/u);
+  assert.match(source, /teacher\.fullName/u);
   assert.match(source, /data\?\.classYears/u);
   assert.doesNotMatch(source, /name="classLabel"/u);
   assert.match(source, /maxLength=\{160\}/u);
@@ -44,10 +58,13 @@ test("teacher booking UI collects bounded identity and uses only active class op
   assert.match(source, /method: "DELETE"/u);
   assert.match(source, /step=\{300\}/u);
   assert.match(source, /max=\{visitHorizonEnd\(today\)\}/u);
-  assert.match(source, /aria-invalid=\{Boolean\(fieldErrors\.surname\)\}/u);
   assert.match(source, /setFieldErrors\(error\.fieldErrors\)/u);
   assert.match(source, /disabled=\{!bookingEnabled \|\| submitting \|\| Boolean\(pending\)\}/u);
-  assert.match(source, /додати вашу робочу email-адресу/u);
+  assert.doesNotMatch(source, /робочу email-адресу|surname:\s*[^,]+,/u);
+  assert.match(source, /window\.sessionStorage/u);
+  assert.doesNotMatch(source, /window\.localStorage/u);
+  assert.match(source, /clearVisitPendingIntent\([\s\S]*session\.pendingScope/u);
+  assert.match(source, /href=\{PUBLIC_CATALOG_URL\}/u);
 });
 
 test("uncertain teacher requests retain the exact request and payload", () => {
@@ -63,7 +80,6 @@ test("uncertain teacher requests retain the exact request and payload", () => {
     requestId: "123e4567-e89b-42d3-a456-426614174000",
     payload: {
       requestId: "123e4567-e89b-42d3-a456-426614174000",
-      surname: "Шевченко",
       date: "2026-09-10",
       startTime: "09:00",
       endTime: "09:30",
@@ -79,6 +95,8 @@ test("uncertain teacher requests retain the exact request and payload", () => {
 
 test("teacher availability query covers the complete server booking horizon", () => {
   assert.equal(teacherVisitsUrl("2026-09-10"), "/api/visits/teacher?from=2026-09-10&to=2026-12-09");
+  assert.equal(teacherSearchUrl("  Шев  "), "/api/visits/teacher/directory?q=%D0%A8%D0%B5%D0%B2");
+  assert.equal(teacherSessionUrl, "/api/visits/teacher/session");
   assert.deepEqual(
     busyPeriodParts({ startAt: "2026-09-10T10:00:00", endAt: "2026-09-10T10:30:00" }),
     { date: "2026-09-10", startTime: "10:00", endTime: "10:30" },
@@ -98,6 +116,7 @@ test("ambiguous HTTP responses keep their durable visit intent", () => {
   assert.equal(isUncertainVisitFailure(new VisitApiError("bad", 400, "validation_failed")), false);
   assert.equal(isUncertainVisitFailure(new VisitApiError("elapsed", 409, "visit_time_elapsed")), false);
   assert.equal(isUncertainVisitFailure(new VisitApiError("started", 409, "booking_not_cancellable")), false);
+  assert.equal(isUncertainVisitFailure(new VisitApiError("revoked", 401, "teacher_access_revoked")), false);
 });
 
 test("admin visit UI shows private fields only behind librarian authorization", async () => {
@@ -119,13 +138,15 @@ test("site entry points link to protected booking and librarian schedule", async
   assert.match(workspace, /href="\/librarian\/visits"/u);
 });
 
-test("SIWC return path accepts only bounded date and time query values", async () => {
+test("public app preserves only bounded date and time deep-link values", async () => {
   const source = await read("app/visits/page.tsx");
+  const workspace = await read("app/visits/visit-booking-workspace.tsx");
   assert.match(source, /function boundedDate/u);
   assert.match(source, /function boundedTime/u);
-  assert.doesNotMatch(source, /ownerId=\{user\.userId\}/u);
-  assert.doesNotMatch(await read("app/visits/visit-booking-workspace.tsx"), /ownerId/u);
-  assert.match(source, /pendingScope=\{await visitPendingScope\(user\.userId\)\}/u);
-  assert.match(source, /crypto\.subtle\.digest\("SHA-256"/u);
-  assert.doesNotMatch(source, /pendingScope=\{user\.userId\}/u);
+  assert.match(source, /initialDate=\{boundedDate\(params\?\.date\)\}/u);
+  assert.match(source, /initialStartTime=\{boundedTime\(params\?\.start\)\}/u);
+  assert.match(source, /initialEndTime=\{boundedTime\(params\?\.end\)\}/u);
+  assert.doesNotMatch(`${source}\n${workspace}`, /ownerId|user\.userId|ownerEmail/u);
+  assert.match(workspace, /pendingScope=\{session\.pendingScope\}/u);
+  assert.match(workspace, /visitPendingKey\("teacher", pendingScope\)/u);
 });

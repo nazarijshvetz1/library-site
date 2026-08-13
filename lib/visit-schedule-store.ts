@@ -1,5 +1,5 @@
 import type { ChatGPTUser } from "../app/chatgpt-auth.ts";
-import type { TeacherAccessMode } from "./visit-schedule-api.ts";
+import type { VisitTeacherIdentity } from "./visit-teacher-auth.ts";
 import {
   isoWeekday,
   kyivLocalNow,
@@ -48,7 +48,7 @@ export type VisitBooking = {
   cancelledAt: string | null;
 };
 
-export type PrivateVisitBooking = VisitBooking & { ownerEmail: string };
+export type PrivateVisitBooking = VisitBooking & { ownerEmail: string | null; ownerUserId: string | null };
 export type VisitClosure = PublicVisitClosure & {
   id: string;
   reason: string;
@@ -59,7 +59,7 @@ export type VisitClosure = PublicVisitClosure & {
 };
 
 type ScheduleOptions = {
-  ownerAuthUserId?: string;
+  ownerUserId?: string;
   includeClasses?: boolean;
   includePrivateBookings?: boolean;
   status?: "active" | "cancelled" | "all";
@@ -69,8 +69,9 @@ type ScheduleOptions = {
 
 type BookingRow = {
   id: string;
-  owner_auth_user_id: string;
-  owner_email: string;
+  owner_user_id: string | null;
+  owner_auth_user_id: string | null;
+  owner_email: string | null;
   surname: string;
   class_year_id: string | null;
   class_label: string | null;
@@ -179,18 +180,18 @@ export async function readVisitSchedule(
     }));
   }
 
-  if (options.ownerAuthUserId || options.includePrivateBookings) {
+  if (options.ownerUserId || options.includePrivateBookings) {
     const status = options.status ?? "all";
     const statusSql = status === "all" ? "" : "AND status = ?";
-    const ownerSql = options.ownerAuthUserId ? "AND owner_auth_user_id = ?" : "";
+    const ownerSql = options.ownerUserId ? "AND owner_user_id = ?" : "";
     const futureSql = options.futureOnly ? "AND (visit_date > ? OR (visit_date = ? AND start_time > ?))" : "";
     const bindings: D1Value[] = [range.from, range.to];
     if (status !== "all") bindings.push(status);
-    if (options.ownerAuthUserId) bindings.push(options.ownerAuthUserId);
+    if (options.ownerUserId) bindings.push(options.ownerUserId);
     if (options.futureOnly) bindings.push(options.futureOnly.date, options.futureOnly.date, options.futureOnly.time);
     bindings.push(limit + 1);
     const rows = await db.prepare(`
-      SELECT id, owner_auth_user_id, owner_email, surname, class_year_id, class_label,
+      SELECT id, owner_user_id, owner_auth_user_id, owner_email, surname, class_year_id, class_label,
              visit_date, start_time, end_time, purpose, status, version, created_at, cancelled_at
       FROM visit_bookings
       WHERE visit_date BETWEEN ? AND ? ${statusSql} ${ownerSql} ${futureSql}
@@ -217,11 +218,10 @@ export async function readVisitSchedule(
 
 export async function createVisitBooking(
   db: VisitD1Database,
-  user: ChatGPTUser,
+  teacher: VisitTeacherIdentity,
   input: VisitBookingCreateInput,
-  accessMode: TeacherAccessMode,
 ): Promise<VisitBooking> {
-  const owner = user.userId;
+  const owner = `teacher:${teacher.teacherUserId}`;
   const requestHash = await mutationHash({ kind: "visit_booking_create", owner, input });
   const replayed = await replayCompletedCommand<VisitBooking>(db, input.requestId, requestHash, owner);
   if (replayed) return replayed;
@@ -245,8 +245,8 @@ export async function createVisitBooking(
   }
   const activeCount = await db.prepare(`
     SELECT COUNT(*) AS total FROM visit_bookings
-    WHERE owner_auth_user_id = ? AND status = 'active' AND visit_date >= ?
-  `).bind(owner, today).first<{ total: number }>();
+    WHERE owner_user_id = ? AND status = 'active' AND visit_date >= ?
+  `).bind(teacher.teacherUserId, today).first<{ total: number }>();
   if (Number(activeCount?.total ?? 0) >= VISIT_MAX_ACTIVE_BOOKINGS) {
     throw new VisitScheduleError("booking_limit_reached", 429, "Досягнуто ліміт 20 активних майбутніх бронювань.");
   }
@@ -258,7 +258,7 @@ export async function createVisitBooking(
     date: input.date,
     startTime: input.startTime,
     endTime: input.endTime,
-    surname: input.surname,
+    surname: teacher.fullName,
     classYearId: classYear?.id ?? null,
     classLabel: classYear?.class_name ?? null,
     purpose: input.purpose,
@@ -273,23 +273,27 @@ export async function createVisitBooking(
     insertVisitCommand(db, input.requestId, owner, "visit_booking_create", requestHash, id, now),
     db.prepare(`
       INSERT INTO visit_bookings (
-        id, owner_auth_user_id, owner_email, surname, class_year_id, class_label,
+        id, owner_user_id, owner_auth_user_id, owner_email, surname, class_year_id, class_label,
         visit_date, start_time, end_time, purpose, status, cancel_reason,
         cancelled_by_auth_user_id, cancelled_by_user_id, version,
         created_at, updated_at, cancelled_at
       )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', '', NULL, NULL, 1, ?, ?, NULL
+      SELECT ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, 'active', '', NULL, NULL, 1, ?, ?, NULL
       WHERE (? IS NULL OR EXISTS (
         SELECT 1 FROM class_years WHERE id = ? AND status = 'active'
       ))
       AND (SELECT COUNT(*) FROM visit_bookings
-        WHERE owner_auth_user_id = ? AND status = 'active' AND visit_date >= ?) < ?
+        WHERE owner_user_id = ? AND status = 'active' AND visit_date >= ?) < ?
       AND (? > ?)
-      AND (? = 1 OR EXISTS (
-        SELECT 1 FROM users
-        WHERE status = 'active' AND role = 'teacher'
-          AND (auth_user_id = ? OR lower(email) = lower(?))
-      ))
+      AND EXISTS (
+        SELECT 1 FROM users u
+        JOIN visit_teacher_credentials c ON c.teacher_user_id = u.id
+        JOIN visit_teacher_sessions s ON s.teacher_user_id = u.id
+        WHERE u.id = ? AND u.status = 'active' AND u.role = 'teacher'
+          AND u.full_name = ? AND c.status = 'active' AND c.version = ?
+          AND s.token_hash = ? AND s.credential_version = c.version
+          AND s.revoked_at IS NULL AND s.expires_at > ?
+      )
       AND (
         EXISTS (SELECT 1 FROM visit_schedule_hours
           WHERE weekday = ? AND status = 'active' AND start_time <= ? AND end_time >= ?)
@@ -297,13 +301,14 @@ export async function createVisitBooking(
           AND ? BETWEEN 1 AND 5 AND ? >= ? AND ? <= ?)
       )
     `).bind(
-      id, owner, user.email.toLowerCase(), input.surname, classYear?.id ?? null,
+      id, teacher.teacherUserId, teacher.fullName, classYear?.id ?? null,
       classYear?.class_name ?? null, input.date, input.startTime, input.endTime,
       input.purpose ?? "", now, now,
       input.classYearId, input.classYearId,
-      owner, today, VISIT_MAX_ACTIVE_BOOKINGS,
+      teacher.teacherUserId, today, VISIT_MAX_ACTIVE_BOOKINGS,
       `${input.date}T${input.startTime}`, `${localNow.date}T${localNow.time}`,
-      accessMode === "allowlist" ? 1 : 0, user.userId, user.email,
+      teacher.teacherUserId, teacher.fullName, teacher.credentialVersion,
+      teacher.tokenHash, now,
       weekday, input.startTime, input.endTime,
       weekday, weekday, input.startTime, fallback.startTime, input.endTime, fallback.endTime,
     ),
@@ -315,7 +320,7 @@ export async function createVisitBooking(
       FROM json_each(?)
     `).bind(id, id, now, JSON.stringify(segments)),
     auditClaimStatement(db, {
-      id: `AUD-${crypto.randomUUID()}`, actorUserId: null, actorEmail: user.email,
+      id: `AUD-${crypto.randomUUID()}`, actorUserId: teacher.teacherUserId, actorEmail: "teacher-code@local.invalid",
       action: "visit.booking.create", entityType: "visit_booking", entityId: id,
       requestId: input.requestId, before: null, after: result, metadata: null,
       createdAt: now, claimOwner: "booking", expectedClaimCount: segments.length,
@@ -329,7 +334,7 @@ export async function createVisitBooking(
   } catch (error) {
     const replay = await replayCompletedCommand<VisitBooking>(db, input.requestId, requestHash, owner);
     if (replay) return replay;
-    await diagnoseCreateBooking(db, input, owner, today, localNow.time, user, accessMode);
+    await diagnoseCreateBooking(db, input, teacher, today, localNow.time, now);
     if (isSlotConflict(error)) {
       throw new VisitScheduleError("slot_unavailable", 409, "Цей час щойно зайняли. Оберіть інший проміжок.");
     }
@@ -339,12 +344,11 @@ export async function createVisitBooking(
 
 export async function cancelOwnVisitBooking(
   db: VisitD1Database,
-  user: ChatGPTUser,
+  teacher: VisitTeacherIdentity,
   bookingId: string,
   input: VisitCancelInput,
-  accessMode: TeacherAccessMode,
 ): Promise<VisitBooking> {
-  return cancelBooking(db, user, bookingId, input, null, accessMode);
+  return cancelBooking(db, teacher, bookingId, input, null);
 }
 
 export async function cancelAdminVisitBooking(
@@ -354,104 +358,149 @@ export async function cancelAdminVisitBooking(
   input: VisitCancelInput,
 ): Promise<PrivateVisitBooking> {
   const actor = await resolveLibrarianActor(db, user);
-  return cancelBooking(db, user, bookingId, input, actor, null) as Promise<PrivateVisitBooking>;
+  return cancelBooking(db, user, bookingId, input, actor) as Promise<PrivateVisitBooking>;
 }
 
 async function cancelBooking(
   db: VisitD1Database,
-  user: ChatGPTUser,
+  principal: ChatGPTUser | VisitTeacherIdentity,
   bookingId: string,
   input: VisitCancelInput,
   actor: MutationActor | null,
-  teacherAccessMode: TeacherAccessMode | null,
 ): Promise<VisitBooking | PrivateVisitBooking> {
-  const ownerKey = actor ? `admin:${actor.id}` : user.userId;
+  const teacher = actor ? null : principal as VisitTeacherIdentity;
+  const user = actor ? principal as ChatGPTUser : null;
+  const ownerKey = actor ? `admin:${actor.id}` : `teacher:${teacher!.teacherUserId}`;
   const requestHash = await mutationHash({
     kind: actor ? "visit_booking_admin_cancel" : "visit_booking_cancel",
-    ownerKey, bookingId, input,
+    ownerKey,
+    bookingId,
+    input,
   });
-  const replayed = await replayCompletedCommand<PrivateVisitBooking>(db, input.requestId, requestHash, ownerKey);
+  const replayed = await replayCompletedCommand<PrivateVisitBooking>(
+    db,
+    input.requestId,
+    requestHash,
+    ownerKey,
+  );
   if (replayed) return actor ? replayed : stripOwner(replayed);
-  const ownerGuard = actor ? "" : "AND owner_auth_user_id = ?";
-  const bindings: D1Value[] = [bookingId];
-  if (!actor) bindings.push(user.userId);
+
+  const ownerGuard = actor ? "" : "AND owner_user_id = ?";
+  const rowBindings: D1Value[] = [bookingId];
+  if (teacher) rowBindings.push(teacher.teacherUserId);
   const row = await db.prepare(`
-    SELECT id, owner_auth_user_id, owner_email, surname, class_year_id, class_label,
-           visit_date, start_time, end_time, purpose, status, version, created_at, cancelled_at
+    SELECT id, owner_user_id, owner_auth_user_id, owner_email, surname,
+           class_year_id, class_label, visit_date, start_time, end_time,
+           purpose, status, version, created_at, cancelled_at
     FROM visit_bookings WHERE id = ? ${ownerGuard} LIMIT 1
-  `).bind(...bindings).first<BookingRow>();
+  `).bind(...rowBindings).first<BookingRow>();
   if (!row) throw new VisitScheduleError("booking_not_found", 404, "Бронювання не знайдено.");
   if (row.status !== "active" || Number(row.version) !== input.expectedVersion) {
     throw new VisitScheduleError("booking_version_conflict", 409, "Бронювання вже змінилося. Оновіть сторінку.");
   }
+
   const cancellationNow = kyivLocalNow();
-  if (!actor && `${row.visit_date}T${row.start_time}` <= `${cancellationNow.date}T${cancellationNow.time}`) {
-    throw new VisitScheduleError("booking_not_cancellable", 409, "Розпочатий або минулий візит учитель уже не може скасувати.");
+  if (teacher && `${row.visit_date}T${row.start_time}` <= `${cancellationNow.date}T${cancellationNow.time}`) {
+    throw new VisitScheduleError("booking_not_cancellable", 409, "Розпочатий або минулий візит уже не можна скасувати.");
   }
   const now = new Date().toISOString();
   const privateResult: PrivateVisitBooking = {
-    ...privateBooking(row), status: "cancelled", version: Number(row.version) + 1, cancelledAt: now,
+    ...privateBooking(row),
+    status: "cancelled",
+    version: Number(row.version) + 1,
+    cancelledAt: now,
   };
-  const updateOwnerSql = actor ? "" : "AND owner_auth_user_id = ?";
+  const updateOwnerSql = actor ? "" : "AND owner_user_id = ?";
   const accessGuardSql = actor
-    ? "AND EXISTS (SELECT 1 FROM users WHERE id = ? AND status = 'active' AND role IN ('admin','librarian'))"
-    : `AND (? = 1 OR EXISTS (SELECT 1 FROM users WHERE status = 'active' AND role = 'teacher'
-        AND (auth_user_id = ? OR lower(email) = lower(?))))
-       AND (visit_date || 'T' || start_time) > ?`;
+    ? "AND EXISTS (SELECT 1 FROM users WHERE id=? AND status='active' AND role IN ('admin','librarian'))"
+    : `AND EXISTS (
+         SELECT 1 FROM users u
+         JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id
+         JOIN visit_teacher_sessions s ON s.teacher_user_id=u.id
+         WHERE u.id=? AND u.status='active' AND u.role='teacher'
+           AND u.full_name=? AND c.status='active' AND c.version=?
+           AND s.token_hash=? AND s.credential_version=c.version
+           AND s.revoked_at IS NULL AND s.expires_at>?
+       ) AND (visit_date || 'T' || start_time) > ?`;
   const accessBindings: D1Value[] = actor
     ? [actor.id]
-    : [teacherAccessMode === "allowlist" ? 1 : 0, user.userId, user.email, `${cancellationNow.date}T${cancellationNow.time}`];
-  const updateBindings: D1Value[] = [
-    input.reason ?? "", actor ? null : user.userId, actor?.id ?? null, now, now,
-    bookingId, input.expectedVersion,
-  ];
-  if (!actor) updateBindings.push(user.userId);
+    : [
+        teacher!.teacherUserId,
+        teacher!.fullName,
+        teacher!.credentialVersion,
+        teacher!.tokenHash,
+        now,
+        `${cancellationNow.date}T${cancellationNow.time}`,
+      ];
+  const ownerBindings: D1Value[] = teacher ? [teacher.teacherUserId] : [];
+  const cancelledByUserId = actor?.id ?? teacher!.teacherUserId;
   const statements = [
-    insertVisitCommand(db, input.requestId, ownerKey, actor ? "visit_booking_admin_cancel" : "visit_booking_cancel", requestHash, bookingId, now),
+    insertVisitCommand(
+      db,
+      input.requestId,
+      ownerKey,
+      actor ? "visit_booking_admin_cancel" : "visit_booking_cancel",
+      requestHash,
+      bookingId,
+      now,
+    ),
     db.prepare(`
-      DELETE FROM visit_slot_claims
-      WHERE booking_id = ? AND EXISTS (
-        SELECT 1 FROM visit_bookings WHERE id = ? AND status = 'active' AND version = ? ${updateOwnerSql} ${accessGuardSql}
+      DELETE FROM visit_slot_claims WHERE booking_id=? AND EXISTS (
+        SELECT 1 FROM visit_bookings
+        WHERE id=? AND status='active' AND version=? ${updateOwnerSql} ${accessGuardSql}
       )
-    `).bind(bookingId, bookingId, input.expectedVersion, ...(!actor ? [user.userId] : []), ...accessBindings),
+    `).bind(bookingId, bookingId, input.expectedVersion, ...ownerBindings, ...accessBindings),
     db.prepare(`
-      UPDATE visit_bookings
-      SET status = 'cancelled', cancel_reason = ?, cancelled_by_auth_user_id = ?,
-          cancelled_by_user_id = ?, cancelled_at = ?, updated_at = ?, version = version + 1
-      WHERE id = ? AND status = 'active' AND version = ? ${updateOwnerSql} ${accessGuardSql}
-    `).bind(...updateBindings, ...accessBindings),
+      UPDATE visit_bookings SET status='cancelled', cancel_reason=?,
+        cancelled_by_auth_user_id=NULL, cancelled_by_user_id=?, cancelled_at=?,
+        updated_at=?, version=version+1
+      WHERE id=? AND status='active' AND version=? ${updateOwnerSql} ${accessGuardSql}
+    `).bind(
+      input.reason ?? "",
+      cancelledByUserId,
+      now,
+      now,
+      bookingId,
+      input.expectedVersion,
+      ...ownerBindings,
+      ...accessBindings,
+    ),
     auditCancellationStatement(db, {
-      id: `AUD-${crypto.randomUUID()}`, actorUserId: actor?.id ?? null, actorEmail: user.email,
+      id: `AUD-${crypto.randomUUID()}`,
+      actorUserId: cancelledByUserId,
+      actorEmail: user?.email ?? "teacher-code@local.invalid",
       action: actor ? "visit.booking.admin_cancel" : "visit.booking.cancel",
-      entityType: "visit_booking", entityId: bookingId, requestId: input.requestId,
-      before: privateBooking(row), after: privateResult,
-      metadata: actor ? { reason: input.reason } : null, createdAt: now,
-      claimOwner: "booking", expectedVersion: privateResult.version, cancelledAt: now,
+      entityType: "visit_booking",
+      entityId: bookingId,
+      requestId: input.requestId,
+      before: privateBooking(row),
+      after: privateResult,
+      metadata: actor ? { reason: input.reason } : null,
+      createdAt: now,
+      claimOwner: "booking",
+      expectedVersion: privateResult.version,
+      cancelledAt: now,
     }),
     completeVisitCommand(db, input.requestId, privateResult, now),
   ];
+
   try {
     await db.batch(statements);
     return actor ? privateResult : stripOwner(privateResult);
   } catch (error) {
-    const replay = await replayCompletedCommand<PrivateVisitBooking>(db, input.requestId, requestHash, ownerKey);
+    const replay = await replayCompletedCommand<PrivateVisitBooking>(
+      db,
+      input.requestId,
+      requestHash,
+      ownerKey,
+    );
     if (replay) return actor ? replay : stripOwner(replay);
-    if (!actor && teacherAccessMode === "directory") {
-      const teacher = await db.prepare(`SELECT id FROM users WHERE status='active' AND role='teacher'
-        AND (auth_user_id=? OR lower(email)=lower(?)) LIMIT 1`).bind(user.userId, user.email).first();
-      if (!teacher) throw new VisitScheduleError("teacher_access_denied", 403, "Доступ учителя було відкликано. Зверніться до бібліотекаря.");
-    }
-    if (!actor) {
-      const current = await db.prepare(`SELECT visit_date, start_time FROM visit_bookings WHERE id=? LIMIT 1`)
-        .bind(bookingId).first<{ visit_date: string; start_time: string }>();
-      if (current && `${current.visit_date}T${current.start_time}` <= `${cancellationNow.date}T${cancellationNow.time}`) {
-        throw new VisitScheduleError("booking_not_cancellable", 409, "Розпочатий або минулий візит учитель уже не може скасувати.");
-      }
-    }
+    if (teacher) await requireActiveTeacherPrincipal(db, teacher, now);
     if (actor) {
-      const activeActor = await db.prepare(`SELECT id FROM users WHERE id=? AND status='active' AND role IN ('admin','librarian') LIMIT 1`)
+      const activeActor = await db.prepare(`SELECT id FROM users
+        WHERE id=? AND status='active' AND role IN ('admin','librarian') LIMIT 1`)
         .bind(actor.id).first();
-      if (!activeActor) throw new VisitScheduleError("actor_not_mapped", 403, "Доступ бібліотекаря було відкликано.");
+      if (!activeActor) throw new VisitScheduleError("actor_not_mapped", 403, "Доступ бібліотекаря відкликано.");
     }
     if (isGuardFailure(error)) {
       throw new VisitScheduleError("booking_version_conflict", 409, "Бронювання вже змінилося. Оновіть сторінку.");
@@ -628,11 +677,10 @@ async function requireBusinessInterval(db: VisitD1Database, weekday: number, sta
 async function diagnoseCreateBooking(
   db: VisitD1Database,
   input: VisitBookingCreateInput,
-  owner: string,
+  teacher: VisitTeacherIdentity,
   today: string,
   currentTime: string,
-  user: ChatGPTUser,
-  accessMode: TeacherAccessMode,
+  now: string,
 ) {
   if (input.date === today && input.startTime <= currentTime) {
     throw new VisitScheduleError("visit_time_elapsed", 409, "Оберіть майбутній час відвідування.");
@@ -642,23 +690,40 @@ async function diagnoseCreateBooking(
       .bind(input.classYearId).first();
     if (!active) throw new VisitScheduleError("class_year_not_active", 409, "Обраний клас уже не є активним. Оновіть список класів.");
   }
-  if (accessMode === "directory") {
-    const teacher = await db.prepare(`
-      SELECT id FROM users WHERE status = 'active' AND role = 'teacher'
-        AND (auth_user_id = ? OR lower(email) = lower(?)) LIMIT 1
-    `).bind(user.userId, user.email).first();
-    if (!teacher) {
-      throw new VisitScheduleError("teacher_access_denied", 403, "Доступ учителя було відкликано. Зверніться до бібліотекаря.");
-    }
-  }
+  await requireActiveTeacherPrincipal(db, teacher, now);
   const count = await db.prepare(`
     SELECT COUNT(*) AS total FROM visit_bookings
-    WHERE owner_auth_user_id = ? AND status = 'active' AND visit_date >= ?
-  `).bind(owner, today).first<{ total: number }>();
+    WHERE owner_user_id = ? AND status = 'active' AND visit_date >= ?
+  `).bind(teacher.teacherUserId, today).first<{ total: number }>();
   if (Number(count?.total ?? 0) >= VISIT_MAX_ACTIVE_BOOKINGS) {
     throw new VisitScheduleError("booking_limit_reached", 429, "Досягнуто ліміт 20 активних майбутніх бронювань.");
   }
   await requireBusinessInterval(db, isoWeekday(input.date), input.startTime, input.endTime);
+}
+
+async function requireActiveTeacherPrincipal(
+  db: VisitD1Database,
+  teacher: VisitTeacherIdentity,
+  now: string,
+): Promise<void> {
+  const active = await db.prepare(`
+    SELECT u.id FROM users u
+    JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id
+    JOIN visit_teacher_sessions s ON s.teacher_user_id=u.id
+    WHERE u.id=? AND u.full_name=? AND u.status='active' AND u.role='teacher'
+      AND c.status='active' AND c.version=?
+      AND s.token_hash=? AND s.credential_version=c.version
+      AND s.revoked_at IS NULL AND s.expires_at>? LIMIT 1
+  `).bind(
+    teacher.teacherUserId,
+    teacher.fullName,
+    teacher.credentialVersion,
+    teacher.tokenHash,
+    now,
+  ).first();
+  if (!active) {
+    throw new VisitScheduleError("teacher_access_revoked", 401, "Доступ учителя змінився. Увійдіть ще раз.");
+  }
 }
 
 function defaultBusinessInterval(): VisitInterval {
@@ -693,7 +758,7 @@ function booking(row: BookingRow): VisitBooking {
 }
 
 function privateBooking(row: BookingRow): PrivateVisitBooking {
-  return { ...booking(row), ownerEmail: row.owner_email };
+  return { ...booking(row), ownerEmail: row.owner_email, ownerUserId: row.owner_user_id };
 }
 
 function stripOwner(value: PrivateVisitBooking): VisitBooking {

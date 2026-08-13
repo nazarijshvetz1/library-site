@@ -36,7 +36,7 @@ const migrationUrls = [
     "0003_odd_the_order.sql",
     "0004_staging_import_runs.sql",
     "0005_young_night_nurse.sql",
-    "0006_pale_sauron.sql", "0007_cold_whiplash.sql",
+    "0006_pale_sauron.sql", "0007_cold_whiplash.sql", "0008_sudden_thunderbird.sql",
   ].map((file) => new URL(`../drizzle/${file}`, import.meta.url));
 
 async function fixturePlan() {
@@ -326,6 +326,36 @@ test("staging reset atomically clears domain/import rows while preserving migrat
     ) VALUES ('CLINE-RESET', 'CLTX-RESET', 'CLI-RESET', ?, ?, 'unspecified',
       -1, 1, 0, '2026-09-10T00:00:00.000Z')
   `).run(materialId, locationId);
+  database.prepare(`
+    INSERT INTO visit_teacher_credentials (
+      teacher_user_id, login_id, code_hmac, status, version, failed_attempts,
+      failure_window_started_at, locked_until, last_login_at, code_rotated_at,
+      last_access_command_id, created_by_user_id, updated_by_user_id, created_at, updated_at
+    ) VALUES (?, 'reset-login-id-001', ?, 'active', 1, 0, NULL, NULL, NULL,
+      '2026-09-10T00:00:00.000Z', NULL, ?, ?,
+      '2026-09-10T00:00:00.000Z', '2026-09-10T00:00:00.000Z')
+  `).run(teacherId, "b".repeat(64), actorId, actorId);
+  database.prepare(`
+    INSERT INTO visit_teacher_sessions (
+      token_hash, teacher_user_id, credential_version, pending_scope, ip_scope_hash,
+      expires_at, last_seen_at, revoked_at, created_at
+    ) VALUES (?, ?, 1, 'reset-pending-scope-001', ?,
+      '2026-09-11T00:00:00.000Z', '2026-09-10T00:00:00.000Z', NULL,
+      '2026-09-10T00:00:00.000Z')
+  `).run("c".repeat(64), teacherId, "d".repeat(64));
+  database.prepare(`
+    INSERT INTO visit_teacher_login_limits (
+      scope_hash, attempts, window_started_at, blocked_until, updated_at
+    ) VALUES (?, 1, '2026-09-10T00:00:00.000Z', NULL, '2026-09-10T00:00:00.000Z')
+  `).run("e".repeat(64));
+  database.prepare(`
+    INSERT INTO visit_teacher_access_commands (
+      id, actor_user_id, kind, teacher_user_id, request_hash, status, result_json,
+      created_at, updated_at, completed_at
+    ) VALUES ('99999999-9999-4999-8999-999999999998', ?, 'code.issue', ?, ?,
+      'completed', '{"version":1}', '2026-09-10T00:00:00.000Z',
+      '2026-09-10T00:00:00.000Z', '2026-09-10T00:00:00.000Z')
+  `).run(actorId, teacherId, "f".repeat(64));
   const schemaBefore = database.prepare(`
     SELECT name, type, sql FROM sqlite_schema ORDER BY type, name
   `).all();
@@ -343,6 +373,10 @@ test("staging reset atomically clears domain/import rows while preserving migrat
   assert.equal(report.deletedByTable.class_loan_transactions, 1);
   assert.equal(report.deletedByTable.class_loan_items, 1);
   assert.equal(report.deletedByTable.class_loans, 1);
+  assert.equal(report.deletedByTable.visit_teacher_sessions, 1);
+  assert.equal(report.deletedByTable.visit_teacher_login_limits, 1);
+  assert.equal(report.deletedByTable.visit_teacher_access_commands, 1);
+  assert.equal(report.deletedByTable.visit_teacher_credentials, 1);
   assert.ok(report.batchStatements <= 50, `reset used ${report.batchStatements} statements`);
   assert.equal(database.prepare("SELECT count(*) AS count FROM librarian_drafts").get().count, 1);
   assert.equal(database.prepare("SELECT count(*) AS count FROM librarian_draft_events").get().count, 1);

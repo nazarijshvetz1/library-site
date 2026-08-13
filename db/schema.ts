@@ -148,6 +148,15 @@ const mutationCommandStatuses = ["processing", "completed", "failed"] as const;
 const visitBookingStatuses = ["active", "cancelled"] as const;
 const visitClosureStatuses = ["active", "cancelled"] as const;
 const visitHourStatuses = ["active", "inactive"] as const;
+const visitTeacherCredentialStatuses = ["active", "disabled"] as const;
+const visitTeacherAccessCommandKinds = [
+  "code.issue",
+  "code.bulk_issue",
+  "credential.enable",
+  "credential.disable",
+  "credential.unlock",
+  "sessions.revoke",
+] as const;
 
 /**
  * Canonical bibliographic record. `id` is the durable CAT-ID while
@@ -398,6 +407,121 @@ export const users = sqliteTable(
       "users_status_valid",
       sql`${table.status} in ('active', 'inactive')`,
     ),
+  ],
+);
+
+/** App-owned credentials for teachers who use the public visit scheduler. */
+export const visitTeacherCredentials = sqliteTable(
+  "visit_teacher_credentials",
+  {
+    teacherUserId: text("teacher_user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    loginId: text("login_id").notNull(),
+    codeHmac: text("code_hmac").notNull(),
+    status: text("status", { enum: visitTeacherCredentialStatuses }).notNull().default("active"),
+    version: integer("version").notNull().default(1),
+    failedAttempts: integer("failed_attempts").notNull().default(0),
+    failureWindowStartedAt: text("failure_window_started_at"),
+    lockedUntil: text("locked_until"),
+    lastLoginAt: text("last_login_at"),
+    codeRotatedAt: text("code_rotated_at").notNull(),
+    lastAccessCommandId: text("last_access_command_id"),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    updatedByUserId: text("updated_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_visit_teacher_credentials_login_id").on(table.loginId),
+    index("idx_visit_teacher_credentials_status_teacher").on(table.status, table.teacherUserId),
+    check("visit_teacher_credentials_login_id_not_blank", sql`length(trim(${table.loginId})) between 16 and 128`),
+    check("visit_teacher_credentials_hmac_valid", sql`length(${table.codeHmac}) = 64 and lower(${table.codeHmac}) not glob '*[^0-9a-f]*'`),
+    check("visit_teacher_credentials_status_valid", sql`${table.status} in ('active', 'disabled')`),
+    check("visit_teacher_credentials_version_positive", sql`${table.version} > 0`),
+    check("visit_teacher_credentials_attempts_nonnegative", sql`${table.failedAttempts} >= 0`),
+    check(
+      "visit_teacher_credentials_command_id_valid",
+      sql`${table.lastAccessCommandId} is null or length(${table.lastAccessCommandId}) = 36`,
+    ),
+  ],
+);
+
+/** Browser sessions store only a SHA-256 token digest, never the cookie token. */
+export const visitTeacherSessions = sqliteTable(
+  "visit_teacher_sessions",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    teacherUserId: text("teacher_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    credentialVersion: integer("credential_version").notNull(),
+    pendingScope: text("pending_scope").notNull(),
+    ipScopeHash: text("ip_scope_hash").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    lastSeenAt: text("last_seen_at").notNull(),
+    revokedAt: text("revoked_at"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_visit_teacher_sessions_pending_scope").on(table.pendingScope),
+    index("idx_visit_teacher_sessions_teacher_active").on(table.teacherUserId, table.revokedAt, table.expiresAt),
+    index("idx_visit_teacher_sessions_expires").on(table.expiresAt),
+    check("visit_teacher_sessions_token_hash_valid", sql`length(${table.tokenHash}) = 64 and lower(${table.tokenHash}) not glob '*[^0-9a-f]*'`),
+    check("visit_teacher_sessions_ip_hash_valid", sql`length(${table.ipScopeHash}) = 64 and lower(${table.ipScopeHash}) not glob '*[^0-9a-f]*'`),
+    check("visit_teacher_sessions_pending_scope_not_blank", sql`length(trim(${table.pendingScope})) between 16 and 128`),
+    check("visit_teacher_sessions_version_positive", sql`${table.credentialVersion} > 0`),
+  ],
+);
+
+/** Fixed-window login throttles keyed by a peppered digest of the client IP. */
+export const visitTeacherLoginLimits = sqliteTable(
+  "visit_teacher_login_limits",
+  {
+    scopeHash: text("scope_hash").primaryKey(),
+    attempts: integer("attempts").notNull().default(0),
+    windowStartedAt: text("window_started_at").notNull(),
+    blockedUntil: text("blocked_until"),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("idx_visit_teacher_login_limits_updated").on(table.updatedAt),
+    check("visit_teacher_login_limits_scope_valid", sql`length(${table.scopeHash}) = 64 and lower(${table.scopeHash}) not glob '*[^0-9a-f]*'`),
+    check("visit_teacher_login_limits_attempts_nonnegative", sql`${table.attempts} >= 0`),
+  ],
+);
+
+/** Idempotency receipts for librarian credential administration; never stores plaintext codes. */
+export const visitTeacherAccessCommands = sqliteTable(
+  "visit_teacher_access_commands",
+  {
+    id: text("id").primaryKey(),
+    actorUserId: text("actor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    kind: text("kind", { enum: visitTeacherAccessCommandKinds }).notNull(),
+    teacherUserId: text("teacher_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    requestHash: text("request_hash").notNull(),
+    status: text("status", { enum: mutationCommandStatuses }).notNull().default("processing"),
+    resultJson: text("result_json"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    completedAt: text("completed_at"),
+  },
+  (table) => [
+    index("idx_visit_teacher_access_commands_actor_created").on(table.actorUserId, table.createdAt),
+    check("visit_teacher_access_commands_kind_valid", sql`${table.kind} in ('code.issue','code.bulk_issue','credential.enable','credential.disable','credential.unlock','sessions.revoke')`),
+    check("visit_teacher_access_commands_hash_valid", sql`length(${table.requestHash}) = 64 and lower(${table.requestHash}) not glob '*[^0-9a-f]*'`),
+    check("visit_teacher_access_commands_status_valid", sql`${table.status} in ('processing', 'completed', 'failed')`),
+    check("visit_teacher_access_commands_result_valid", sql`${table.resultJson} is null or json_valid(${table.resultJson})`),
+    check("visit_teacher_access_commands_completion_consistent", sql`(${table.status} = 'processing' and ${table.completedAt} is null) or (${table.status} in ('completed', 'failed') and ${table.completedAt} is not null)`),
   ],
 );
 
@@ -1048,13 +1172,17 @@ export const visitScheduleClosures = sqliteTable(
   ],
 );
 
-/** SIWC-owned bookings. Public serializers must never expose owner or class fields. */
+/** Teacher-owned bookings. Legacy SIWC owner fields remain nullable for migration history. */
 export const visitBookings = sqliteTable(
   "visit_bookings",
   {
     id: text("id").primaryKey(),
-    ownerAuthUserId: text("owner_auth_user_id").notNull(),
-    ownerEmail: text("owner_email").notNull(),
+    ownerUserId: text("owner_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    ownerAuthUserId: text("owner_auth_user_id"),
+    ownerEmail: text("owner_email"),
     surname: text("surname").notNull(),
     classYearId: text("class_year_id").references(() => classYears.id, {
       onDelete: "restrict",
@@ -1088,9 +1216,17 @@ export const visitBookings = sqliteTable(
       table.status,
       table.visitDate,
     ),
+    index("idx_visit_bookings_owner_user_status_date").on(
+      table.ownerUserId,
+      table.status,
+      table.visitDate,
+    ),
     index("idx_visit_bookings_class_date").on(table.classYearId, table.visitDate),
-    check("visit_bookings_owner_not_blank", sql`length(trim(${table.ownerAuthUserId})) > 0`),
-    check("visit_bookings_email_not_blank", sql`length(trim(${table.ownerEmail})) > 0`),
+    check(
+      "visit_bookings_owner_valid",
+      sql`(${table.ownerUserId} is not null and ${table.ownerAuthUserId} is null and ${table.ownerEmail} is null)
+        or (${table.ownerUserId} is null and length(trim(${table.ownerAuthUserId})) > 0 and length(trim(${table.ownerEmail})) > 0)`,
+    ),
     check("visit_bookings_surname_length", sql`length(trim(${table.surname})) between 2 and 80`),
     check(
       "visit_bookings_date_valid",

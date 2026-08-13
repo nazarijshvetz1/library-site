@@ -20,6 +20,7 @@ import {
   clearVisitPendingIntent,
 } from "@/app/visits/visit-client";
 import styles from "@/app/visits/visits.module.css";
+import TeacherAccessAdmin from "./teacher-access-admin";
 
 const LOGO_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
 
@@ -145,14 +146,13 @@ export default function LibrarianVisitWorkspace({ pendingScope, displayName, wri
           {loading ? <p className={styles.empty}>Оновлюємо розклад…</p> : bookings.length ? (
             <div role="region" aria-label="Таблиця відвідувань">
               <table className={styles.adminTable}>
-                <thead><tr><th>Час</th><th>Прізвище</th><th>Клас</th><th>Мета</th><th>Акаунт</th><th>Стан</th><th><span className="sr-only">Дії</span></th></tr></thead>
+                <thead><tr><th>Час</th><th>Учитель</th><th>Клас</th><th>Мета</th><th>Стан</th><th><span className="sr-only">Дії</span></th></tr></thead>
                 <tbody>{bookings.map((booking) => (
                   <tr key={booking.id}>
                     <td><strong>{formatVisitDateTime(`${booking.date}T${booking.startTime}`)}</strong><br />до {booking.endTime}</td>
                     <td>{booking.surname}</td>
                     <td>{booking.classLabel || "—"}</td>
                     <td>{booking.purpose || "—"}</td>
-                    <td>{booking.ownerEmail || "—"}</td>
                     <td>{booking.status === "cancelled" ? "Скасовано" : "Активний"}</td>
                     <td>{booking.status !== "cancelled" ? <button className={styles.danger} type="button" onClick={() => cancel(booking)} disabled={!writesEnabled || data?.bookingEnabled !== true || submitting || Boolean(pending)}>Скасувати</button> : null}</td>
                   </tr>
@@ -161,6 +161,7 @@ export default function LibrarianVisitWorkspace({ pendingScope, displayName, wri
             </div>
           ) : <p className={styles.empty}>За цими фільтрами записів немає.</p>}
         </section>
+        <TeacherAccessAdmin writesEnabled={writesEnabled} />
       </section>
     </main>
   );

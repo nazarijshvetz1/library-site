@@ -37,7 +37,7 @@ async function visitDatabase() {
   for (const file of [
     "0000_librarian_drafts.sql", "0001_draft_workflow.sql", "0002_remove_legacy_audit_triggers.sql",
     "0003_odd_the_order.sql", "0004_staging_import_runs.sql", "0005_young_night_nurse.sql",
-    "0006_pale_sauron.sql", "0007_cold_whiplash.sql",
+    "0006_pale_sauron.sql", "0007_cold_whiplash.sql", "0008_sudden_thunderbird.sql",
   ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
   const now = new Date().toISOString();
   sqlite.prepare(`INSERT INTO users
@@ -48,7 +48,31 @@ async function visitDatabase() {
     (id, full_name, sort_name, email, auth_user_id, role, status, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)`)
     .run("USR-LIB", "Бібліотекар", "Бібліотекар", "library@example.test", "auth-library", "librarian", now, now);
+  sqlite.prepare(`INSERT INTO visit_teacher_credentials (
+    teacher_user_id, login_id, code_hmac, status, version, failed_attempts,
+    locked_until, last_login_at, code_rotated_at, created_by_user_id,
+    updated_by_user_id, created_at, updated_at
+  ) VALUES ('USR-TEACHER','opaque-teacher-login-001',?,'active',1,0,NULL,NULL,?,
+    'USR-LIB','USR-LIB',?,?)`).run("a".repeat(64), now, now, now);
+  sqlite.prepare(`INSERT INTO visit_teacher_sessions (
+    token_hash, teacher_user_id, credential_version, pending_scope, ip_scope_hash,
+    expires_at, last_seen_at, revoked_at, created_at
+  ) VALUES (?, 'USR-TEACHER', 1, 'pending-scope-teacher-001', ?,
+    '2999-01-01T00:00:00.000Z', ?, NULL, ?)`)
+    .run("b".repeat(64), "c".repeat(64), now, now);
   return { sqlite, db: new TestD1(sqlite) };
+}
+
+function teacherIdentity(overrides = {}) {
+  return {
+    teacherUserId: "USR-TEACHER",
+    fullName: "Учитель",
+    credentialVersion: 1,
+    tokenHash: "b".repeat(64),
+    pendingScope: "pending-scope-teacher-001",
+    expiresAt: "2999-01-01T00:00:00.000Z",
+    ...overrides,
+  };
 }
 
 function futureWeekday() {
@@ -147,6 +171,72 @@ test("visit slot-claim migration preserves rows with foreign keys enabled", asyn
     .run(now), /visit_slot_claims_key_valid/);
 });
 
+test("teacher-code migration preserves bookings and claims with foreign keys enabled", async () => {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec("PRAGMA foreign_keys = ON;");
+  for (const file of [
+    "0000_librarian_drafts.sql", "0001_draft_workflow.sql", "0002_remove_legacy_audit_triggers.sql",
+    "0003_odd_the_order.sql", "0004_staging_import_runs.sql", "0005_young_night_nurse.sql",
+    "0006_pale_sauron.sql", "0007_cold_whiplash.sql",
+  ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
+  const now = new Date().toISOString();
+  for (const user of [
+    ["USR-MIG", "Migration Teacher", "auth-owner@example.test", "auth-migration"],
+    ["USR-CONFLICT", "Email Conflict", "email-conflict@example.test", "auth-conflict"],
+    ["USR-FALLBACK", "Email Fallback", "fallback@example.test", "auth-fallback"],
+  ]) sqlite.prepare(`INSERT INTO users
+    (id, full_name, sort_name, email, auth_user_id, role, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, 'teacher', 'active', ?, ?)`)
+    .run(user[0], user[1], user[1].toLowerCase(), user[2], user[3], now, now);
+  sqlite.prepare(`INSERT INTO visit_bookings (
+    id, owner_auth_user_id, owner_email, surname, visit_date, start_time, end_time,
+    purpose, status, cancel_reason, version, created_at, updated_at
+  ) VALUES ('VIS-MIG', 'auth-migration', 'email-conflict@example.test', 'Migration Teacher',
+    '2026-09-01', '09:00', '09:20', '', 'active', '', 1, ?, ?)` ).run(now, now);
+  sqlite.prepare(`INSERT INTO visit_bookings (
+    id, owner_auth_user_id, owner_email, surname, visit_date, start_time, end_time,
+    purpose, status, cancel_reason, cancelled_by_auth_user_id, version, created_at, updated_at, cancelled_at
+  ) VALUES ('VIS-FALLBACK', 'missing-auth', 'fallback@example.test', 'Email Fallback',
+    '2026-09-02', '10:00', '10:20', '', 'cancelled', 'legacy', 'legacy-canceller', 2, ?, ?, ?)`)
+    .run(now, now, now);
+  sqlite.prepare(`INSERT INTO visit_bookings (
+    id, owner_auth_user_id, owner_email, surname, visit_date, start_time, end_time,
+    purpose, status, cancel_reason, version, created_at, updated_at
+  ) VALUES ('VIS-UNMATCHED', 'missing-auth-2', 'missing@example.test', 'Unmatched Teacher',
+    '2026-09-03', '11:00', '11:20', '', 'active', '', 1, ?, ?)` ).run(now, now);
+  sqlite.prepare(`INSERT INTO visit_slot_claims(segment_key, booking_id, closure_id, created_at)
+    VALUES ('2026-09-01T09:00','VIS-MIG',NULL,?)`).run(now);
+  sqlite.prepare(`INSERT INTO visit_slot_claims(segment_key, booking_id, closure_id, created_at)
+    VALUES ('2026-09-03T11:00','VIS-UNMATCHED',NULL,?)`).run(now);
+  const migration = await readFile(new URL("../drizzle/0008_sudden_thunderbird.sql", import.meta.url), "utf8");
+  assert.doesNotMatch(migration, /PRAGMA foreign_keys\s*=\s*OFF/iu);
+  sqlite.exec(migration);
+  assert.equal(sqlite.prepare("PRAGMA foreign_keys").get().foreign_keys, 1);
+  assert.deepEqual(sqlite.prepare("PRAGMA foreign_key_check").all(), []);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM visit_bookings").get().n, 3);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM visit_slot_claims").get().n, 2);
+  const authPreferred = sqlite.prepare(`SELECT owner_user_id,owner_auth_user_id,owner_email
+    FROM visit_bookings WHERE id='VIS-MIG'`).get();
+  assert.deepEqual({ ...authPreferred }, { owner_user_id: "USR-MIG", owner_auth_user_id: null, owner_email: null });
+  const emailFallback = sqlite.prepare(`SELECT owner_user_id,owner_auth_user_id,owner_email,status
+    FROM visit_bookings WHERE id='VIS-FALLBACK'`).get();
+  assert.deepEqual({ ...emailFallback }, {
+    owner_user_id: "USR-FALLBACK", owner_auth_user_id: null, owner_email: null, status: "cancelled",
+  });
+  const unmatched = sqlite.prepare(`SELECT owner_user_id,owner_auth_user_id,owner_email
+    FROM visit_bookings WHERE id='VIS-UNMATCHED'`).get();
+  assert.deepEqual({ ...unmatched }, {
+    owner_user_id: null, owner_auth_user_id: "missing-auth-2", owner_email: "missing@example.test",
+  });
+  assert.deepEqual(
+    sqlite.prepare("SELECT segment_key,booking_id FROM visit_slot_claims ORDER BY segment_key").all().map((row) => ({ ...row })),
+    [
+      { segment_key: "2026-09-01T09:00", booking_id: "VIS-MIG" },
+      { segment_key: "2026-09-03T11:00", booking_id: "VIS-UNMATCHED" },
+    ],
+  );
+});
+
 test("visit audits verify persisted final state without relying on changes()", async () => {
   const source = await readFile(new URL("../lib/visit-schedule-store.ts", import.meta.url), "utf8");
   assert.match(source, /claimOwner:\s*"booking", expectedClaimCount: segments\.length/);
@@ -178,14 +268,14 @@ test("visit routes keep public payload PII-free and protect teacher writes", asy
   ]);
   assert.match(publicRoute, /Access-Control-Allow-Origin.*\*/s);
   assert.doesNotMatch(publicRoute, /surname|ownerEmail|classLabel|purpose/);
-  assert.match(teacherRoute, /authorizeTeacher/);
+  assert.match(teacherRoute, /requireVisitTeacherSession/);
+  assert.match(teacherRoute, /isSameOriginRequest\(request\)/);
   assert.match(teacherRoute, /readVisitJson/);
   assert.match(cancelRoute, /cancelOwnVisitBooking/);
-  assert.match(api, /VISIT_TEACHER_ALLOWED_EMAILS/);
-  assert.match(api, /role = 'teacher'/);
-  assert.match(api, /isSameOriginRequest/);
+  assert.match(cancelRoute, /isSameOriginRequest\(request\)/);
+  assert.doesNotMatch(api, /VISIT_TEACHER_ALLOWED_EMAILS/);
   assert.match(store, /PRIMARY KEY|visit_slot_claims/);
-  assert.match(store, /owner_auth_user_id = \?/);
+  assert.match(store, /owner_user_id = \?/);
   assert.match(store, /request_id_conflict/);
   assert.match(store, /visit_time_elapsed/);
   assert.match(store, /LIMIT 3001/);
@@ -205,10 +295,10 @@ test("visit tables are reset in FK-safe order before users and class years", asy
 
 test("atomic segment claims reject overlapping booking and closure without partial writes", async () => {
   const { sqlite, db } = await visitDatabase();
-  const teacher = { userId: "auth-teacher", email: "teacher@example.test", displayName: "Teacher", fullName: null };
+  const teacher = teacherIdentity();
   const librarian = { userId: "auth-library", email: "library@example.test", displayName: "Library", fullName: null };
   const date = futureWeekday();
-  const first = await store.createVisitBooking(db, teacher, bookingInput("44444444-4444-4444-8444-444444444444", date), "directory");
+  const first = await store.createVisitBooking(db, teacher, bookingInput("44444444-4444-4444-8444-444444444444", date));
   await assert.rejects(
     store.createVisitClosure(db, librarian, {
       requestId: "55555555-5555-4555-8555-555555555555", date,
@@ -224,11 +314,11 @@ test("atomic segment claims reject overlapping booking and closure without parti
 
 test("directory teacher deactivation between authorization and batch rolls back completely", async () => {
   const { sqlite, db } = await visitDatabase();
-  const teacher = { userId: "auth-teacher", email: "teacher@example.test", displayName: "Teacher", fullName: null };
+  const teacher = teacherIdentity();
   db.beforeBatch = () => sqlite.prepare("UPDATE users SET status='inactive' WHERE id='USR-TEACHER'").run();
   await assert.rejects(
-    store.createVisitBooking(db, teacher, bookingInput("66666666-6666-4666-8666-666666666666"), "directory"),
-    (error) => error instanceof store.VisitScheduleError && error.code === "teacher_access_denied",
+    store.createVisitBooking(db, teacher, bookingInput("66666666-6666-4666-8666-666666666666")),
+    (error) => error instanceof store.VisitScheduleError && error.code === "teacher_access_revoked",
   );
   assert.equal(sqlite.prepare("SELECT COUNT(*) total FROM visit_bookings").get().total, 0);
   assert.equal(sqlite.prepare("SELECT COUNT(*) total FROM visit_slot_claims").get().total, 0);
@@ -238,52 +328,52 @@ test("directory teacher deactivation between authorization and batch rolls back 
 
 test("booking request id replays once and rejects a changed payload", async () => {
   const { sqlite, db } = await visitDatabase();
-  const teacher = { userId: "auth-teacher", email: "teacher@example.test", displayName: "Teacher", fullName: null };
+  const teacher = teacherIdentity();
   const input = bookingInput("77777777-7777-4777-8777-777777777777");
-  const first = await store.createVisitBooking(db, teacher, input, "directory");
-  const replay = await store.createVisitBooking(db, teacher, input, "directory");
+  const first = await store.createVisitBooking(db, teacher, input);
+  const replay = await store.createVisitBooking(db, teacher, input);
   assert.deepEqual(replay, first);
   assert.equal(sqlite.prepare("SELECT COUNT(*) total FROM visit_bookings").get().total, 1);
   assert.equal(sqlite.prepare("SELECT COUNT(*) total FROM audit_events WHERE entity_type='visit_booking'").get().total, 1);
   await assert.rejects(
-    store.createVisitBooking(db, teacher, { ...input, surname: "Інше" }, "directory"),
+    store.createVisitBooking(db, teacher, { ...input, purpose: "Інше" }),
     (error) => error instanceof store.VisitScheduleError && error.code === "request_id_conflict",
   );
 });
 
 test("owner isolation, cancellation claim release and rebooking are atomic", async () => {
   const { sqlite, db } = await visitDatabase();
-  const teacher = { userId: "auth-teacher", email: "teacher@example.test", displayName: "Teacher", fullName: null };
-  const stranger = { userId: "auth-stranger", email: "stranger@example.test", displayName: "Stranger", fullName: null };
+  const teacher = teacherIdentity();
+  const stranger = teacherIdentity({ teacherUserId: "USR-STRANGER", tokenHash: "d".repeat(64) });
   const date = futureWeekday();
-  const first = await store.createVisitBooking(db, teacher, bookingInput("88888888-8888-4888-8888-888888888888", date), "directory");
+  const first = await store.createVisitBooking(db, teacher, bookingInput("88888888-8888-4888-8888-888888888888", date));
   await assert.rejects(
     store.cancelOwnVisitBooking(db, stranger, first.id, {
       requestId: "99999999-9999-4999-8999-999999999999", expectedVersion: 1, reason: null,
-    }, "allowlist"),
+    }),
     (error) => error instanceof store.VisitScheduleError && error.code === "booking_not_found",
   );
   const cancelled = await store.cancelOwnVisitBooking(db, teacher, first.id, {
     requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", expectedVersion: 1, reason: null,
-  }, "directory");
+  });
   assert.equal(cancelled.status, "cancelled");
   assert.equal(sqlite.prepare("SELECT COUNT(*) total FROM visit_slot_claims").get().total, 0);
-  const second = await store.createVisitBooking(db, teacher, bookingInput("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", date), "directory");
+  const second = await store.createVisitBooking(db, teacher, bookingInput("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", date));
   assert.notEqual(second.id, first.id);
   assert.equal(sqlite.prepare("SELECT COUNT(*) total FROM visit_slot_claims WHERE booking_id=?").get(second.id).total, 4);
 });
 
 test("teacher and librarian revocation during cancellation roll back every write", async () => {
   const { sqlite, db } = await visitDatabase();
-  const teacher = { userId: "auth-teacher", email: "teacher@example.test", displayName: "Teacher", fullName: null };
+  const teacher = teacherIdentity();
   const librarian = { userId: "auth-library", email: "library@example.test", displayName: "Library", fullName: null };
-  const first = await store.createVisitBooking(db, teacher, bookingInput("dddddddd-dddd-4ddd-8ddd-dddddddddddd"), "directory");
+  const first = await store.createVisitBooking(db, teacher, bookingInput("dddddddd-dddd-4ddd-8ddd-dddddddddddd"));
   db.beforeBatch = () => sqlite.prepare("UPDATE users SET status='inactive' WHERE id='USR-TEACHER'").run();
   await assert.rejects(
     store.cancelOwnVisitBooking(db, teacher, first.id, {
       requestId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", expectedVersion: 1, reason: null,
-    }, "directory"),
-    (error) => error instanceof store.VisitScheduleError && error.code === "teacher_access_denied",
+    }),
+    (error) => error instanceof store.VisitScheduleError && error.code === "teacher_access_revoked",
   );
   let row = sqlite.prepare("SELECT status, version FROM visit_bookings WHERE id=?").get(first.id);
   assert.equal(row.status, "active");
@@ -308,11 +398,11 @@ test("teacher and librarian revocation during cancellation roll back every write
 
 test("public schedule projection contains generic busy intervals without private booking fields", async () => {
   const { db } = await visitDatabase();
-  const teacher = { userId: "auth-teacher", email: "teacher@example.test", displayName: "Teacher", fullName: null };
+  const teacher = teacherIdentity();
   const date = futureWeekday();
   await store.createVisitBooking(db, teacher, {
     ...bookingInput("cccccccc-cccc-4ccc-8ccc-cccccccccccc", date), purpose: "Приватна мета",
-  }, "directory");
+  });
   const schedule = await store.readVisitSchedule(db, { from: date, to: date });
   assert.deepEqual(schedule.busy, [{ date, startTime: "09:00", endTime: "09:20", status: "busy" }]);
   assert.equal("bookings" in schedule, false);
@@ -321,26 +411,26 @@ test("public schedule projection contains generic busy intervals without private
 
 test("teacher list omits elapsed visits and teacher cannot cancel visit history", async () => {
   const { sqlite, db } = await visitDatabase();
-  const teacher = { userId: "auth-teacher", email: "teacher@example.test", displayName: "Teacher", fullName: null };
+  const teacher = teacherIdentity();
   const localNow = validation.kyivLocalNow();
   const createdAt = new Date().toISOString();
   sqlite.prepare(`INSERT INTO visit_bookings (
-    id, owner_auth_user_id, owner_email, surname, visit_date, start_time, end_time,
+    id, owner_user_id, surname, visit_date, start_time, end_time,
     purpose, status, cancel_reason, version, created_at, updated_at
-  ) VALUES ('VIS-PAST', ?, ?, 'Шевченко', ?, '00:00', '00:20', '', 'active', '', 1, ?, ?)`)
-    .run(teacher.userId, teacher.email, localNow.date, createdAt, createdAt);
+  ) VALUES ('VIS-PAST', ?, 'Учитель', ?, '00:00', '00:20', '', 'active', '', 1, ?, ?)`)
+    .run(teacher.teacherUserId, localNow.date, createdAt, createdAt);
   for (const time of ["00:00", "00:05", "00:10", "00:15"]) {
     sqlite.prepare("INSERT INTO visit_slot_claims(segment_key, booking_id, closure_id, created_at) VALUES (?, 'VIS-PAST', NULL, ?)")
       .run(`${localNow.date}T${time}`, createdAt);
   }
   const own = await store.readVisitSchedule(db, { from: localNow.date, to: localNow.date }, {
-    ownerAuthUserId: teacher.userId, status: "active", futureOnly: localNow,
+    ownerUserId: teacher.teacherUserId, status: "active", futureOnly: localNow,
   });
   assert.deepEqual(own.bookings, []);
   await assert.rejects(
     store.cancelOwnVisitBooking(db, teacher, "VIS-PAST", {
       requestId: "12121212-1212-4212-8212-121212121212", expectedVersion: 1, reason: null,
-    }, "directory"),
+    }),
     (error) => error instanceof store.VisitScheduleError && error.code === "booking_not_cancellable",
   );
   assert.equal(sqlite.prepare("SELECT status FROM visit_bookings WHERE id='VIS-PAST'").get().status, "active");
