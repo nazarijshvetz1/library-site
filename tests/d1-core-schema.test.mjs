@@ -14,6 +14,7 @@ const migrationFiles = [
   "drizzle/0007_cold_whiplash.sql",
   "drizzle/0008_sudden_thunderbird.sql",
   "drizzle/0009_happy_silver_samurai.sql",
+  "drizzle/0010_shocking_cobalt_man.sql",
 ];
 
 async function migratedDatabase() {
@@ -91,6 +92,8 @@ test("core migration extends the existing draft database without recreating it",
     "migration_import_runs",
     "mutation_commands",
     "portal_notifications",
+    "teacher_profiles",
+    "material_request_reservations",
     "users",
     "visit_bookings",
     "visit_guest_rate_limits",

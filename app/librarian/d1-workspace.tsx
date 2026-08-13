@@ -76,6 +76,7 @@ type CatalogMaterial = {
   libraryQuantity: number;
   otherLocationQuantity: number;
   loanedQuantity: number;
+  reservedQuantity?: number;
 };
 
 type MaterialLink = {
@@ -102,6 +103,10 @@ type MaterialHolding = {
   locationType: string;
   locationStatus: string;
   condition: string | null;
+  physicalQuantity: number;
+  reservedQuantity: number;
+  availableQuantity: number;
+  /** Effective unreserved quantity retained for issue-form compatibility. */
   quantity: number;
   updatedAt: string;
 };
@@ -596,6 +601,10 @@ export default function D1LibrarianWorkspace({
           <Link href="/librarian/visits" className={styles.catalogLink}>
             <span className={styles.catalogLinkLabel}>Відвідування</span>{" "}
             <span aria-hidden="true">▣</span>
+          </Link>
+          <Link href="/librarian/teachers" className={styles.catalogLink}>
+            <span className={styles.catalogLinkLabel}>Вчителі</span>{" "}
+            <span aria-hidden="true">●</span>
           </Link>
           <span>
             <strong>{displayName}</strong>
@@ -1234,6 +1243,7 @@ function MaterialCard({
         <StockStat label="Усього" value={detail.totalQuantity} />
         <StockStat label="Доступно" value={detail.availableQuantity} emphasis />
         <StockStat label="Видано" value={detail.loanedQuantity} />
+        {detail.reservedQuantity ? <StockStat label="Зарезервовано" value={detail.reservedQuantity} /> : null}
       </div>
 
       <section className={styles.detailSection}>
@@ -1263,7 +1273,10 @@ function MaterialCard({
                   <strong>{holding.locationName}</strong>
                   <small>{conditionLabel(holding.condition)}</small>
                 </div>
-                <b>{holding.quantity}</b>
+                <b>{holding.availableQuantity}</b>
+                {holding.reservedQuantity > 0 ? (
+                  <small>Фізично {holding.physicalQuantity} · у резерві {holding.reservedQuantity}</small>
+                ) : null}
               </article>
             ))}
           </div>
@@ -2067,7 +2080,9 @@ function ReceiptForm({
   const holding = detail.holdings.find(
     (item) => item.locationId === effectiveLocationId && (item.condition || "unspecified") === condition,
   );
-  const expectedQuantity = holding?.quantity ?? 0;
+  // Receipts compare against physical stock; reservations only reduce what can
+  // be issued, not the number of copies already present at the location.
+  const expectedQuantity = holding?.physicalQuantity ?? 0;
   const [quantity, setQuantity] = useState("1");
   const [occurredAt, setOccurredAt] = useState(() => todayInKyiv());
   const [documentNumber, setDocumentNumber] = useState("");
@@ -2299,8 +2314,8 @@ function TransferForm({
         destinationLocationId: effectiveDestinationId,
         condition: source?.condition || "unspecified",
         quantity: Number(quantity),
-        expectedSourceQuantity: source?.quantity,
-        expectedDestinationQuantity: destinationHolding?.quantity ?? 0,
+        expectedSourceQuantity: source?.physicalQuantity,
+        expectedDestinationQuantity: destinationHolding?.physicalQuantity ?? 0,
         occurredAt,
         documentNumber: documentNumber.trim() || null,
         notes: notes.trim() || null,
@@ -2401,10 +2416,10 @@ function TransferForm({
             <input value={conditionLabel(source?.condition ?? null)} readOnly />
           </EditField>
           <EditField label="У джерелі зараз">
-            <input value={source?.quantity ?? 0} readOnly />
+            <input value={source?.physicalQuantity ?? 0} readOnly />
           </EditField>
           <EditField label="У місці призначення зараз">
-            <input value={destinationHolding?.quantity ?? 0} readOnly />
+            <input value={destinationHolding?.physicalQuantity ?? 0} readOnly />
           </EditField>
           <EditField label="Перемістити" required error={fieldErrors.quantity}>
             <input
@@ -2601,7 +2616,7 @@ function WriteoffForm({
         locationId: source?.locationId,
         condition: source?.condition || "unspecified",
         quantity: amount,
-        expectedQuantity: source?.quantity,
+        expectedQuantity: source?.physicalQuantity,
         reason,
         occurredAt,
         documentNumber: documentNumber.trim() || null,
@@ -2693,7 +2708,7 @@ function WriteoffForm({
             </select>
           </EditField>
           <EditField label="Поточний залишок">
-            <input value={source?.quantity ?? 0} readOnly />
+            <input value={source?.physicalQuantity ?? 0} readOnly />
           </EditField>
           <EditField label="Списати" required error={fieldErrors.quantity}>
             <input
@@ -2853,7 +2868,9 @@ function StockCountForm({
   const effectiveLocationId = locationId || countableLocations[0]?.id || "";
   const [condition, setCondition] = useState(() => initialHolding?.condition || "unspecified");
   const selected = holdings.find((holding) => holding.locationId === effectiveLocationId && (holding.condition || "unspecified") === condition) ?? null;
-  const expectedQuantity = selected?.quantity ?? 0;
+  // Inventory counting always starts from the physical quantity. Reserved
+  // copies remain on the shelf and must still be counted.
+  const expectedQuantity = selected?.physicalQuantity ?? 0;
   const [countedQuantity, setCountedQuantity] = useState(() => String(expectedQuantity));
   const [reason, setReason] = useState("inventory_count");
   const [occurredAt, setOccurredAt] = useState(() => todayInKyiv());
@@ -2867,14 +2884,14 @@ function StockCountForm({
     const next = holdings.find((holding) => holding.locationId === value);
     const nextCondition = next?.condition || "unspecified";
     setCondition(nextCondition);
-    setCountedQuantity(String(next?.quantity ?? 0));
+    setCountedQuantity(String(next?.physicalQuantity ?? 0));
     setMessage("");
   }
 
   function chooseCondition(value: string) {
     setCondition(value);
     const next = holdings.find((holding) => holding.locationId === effectiveLocationId && (holding.condition || "unspecified") === value);
-    setCountedQuantity(String(next?.quantity ?? 0));
+    setCountedQuantity(String(next?.physicalQuantity ?? 0));
     setMessage("");
   }
 

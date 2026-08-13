@@ -35,6 +35,34 @@ type D1Binding = {
 
 export type LibraryD1Database = D1Binding;
 
+async function activeReservedQuantity(
+  db: D1Binding,
+  materialId: string,
+  locationId: string,
+  condition: string,
+): Promise<number> {
+  const row = await db.prepare(`
+    SELECT COALESCE(SUM(reserved_quantity-issued_quantity-released_quantity), 0) AS quantity
+    FROM material_request_reservations
+    WHERE material_id=? AND source_location_id=? AND condition=?
+      AND reserved_quantity>issued_quantity+released_quantity
+  `).bind(materialId, locationId, condition).first<{ quantity: number }>();
+  return Math.max(0, Number(row?.quantity) || 0);
+}
+
+async function activeMaterialReservationQuantity(
+  db: D1Binding,
+  materialId: string,
+): Promise<number> {
+  const row = await db.prepare(`
+    SELECT COALESCE(SUM(reserved_quantity-issued_quantity-released_quantity), 0) AS quantity
+    FROM material_request_reservations
+    WHERE material_id=?
+      AND reserved_quantity>issued_quantity+released_quantity
+  `).bind(materialId).first<{ quantity: number }>();
+  return Math.max(0, Number(row?.quantity) || 0);
+}
+
 type MutationActor = {
   id: string;
   email: string;
@@ -913,11 +941,26 @@ export async function archiveMaterialDirect(
         JOIN class_loans clo ON clo.id = cli.class_loan_id
         WHERE cli.material_id = ? AND clo.status != 'cancelled'
           AND cli.quantity_issued > cli.quantity_returned
-      ), 0) AS loaned_quantity
-  `).bind(materialId, materialId, materialId, materialId, materialId)
-    .first<{ total_quantity: number; loaned_quantity: number }>();
+      ), 0) AS loaned_quantity,
+      COALESCE((
+        SELECT SUM(reservation.reserved_quantity-reservation.issued_quantity-reservation.released_quantity)
+        FROM material_request_reservations reservation
+        WHERE reservation.material_id=?
+          AND reservation.reserved_quantity>reservation.issued_quantity+reservation.released_quantity
+      ), 0) AS reserved_quantity
+  `).bind(materialId, materialId, materialId, materialId, materialId, materialId)
+    .first<{ total_quantity: number; loaned_quantity: number; reserved_quantity: number }>();
   const totalQuantity = Number(stock?.total_quantity ?? 0);
   const loanedQuantity = Number(stock?.loaned_quantity ?? 0);
+  const reservedQuantity = Number(stock?.reserved_quantity ?? 0);
+  if (reservedQuantity > 0) {
+    throw new LibraryMutationError(
+      "material_reserved_conflict",
+      409,
+      "Матеріал зарезервовано для замовлення вчителя. Спочатку видайте або звільніть резерв.",
+      { reservedQuantity },
+    );
+  }
   if (totalQuantity > 0 || loanedQuantity > 0) {
     throw new LibraryMutationError(
       "material_has_stock",
@@ -1019,17 +1062,32 @@ export async function archiveMaterialDirect(
     completeCommandStatement(db, input.requestId, result, archivedAt),
   ];
 
-  const replayed = await executeIdempotentBatch<MaterialArchiveResult>(
-    db,
-    statements,
-    input.requestId,
-    requestHash,
-    {
-      code: "material_archive_conflict",
-      message: "Матеріал або його залишок змінилися під час видалення. Оновіть картку й перевірте залишок.",
-    },
-  );
-  return replayed ?? result;
+  try {
+    const replayed = await executeIdempotentBatch<MaterialArchiveResult>(
+      db,
+      statements,
+      input.requestId,
+      requestHash,
+      {
+        code: "material_archive_conflict",
+        message: "Матеріал або його залишок змінилися під час видалення. Оновіть картку й перевірте залишок.",
+      },
+    );
+    return replayed ?? result;
+  } catch (error) {
+    if (
+      error instanceof LibraryMutationError
+      && error.code === "material_archive_conflict"
+      && await activeMaterialReservationQuantity(db, materialId) > 0
+    ) {
+      throw new LibraryMutationError(
+        "material_reserved_conflict",
+        409,
+        "Матеріал зарезервовано для замовлення вчителя.",
+      );
+    }
+    throw error;
+  }
 }
 
 export async function adjustHoldingToActualCount(
@@ -1094,6 +1152,20 @@ export async function adjustHoldingToActualCount(
       409,
       "Залишок уже змінився. Оновіть картку матеріалу.",
       { currentQuantity: quantityBefore },
+    );
+  }
+  const reservedQuantity = await activeReservedQuantity(
+    db,
+    input.materialId,
+    input.locationId,
+    input.condition,
+  );
+  if (input.countedQuantity < reservedQuantity) {
+    throw new LibraryMutationError(
+      "reserved_stock_conflict",
+      409,
+      "Фактичний залишок не може бути меншим за підготовлений резерв.",
+      { reservedQuantity, minimumQuantity: reservedQuantity },
     );
   }
 
@@ -1444,6 +1516,20 @@ export async function transferStockDirect(
       { availableQuantity: sourceQuantityBefore },
     );
   }
+  const sourceReservedQuantity = await activeReservedQuantity(
+    db,
+    input.materialId,
+    input.sourceLocationId,
+    input.condition,
+  );
+  if (sourceQuantityBefore - input.quantity < sourceReservedQuantity) {
+    throw new LibraryMutationError(
+      "reserved_stock_conflict",
+      409,
+      "Ці примірники зарезервовано для замовлення вчителя.",
+      { reservedQuantity: sourceReservedQuantity, availableQuantity: sourceQuantityBefore - sourceReservedQuantity },
+    );
+  }
 
   const sourceQuantityAfter = sourceQuantityBefore - input.quantity;
   const destinationQuantityAfter = destinationQuantityBefore + input.quantity;
@@ -1762,6 +1848,20 @@ export async function writeOffStockDirect(
       { availableQuantity: quantityBefore },
     );
   }
+  const reservedQuantity = await activeReservedQuantity(
+    db,
+    input.materialId,
+    input.locationId,
+    input.condition,
+  );
+  if (quantityBefore - input.quantity < reservedQuantity) {
+    throw new LibraryMutationError(
+      "reserved_stock_conflict",
+      409,
+      "Ці примірники зарезервовано для замовлення вчителя.",
+      { reservedQuantity, availableQuantity: quantityBefore - reservedQuantity },
+    );
+  }
 
   const quantityAfter = quantityBefore - input.quantity;
   const createdAt = new Date().toISOString();
@@ -1976,7 +2076,14 @@ export async function issueLoanToTeacher(
       item.sourceLocationId,
       item.condition,
     ).first<{ quantity: number; version: number; location_type: string }>();
-    const currentQuantity = state ? Number(state.quantity) : 0;
+    const physicalQuantity = state ? Number(state.quantity) : 0;
+    const reservedQuantity = await activeReservedQuantity(
+      db,
+      item.materialId,
+      item.sourceLocationId,
+      item.condition,
+    );
+    const currentQuantity = Math.max(0, physicalQuantity - reservedQuantity);
     if (currentQuantity !== item.expectedAvailableQuantity) {
       throw new LibraryMutationError(
         "stock_quantity_conflict",
@@ -1994,7 +2101,7 @@ export async function issueLoanToTeacher(
       );
     }
     itemStates.push({
-      quantity: currentQuantity,
+      quantity: physicalQuantity,
       version: Number(state.version),
       locationType: state.location_type,
     });
@@ -2673,6 +2780,12 @@ export async function issueLoanToClass(
         json_extract(value, '$.sourceLocationId') AS location_id,
         json_extract(value, '$.condition') AS condition
       FROM json_each(?)
+    ), active_reservations AS (
+      SELECT material_id, source_location_id, condition,
+             SUM(reserved_quantity-issued_quantity-released_quantity) AS quantity
+      FROM material_request_reservations
+      WHERE reserved_quantity>issued_quantity+released_quantity
+      GROUP BY material_id, source_location_id, condition
     )
     SELECT
       requested.item_index,
@@ -2682,7 +2795,8 @@ export async function issueLoanToClass(
       CASE WHEN l.status = 'active' AND l.type != 'service' THEN l.id END
         AS active_location_id,
       h.quantity,
-      h.version
+      h.version,
+      COALESCE(active_reservations.quantity, 0) AS reserved_quantity
     FROM requested
     LEFT JOIN materials m ON m.id = requested.material_id
     LEFT JOIN locations l ON l.id = requested.location_id
@@ -2690,6 +2804,10 @@ export async function issueLoanToClass(
       ON h.material_id = requested.material_id
       AND h.location_id = requested.location_id
       AND h.condition = requested.condition
+    LEFT JOIN active_reservations
+      ON active_reservations.material_id=requested.material_id
+      AND active_reservations.source_location_id=requested.location_id
+      AND active_reservations.condition=requested.condition
     ORDER BY requested.item_index
   `).bind(requestedItemsJson).all<{
     item_index: number;
@@ -2698,6 +2816,7 @@ export async function issueLoanToClass(
     active_location_id: string | null;
     quantity: number | null;
     version: number | null;
+    reserved_quantity: number;
   }>();
   const itemStates = (itemStateResult.results ?? []).map((state) => ({
     quantity: state.active_material_id && state.active_location_id
@@ -2706,6 +2825,7 @@ export async function issueLoanToClass(
     version: state.active_material_id && state.active_location_id
       ? Number(state.version ?? 0)
       : 0,
+    reservedQuantity: Number(state.reserved_quantity ?? 0),
   }));
   if (itemStates.length !== input.items.length) {
     throw new LibraryMutationError(
@@ -2714,9 +2834,10 @@ export async function issueLoanToClass(
       "Не вдалося прочитати всі позиції видачі.",
     );
   }
-  input.items.forEach((item, index) => {
+  for (let index = 0; index < input.items.length; index += 1) {
+    const item = input.items[index];
     const state = itemStates[index];
-    const currentQuantity = state.quantity;
+    const currentQuantity = Math.max(0, state.quantity - state.reservedQuantity);
     if (currentQuantity !== item.expectedAvailableQuantity) {
       throw new LibraryMutationError(
         "stock_quantity_conflict",
@@ -2733,7 +2854,7 @@ export async function issueLoanToClass(
         { materialId: item.materialId, currentQuantity },
       );
     }
-  });
+  }
 
   const createdAt = new Date().toISOString();
   const classLoanId = `CLOAN-${crypto.randomUUID()}`;
@@ -4023,7 +4144,7 @@ function rebuildStockTotalsStatement(
   return db.prepare(`
     INSERT INTO material_stock_totals (
       material_id, total_quantity, library_quantity,
-      other_location_quantity, loaned_quantity, updated_at
+      other_location_quantity, loaned_quantity, reserved_quantity, updated_at
     )
     SELECT
       m.id,
@@ -4031,6 +4152,7 @@ function rebuildStockTotalsStatement(
       COALESCE(SUM(CASE WHEN l.type = 'library' THEN h.quantity ELSE 0 END), 0),
       COALESCE(SUM(CASE WHEN l.type != 'library' THEN h.quantity ELSE 0 END), 0),
       COALESCE(outstanding.quantity, 0),
+      COALESCE(reservations.quantity, 0),
       ?
     FROM materials m
     LEFT JOIN holdings h ON h.material_id = m.id
@@ -4054,13 +4176,21 @@ function rebuildStockTotalsStatement(
       ) outstanding_rows
       GROUP BY material_id
     ) outstanding ON outstanding.material_id = m.id
+    LEFT JOIN (
+      SELECT material_id,
+             SUM(reserved_quantity-issued_quantity-released_quantity) AS quantity
+      FROM material_request_reservations
+      WHERE reserved_quantity>issued_quantity+released_quantity
+      GROUP BY material_id
+    ) reservations ON reservations.material_id=m.id
     WHERE m.id = ?
-    GROUP BY m.id, outstanding.quantity
+    GROUP BY m.id, outstanding.quantity, reservations.quantity
     ON CONFLICT(material_id) DO UPDATE SET
       total_quantity = excluded.total_quantity,
       library_quantity = excluded.library_quantity,
       other_location_quantity = excluded.other_location_quantity,
       loaned_quantity = excluded.loaned_quantity,
+      reserved_quantity = excluded.reserved_quantity,
       updated_at = excluded.updated_at
   `).bind(updatedAt, materialId);
 }
@@ -4077,7 +4207,7 @@ function rebuildStockTotalsBulkStatement(
     )
     INSERT INTO material_stock_totals (
       material_id, total_quantity, library_quantity,
-      other_location_quantity, loaned_quantity, updated_at
+      other_location_quantity, loaned_quantity, reserved_quantity, updated_at
     )
     SELECT
       m.id,
@@ -4085,6 +4215,7 @@ function rebuildStockTotalsBulkStatement(
       COALESCE(SUM(CASE WHEN l.type = 'library' THEN h.quantity ELSE 0 END), 0),
       COALESCE(SUM(CASE WHEN l.type != 'library' THEN h.quantity ELSE 0 END), 0),
       COALESCE(outstanding.quantity, 0),
+      COALESCE(reservations.quantity, 0),
       ?
     FROM requested
     JOIN materials m ON m.id = requested.material_id
@@ -4109,12 +4240,20 @@ function rebuildStockTotalsBulkStatement(
       ) outstanding_rows
       GROUP BY material_id
     ) outstanding ON outstanding.material_id = m.id
-    GROUP BY m.id, outstanding.quantity
+    LEFT JOIN (
+      SELECT material_id,
+             SUM(reserved_quantity-issued_quantity-released_quantity) AS quantity
+      FROM material_request_reservations
+      WHERE reserved_quantity>issued_quantity+released_quantity
+      GROUP BY material_id
+    ) reservations ON reservations.material_id=m.id
+    GROUP BY m.id, outstanding.quantity, reservations.quantity
     ON CONFLICT(material_id) DO UPDATE SET
       total_quantity = excluded.total_quantity,
       library_quantity = excluded.library_quantity,
       other_location_quantity = excluded.other_location_quantity,
       loaned_quantity = excluded.loaned_quantity,
+      reserved_quantity = excluded.reserved_quantity,
       updated_at = excluded.updated_at
   `).bind(JSON.stringify(materialIds), updatedAt);
 }
@@ -4136,6 +4275,24 @@ async function executeIdempotentBatch<T>(
   } catch (error) {
     const replay = await replayCompletedCommand<T>(db, requestId, requestHash);
     if (replay) return replay;
+    const errorMessage = error instanceof Error ? error.message : String(error ?? "");
+    if (errorMessage.includes("material_reserved_conflict")) {
+      throw new LibraryMutationError(
+        "material_reserved_conflict",
+        409,
+        "Матеріал зарезервовано для замовлення вчителя.",
+      );
+    }
+    if (
+      errorMessage.includes("reserved_stock_conflict")
+      || errorMessage.includes("reservation_stock_conflict")
+    ) {
+      throw new LibraryMutationError(
+        "reserved_stock_conflict",
+        409,
+        "Операція зачіпає примірники, зарезервовані для замовлення вчителя.",
+      );
+    }
     const classified = conflict.classify?.(error) ?? null;
     if (classified) {
       throw new LibraryMutationError(classified.code, 409, classified.message);
@@ -4164,7 +4321,10 @@ function isOptimisticGuardFailure(error: unknown): boolean {
     || message.includes("NOT NULL constraint failed: holdings.location_id")
     || message.includes(
       "UNIQUE constraint failed: holdings.material_id, holdings.location_id, holdings.condition",
-    );
+    )
+    || message.includes("reserved_stock_conflict")
+    || message.includes("reservation_stock_conflict")
+    || message.includes("material_reserved_conflict");
 }
 
 function classifyClassLoanIssueRace(

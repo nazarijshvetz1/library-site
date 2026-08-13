@@ -38,6 +38,7 @@ const migrationUrls = [
     "0005_young_night_nurse.sql",
     "0006_pale_sauron.sql", "0007_cold_whiplash.sql", "0008_sudden_thunderbird.sql",
     "0009_happy_silver_samurai.sql",
+    "0010_shocking_cobalt_man.sql",
   ].map((file) => new URL(`../drizzle/${file}`, import.meta.url));
 
 async function fixturePlan() {
@@ -212,6 +213,10 @@ test("fresh preflight, one atomic batch, FTS rebuild and post-verify agree", asy
   assertVerifiedImportInspection(after, plan);
   assert.equal(after.totalUnchanged, totalHostedImportRows(plan));
   assert.equal(database.prepare("SELECT status FROM migration_import_runs WHERE id = 'MIG-test'").get().status, "committed");
+  assert.equal(
+    database.prepare("SELECT COUNT(*) AS count FROM teacher_profiles").get().count,
+    plan.tables.users.filter((row) => row.role === "teacher").length,
+  );
   assert.equal(database.prepare("SELECT count(*) AS count FROM materials_fts").get().count, plan.tables.materials.length);
   assert.equal(
     database.prepare("SELECT count(*) AS count FROM materials_fts WHERE materials_fts MATCH '9780306406157'").get().count,
@@ -336,6 +341,8 @@ test("staging reset atomically clears domain/import rows while preserving migrat
       '2026-09-10T00:00:00.000Z', NULL, ?, ?,
       '2026-09-10T00:00:00.000Z', '2026-09-10T00:00:00.000Z')
   `).run(teacherId, "b".repeat(64), actorId, actorId);
+  database.prepare(`UPDATE teacher_profiles SET subject_position='Reset',updated_at='2026-09-10T00:00:00.000Z'
+    WHERE teacher_user_id=?`).run(teacherId);
   database.prepare(`
     INSERT INTO visit_teacher_sessions (
       token_hash, teacher_user_id, credential_version, pending_scope, ip_scope_hash,
@@ -368,9 +375,9 @@ test("staging reset atomically clears domain/import rows while preserving migrat
     .run("3".repeat(64));
   database.prepare(`INSERT INTO material_requests (
     id,teacher_user_id,status,teacher_notes,librarian_note,rejection_reason,
-    pickup_location_id,resulting_loan_id,reviewed_by_user_id,cancelled_by_user_id,
+    pickup_location_id,resulting_loan_id,due_at,reviewed_by_user_id,cancelled_by_user_id,
     version,submitted_at,ready_at,completed_at,rejected_at,cancelled_at,created_at,updated_at
-  ) VALUES ('MRQ-RESET',?,'submitted','','','',NULL,NULL,NULL,NULL,1,
+  ) VALUES ('MRQ-RESET',?,'submitted','','','',NULL,NULL,NULL,NULL,NULL,1,
     '2026-09-10T00:00:00.000Z',NULL,NULL,NULL,NULL,
     '2026-09-10T00:00:00.000Z','2026-09-10T00:00:00.000Z')`).run(teacherId);
   database.prepare(`INSERT INTO material_request_items (
@@ -378,6 +385,11 @@ test("staging reset atomically clears domain/import rows while preserving migrat
     approved_quantity,fulfilled_quantity,sort_order,created_at,updated_at
   ) VALUES ('MRI-RESET','MRQ-RESET',?,'Reset material','',1,NULL,0,0,
     '2026-09-10T00:00:00.000Z','2026-09-10T00:00:00.000Z')`).run(materialId);
+  database.prepare(`INSERT INTO material_request_reservations (
+    id,request_id,request_item_id,material_id,source_location_id,condition,
+    reserved_quantity,issued_quantity,released_quantity,created_at,updated_at
+  ) VALUES ('MRR-RESET','MRQ-RESET','MRI-RESET',?,?, 'unspecified',1,0,0,
+    '2026-09-10T00:00:00.000Z','2026-09-10T00:00:00.000Z')`).run(materialId, locationId);
   database.prepare(`INSERT INTO material_request_events (
     id,request_id,actor_user_id,actor_kind,kind,from_status,to_status,metadata_json,created_at
   ) VALUES ('MRE-RESET','MRQ-RESET',?,'teacher','submitted',NULL,'submitted',NULL,
@@ -409,10 +421,15 @@ test("staging reset atomically clears domain/import rows while preserving migrat
   assert.equal(report.deletedByTable.visit_teacher_login_limits, 1);
   assert.equal(report.deletedByTable.visit_teacher_access_commands, 1);
   assert.equal(report.deletedByTable.visit_teacher_credentials, 1);
+  assert.equal(
+    report.deletedByTable.teacher_profiles,
+    plan.tables.users.filter((row) => row.role === "teacher").length,
+  );
   assert.equal(report.deletedByTable.visit_guest_sessions, 1);
   assert.equal(report.deletedByTable.visit_guest_rate_limits, 1);
   assert.equal(report.deletedByTable.material_request_events, 1);
   assert.equal(report.deletedByTable.material_request_items, 1);
+  assert.equal(report.deletedByTable.material_request_reservations, 1);
   assert.equal(report.deletedByTable.portal_notifications, 1);
   assert.equal(report.deletedByTable.material_requests, 1);
   assert.ok(report.batchStatements <= 50, `reset used ${report.batchStatements} statements`);

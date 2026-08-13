@@ -84,6 +84,11 @@ function openDatabase() {
     "0002_remove_legacy_audit_triggers.sql",
     "0003_odd_the_order.sql",
     "0005_young_night_nurse.sql",
+    "0006_pale_sauron.sql",
+    "0007_cold_whiplash.sql",
+    "0008_sudden_thunderbird.sql",
+    "0009_happy_silver_samurai.sql",
+    "0010_shocking_cobalt_man.sql",
   ]) {
     const sql = fs.readFileSync(path.join(root, "drizzle", file), "utf8");
     for (const statement of sql.split(/-->\s*statement-breakpoint/gu)) {
@@ -164,6 +169,29 @@ function seedActiveClassYear(sqlite) {
       NULL, '', 1, ?, ?
     )
   `).run(now, now);
+}
+
+function seedActiveReservation(sqlite, quantity = 5, suffix = "RACE") {
+  const now = "2026-08-11T09:00:00.000Z";
+  const requestId = `MRQ-${suffix}`;
+  const itemId = `MRI-${suffix}`;
+  sqlite.prepare(`INSERT INTO material_requests (
+    id,teacher_user_id,status,teacher_notes,librarian_note,rejection_reason,
+    pickup_location_id,resulting_loan_id,due_at,reviewed_by_user_id,cancelled_by_user_id,
+    version,submitted_at,ready_at,completed_at,rejected_at,cancelled_at,created_at,updated_at
+  ) VALUES (?,'USR-TCH','in_review','','','',NULL,NULL,NULL,'USR-LIB',NULL,
+    1,?,NULL,NULL,NULL,NULL,?,?)`).run(requestId, now, now, now);
+  sqlite.prepare(`INSERT INTO material_request_items (
+    id,request_id,material_id,title_snapshot,author_snapshot,requested_quantity,
+    approved_quantity,fulfilled_quantity,sort_order,created_at,updated_at
+  ) VALUES (?,?,'CAT-0001','Стара назва','Автор',?, ?,0,0,?,?)`)
+    .run(itemId, requestId, quantity, quantity, now, now);
+  sqlite.prepare(`INSERT INTO material_request_reservations (
+    id,request_id,request_item_id,material_id,source_location_id,condition,
+    reserved_quantity,issued_quantity,released_quantity,created_at,updated_at
+  ) VALUES (?,?,?,'CAT-0001','LOC-001','unspecified',?,0,0,?,?)`)
+    .run(`MRR-${suffix}`, requestId, itemId, quantity, now, now);
+  return { requestId, itemId, reservationId: `MRR-${suffix}` };
 }
 
 const actor = {
@@ -1666,4 +1694,111 @@ test("transfer and writeoff races return 409 without partial inventory history",
   assert.equal(writeoffDb.sqlite.prepare("SELECT count(*) AS count FROM inventory_transactions").get().count, 0);
   assert.equal(writeoffDb.sqlite.prepare("SELECT count(*) AS count FROM mutation_commands").get().count, 0);
   assert.equal(writeoffDb.sqlite.prepare("SELECT count(*) AS count FROM audit_events").get().count, 0);
+});
+
+test("a reservation committed after mutation pre-read blocks every holding-decrease path", async () => {
+  const scenarios = [
+    {
+      name: "stock count",
+      prepare: () => {},
+      mutate: ({ d1 }) => mutation.adjustHoldingToActualCount(actor, {
+        requestId: "30000000-0000-4000-8000-000000000001",
+        materialId: "CAT-0001", locationId: "LOC-001", condition: "unspecified",
+        expectedQuantity: 5, countedQuantity: 4, reason: "inventory_count",
+        occurredAt: "2026-08-13", notes: null,
+      }, d1),
+    },
+    {
+      name: "transfer",
+      prepare: ({ sqlite }) => sqlite.prepare(`INSERT INTO locations
+        (id,name,type,status,is_public,sort_order,created_at,updated_at)
+        VALUES ('LOC-002','Кабінет','classroom','active',1,2,?,?)`)
+        .run("2026-08-11T08:00:00.000Z", "2026-08-11T08:00:00.000Z"),
+      mutate: ({ d1 }) => mutation.transferStockDirect(actor, {
+        requestId: "30000000-0000-4000-8000-000000000002",
+        materialId: "CAT-0001", sourceLocationId: "LOC-001",
+        destinationLocationId: "LOC-002", condition: "unspecified", quantity: 1,
+        expectedSourceQuantity: 5, expectedDestinationQuantity: 0,
+        occurredAt: "2026-08-13", documentNumber: null, notes: null,
+      }, d1),
+    },
+    {
+      name: "writeoff",
+      prepare: () => {},
+      mutate: ({ d1 }) => mutation.writeOffStockDirect(actor, {
+        requestId: "30000000-0000-4000-8000-000000000003",
+        materialId: "CAT-0001", locationId: "LOC-001", condition: "unspecified",
+        quantity: 1, expectedQuantity: 5, reason: "damaged",
+        occurredAt: "2026-08-13", documentNumber: "Акт", notes: null,
+      }, d1),
+    },
+    {
+      name: "teacher issue",
+      prepare: () => {},
+      mutate: ({ d1 }) => mutation.issueLoanToTeacher(actor, {
+        requestId: "30000000-0000-4000-8000-000000000004",
+        teacherUserId: "USR-TCH", issuedAt: "2026-08-13", dueAt: null, notes: null,
+        items: [{ materialId: "CAT-0001", sourceLocationId: "LOC-001",
+          condition: "unspecified", quantity: 1, expectedAvailableQuantity: 5 }],
+      }, d1),
+    },
+    {
+      name: "class issue",
+      prepare: ({ sqlite }) => seedActiveClassYear(sqlite),
+      mutate: ({ d1 }) => mutation.issueLoanToClass(actor, {
+        requestId: "30000000-0000-4000-8000-000000000005",
+        classYearId: "CY-2026-001", expectedClassYearVersion: 1,
+        responsibleTeacherUserId: "USR-TCH", issuedAt: "2026-09-01",
+        dueAt: null, notes: null,
+        items: [{ materialId: "CAT-0001", sourceLocationId: "LOC-001",
+          condition: "unspecified", quantity: 1, expectedAvailableQuantity: 5 }],
+      }, d1),
+    },
+  ];
+
+  for (const [index, scenario] of scenarios.entries()) {
+    const context = openDatabase();
+    scenario.prepare(context);
+    context.d1.beforeBatch = () => seedActiveReservation(
+      context.sqlite,
+      5,
+      `RACE-${index}`,
+    );
+    await assert.rejects(
+      scenario.mutate(context),
+      (error) => error instanceof mutation.LibraryMutationError
+        && error.status === 409 && error.code === "reserved_stock_conflict",
+      scenario.name,
+    );
+    assert.equal(context.sqlite.prepare("SELECT quantity FROM holdings WHERE material_id='CAT-0001' AND location_id='LOC-001'").get().quantity, 5, scenario.name);
+    assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM inventory_transactions").get().n, 0, scenario.name);
+    assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM class_loan_transactions").get().n, 0, scenario.name);
+    assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM mutation_commands").get().n, 0, scenario.name);
+    assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_events").get().n, 0, scenario.name);
+  }
+});
+
+test("a concurrent active reservation prevents material archive", async () => {
+  const context = openDatabase();
+  context.sqlite.prepare("DELETE FROM holdings WHERE material_id='CAT-0001'").run();
+  context.sqlite.prepare(`UPDATE material_stock_totals SET total_quantity=0,
+    library_quantity=0,other_location_quantity=0,loaned_quantity=0,reserved_quantity=0
+    WHERE material_id='CAT-0001'`).run();
+  context.d1.beforeBatch = () => {
+    context.sqlite.prepare(`INSERT INTO holdings
+      (material_id,location_id,condition,quantity,version,updated_at)
+      VALUES ('CAT-0001','LOC-001','unspecified',1,1,'2026-08-13T08:00:00.000Z')`).run();
+    seedActiveReservation(context.sqlite, 1, "ARCHIVE");
+  };
+  await assert.rejects(
+    mutation.archiveMaterialDirect(actor, "CAT-0001", {
+      requestId: "30000000-0000-4000-8000-000000000006",
+      expectedVersion: 1,
+    }, context.d1),
+    (error) => error instanceof mutation.LibraryMutationError
+      && error.status === 409 && error.code === "material_reserved_conflict",
+  );
+  assert.equal(context.sqlite.prepare("SELECT status FROM materials WHERE id='CAT-0001'").get().status, "active");
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM mutation_commands").get().n, 0);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_events").get().n, 0);
 });

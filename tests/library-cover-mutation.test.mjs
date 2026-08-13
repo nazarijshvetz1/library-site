@@ -113,6 +113,16 @@ function openDatabase() {
       if (statement.trim()) sqlite.exec(statement);
     }
   }
+  sqlite.exec(`ALTER TABLE material_stock_totals
+    ADD COLUMN reserved_quantity integer NOT NULL DEFAULT 0`);
+  sqlite.exec(`CREATE TABLE material_request_reservations (
+    material_id text NOT NULL,
+    source_location_id text NOT NULL,
+    condition text NOT NULL,
+    reserved_quantity integer NOT NULL,
+    issued_quantity integer NOT NULL DEFAULT 0,
+    released_quantity integer NOT NULL DEFAULT 0
+  )`);
   seed(sqlite);
   return { sqlite, d1: new TestD1(sqlite), bucket: new TestBucket() };
 }

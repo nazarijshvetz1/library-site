@@ -5,7 +5,9 @@ import type {
   MaterialRequestActionInput,
   MaterialRequestCancelInput,
   MaterialRequestCreateInput,
+  MaterialRequestIssueInput,
   MaterialRequestReadyInput,
+  MaterialRequestReleaseInput,
   NotificationReadInput,
 } from "./teacher-material-request-validation.ts";
 
@@ -50,7 +52,22 @@ export type MaterialRequestItemProjection = {
   requestedQuantity: number;
   approvedQuantity: number;
   fulfilledQuantity: number;
+  reservedQuantity: number;
   sortOrder: number;
+  reservations: MaterialRequestReservationProjection[];
+};
+
+export type MaterialRequestReservationProjection = {
+  id: string;
+  sourceLocationId: string;
+  sourceLocationName: string;
+  condition: string;
+  reservedQuantity: number;
+  issuedQuantity: number;
+  releasedQuantity: number;
+  remainingQuantity: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type MaterialRequestProjection = {
@@ -66,6 +83,7 @@ export type MaterialRequestProjection = {
   pickupLocationName: string | null;
   pickupLocation: { id: string; name: string } | null;
   resultingLoanId: string | null;
+  dueAt: string | null;
   version: number;
   submittedAt: string;
   readyAt: string | null;
@@ -116,6 +134,7 @@ type RequestRow = {
   pickup_location_id: string | null;
   pickup_location_name: string | null;
   resulting_loan_id: string | null;
+  due_at: string | null;
   version: number;
   submitted_at: string;
   ready_at: string | null;
@@ -137,6 +156,7 @@ type RequestRow = {
   cover_storage_key: string | null;
   cover_external_url: string | null;
   cover_sha256: string | null;
+  reservations_json: string;
   new_count?: number;
 };
 
@@ -316,6 +336,7 @@ export async function createTeacherMaterialRequest(
     pickupLocationName: null,
     pickupLocation: null,
     resultingLoanId: null,
+    dueAt: null,
     version: 1,
     submittedAt: createdAt,
     readyAt: null,
@@ -339,7 +360,9 @@ export async function createTeacherMaterialRequest(
       requestedQuantity: item.qty,
       approvedQuantity: 0,
       fulfilledQuantity: 0,
+      reservedQuantity: 0,
       sortOrder: item.sortOrder,
+      reservations: [],
     })),
   };
   const statements: D1Statement[] = [
@@ -770,6 +793,41 @@ export async function applyLibrarianMaterialRequestAction(
   if (input.action === "ready") {
     return readyMaterialRequest(db, actor, current, input, requestHash);
   }
+  if (input.action === "issue") {
+    return issueMaterialRequest(db, actor, current, input, requestHash);
+  }
+  if (input.action === "release") {
+    return releaseMaterialRequest(db, actor, current, input, requestHash);
+  }
+  if (input.action === "complete") {
+    const items = current.items.flatMap((item) => item.reservations)
+      .filter((reservation) => reservation.remainingQuantity > 0)
+      .map((reservation) => ({
+        reservationId: reservation.id,
+        quantity: reservation.remainingQuantity,
+      }));
+    if (!items.length) {
+      if (current.resultingLoanId
+        && (current.status === "ready" || current.status === "partially_ready")) {
+        // Before reservation support, "ready" already created the loan and
+        // reduced holdings. Completing that legacy row must only record the
+        // physical handoff; issuing it again would double-decrement stock.
+        return transitionMaterialRequest(db, actor, current, input, requestHash);
+      }
+      throw new TeacherMaterialRequestError(
+        "nothing_to_issue",
+        409,
+        "У заявці немає підготовлених примірників для видачі.",
+      );
+    }
+    return issueMaterialRequest(db, actor, current, {
+      ...input,
+      action: "issue",
+      issuedAt: kyivToday(),
+      dueAt: current.dueAt,
+      items,
+    }, requestHash);
+  }
   return transitionMaterialRequest(db, actor, current, input, requestHash);
 }
 
@@ -1166,16 +1224,16 @@ async function readyMaterialRequest(
   input: MaterialRequestReadyInput,
   requestHash: string,
 ): Promise<Record<string, unknown>> {
-  if (current.status !== "submitted" && current.status !== "in_review") {
+  if (!["submitted", "in_review", "ready", "partially_ready"].includes(current.status)) {
     throw new TeacherMaterialRequestError(
       "invalid_request_transition",
       409,
-      "Цю заявку вже не можна позначити готовою.",
+      "Цю заявку вже не можна підготувати.",
       { status: current.status },
     );
   }
   const currentByItem = new Map(current.items.map((item) => [item.id, item]));
-  const readyItems = input.items.map((item) => {
+  const targets = input.items.map((item) => {
     const requested = currentByItem.get(item.itemId);
     if (!requested || item.approvedQuantity > requested.requestedQuantity) {
       throw new TeacherMaterialRequestError(
@@ -1185,57 +1243,106 @@ async function readyMaterialRequest(
         { itemId: item.itemId },
       );
     }
-    return { ...item, materialId: requested.materialId };
+    if (item.approvedQuantity < requested.approvedQuantity) {
+      throw new TeacherMaterialRequestError(
+        "reservation_quantity_decrease_requires_release",
+        409,
+        "Для зменшення підготовленої кількості скористайтеся дією «Не забрано».",
+        { itemId: item.itemId, approvedQuantity: requested.approvedQuantity },
+      );
+    }
+    return {
+      ...item,
+      materialId: requested.materialId,
+      deltaQuantity: item.approvedQuantity - requested.approvedQuantity,
+    };
   });
-  const issuedAt = kyivToday();
-  if (input.dueAt && input.dueAt < issuedAt) {
-    throw new TeacherMaterialRequestError("invalid_due_date", 400, "Дата повернення не може бути в минулому.");
+  const dueBase = kyivToday();
+  if (input.dueAt && input.dueAt < dueBase) {
+    throw new TeacherMaterialRequestError(
+      "invalid_due_date",
+      400,
+      "Дата повернення не може бути в минулому.",
+    );
   }
-  const availability = await db.prepare(`
-    WITH requested AS (
-      SELECT
-        CAST(json_extract(value, '$.itemId') AS TEXT) AS item_id,
-        CAST(json_extract(value, '$.materialId') AS TEXT) AS material_id,
-        CAST(json_extract(value, '$.sourceLocationId') AS TEXT) AS source_location_id,
-        CAST(json_extract(value, '$.condition') AS TEXT) AS condition,
-        CAST(json_extract(value, '$.approvedQuantity') AS INTEGER) AS approved_quantity,
-        CAST(json_extract(value, '$.expectedAvailableQuantity') AS INTEGER) AS expected_quantity,
-        CAST(key AS INTEGER) AS sort_order
-      FROM json_each(?)
-    )
-    SELECT requested.*, m.id AS active_material_id,
-           source.id AS active_source_id,
-           h.quantity, h.version,
-           pickup.id AS pickup_id, pickup.name AS pickup_name
-    FROM requested
-    LEFT JOIN materials m ON m.id=requested.material_id
-      AND m.status='active' AND m.archived_at IS NULL
-    LEFT JOIN locations source ON source.id=requested.source_location_id
-      AND source.status='active' AND source.type!='service'
-    LEFT JOIN holdings h ON h.material_id=requested.material_id
-      AND h.location_id=requested.source_location_id
-      AND h.condition=requested.condition
-    LEFT JOIN locations pickup ON pickup.id=?
-      AND pickup.status='active' AND pickup.is_public=1
-    ORDER BY requested.sort_order
-  `).bind(JSON.stringify(readyItems), input.pickupLocationId).all<{
-    item_id: string;
-    material_id: string;
-    source_location_id: string;
-    condition: string;
-    approved_quantity: number;
-    expected_quantity: number;
-    sort_order: number;
-    active_material_id: string | null;
-    active_source_id: string | null;
-    quantity: number | null;
-    version: number | null;
-    pickup_id: string | null;
-    pickup_name: string | null;
-  }>();
+  const deltas = targets.filter((item) => item.deltaQuantity > 0);
+  const settingsChanged = input.pickupLocationId !== current.pickupLocationId
+    || input.dueAt !== current.dueAt;
+  if (!deltas.length && !settingsChanged) {
+    throw new TeacherMaterialRequestError(
+      "nothing_to_reserve",
+      409,
+      "Підготовлена кількість не змінилася.",
+    );
+  }
+
+  const availability = deltas.length
+    ? await db.prepare(`
+        WITH requested AS (
+          SELECT
+            CAST(json_extract(value, '$.itemId') AS TEXT) AS item_id,
+            CAST(json_extract(value, '$.materialId') AS TEXT) AS material_id,
+            CAST(json_extract(value, '$.sourceLocationId') AS TEXT) AS source_location_id,
+            CAST(json_extract(value, '$.condition') AS TEXT) AS condition,
+            CAST(json_extract(value, '$.deltaQuantity') AS INTEGER) AS reserve_quantity,
+            CAST(json_extract(value, '$.expectedAvailableQuantity') AS INTEGER) AS expected_quantity,
+            CAST(key AS INTEGER) AS sort_order
+          FROM json_each(?)
+        ), active_reservations AS (
+          SELECT material_id, source_location_id, condition,
+                 SUM(reserved_quantity-issued_quantity-released_quantity) AS quantity
+          FROM material_request_reservations
+          WHERE reserved_quantity>issued_quantity+released_quantity
+          GROUP BY material_id, source_location_id, condition
+        )
+        SELECT requested.*, m.id AS active_material_id,
+               source.id AS active_source_id,
+               COALESCE(h.quantity, 0) AS physical_quantity,
+               COALESCE(active_reservations.quantity, 0) AS reserved_quantity,
+               pickup.id AS pickup_id, pickup.name AS pickup_name
+        FROM requested
+        LEFT JOIN materials m ON m.id=requested.material_id
+          AND m.status='active' AND m.archived_at IS NULL
+        LEFT JOIN locations source ON source.id=requested.source_location_id
+          AND source.status='active' AND source.type!='service'
+        LEFT JOIN holdings h ON h.material_id=requested.material_id
+          AND h.location_id=requested.source_location_id
+          AND h.condition=requested.condition
+        LEFT JOIN active_reservations ON active_reservations.material_id=requested.material_id
+          AND active_reservations.source_location_id=requested.source_location_id
+          AND active_reservations.condition=requested.condition
+        LEFT JOIN locations pickup ON pickup.id=?
+          AND pickup.status='active' AND pickup.is_public=1
+        ORDER BY requested.sort_order
+      `).bind(JSON.stringify(deltas), input.pickupLocationId).all<{
+        item_id: string;
+        material_id: string;
+        source_location_id: string;
+        condition: string;
+        reserve_quantity: number;
+        expected_quantity: number;
+        active_material_id: string | null;
+        active_source_id: string | null;
+        physical_quantity: number;
+        reserved_quantity: number;
+        pickup_id: string | null;
+        pickup_name: string | null;
+      }>()
+    : { results: [] };
+  const pickup = await db.prepare(`
+    SELECT id, name FROM locations
+    WHERE id=? AND status='active' AND is_public=1 LIMIT 1
+  `).bind(input.pickupLocationId).first<{ id: string; name: string }>();
+  if (!pickup) {
+    throw new TeacherMaterialRequestError(
+      "pickup_location_not_found",
+      404,
+      "Оберіть активне публічне місце отримання.",
+    );
+  }
   const states = availability.results ?? [];
-  if (states.length !== readyItems.length || states.some((state) => !state.pickup_id)) {
-    throw new TeacherMaterialRequestError("pickup_location_not_found", 404, "Оберіть активне публічне місце отримання.");
+  if (states.length !== deltas.length) {
+    throw new TeacherMaterialRequestError("request_items_mismatch", 409, "Не вдалося перевірити всі позиції заявки.");
   }
   for (const state of states) {
     if (!state.active_material_id || !state.active_source_id) {
@@ -1246,65 +1353,61 @@ async function readyMaterialRequest(
         { materialId: state.material_id },
       );
     }
-    const quantity = Math.max(0, Number(state.quantity) || 0);
-    if (quantity !== Number(state.expected_quantity)) {
+    const effective = Math.max(
+      0,
+      Number(state.physical_quantity) - Number(state.reserved_quantity),
+    );
+    if (effective !== Number(state.expected_quantity)) {
       throw new TeacherMaterialRequestError(
-        "stock_quantity_conflict",
+        "reservation_stock_conflict",
         409,
-        "Залишок одного з матеріалів змінився. Оновіть заявку.",
-        { materialId: state.material_id, currentQuantity: quantity },
+        "Доступна кількість змінилася. Оновіть заявку.",
+        { materialId: state.material_id, currentQuantity: effective },
       );
     }
-    if (Number(state.approved_quantity) > quantity) {
+    if (Number(state.reserve_quantity) > effective) {
       throw new TeacherMaterialRequestError(
         "insufficient_stock",
         409,
-        "У вибраному місці недостатньо примірників.",
-        { materialId: state.material_id, currentQuantity: quantity },
+        "У вибраному місці недостатньо вільних примірників.",
+        { materialId: state.material_id, currentQuantity: effective },
       );
     }
   }
 
-  const positiveStates = states.filter((state) => Number(state.approved_quantity) > 0);
   const now = new Date().toISOString();
-  const loanId = `LOAN-${crypto.randomUUID()}`;
-  const transactionId = `TX-${crypto.randomUUID()}`;
-  const status: "ready" | "partially_ready" = readyItems.length === current.items.length
-    && readyItems.every((item) =>
-      item.approvedQuantity === currentByItem.get(item.itemId)?.requestedQuantity
-    ) ? "ready" : "partially_ready";
-  const approvedByItem = new Map(readyItems.map((item) => [item.itemId, item.approvedQuantity]));
-  const fullApprovalItems = current.items.map((item) => ({
-    itemId: item.id,
-    approvedQuantity: approvedByItem.get(item.id) ?? 0,
+  const reservationRows = states.map((state) => ({
+    id: `MRR-${crypto.randomUUID()}`,
+    itemId: state.item_id,
+    materialId: state.material_id,
+    sourceLocationId: state.source_location_id,
+    condition: state.condition,
+    quantity: Number(state.reserve_quantity),
+    expectedAvailableQuantity: Number(state.expected_quantity),
   }));
-  const loanItemIds = new Map(positiveStates.map((state) => [
-    state.material_id,
-    `LI-${crypto.randomUUID()}`,
-  ]));
+  const targetByItem = new Map(targets.map((item) => [item.itemId, item.approvedQuantity]));
+  const itemApprovals = current.items.map((item) => ({
+    itemId: item.id,
+    approvedQuantity: targetByItem.get(item.id) ?? item.approvedQuantity,
+  }));
+  const status: "ready" | "partially_ready" = itemApprovals.every((item) =>
+    item.approvedQuantity === currentByItem.get(item.itemId)?.requestedQuantity
+  ) ? "ready" : "partially_ready";
   const result = {
     requestId: current.id,
     status,
     version: current.version + 1,
     updatedAt: now,
-    readyAt: now,
-    pickupLocationId: input.pickupLocationId,
-    pickupLocationName: String(states[0]?.pickup_name ?? ""),
-    resultingLoanId: loanId,
-    loan: {
-      loanId,
-      status: "open",
-      teacherUserId: current.teacherUserId,
-      issuedAt,
-      dueAt: input.dueAt,
-      transactionId,
-      items: positiveStates.map((state) => ({
-        loanItemId: loanItemIds.get(state.material_id),
-        materialId: state.material_id,
-        quantityIssued: Number(state.approved_quantity),
-        quantityReturned: 0,
-      })),
-    },
+    readyAt: current.readyAt ?? now,
+    dueAt: input.dueAt,
+    pickupLocationId: pickup.id,
+    pickupLocationName: pickup.name,
+    reserved: reservationRows.map((row) => ({
+      reservationId: row.id,
+      itemId: row.itemId,
+      materialId: row.materialId,
+      quantity: row.quantity,
+    })),
   };
   const eventId = `MRE-${crypto.randomUUID()}`;
   const notificationId = `NTF-${crypto.randomUUID()}`;
@@ -1319,224 +1422,73 @@ async function readyMaterialRequest(
       current.id,
       now,
     ),
-    db.prepare(`
-      INSERT INTO loans (
-        id, teacher_user_id, status, issued_at, due_at, closed_at, notes,
-        issued_by_user_id, closed_by_user_id, version, created_at, updated_at
+  ];
+  for (const reservation of reservationRows) {
+    statements.push(db.prepare(`
+      INSERT INTO material_request_reservations (
+        id, request_id, request_item_id, material_id, source_location_id,
+        condition, reserved_quantity, issued_quantity, released_quantity,
+        created_at, updated_at
       )
-      SELECT ?, mr.teacher_user_id, 'open', ?, ?, NULL, ?, actor.id,
-             NULL, 1, ?, ?
+      SELECT ?, mr.id, item.id, item.material_id, holding.location_id,
+             holding.condition, ?, 0, 0, ?, ?
       FROM material_requests mr
-      JOIN users teacher ON teacher.id=mr.teacher_user_id
-        AND teacher.role='teacher' AND teacher.status='active'
-      JOIN users actor ON actor.id=?
-        AND actor.role IN ('admin','librarian') AND actor.status='active'
-      JOIN locations pickup ON pickup.id=?
-        AND pickup.status='active' AND pickup.is_public=1
-      WHERE mr.id=? AND mr.version=? AND mr.status IN ('submitted','in_review')
+      JOIN material_request_items item ON item.request_id=mr.id AND item.id=?
+        AND item.material_id=?
+      JOIN holdings holding ON holding.material_id=item.material_id
+        AND holding.location_id=? AND holding.condition=?
+      JOIN locations source ON source.id=holding.location_id
+        AND source.status='active' AND source.type!='service'
+      WHERE mr.id=? AND mr.version=?
+        AND mr.status IN ('submitted','in_review','ready','partially_ready')
+        AND holding.quantity-COALESCE((
+          SELECT SUM(active.reserved_quantity-active.issued_quantity-active.released_quantity)
+          FROM material_request_reservations active
+          WHERE active.material_id=holding.material_id
+            AND active.source_location_id=holding.location_id
+            AND active.condition=holding.condition
+            AND active.reserved_quantity>active.issued_quantity+active.released_quantity
+        ), 0)=?
     `).bind(
-      loanId,
-      issuedAt,
-      input.dueAt,
-      "",
+      reservation.id,
+      reservation.quantity,
       now,
       now,
-      actor.id,
-      input.pickupLocationId,
+      reservation.itemId,
+      reservation.materialId,
+      reservation.sourceLocationId,
+      reservation.condition,
       current.id,
       current.version,
-    ),
-    db.prepare(`
-      INSERT INTO inventory_transactions (
-        id, request_id, kind, occurred_at, document_number, reason, notes,
-        loan_id, actor_user_id, reversal_of_id, status, created_at
-      ) VALUES (?, ?, 'loan_issue', ?, NULL, NULL, ?, ?, ?, NULL, 'posted', ?)
-    `).bind(
-      transactionId,
-      input.requestId,
-      issuedAt,
-      "",
-      loanId,
-      actor.id,
-      now,
-    ),
-  ];
-  for (const state of positiveStates) {
-    const beforeQuantity = Number(state.quantity);
-    const beforeVersion = Number(state.version);
-    const quantityIssued = Number(state.approved_quantity);
-    const afterQuantity = beforeQuantity - quantityIssued;
-    const loanItemId = String(loanItemIds.get(state.material_id));
-    const inventoryLineId = `LINE-${crypto.randomUUID()}`;
-    statements.push(
-      db.prepare(`
-        INSERT INTO loan_items (
-          id, loan_id, material_id, source_location_id, condition,
-          quantity_issued, quantity_returned, notes, created_at, updated_at
-        ) VALUES (
-          ?, ?,
-          (SELECT id FROM materials WHERE id=? AND status='active' AND archived_at IS NULL),
-          (SELECT id FROM locations WHERE id=? AND status='active' AND type!='service'),
-          ?, ?, 0, '', ?, ?
-        )
-      `).bind(
-        loanItemId,
-        loanId,
-        state.material_id,
-        state.source_location_id,
-        state.condition,
-        quantityIssued,
-        now,
-        now,
-      ),
-    );
-    statements.push(db.prepare(`
-      INSERT INTO inventory_transaction_lines (
-        id, transaction_id, material_id, location_id, condition,
-        quantity_delta, quantity_before, quantity_after, counted_quantity,
-        loan_item_id, created_at
-      ) VALUES (
-        ?, ?, (
-          SELECT holding.material_id
-          FROM holdings holding
-          JOIN inventory_transactions transaction_record
-            ON transaction_record.id=? AND transaction_record.request_id=?
-            AND transaction_record.loan_id=?
-          JOIN loan_items loan_item ON loan_item.id=?
-            AND loan_item.loan_id=transaction_record.loan_id
-            AND loan_item.material_id=holding.material_id
-            AND loan_item.source_location_id=holding.location_id
-            AND loan_item.condition=holding.condition
-            AND loan_item.quantity_issued=?
-          JOIN mutation_commands command ON command.id=transaction_record.request_id
-            AND command.actor_user_id=? AND command.status='processing'
-          WHERE holding.material_id=? AND holding.location_id=?
-            AND holding.condition=? AND holding.quantity=? AND holding.version=?
-        ), ?, ?, ?, ?, ?, NULL, ?, ?
-      )
-    `).bind(
-      inventoryLineId,
-      transactionId,
-      transactionId,
-      input.requestId,
-      loanId,
-      loanItemId,
-      quantityIssued,
-      actor.id,
-      state.material_id,
-      state.source_location_id,
-      state.condition,
-      beforeQuantity,
-      beforeVersion,
-      state.source_location_id,
-      state.condition,
-      -quantityIssued,
-      beforeQuantity,
-      afterQuantity,
-      loanItemId,
-      now,
+      reservation.expectedAvailableQuantity,
     ));
-    if (afterQuantity === 0) {
-      statements.push(db.prepare(`
-        DELETE FROM holdings
-        WHERE material_id=? AND location_id=? AND condition=?
-          AND quantity=? AND version=?
-          AND EXISTS (
-            SELECT 1 FROM inventory_transaction_lines line
-            WHERE line.id=? AND line.transaction_id=?
-              AND line.material_id=holdings.material_id
-              AND line.location_id=holdings.location_id
-              AND line.condition=holdings.condition
-              AND line.quantity_before=holdings.quantity
-              AND line.quantity_after=0 AND line.loan_item_id=?
-          )
-      `).bind(
-        state.material_id,
-        state.source_location_id,
-        state.condition,
-        beforeQuantity,
-        beforeVersion,
-        inventoryLineId,
-        transactionId,
-        loanItemId,
-      ));
-    } else {
-      statements.push(db.prepare(`
-        UPDATE holdings
-        SET quantity=?, version=?, updated_at=?
-        WHERE material_id=? AND location_id=? AND condition=?
-          AND quantity=? AND version=?
-          AND EXISTS (
-            SELECT 1 FROM inventory_transaction_lines line
-            WHERE line.id=? AND line.transaction_id=?
-              AND line.material_id=holdings.material_id
-              AND line.location_id=holdings.location_id
-              AND line.condition=holdings.condition
-              AND line.quantity_before=holdings.quantity
-              AND line.quantity_after=? AND line.loan_item_id=?
-          )
-      `).bind(
-        afterQuantity,
-        beforeVersion + 1,
-        now,
-        state.material_id,
-        state.source_location_id,
-        state.condition,
-        beforeQuantity,
-        beforeVersion,
-        inventoryLineId,
-        transactionId,
-        afterQuantity,
-        loanItemId,
-      ));
-    }
   }
-  const positiveMaterialIds = positiveStates.map((state) => state.material_id);
   statements.push(
-    rebuildStockTotalsBulkStatement(db, positiveMaterialIds, now),
     db.prepare(`
       WITH updates AS (
-        SELECT
-          CAST(json_extract(value, '$.itemId') AS TEXT) AS item_id,
-          CAST(json_extract(value, '$.approvedQuantity') AS INTEGER) AS approved_quantity
+        SELECT CAST(json_extract(value, '$.itemId') AS TEXT) AS item_id,
+               CAST(json_extract(value, '$.approvedQuantity') AS INTEGER) AS approved_quantity
         FROM json_each(?)
       )
-      UPDATE material_request_items
-      SET approved_quantity = (
-            SELECT approved_quantity FROM updates
-            WHERE updates.item_id=material_request_items.id
-          ),
-          fulfilled_quantity = (
-            SELECT approved_quantity FROM updates
-            WHERE updates.item_id=material_request_items.id
-          ),
-          updated_at = ?
-      WHERE request_id=?
-        AND id IN (SELECT item_id FROM updates)
-    `).bind(JSON.stringify(fullApprovalItems), now, current.id),
+      UPDATE material_request_items AS item
+      SET approved_quantity=(SELECT approved_quantity FROM updates WHERE item_id=item.id),
+          updated_at=?
+      WHERE item.request_id=? AND EXISTS (SELECT 1 FROM updates WHERE item_id=item.id)
+    `).bind(JSON.stringify(itemApprovals), now, current.id),
     db.prepare(`
       UPDATE material_requests
-      SET status=?, librarian_note=?, rejection_reason='', pickup_location_id=?,
-          resulting_loan_id=?, reviewed_by_user_id=?, ready_at=?,
+      SET status=?, librarian_note='', rejection_reason='', pickup_location_id=?,
+          due_at=?, reviewed_by_user_id=?, ready_at=COALESCE(ready_at, ?),
           version=version+1, updated_at=?
-      WHERE id=? AND version=? AND status IN ('submitted','in_review')
+      WHERE id=? AND version=?
+        AND status IN ('submitted','in_review','ready','partially_ready')
         AND (SELECT COUNT(*) FROM material_request_items WHERE request_id=?)=?
-        AND NOT EXISTS (
-          SELECT 1
-          FROM material_request_items mri
-          LEFT JOIN json_each(?) supplied
-            ON CAST(json_extract(supplied.value, '$.itemId') AS TEXT)=mri.id
-          WHERE mri.request_id=? AND (
-            supplied.value IS NULL OR mri.approved_quantity !=
-              CAST(json_extract(supplied.value, '$.approvedQuantity') AS INTEGER)
-          )
-        )
-        AND EXISTS (SELECT 1 FROM loans WHERE id=? AND teacher_user_id=material_requests.teacher_user_id)
+        AND (SELECT COUNT(*) FROM material_request_reservations
+             WHERE id IN (SELECT CAST(value AS TEXT) FROM json_each(?)))=?
     `).bind(
       status,
-      "",
       input.pickupLocationId,
-      loanId,
+      input.dueAt,
       actor.id,
       now,
       now,
@@ -1544,9 +1496,8 @@ async function readyMaterialRequest(
       current.version,
       current.id,
       current.items.length,
-      JSON.stringify(fullApprovalItems),
-      current.id,
-      loanId,
+      JSON.stringify(reservationRows.map((row) => row.id)),
+      reservationRows.length,
     ),
     db.prepare(`
       INSERT INTO material_request_events (
@@ -1554,35 +1505,21 @@ async function readyMaterialRequest(
         from_status, to_status, metadata_json, created_at
       ) VALUES (?, (
         SELECT id FROM material_requests
-        WHERE id=? AND status=? AND version=? AND resulting_loan_id=? AND updated_at=?
-          AND EXISTS (
-            SELECT 1 FROM mutation_commands
-            WHERE id=? AND actor_user_id=? AND status='processing'
-              AND target_type='material_request'
-              AND target_id=material_requests.id AND request_hash=?
-          )
+        WHERE id=? AND status=? AND version=? AND updated_at=?
       ), ?, 'librarian', 'ready', ?, ?, ?, ?)
     `).bind(
       eventId,
       current.id,
       status,
       current.version + 1,
-      loanId,
       now,
-      input.requestId,
-      actor.id,
-      requestHash,
       actor.id,
       current.status,
       status,
       JSON.stringify({
         pickupLocationId: input.pickupLocationId,
-        loanId,
-        items: readyItems.map((item) => ({
-          itemId: item.itemId,
-          materialId: item.materialId,
-          approvedQuantity: item.approvedQuantity,
-        })),
+        dueAt: input.dueAt,
+        reservations: result.reserved,
       }),
       now,
     ),
@@ -1592,7 +1529,7 @@ async function readyMaterialRequest(
         entity_type, entity_id, read_at, version, created_at, updated_at
       )
       SELECT ?, mr.teacher_user_id, ?, 'material_request_ready',
-             'Замовлення готове', ?, 'material_request', mr.id,
+             'Замовлення підготовлено', ?, 'material_request', mr.id,
              NULL, 1, ?, ?
       FROM material_requests mr
       WHERE mr.id=? AND EXISTS (
@@ -1601,12 +1538,21 @@ async function readyMaterialRequest(
     `).bind(
       notificationId,
       `material-request:${current.id}:ready:${input.requestId}`,
-      `Замовлення підготовлено. Місце отримання: ${String(states[0]?.pickup_name ?? "")}.`,
+      `Замовлення зарезервовано. Місце отримання: ${pickup.name}.`,
       now,
       now,
       current.id,
       eventId,
     ),
+  );
+  if (reservationRows.length) {
+    statements.push(rebuildStockTotalsBulkStatement(
+      db,
+      [...new Set(reservationRows.map((row) => row.materialId))],
+      now,
+    ));
+  }
+  statements.push(
     requestAuditStatement(
       db,
       actor,
@@ -1614,12 +1560,517 @@ async function readyMaterialRequest(
       current,
       result,
       eventId,
-      {
-        status,
-        version: current.version + 1,
-        updatedAt: now,
-        resultingLoanId: loanId,
-      },
+      { status, version: current.version + 1, updatedAt: now },
+      now,
+    ),
+    completeCommandStatement(db, input.requestId, result, now),
+  );
+  if (statements.length > 50) {
+    throw new TeacherMaterialRequestError("request_too_large", 400, "У заявці забагато позицій.");
+  }
+  const replayed = await executeIdempotentBatch<typeof result>(
+    db,
+    statements,
+    input.requestId,
+    actor.id,
+    requestHash,
+    "reservation_stock_conflict",
+    "Залишок або заявка змінилися. Оновіть чергу.",
+  );
+  return replayed ?? result;
+}
+
+async function issueMaterialRequest(
+  db: TeacherMaterialRequestDatabase,
+  actor: MutationActor,
+  current: MaterialRequestProjection,
+  input: MaterialRequestIssueInput,
+  requestHash: string,
+): Promise<Record<string, unknown>> {
+  if (current.status !== "ready" && current.status !== "partially_ready") {
+    throw new TeacherMaterialRequestError(
+      "invalid_request_transition",
+      409,
+      "Видати можна лише підготовлене замовлення.",
+      { status: current.status },
+    );
+  }
+  if (input.issuedAt > kyivToday()) {
+    throw new TeacherMaterialRequestError(
+      "invalid_issue_date",
+      400,
+      "Дата фактичної видачі не може бути в майбутньому.",
+    );
+  }
+  if (input.dueAt && input.dueAt < input.issuedAt) {
+    throw new TeacherMaterialRequestError(
+      "invalid_due_date",
+      400,
+      "Дата повернення не може передувати даті видачі.",
+    );
+  }
+  const reservationIndex = new Map<string, {
+    item: MaterialRequestItemProjection;
+    reservation: MaterialRequestReservationProjection;
+  }>();
+  for (const item of current.items) {
+    for (const reservation of item.reservations) {
+      reservationIndex.set(reservation.id, { item, reservation });
+    }
+  }
+  const issueRows = input.items.map((entry) => {
+    const indexed = reservationIndex.get(entry.reservationId);
+    if (!indexed) {
+      throw new TeacherMaterialRequestError(
+        "reservation_not_found",
+        404,
+        "Резерв не знайдено у цій заявці.",
+        { reservationId: entry.reservationId },
+      );
+    }
+    if (entry.quantity > indexed.reservation.remainingQuantity) {
+      throw new TeacherMaterialRequestError(
+        "reservation_quantity_exceeded",
+        409,
+        "Кількість видачі перевищує активний резерв.",
+        { reservationId: entry.reservationId, remainingQuantity: indexed.reservation.remainingQuantity },
+      );
+    }
+    return {
+      reservationId: entry.reservationId,
+      requestItemId: indexed.item.id,
+      materialId: indexed.item.materialId,
+      sourceLocationId: indexed.reservation.sourceLocationId,
+      condition: indexed.reservation.condition,
+      quantity: entry.quantity,
+      reservedBefore: indexed.reservation.reservedQuantity,
+      issuedBefore: indexed.reservation.issuedQuantity,
+      releasedBefore: indexed.reservation.releasedQuantity,
+      issuedAfter: indexed.reservation.issuedQuantity + entry.quantity,
+      loanItemId: `LI-${crypto.randomUUID()}`,
+      lineId: `LINE-${crypto.randomUUID()}`,
+    };
+  });
+  if (!issueRows.length) {
+    throw new TeacherMaterialRequestError("nothing_to_issue", 409, "Немає примірників для видачі.");
+  }
+
+  const holdingResponse = await db.prepare(`
+    WITH requested AS (
+      SELECT DISTINCT
+        CAST(json_extract(value, '$.materialId') AS TEXT) AS material_id,
+        CAST(json_extract(value, '$.sourceLocationId') AS TEXT) AS location_id,
+        CAST(json_extract(value, '$.condition') AS TEXT) AS condition
+      FROM json_each(?)
+    )
+    SELECT requested.material_id, requested.location_id, requested.condition,
+           h.quantity, h.version
+    FROM requested
+    LEFT JOIN holdings h ON h.material_id=requested.material_id
+      AND h.location_id=requested.location_id AND h.condition=requested.condition
+  `).bind(JSON.stringify(issueRows)).all<{
+    material_id: string;
+    location_id: string;
+    condition: string;
+    quantity: number | null;
+    version: number | null;
+  }>();
+  const holdingGroups = new Map<string, {
+    materialId: string;
+    locationId: string;
+    condition: string;
+    quantity: number;
+    version: number;
+  }>();
+  for (const row of holdingResponse.results ?? []) {
+    holdingGroups.set(stockKey(row.material_id, row.location_id, row.condition), {
+      materialId: row.material_id,
+      locationId: row.location_id,
+      condition: row.condition,
+      quantity: Number(row.quantity ?? 0),
+      version: Number(row.version ?? 0),
+    });
+  }
+  const workingGroups = new Map([...holdingGroups].map(([key, value]) => [key, { ...value }]));
+  for (const row of issueRows) {
+    const group = workingGroups.get(stockKey(row.materialId, row.sourceLocationId, row.condition));
+    if (!group || group.version < 1 || group.quantity < row.quantity) {
+      throw new TeacherMaterialRequestError(
+        "reservation_stock_conflict",
+        409,
+        "Фізичний залишок підготовлених примірників змінився.",
+        { materialId: row.materialId },
+      );
+    }
+    Object.assign(row, {
+      quantityBefore: group.quantity,
+      versionBefore: group.version,
+      quantityAfter: group.quantity - row.quantity,
+      versionAfter: group.version + 1,
+    });
+    group.quantity -= row.quantity;
+    group.version += 1;
+  }
+
+  const existingLoan = current.resultingLoanId
+    ? await db.prepare(`
+        SELECT id, teacher_user_id, status, version, issued_at, due_at
+        FROM loans WHERE id=? LIMIT 1
+      `).bind(current.resultingLoanId).first<{
+        id: string;
+        teacher_user_id: string;
+        status: string;
+        version: number;
+        issued_at: string;
+        due_at: string | null;
+      }>()
+    : null;
+  if (current.resultingLoanId && (
+    !existingLoan
+    || existingLoan.teacher_user_id !== current.teacherUserId
+    || existingLoan.status !== "open"
+  )) {
+    throw new TeacherMaterialRequestError(
+      "request_loan_closed",
+      409,
+      "Пов’язану видачу вже закрито. Залишок резерву можна лише звільнити.",
+    );
+  }
+
+  const now = new Date().toISOString();
+  const loanId = existingLoan?.id ?? `LOAN-${crypto.randomUUID()}`;
+  const transactionId = `TX-${crypto.randomUUID()}`;
+  const issuedByItem = new Map<string, number>();
+  for (const row of issueRows) {
+    issuedByItem.set(row.requestItemId, (issuedByItem.get(row.requestItemId) ?? 0) + row.quantity);
+  }
+  const totalActiveBefore = current.items.flatMap((item) => item.reservations)
+    .reduce((sum, reservation) => sum + reservation.remainingQuantity, 0);
+  const issuedNow = issueRows.reduce((sum, row) => sum + row.quantity, 0);
+  const activeAfter = totalActiveBefore - issuedNow;
+  const status: MaterialRequestStatus = activeAfter === 0
+    ? "completed"
+    : current.items.every((item) => item.approvedQuantity === item.requestedQuantity)
+      ? "ready"
+      : "partially_ready";
+  const result = {
+    requestId: current.id,
+    status,
+    version: current.version + 1,
+    updatedAt: now,
+    completedAt: status === "completed" ? now : null,
+    resultingLoanId: loanId,
+    loan: {
+      loanId,
+      status: "open",
+      teacherUserId: current.teacherUserId,
+      issuedAt: existingLoan?.issued_at ?? input.issuedAt,
+      dueAt: input.dueAt,
+      transactionId,
+      items: issueRows.map((row) => ({
+        loanItemId: row.loanItemId,
+        reservationId: row.reservationId,
+        materialId: row.materialId,
+        quantityIssued: row.quantity,
+        quantityReturned: 0,
+      })),
+    },
+  };
+  const eventId = `MRE-${crypto.randomUUID()}`;
+  const notificationId = `NTF-${crypto.randomUUID()}`;
+  const statements: D1Statement[] = [
+    insertCommandStatement(
+      db,
+      input.requestId,
+      requestHash,
+      actor.id,
+      "material_request.issue",
+      "material_request",
+      current.id,
+      now,
+    ),
+    db.prepare(`
+      WITH updates AS (
+        SELECT
+          CAST(json_extract(value, '$.reservationId') AS TEXT) AS reservation_id,
+          CAST(json_extract(value, '$.reservedBefore') AS INTEGER) AS reserved_before,
+          CAST(json_extract(value, '$.issuedBefore') AS INTEGER) AS issued_before,
+          CAST(json_extract(value, '$.releasedBefore') AS INTEGER) AS released_before,
+          CAST(json_extract(value, '$.issuedAfter') AS INTEGER) AS issued_after
+        FROM json_each(?)
+      )
+      UPDATE material_request_reservations AS reservation
+      SET issued_quantity=(SELECT issued_after FROM updates WHERE reservation_id=reservation.id),
+          updated_at=?
+      WHERE reservation.request_id=? AND EXISTS (
+        SELECT 1 FROM updates
+        WHERE reservation_id=reservation.id
+          AND reserved_before=reservation.reserved_quantity
+          AND issued_before=reservation.issued_quantity
+          AND released_before=reservation.released_quantity
+          AND issued_after<=reservation.reserved_quantity-reservation.released_quantity
+      )
+    `).bind(JSON.stringify(issueRows), now, current.id),
+    db.prepare(`
+      WITH updates AS (
+        SELECT CAST(json_extract(value, '$.requestItemId') AS TEXT) AS item_id,
+               SUM(CAST(json_extract(value, '$.quantity') AS INTEGER)) AS quantity
+        FROM json_each(?) GROUP BY item_id
+      )
+      UPDATE material_request_items AS item
+      SET fulfilled_quantity=fulfilled_quantity+(
+            SELECT quantity FROM updates WHERE item_id=item.id
+          ), updated_at=?
+      WHERE item.request_id=? AND EXISTS (
+        SELECT 1 FROM updates WHERE item_id=item.id
+          AND item.fulfilled_quantity+quantity<=item.approved_quantity
+      )
+    `).bind(JSON.stringify(issueRows), now, current.id),
+  ];
+  if (existingLoan) {
+    statements.push(db.prepare(`
+      UPDATE loans
+      SET due_at=?, version=version+1, updated_at=?
+      WHERE id=? AND teacher_user_id=? AND status='open' AND version=?
+        AND (SELECT COUNT(*) FROM material_request_reservations reservation
+             JOIN json_each(?) supplied
+               ON CAST(json_extract(supplied.value, '$.reservationId') AS TEXT)=reservation.id
+             WHERE reservation.request_id=?
+               AND reservation.issued_quantity=CAST(json_extract(supplied.value, '$.issuedAfter') AS INTEGER))=?
+    `).bind(
+      input.dueAt,
+      now,
+      loanId,
+      current.teacherUserId,
+      existingLoan.version,
+      JSON.stringify(issueRows),
+      current.id,
+      issueRows.length,
+    ));
+  } else {
+    statements.push(db.prepare(`
+      INSERT INTO loans (
+        id, teacher_user_id, status, issued_at, due_at, closed_at, notes,
+        issued_by_user_id, closed_by_user_id, version, created_at, updated_at
+      )
+      SELECT ?, mr.teacher_user_id, 'open', ?, ?, NULL, '', ?, NULL, 1, ?, ?
+      FROM material_requests mr
+      WHERE mr.id=? AND mr.version=?
+        AND (SELECT COUNT(*) FROM material_request_reservations reservation
+             JOIN json_each(?) supplied
+               ON CAST(json_extract(supplied.value, '$.reservationId') AS TEXT)=reservation.id
+             WHERE reservation.request_id=mr.id
+               AND reservation.issued_quantity=CAST(json_extract(supplied.value, '$.issuedAfter') AS INTEGER))=?
+    `).bind(
+      loanId,
+      input.issuedAt,
+      input.dueAt,
+      actor.id,
+      now,
+      now,
+      current.id,
+      current.version,
+      JSON.stringify(issueRows),
+      issueRows.length,
+    ));
+  }
+  statements.push(db.prepare(`
+    INSERT INTO inventory_transactions (
+      id, request_id, kind, occurred_at, document_number, reason, notes,
+      loan_id, actor_user_id, reversal_of_id, status, created_at
+    )
+    SELECT ?, ?, 'loan_issue', ?, NULL, NULL, '', loan.id, ?, NULL, 'posted', ?
+    FROM loans loan WHERE loan.id=? AND loan.status='open'
+  `).bind(transactionId, input.requestId, input.issuedAt, actor.id, now, loanId));
+
+  for (const row of issueRows) {
+    const typedRow = row as typeof row & {
+      quantityBefore: number;
+      versionBefore: number;
+      quantityAfter: number;
+      versionAfter: number;
+    };
+    statements.push(
+      db.prepare(`
+        INSERT INTO loan_items (
+          id, loan_id, material_id, source_location_id, condition,
+          quantity_issued, quantity_returned, notes, created_at, updated_at
+        )
+        SELECT ?, ?, reservation.material_id, reservation.source_location_id,
+               reservation.condition, ?, 0, '', ?, ?
+        FROM material_request_reservations reservation
+        WHERE reservation.id=? AND reservation.request_id=?
+          AND reservation.issued_quantity=?
+          AND EXISTS (SELECT 1 FROM loans WHERE id=? AND status='open')
+      `).bind(
+        row.loanItemId,
+        loanId,
+        row.quantity,
+        now,
+        now,
+        row.reservationId,
+        current.id,
+        row.issuedAfter,
+        loanId,
+      ),
+    );
+    if (typedRow.quantityAfter === 0) {
+      statements.push(db.prepare(`
+        DELETE FROM holdings
+        WHERE material_id=? AND location_id=? AND condition=?
+          AND quantity=? AND version=?
+      `).bind(
+        row.materialId,
+        row.sourceLocationId,
+        row.condition,
+        typedRow.quantityBefore,
+        typedRow.versionBefore,
+      ));
+    } else {
+      statements.push(db.prepare(`
+        UPDATE holdings
+        SET quantity=?, version=?, updated_at=?
+        WHERE material_id=? AND location_id=? AND condition=?
+          AND quantity=? AND version=?
+      `).bind(
+        typedRow.quantityAfter,
+        typedRow.versionAfter,
+        now,
+        row.materialId,
+        row.sourceLocationId,
+        row.condition,
+        typedRow.quantityBefore,
+        typedRow.versionBefore,
+      ));
+    }
+    statements.push(db.prepare(`
+      INSERT INTO inventory_transaction_lines (
+        id, transaction_id, material_id, location_id, condition,
+        quantity_delta, quantity_before, quantity_after, counted_quantity,
+        loan_item_id, created_at
+      ) VALUES (?, ?, (
+        SELECT item.material_id FROM loan_items item
+        WHERE item.id=? AND item.loan_id=? AND item.quantity_issued=?
+          AND EXISTS (
+            SELECT 1 FROM material_request_reservations reservation
+            WHERE reservation.id=? AND reservation.request_id=?
+              AND reservation.issued_quantity=?
+          )
+          AND (
+            (? > 0 AND EXISTS (
+              SELECT 1 FROM holdings holding
+              WHERE holding.material_id=item.material_id
+                AND holding.location_id=item.source_location_id
+                AND holding.condition=item.condition
+                AND holding.quantity=? AND holding.version=?
+            ))
+            OR (? = 0 AND NOT EXISTS (
+              SELECT 1 FROM holdings holding
+              WHERE holding.material_id=item.material_id
+                AND holding.location_id=item.source_location_id
+                AND holding.condition=item.condition
+            ))
+          )
+      ), ?, ?, ?, ?, ?, NULL, ?, ?)
+    `).bind(
+      row.lineId,
+      transactionId,
+      row.loanItemId,
+      loanId,
+      row.quantity,
+      row.reservationId,
+      current.id,
+      row.issuedAfter,
+      typedRow.quantityAfter,
+      typedRow.quantityAfter,
+      typedRow.versionAfter,
+      typedRow.quantityAfter,
+      row.sourceLocationId,
+      row.condition,
+      -row.quantity,
+      typedRow.quantityBefore,
+      typedRow.quantityAfter,
+      row.loanItemId,
+      now,
+    ));
+  }
+  statements.push(
+    db.prepare(`
+      UPDATE material_requests
+      SET status=?, resulting_loan_id=COALESCE(resulting_loan_id, ?), due_at=?,
+          completed_at=?, version=version+1, updated_at=?
+      WHERE id=? AND version=? AND status IN ('ready','partially_ready')
+        AND (resulting_loan_id IS NULL OR resulting_loan_id=?)
+        AND EXISTS (SELECT 1 FROM loans WHERE id=? AND teacher_user_id=material_requests.teacher_user_id)
+        AND (SELECT COUNT(*) FROM material_request_reservations reservation
+             JOIN json_each(?) supplied
+               ON CAST(json_extract(supplied.value, '$.reservationId') AS TEXT)=reservation.id
+             WHERE reservation.request_id=material_requests.id
+               AND reservation.issued_quantity=CAST(json_extract(supplied.value, '$.issuedAfter') AS INTEGER))=?
+    `).bind(
+      status,
+      loanId,
+      input.dueAt,
+      status === "completed" ? now : null,
+      now,
+      current.id,
+      current.version,
+      loanId,
+      loanId,
+      JSON.stringify(issueRows),
+      issueRows.length,
+    ),
+    db.prepare(`
+      INSERT INTO material_request_events (
+        id, request_id, actor_user_id, actor_kind, kind,
+        from_status, to_status, metadata_json, created_at
+      ) VALUES (?, (
+        SELECT id FROM material_requests
+        WHERE id=? AND status=? AND version=? AND resulting_loan_id=? AND updated_at=?
+      ), ?, 'librarian', 'issue', ?, ?, ?, ?)
+    `).bind(
+      eventId,
+      current.id,
+      status,
+      current.version + 1,
+      loanId,
+      now,
+      actor.id,
+      current.status,
+      status,
+      JSON.stringify({ loanId, transactionId, issuedAt: input.issuedAt, dueAt: input.dueAt, items: input.items }),
+      now,
+    ),
+    db.prepare(`
+      INSERT INTO portal_notifications (
+        id, teacher_user_id, dedupe_key, type, title, message,
+        entity_type, entity_id, read_at, version, created_at, updated_at
+      )
+      SELECT ?, mr.teacher_user_id, ?, 'material_request_issued',
+             'Матеріали видано', ?, 'material_request', mr.id,
+             NULL, 1, ?, ?
+      FROM material_requests mr
+      WHERE mr.id=? AND EXISTS (
+        SELECT 1 FROM material_request_events WHERE id=? AND request_id=mr.id
+      )
+    `).bind(
+      notificationId,
+      `material-request:${current.id}:issue:${input.requestId}`,
+      `Видано ${issuedNow} примірн. Строк повернення: ${input.dueAt ?? "без визначеного строку"}.`,
+      now,
+      now,
+      current.id,
+      eventId,
+    ),
+    rebuildStockTotalsBulkStatement(db, [...new Set(issueRows.map((row) => row.materialId))], now),
+    requestAuditStatement(
+      db,
+      actor,
+      input.requestId,
+      current,
+      result,
+      eventId,
+      { status, version: current.version + 1, updatedAt: now, resultingLoanId: loanId },
       now,
     ),
     db.prepare(`
@@ -1628,8 +2079,9 @@ async function readyMaterialRequest(
         request_id, before_json, after_json, metadata_json, created_at
       ) VALUES (?, ?, ?, 'loan.issued', 'loan', (
         SELECT resulting_loan_id FROM material_requests
-        WHERE id=? AND resulting_loan_id=?
-          AND EXISTS (SELECT 1 FROM material_request_events WHERE id=? AND request_id=material_requests.id)
+        WHERE id=? AND resulting_loan_id=? AND EXISTS (
+          SELECT 1 FROM material_request_events WHERE id=? AND request_id=material_requests.id
+        )
       ), ?, NULL, ?, ?, ?)
     `).bind(
       `AUD-${crypto.randomUUID()}`,
@@ -1645,11 +2097,11 @@ async function readyMaterialRequest(
     ),
     completeCommandStatement(db, input.requestId, result, now),
   );
-  if (statements.length > 43) {
+  if (statements.length > 50) {
     throw new TeacherMaterialRequestError(
       "request_too_large",
       400,
-      "У заявці забагато позицій для однієї безпечної операції.",
+      "У заявці забагато позицій для однієї безпечної видачі.",
     );
   }
   const replayed = await executeIdempotentBatch<typeof result>(
@@ -1658,8 +2110,236 @@ async function readyMaterialRequest(
     input.requestId,
     actor.id,
     requestHash,
-    "stock_quantity_conflict",
-    "Залишок або заявка змінилися. Оновіть чергу й перевірте кількість.",
+    "request_version_conflict",
+    "Заявка вже змінилася. Оновіть чергу.",
+  );
+  return replayed ?? result;
+}
+
+async function releaseMaterialRequest(
+  db: TeacherMaterialRequestDatabase,
+  actor: MutationActor,
+  current: MaterialRequestProjection,
+  input: MaterialRequestReleaseInput,
+  requestHash: string,
+): Promise<Record<string, unknown>> {
+  if (current.status !== "ready" && current.status !== "partially_ready") {
+    throw new TeacherMaterialRequestError(
+      "invalid_request_transition",
+      409,
+      "Звільнити можна лише активний резерв.",
+      { status: current.status },
+    );
+  }
+  const reservationIndex = new Map<string, {
+    item: MaterialRequestItemProjection;
+    reservation: MaterialRequestReservationProjection;
+  }>();
+  for (const item of current.items) {
+    for (const reservation of item.reservations) {
+      reservationIndex.set(reservation.id, { item, reservation });
+    }
+  }
+  const releaseRows = input.items.map((entry) => {
+    const indexed = reservationIndex.get(entry.reservationId);
+    if (!indexed) {
+      throw new TeacherMaterialRequestError(
+        "reservation_not_found",
+        404,
+        "Резерв не знайдено у цій заявці.",
+        { reservationId: entry.reservationId },
+      );
+    }
+    if (entry.quantity > indexed.reservation.remainingQuantity) {
+      throw new TeacherMaterialRequestError(
+        "reservation_quantity_exceeded",
+        409,
+        "Кількість звільнення перевищує активний резерв.",
+        { reservationId: entry.reservationId, remainingQuantity: indexed.reservation.remainingQuantity },
+      );
+    }
+    return {
+      reservationId: entry.reservationId,
+      requestItemId: indexed.item.id,
+      materialId: indexed.item.materialId,
+      quantity: entry.quantity,
+      reservedBefore: indexed.reservation.reservedQuantity,
+      issuedBefore: indexed.reservation.issuedQuantity,
+      releasedBefore: indexed.reservation.releasedQuantity,
+      releasedAfter: indexed.reservation.releasedQuantity + entry.quantity,
+    };
+  });
+  if (!releaseRows.length) {
+    throw new TeacherMaterialRequestError("nothing_to_release", 409, "Немає резерву для звільнення.");
+  }
+  const releasedByItem = new Map<string, number>();
+  for (const row of releaseRows) {
+    releasedByItem.set(row.requestItemId, (releasedByItem.get(row.requestItemId) ?? 0) + row.quantity);
+  }
+  const totalActiveBefore = current.items.flatMap((item) => item.reservations)
+    .reduce((sum, reservation) => sum + reservation.remainingQuantity, 0);
+  const releasedNow = releaseRows.reduce((sum, row) => sum + row.quantity, 0);
+  const activeAfter = totalActiveBefore - releasedNow;
+  const fulfilledTotal = current.items.reduce((sum, item) => sum + item.fulfilledQuantity, 0);
+  const approvedAfter = current.items.map((item) => ({
+    itemId: item.id,
+    requestedQuantity: item.requestedQuantity,
+    approvedQuantity: item.approvedQuantity - (releasedByItem.get(item.id) ?? 0),
+  }));
+  const status: MaterialRequestStatus = activeAfter === 0
+    ? fulfilledTotal > 0 ? "completed" : "cancelled"
+    : approvedAfter.every((item) => item.approvedQuantity === item.requestedQuantity)
+      ? "ready"
+      : "partially_ready";
+  const now = new Date().toISOString();
+  const result = {
+    requestId: current.id,
+    status,
+    version: current.version + 1,
+    updatedAt: now,
+    releasedQuantity: releasedNow,
+    releaseReason: input.reason,
+    items: input.items,
+  };
+  const eventId = `MRE-${crypto.randomUUID()}`;
+  const notificationId = `NTF-${crypto.randomUUID()}`;
+  const statements: D1Statement[] = [
+    insertCommandStatement(
+      db,
+      input.requestId,
+      requestHash,
+      actor.id,
+      "material_request.release",
+      "material_request",
+      current.id,
+      now,
+    ),
+    db.prepare(`
+      WITH updates AS (
+        SELECT
+          CAST(json_extract(value, '$.reservationId') AS TEXT) AS reservation_id,
+          CAST(json_extract(value, '$.reservedBefore') AS INTEGER) AS reserved_before,
+          CAST(json_extract(value, '$.issuedBefore') AS INTEGER) AS issued_before,
+          CAST(json_extract(value, '$.releasedBefore') AS INTEGER) AS released_before,
+          CAST(json_extract(value, '$.releasedAfter') AS INTEGER) AS released_after
+        FROM json_each(?)
+      )
+      UPDATE material_request_reservations AS reservation
+      SET released_quantity=(SELECT released_after FROM updates WHERE reservation_id=reservation.id),
+          updated_at=?
+      WHERE reservation.request_id=? AND EXISTS (
+        SELECT 1 FROM updates
+        WHERE reservation_id=reservation.id
+          AND reserved_before=reservation.reserved_quantity
+          AND issued_before=reservation.issued_quantity
+          AND released_before=reservation.released_quantity
+          AND released_after<=reservation.reserved_quantity-reservation.issued_quantity
+      )
+    `).bind(JSON.stringify(releaseRows), now, current.id),
+    db.prepare(`
+      WITH updates AS (
+        SELECT CAST(json_extract(value, '$.requestItemId') AS TEXT) AS item_id,
+               SUM(CAST(json_extract(value, '$.quantity') AS INTEGER)) AS quantity
+        FROM json_each(?) GROUP BY item_id
+      )
+      UPDATE material_request_items AS item
+      SET approved_quantity=approved_quantity-(
+            SELECT quantity FROM updates WHERE item_id=item.id
+          ), updated_at=?
+      WHERE item.request_id=? AND EXISTS (
+        SELECT 1 FROM updates WHERE item_id=item.id
+          AND item.approved_quantity-quantity>=item.fulfilled_quantity
+      )
+    `).bind(JSON.stringify(releaseRows), now, current.id),
+    db.prepare(`
+      UPDATE material_requests
+      SET status=?, completed_at=?, cancelled_at=?, cancelled_by_user_id=?,
+          librarian_note=?, version=version+1, updated_at=?
+      WHERE id=? AND version=? AND status IN ('ready','partially_ready')
+        AND (SELECT COUNT(*) FROM material_request_reservations reservation
+             JOIN json_each(?) supplied
+               ON CAST(json_extract(supplied.value, '$.reservationId') AS TEXT)=reservation.id
+             WHERE reservation.request_id=material_requests.id
+               AND reservation.released_quantity=CAST(json_extract(supplied.value, '$.releasedAfter') AS INTEGER))=?
+    `).bind(
+      status,
+      status === "completed" ? now : null,
+      status === "cancelled" ? now : null,
+      status === "cancelled" ? actor.id : null,
+      input.reason,
+      now,
+      current.id,
+      current.version,
+      JSON.stringify(releaseRows),
+      releaseRows.length,
+    ),
+    db.prepare(`
+      INSERT INTO material_request_events (
+        id, request_id, actor_user_id, actor_kind, kind,
+        from_status, to_status, metadata_json, created_at
+      ) VALUES (?, (
+        SELECT id FROM material_requests
+        WHERE id=? AND status=? AND version=? AND updated_at=?
+      ), ?, 'librarian', 'release', ?, ?, ?, ?)
+    `).bind(
+      eventId,
+      current.id,
+      status,
+      current.version + 1,
+      now,
+      actor.id,
+      current.status,
+      status,
+      JSON.stringify({ reason: input.reason, items: input.items }),
+      now,
+    ),
+    db.prepare(`
+      INSERT INTO portal_notifications (
+        id, teacher_user_id, dedupe_key, type, title, message,
+        entity_type, entity_id, read_at, version, created_at, updated_at
+      )
+      SELECT ?, mr.teacher_user_id, ?, 'material_request_released',
+             'Резерв замовлення звільнено', ?, 'material_request', mr.id,
+             NULL, 1, ?, ?
+      FROM material_requests mr
+      WHERE mr.id=? AND EXISTS (
+        SELECT 1 FROM material_request_events WHERE id=? AND request_id=mr.id
+      )
+    `).bind(
+      notificationId,
+      `material-request:${current.id}:release:${input.requestId}`,
+      `Звільнено ${releasedNow} зарезервованих примірн. Причина: ${input.reason}`,
+      now,
+      now,
+      current.id,
+      eventId,
+    ),
+    rebuildStockTotalsBulkStatement(db, [...new Set(releaseRows.map((row) => row.materialId))], now),
+    requestAuditStatement(
+      db,
+      actor,
+      input.requestId,
+      current,
+      result,
+      eventId,
+      {
+        status,
+        version: current.version + 1,
+        updatedAt: now,
+        ...(current.resultingLoanId ? { resultingLoanId: current.resultingLoanId } : {}),
+      },
+      now,
+    ),
+    completeCommandStatement(db, input.requestId, result, now),
+  ];
+  const replayed = await executeIdempotentBatch<typeof result>(
+    db,
+    statements,
+    input.requestId,
+    actor.id,
+    requestHash,
+    "request_version_conflict",
+    "Заявка вже змінилася. Оновіть чергу.",
   );
   return replayed ?? result;
 }
@@ -1709,7 +2389,7 @@ function requestProjectionSql(): string {
       mr.id, mr.teacher_user_id, teacher.full_name AS teacher_name,
       mr.status, mr.teacher_notes, mr.librarian_note, mr.rejection_reason,
       mr.pickup_location_id, pickup.name AS pickup_location_name,
-      mr.resulting_loan_id, mr.version, mr.submitted_at, mr.ready_at,
+      mr.resulting_loan_id, mr.due_at, mr.version, mr.submitted_at, mr.ready_at,
       mr.completed_at, mr.rejected_at, mr.cancelled_at,
       mr.created_at, mr.updated_at,
       mri.id AS item_id, mri.material_id, mri.title_snapshot,
@@ -1718,7 +2398,23 @@ function requestProjectionSql(): string {
       cover.storage_provider AS cover_storage_provider,
       cover.storage_key AS cover_storage_key,
       cover.external_url AS cover_external_url,
-      cover.sha256 AS cover_sha256
+      cover.sha256 AS cover_sha256,
+      COALESCE((
+        SELECT json_group_array(json_object(
+          'id', reservation.id,
+          'sourceLocationId', reservation.source_location_id,
+          'sourceLocationName', source.name,
+          'condition', reservation.condition,
+          'reservedQuantity', reservation.reserved_quantity,
+          'issuedQuantity', reservation.issued_quantity,
+          'releasedQuantity', reservation.released_quantity,
+          'createdAt', reservation.created_at,
+          'updatedAt', reservation.updated_at
+        ))
+        FROM material_request_reservations reservation
+        JOIN locations source ON source.id=reservation.source_location_id
+        WHERE reservation.request_item_id=mri.id
+      ), '[]') AS reservations_json
     FROM material_requests mr
     JOIN users teacher ON teacher.id=mr.teacher_user_id
     JOIN material_request_items mri ON mri.request_id=mr.id
@@ -1749,6 +2445,7 @@ function mapRequestRows(rows: RequestRow[]): MaterialRequestProjection[] {
           ? { id: row.pickup_location_id, name: row.pickup_location_name }
           : null,
         resultingLoanId: row.resulting_loan_id,
+        dueAt: row.due_at,
         version: Number(row.version),
         submittedAt: row.submitted_at,
         readyAt: row.ready_at,
@@ -1761,6 +2458,7 @@ function mapRequestRows(rows: RequestRow[]): MaterialRequestProjection[] {
       };
       requests.set(row.id, request);
     }
+    const reservations = parseReservationRows(row.reservations_json);
     request.items.push({
       id: row.item_id,
       materialId: row.material_id,
@@ -1776,10 +2474,38 @@ function mapRequestRows(rows: RequestRow[]): MaterialRequestProjection[] {
       requestedQuantity: Number(row.requested_quantity),
       approvedQuantity: row.approved_quantity === null ? 0 : Number(row.approved_quantity),
       fulfilledQuantity: Number(row.fulfilled_quantity),
+      reservedQuantity: reservations.reduce((total, reservation) => total + reservation.remainingQuantity, 0),
       sortOrder: Number(row.sort_order),
+      reservations,
     });
   }
   return [...requests.values()];
+}
+
+function parseReservationRows(value: string): MaterialRequestReservationProjection[] {
+  try {
+    const rows = JSON.parse(value) as Array<Record<string, unknown>>;
+    if (!Array.isArray(rows)) return [];
+    return rows.map((row) => {
+      const reservedQuantity = Math.max(0, Number(row.reservedQuantity) || 0);
+      const issuedQuantity = Math.max(0, Number(row.issuedQuantity) || 0);
+      const releasedQuantity = Math.max(0, Number(row.releasedQuantity) || 0);
+      return {
+        id: String(row.id ?? ""),
+        sourceLocationId: String(row.sourceLocationId ?? ""),
+        sourceLocationName: String(row.sourceLocationName ?? ""),
+        condition: String(row.condition ?? "unspecified"),
+        reservedQuantity,
+        issuedQuantity,
+        releasedQuantity,
+        remainingQuantity: Math.max(0, reservedQuantity - issuedQuantity - releasedQuantity),
+        createdAt: String(row.createdAt ?? ""),
+        updatedAt: String(row.updatedAt ?? ""),
+      };
+    }).filter((row) => row.id);
+  } catch {
+    return [];
+  }
 }
 
 function requestAuditStatement(
@@ -1837,14 +2563,15 @@ function rebuildStockTotalsBulkStatement(
     )
     INSERT INTO material_stock_totals (
       material_id, total_quantity, library_quantity,
-      other_location_quantity, loaned_quantity, updated_at
+      other_location_quantity, loaned_quantity, reserved_quantity, updated_at
     )
     SELECT
       m.id,
       COALESCE(SUM(h.quantity), 0) + COALESCE(outstanding.quantity, 0),
       COALESCE(SUM(CASE WHEN l.type='library' THEN h.quantity ELSE 0 END), 0),
       COALESCE(SUM(CASE WHEN l.type!='library' THEN h.quantity ELSE 0 END), 0),
-      COALESCE(outstanding.quantity, 0), ?
+      COALESCE(outstanding.quantity, 0),
+      COALESCE(reservations.quantity, 0), ?
     FROM requested
     JOIN materials m ON m.id=requested.material_id
     LEFT JOIN holdings h ON h.material_id=m.id
@@ -1861,12 +2588,20 @@ function rebuildStockTotalsBulkStatement(
         WHERE clo.status!='cancelled' AND cli.quantity_issued>cli.quantity_returned
       ) outstanding_rows GROUP BY material_id
     ) outstanding ON outstanding.material_id=m.id
-    GROUP BY m.id, outstanding.quantity
+    LEFT JOIN (
+      SELECT material_id,
+             SUM(reserved_quantity-issued_quantity-released_quantity) AS quantity
+      FROM material_request_reservations
+      WHERE reserved_quantity>issued_quantity+released_quantity
+      GROUP BY material_id
+    ) reservations ON reservations.material_id=m.id
+    GROUP BY m.id, outstanding.quantity, reservations.quantity
     ON CONFLICT(material_id) DO UPDATE SET
       total_quantity=excluded.total_quantity,
       library_quantity=excluded.library_quantity,
       other_location_quantity=excluded.other_location_quantity,
       loaned_quantity=excluded.loaned_quantity,
+      reserved_quantity=excluded.reserved_quantity,
       updated_at=excluded.updated_at
   `).bind(JSON.stringify(materialIds), updatedAt);
 }
@@ -1906,12 +2641,23 @@ function insertCommandStatement(
   targetId: string,
   createdAt: string,
 ): D1Statement {
+  const requiresLibrarianRole = new Set([
+    "material_request.start_review",
+    "material_request.reject",
+    "material_request.complete",
+    "material_request.ready",
+    "material_request.issue",
+    "material_request.release",
+  ]).has(kind);
   return db.prepare(`
     INSERT INTO mutation_commands (
       id, draft_id, kind, actor_user_id, status, target_type, target_id,
       request_hash, result_json, error_code, error_message,
       created_at, updated_at, completed_at
-    ) VALUES (?, NULL, ?, ?, 'processing', ?, ?, ?, NULL, NULL, NULL, ?, ?, NULL)
+    ) VALUES (?, NULL, ?, (
+      SELECT id FROM users WHERE id=? AND status='active'
+        ${requiresLibrarianRole ? "AND role IN ('admin','librarian')" : ""}
+    ), 'processing', ?, ?, ?, NULL, NULL, NULL, ?, ?, NULL)
   `).bind(
     id,
     kind,
@@ -1963,6 +2709,24 @@ async function executeIdempotentBatch<T>(
       requestHash,
     );
     if (replay) return replay;
+    const errorMessage = error instanceof Error ? error.message : String(error ?? "");
+    if (errorMessage.includes("NOT NULL constraint failed: mutation_commands.actor_user_id")) {
+      throw new TeacherMaterialRequestError(
+        "actor_access_revoked",
+        403,
+        "Доступ бібліотекаря було вимкнено. Увійдіть знову.",
+      );
+    }
+    if (
+      errorMessage.includes("reservation_stock_conflict")
+      || errorMessage.includes("reserved_stock_conflict")
+    ) {
+      throw new TeacherMaterialRequestError(
+        "reservation_stock_conflict",
+        409,
+        "Доступна кількість або резерв змінилися. Оновіть чергу.",
+      );
+    }
     if (isExpectedConflict(error)) {
       throw new TeacherMaterialRequestError(conflictCode, 409, conflictMessage);
     }
@@ -2030,7 +2794,14 @@ function isExpectedConflict(error: unknown): boolean {
     || message.includes("NOT NULL constraint failed: inventory_transaction_lines.material_id")
     || message.includes("NOT NULL constraint failed: loan_items.material_id")
     || message.includes("NOT NULL constraint failed: loan_items.source_location_id")
+    || message.includes("NOT NULL constraint failed: mutation_commands.actor_user_id")
+    || message.includes("reserved_stock_conflict")
+    || message.includes("reservation_stock_conflict")
     || message.includes("FOREIGN KEY constraint failed");
+}
+
+function stockKey(materialId: string, locationId: string, condition: string): string {
+  return `${materialId}\u0000${locationId}\u0000${condition}`;
 }
 
 async function countActiveMaterialRequests(

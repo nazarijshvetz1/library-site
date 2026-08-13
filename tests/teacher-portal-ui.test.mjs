@@ -174,7 +174,7 @@ test("librarian request inbox uses frozen ready fields and public active pickup 
   assert.match(inbox, /action: "ready", pickupLocationId, dueAt: dueAt \|\| null, items/u);
   assert.match(inbox, /itemId: item\.id/u);
   assert.match(inbox, /sourceLocationId: holding\.locationId/u);
-  assert.match(inbox, /expectedAvailableQuantity: holding\.quantity/u);
+  assert.match(inbox, /expectedAvailableQuantity: holdingAvailable\(holding\)/u);
   assert.match(inbox, /window\.sessionStorage/u);
   assert.doesNotMatch(inbox, /window\.localStorage/u);
   assert.match(inbox, /params\.set\("cursor", cursor\)/u);

@@ -71,6 +71,7 @@ export type CatalogSummary = {
   libraryQuantity: number;
   otherLocationQuantity: number;
   loanedQuantity: number;
+  reservedQuantity: number;
 };
 
 export type CatalogLink = {
@@ -88,6 +89,9 @@ export type CatalogHolding = {
   locationType: string;
   locationStatus: string;
   condition: string | null;
+  physicalQuantity: number;
+  reservedQuantity: number;
+  availableQuantity: number;
   quantity: number;
   updatedAt: string;
 };
@@ -439,7 +443,7 @@ function buildCatalogListStatement(query: CatalogListQuery, useFts: boolean): {
   }
   if (query.available) {
     predicates.push(
-      "MAX(0, COALESCE(st.total_quantity, 0) - COALESCE(st.loaned_quantity, 0)) > 0",
+      "MAX(0, COALESCE(st.total_quantity, 0) - COALESCE(st.loaned_quantity, 0) - COALESCE(st.reserved_quantity, 0)) > 0",
     );
   }
 
@@ -496,7 +500,8 @@ function buildCatalogListStatement(query: CatalogListQuery, useFts: boolean): {
         COALESCE(st.total_quantity, 0) AS total_quantity,
         COALESCE(st.library_quantity, 0) AS library_quantity,
         COALESCE(st.other_location_quantity, 0) AS other_location_quantity,
-        COALESCE(st.loaned_quantity, 0) AS loaned_quantity
+        COALESCE(st.loaned_quantity, 0) AS loaned_quantity,
+        COALESCE(st.reserved_quantity, 0) AS reserved_quantity
       FROM materials m
       LEFT JOIN material_stock_totals st ON st.material_id = m.id
       LEFT JOIN material_cover_assets c
@@ -539,7 +544,8 @@ function detailMaterialSql(scope: "public" | "librarian"): string {
       COALESCE(st.total_quantity, 0) AS total_quantity,
       COALESCE(st.library_quantity, 0) AS library_quantity,
       COALESCE(st.other_location_quantity, 0) AS other_location_quantity,
-      COALESCE(st.loaned_quantity, 0) AS loaned_quantity
+      COALESCE(st.loaned_quantity, 0) AS loaned_quantity,
+      COALESCE(st.reserved_quantity, 0) AS reserved_quantity
     FROM materials m
     LEFT JOIN material_stock_totals st ON st.material_id = m.id
     LEFT JOIN material_cover_assets c
@@ -570,7 +576,21 @@ function detailHoldingsSql(scope: "public" | "librarian"): string {
         l.type AS location_type,
         l.status AS location_status,
         NULL AS condition,
-        SUM(h.quantity) AS quantity,
+        SUM(h.quantity) AS physical_quantity,
+        COALESCE((
+          SELECT SUM(reservation.reserved_quantity-reservation.issued_quantity-reservation.released_quantity)
+          FROM material_request_reservations reservation
+          WHERE reservation.material_id=h.material_id
+            AND reservation.source_location_id=l.id
+            AND reservation.reserved_quantity>reservation.issued_quantity+reservation.released_quantity
+        ), 0) AS reserved_quantity,
+        MAX(0, SUM(h.quantity)-COALESCE((
+          SELECT SUM(reservation.reserved_quantity-reservation.issued_quantity-reservation.released_quantity)
+          FROM material_request_reservations reservation
+          WHERE reservation.material_id=h.material_id
+            AND reservation.source_location_id=l.id
+            AND reservation.reserved_quantity>reservation.issued_quantity+reservation.released_quantity
+        ), 0)) AS quantity,
         MAX(h.updated_at) AS updated_at
       FROM holdings h
       JOIN locations l ON l.id = h.location_id
@@ -587,7 +607,23 @@ function detailHoldingsSql(scope: "public" | "librarian"): string {
       l.type AS location_type,
       l.status AS location_status,
       h.condition,
-      h.quantity,
+      h.quantity AS physical_quantity,
+      COALESCE((
+        SELECT SUM(reservation.reserved_quantity-reservation.issued_quantity-reservation.released_quantity)
+        FROM material_request_reservations reservation
+        WHERE reservation.material_id=h.material_id
+          AND reservation.source_location_id=h.location_id
+          AND reservation.condition=h.condition
+          AND reservation.reserved_quantity>reservation.issued_quantity+reservation.released_quantity
+      ), 0) AS reserved_quantity,
+      MAX(0, h.quantity-COALESCE((
+        SELECT SUM(reservation.reserved_quantity-reservation.issued_quantity-reservation.released_quantity)
+        FROM material_request_reservations reservation
+        WHERE reservation.material_id=h.material_id
+          AND reservation.source_location_id=h.location_id
+          AND reservation.condition=h.condition
+          AND reservation.reserved_quantity>reservation.issued_quantity+reservation.released_quantity
+      ), 0)) AS quantity,
       h.updated_at
     FROM holdings h
     JOIN locations l ON l.id = h.location_id
@@ -604,6 +640,10 @@ function mapSummaryRow(row: Record<string, unknown>): CatalogSummary {
   }
   const totalQuantity = nonNegativeInteger(row.total_quantity);
   const loanedQuantity = Math.min(totalQuantity, nonNegativeInteger(row.loaned_quantity));
+  const reservedQuantity = Math.min(
+    Math.max(0, totalQuantity - loanedQuantity),
+    nonNegativeInteger(row.reserved_quantity),
+  );
   const classFrom = nullableGrade(row.class_from);
   const classTo = nullableGrade(row.class_to) ?? classFrom;
   return {
@@ -620,10 +660,11 @@ function mapSummaryRow(row: Record<string, unknown>): CatalogSummary {
     publisher: boundedText(row.publisher, 240),
     thumbnailUrl: coverUrlFromRow(row),
     totalQuantity,
-    availableQuantity: Math.max(0, totalQuantity - loanedQuantity),
+    availableQuantity: Math.max(0, totalQuantity - loanedQuantity - reservedQuantity),
     libraryQuantity: nonNegativeInteger(row.library_quantity),
     otherLocationQuantity: nonNegativeInteger(row.other_location_quantity),
     loanedQuantity,
+    reservedQuantity,
   };
 }
 
@@ -657,6 +698,9 @@ function mapHoldingRow(
   if (!locationId || !locationName) {
     throw new CatalogDataIntegrityError("Holding row has an invalid location");
   }
+  const physicalQuantity = nonNegativeInteger(row.physical_quantity);
+  const reservedQuantity = Math.min(physicalQuantity, nonNegativeInteger(row.reserved_quantity));
+  const availableQuantity = Math.max(0, physicalQuantity - reservedQuantity);
   return {
     locationId,
     locationName,
@@ -665,7 +709,11 @@ function mapHoldingRow(
     condition: scope === "librarian"
       ? boundedText(row.condition, 80) || null
       : null,
-    quantity: nonNegativeInteger(row.quantity),
+    physicalQuantity,
+    reservedQuantity,
+    availableQuantity,
+    // Backwards-compatible effective availability used by existing issue forms.
+    quantity: Math.min(availableQuantity, nonNegativeInteger(row.quantity)),
     updatedAt: boundedText(row.updated_at, 40),
   };
 }
