@@ -42,8 +42,8 @@ export default async function Home() {
           </p>
 
           <div className="hero-actions">
-            <Link className="button button-secondary" href="/visits">
-              Записатися до бібліотеки
+            <Link className="button button-secondary" href="/teacher">
+              Кабінет учителя
             </Link>
             {user ? (
               <>

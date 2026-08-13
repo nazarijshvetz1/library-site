@@ -21,6 +21,7 @@ export default async function VisitsPage({ searchParams }: PageProps) {
       initialDate={boundedDate(params?.date)}
       initialStartTime={boundedTime(params?.start)}
       initialEndTime={boundedTime(params?.end)}
+      initialTab="visits"
     />
   );
 }

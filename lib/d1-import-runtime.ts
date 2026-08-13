@@ -22,13 +22,19 @@ export const HOSTED_IMPORT_MAX_ROWS = 20_000;
  * uploaded again after a reset.
  */
 export const STAGING_IMPORT_RESET_TABLES = Object.freeze([
+  "portal_notifications",
+  "material_request_events",
+  "material_request_items",
+  "material_requests",
   "visit_slot_claims",
+  "visit_bookings",
+  "visit_guest_sessions",
+  "visit_guest_rate_limits",
   "visit_teacher_sessions",
   "visit_teacher_login_limits",
   "visit_teacher_access_commands",
   "visit_teacher_credentials",
   "visit_mutation_commands",
-  "visit_bookings",
   "visit_schedule_closures",
   "visit_schedule_hours",
   "class_loan_transaction_lines",

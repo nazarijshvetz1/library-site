@@ -21,6 +21,7 @@ import {
 } from "@/app/visits/visit-client";
 import styles from "@/app/visits/visits.module.css";
 import TeacherAccessAdmin from "./teacher-access-admin";
+import MaterialRequestInbox from "./material-request-inbox";
 
 const LOGO_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
 
@@ -150,7 +151,7 @@ export default function LibrarianVisitWorkspace({ pendingScope, displayName, wri
                 <tbody>{bookings.map((booking) => (
                   <tr key={booking.id}>
                     <td><strong>{formatVisitDateTime(`${booking.date}T${booking.startTime}`)}</strong><br />до {booking.endTime}</td>
-                    <td>{booking.surname}</td>
+                    <td><strong>{booking.surname}</strong><span className={styles.identityKind} data-verified={bookingIdentityVerified(booking)}>{bookingIdentityLabel(booking)}</span></td>
                     <td>{booking.classLabel || "—"}</td>
                     <td>{booking.purpose || "—"}</td>
                     <td>{booking.status === "cancelled" ? "Скасовано" : "Активний"}</td>
@@ -161,6 +162,7 @@ export default function LibrarianVisitWorkspace({ pendingScope, displayName, wri
             </div>
           ) : <p className={styles.empty}>За цими фільтрами записів немає.</p>}
         </section>
+        <MaterialRequestInbox pendingScope={pendingScope} writesEnabled={writesEnabled} />
         <TeacherAccessAdmin writesEnabled={writesEnabled} />
       </section>
     </main>
@@ -170,6 +172,19 @@ export default function LibrarianVisitWorkspace({ pendingScope, displayName, wri
 function errorMessage(error: unknown): string {
   if (error instanceof VisitApiError) return error.message;
   return "Не вдалося виконати запит. Спробуйте ще раз.";
+}
+
+function bookingIdentityVerified(booking: VisitBooking): boolean {
+  return booking.ownerKind === "teacher" && booking.identityVerified === true;
+}
+
+function bookingIdentityLabel(booking: VisitBooking): string {
+  if (booking.ownerKind === "guest" || booking.identityVerified === false) {
+    return "Непідтверджений гостьовий запис";
+  }
+  return bookingIdentityVerified(booking)
+    ? "Підтверджений учитель"
+    : "Спосіб підтвердження не вказано";
 }
 
 function todayInKyiv(): string {

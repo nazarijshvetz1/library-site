@@ -125,10 +125,11 @@ test("creates bounded week requests and PII-free protected booking handoffs", ()
   assert.equal(normalizeVisitsApiUrl("https://library.example/api/visits/private"), "");
   const selection = visitBookingSelection({ date: "2026-08-10", startTime: "09:40", endTime: "11:30", status: "free" });
   assert.deepEqual(selection, { date: "2026-08-10", startTime: "09:40", endTime: "10:20" });
-  const bookingUrl = visitsBookingUrl("https://library.example/visits", selection);
-  assert.equal(bookingUrl, "https://library.example/visits?date=2026-08-10&start=09%3A40&end=10%3A20");
-  assert.doesNotMatch(bookingUrl, /teacher|class|name|note/i);
+  const bookingUrl = visitsBookingUrl("https://library.example/teacher", selection);
+  assert.equal(bookingUrl, "https://library.example/teacher?date=2026-08-10&start=09%3A40&end=10%3A20");
+  assert.doesNotMatch(bookingUrl, /teacherRef|class|fullName|surname|purpose|note/i);
   assert.equal(visitsBookingUrl("https://library.example/librarian", selection), "");
+  assert.match(visitsBookingUrl("https://library.example/visits", selection), /^https:\/\/library\.example\/visits\?/u);
 });
 
 test("never advertises elapsed, too-short, or out-of-horizon visit slots", () => {
@@ -213,7 +214,8 @@ test("ships an accessible responsive public visit schedule and protected handoff
     readFile(new URL("../source/styles.css", import.meta.url), "utf8"),
     readFile(new URL("../source/config.js", import.meta.url), "utf8"),
   ]);
-  assert.match(html, /href="#visit-schedule"[^>]*>Графік відвідування бібліотеки<\/a>/);
+  assert.match(html, /href="#visit-schedule"[^>]*>Графік<\/a>/);
+  assert.match(html, /href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/teacher"[\s\S]*>Кабінет учителя<\/a>/);
   assert.match(html, /id="visit-schedule" aria-labelledby="visit-schedule-title"/);
   assert.match(html, /Перевірте вільний час і забронюйте відвідування класом/);
   assert.match(html, /id="visitScheduleStatus"[^>]*role="status"[^>]*aria-live="polite"/);
@@ -229,7 +231,7 @@ test("ships an accessible responsive public visit schedule and protected handoff
   assert.match(app, /data-visit-booking="true"/);
   assert.doesNotMatch(app, /localStorage.*visit|sessionStorage.*visit|fetch\([^\n]*method:\s*"POST"/);
   assert.match(config, /visitsApiUrl:\s*"https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/api\/visits\/public"/);
-  assert.match(config, /visitsBookingUrl:\s*"https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/visits"/);
+  assert.match(config, /visitsBookingUrl:\s*"https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/teacher"/);
   assert.match(css, /\.site-header \.site-nav a\[data-primary-section\]\{display:flex\}/);
   assert.match(css, /\.visit-slot>a,[^{]+\{display:flex;min-height:54px/);
   assert.match(css, /@media\(max-width:560px\)[\s\S]*\.visit-days[^}]*grid-template-columns:1fr/);

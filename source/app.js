@@ -165,7 +165,8 @@ export function normalizeVisitsApiUrl(value, baseUrl = "https://catalog.invalid/
 }
 
 export function normalizeVisitsBookingUrl(value, baseUrl = "https://catalog.invalid/") {
-  return normalizedVisitEndpoint(value, "/visits", baseUrl);
+  return normalizedVisitEndpoint(value, "/teacher", baseUrl)
+    || normalizedVisitEndpoint(value, "/visits", baseUrl);
 }
 
 export function visitsPublicApiUrl(value, from, to, baseUrl = "https://catalog.invalid/") {

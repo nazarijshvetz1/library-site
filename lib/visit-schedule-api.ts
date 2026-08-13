@@ -10,6 +10,8 @@ const PRIVATE_HEADERS = {
 
 export function visitScheduleEnabled(): boolean { return getRuntimeBoolean("VISIT_SCHEDULE_ENABLED"); }
 export function visitBookingEnabled(): boolean { return getRuntimeBoolean("VISIT_BOOKING_ENABLED"); }
+export function visitGuestBookingEnabled(): boolean { return getRuntimeBoolean("VISIT_GUEST_BOOKING_ENABLED"); }
+export function teacherPortalEnabled(): boolean { return getRuntimeBoolean("TEACHER_PORTAL_ENABLED"); }
 
 export function visitJson(body: unknown, init: ResponseInit = {}): Response {
   const headers = new Headers(PRIVATE_HEADERS);
@@ -24,6 +26,18 @@ export function visitError(status: number, code: string, error: string, details?
 export function featureGate(write = false): Response | null {
   if (!visitScheduleEnabled()) return visitError(503, "feature_disabled", "Розклад відвідувань тимчасово вимкнено.");
   if (write && !visitBookingEnabled()) return visitError(503, "booking_disabled", "Бронювання тимчасово вимкнено.");
+  return null;
+}
+
+export function guestFeatureGate(write = false): Response | null {
+  if (!visitScheduleEnabled()) return visitError(503, "feature_disabled", "Розклад відвідувань тимчасово вимкнено.");
+  if (!visitGuestBookingEnabled()) return visitError(503, "guest_booking_disabled", "Гостьовий запис тимчасово вимкнено.");
+  if (write && !visitBookingEnabled()) return visitError(503, "booking_disabled", "Бронювання тимчасово вимкнено.");
+  return null;
+}
+
+export function teacherPortalGate(): Response | null {
+  if (!teacherPortalEnabled()) return visitError(503, "teacher_portal_disabled", "Кабінет учителя тимчасово вимкнено.");
   return null;
 }
 
