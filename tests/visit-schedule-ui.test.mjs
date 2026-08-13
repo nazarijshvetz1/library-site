@@ -46,7 +46,8 @@ test("teacher booking UI selects canonical identity, authenticates with a person
   assert.match(source, /Не вдалося увійти\. Перевірте обране ім’я та особистий код/u);
   assert.match(source, /autoComplete="one-time-code"/u);
   assert.match(source, /placeholder="XXXXX-XXXXX"/u);
-  assert.match(source, /\[\^23456789ABCDEFGHJKMNPQRSTUVWXYZ\]/u);
+  const client = await read("app/visits/visit-client.ts");
+  assert.match(client, /\[\^23456789ABCDEFGHJKMNPQRSTUVWXYZ\]/u);
   assert.match(source, /code\.length !== 11/u);
   assert.match(source, /teacher\.fullName/u);
   assert.match(source, /data\?\.classYears/u);
@@ -95,8 +96,8 @@ test("uncertain teacher requests retain the exact request and payload", () => {
 
 test("teacher availability query covers the complete server booking horizon", () => {
   assert.equal(teacherVisitsUrl("2026-09-10"), "/api/visits/teacher?from=2026-09-10&to=2026-12-09");
-  assert.equal(teacherSearchUrl("  Шев  "), "/api/visits/teacher/directory?q=%D0%A8%D0%B5%D0%B2");
-  assert.equal(teacherSessionUrl, "/api/visits/teacher/session");
+  assert.equal(teacherSearchUrl("  Шев  "), "/api/teacher/directory?q=%D0%A8%D0%B5%D0%B2");
+  assert.equal(teacherSessionUrl, "/api/teacher/session");
   assert.deepEqual(
     busyPeriodParts({ startAt: "2026-09-10T10:00:00", endAt: "2026-09-10T10:30:00" }),
     { date: "2026-09-10", startTime: "10:00", endTime: "10:30" },
@@ -117,12 +118,18 @@ test("ambiguous HTTP responses keep their durable visit intent", () => {
   assert.equal(isUncertainVisitFailure(new VisitApiError("elapsed", 409, "visit_time_elapsed")), false);
   assert.equal(isUncertainVisitFailure(new VisitApiError("started", 409, "booking_not_cancellable")), false);
   assert.equal(isUncertainVisitFailure(new VisitApiError("revoked", 401, "teacher_access_revoked")), false);
+  assert.equal(isUncertainVisitFailure(new VisitApiError("changed", 409, "request_version_conflict")), false);
+  assert.equal(isUncertainVisitFailure(new VisitApiError("already read", 409, "notification_already_read")), false);
+  assert.equal(isUncertainVisitFailure(new VisitApiError("running", 409, "mutation_in_progress")), true);
 });
 
 test("admin visit UI shows private fields only behind librarian authorization", async () => {
   const source = await read("app/librarian/visits/visit-admin-workspace.tsx");
   assert.match(source, /booking\.surname/u);
   assert.match(source, /booking\.classLabel/u);
+  assert.match(source, /Непідтверджений гостьовий запис/u);
+  assert.match(source, /Підтверджений учитель/u);
+  assert.match(source, /booking\.ownerKind === "guest" \|\| booking\.identityVerified === false/u);
   assert.match(source, /\/api\/librarian\/visits/u);
   assert.match(source, /disabled=\{!writesEnabled \|\| data\?\.bookingEnabled !== true/u);
   const publicSource = await read("source/app.js");
@@ -134,7 +141,7 @@ test("site entry points link to protected booking and librarian schedule", async
     read("app/page.tsx"),
     read("app/librarian/d1-workspace.tsx"),
   ]);
-  assert.match(home, /href="\/visits"/u);
+  assert.match(home, /href="\/teacher"/u);
   assert.match(workspace, /href="\/librarian\/visits"/u);
 });
 

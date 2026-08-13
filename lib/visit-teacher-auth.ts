@@ -52,6 +52,12 @@ export type VisitTeacherAccessRow = {
   credential: VisitTeacherCredentialProjection | null;
 };
 
+export type TeacherCodeRotationResult = {
+  credentialVersion: number;
+  pendingScope: string;
+  expiresAt: string;
+};
+
 export function teacherAuthPepper(): string {
   const pepper = getRuntimeString("VISIT_TEACHER_AUTH_PEPPER");
   if (!pepper || pepper.length < 32) {
@@ -276,6 +282,316 @@ export async function revokeVisitTeacherSession(
     db.prepare(`UPDATE visit_teacher_sessions SET revoked_at = ?, last_seen_at = ?
       WHERE token_hash = ? AND revoked_at IS NULL`).bind(now, now, await sha256Hex(token)),
   ]);
+}
+
+/**
+ * Rotate a teacher-chosen high-entropy code and replace all sessions atomically.
+ * The plaintext codes and replacement token never enter an idempotency receipt or audit row.
+ */
+export async function rotateVisitTeacherCode(
+  db: VisitD1Database,
+  request: Request,
+  input: { requestId: string; currentCode: string; newCode: string },
+): Promise<{ token: string | null; identity: VisitTeacherIdentity; result: TeacherCodeRotationResult }> {
+  requireVisitTeacherCodeAuthEnabled();
+  const rawSessionToken = readCookie(request.headers.get("Cookie"), VISIT_TEACHER_COOKIE);
+  if (!rawSessionToken || !/^[A-Za-z0-9_-]{40,128}$/u.test(rawSessionToken)) {
+    throw new VisitScheduleError("authentication_required", 401, "Увійдіть за ім’ям і особистим кодом.");
+  }
+  const presentedTokenHash = await sha256Hex(rawSessionToken);
+  const initialNow = new Date().toISOString();
+  const presentedSession = await db.prepare(`SELECT s.token_hash,s.teacher_user_id,s.credential_version,
+      s.pending_scope,s.expires_at,s.revoked_at,u.full_name
+    FROM visit_teacher_sessions s JOIN users u ON u.id=s.teacher_user_id
+    WHERE s.token_hash=? AND s.expires_at>? AND u.role='teacher' AND u.status='active' LIMIT 1`)
+    .bind(presentedTokenHash, initialNow).first<{
+      token_hash: string; teacher_user_id: string; credential_version: number;
+      pending_scope: string; expires_at: string; revoked_at: string | null; full_name: string;
+    }>();
+  if (!presentedSession) {
+    throw new VisitScheduleError("authentication_required", 401, "Сеанс завершився. Увійдіть ще раз.");
+  }
+  const teacher: VisitTeacherIdentity = {
+    teacherUserId: presentedSession.teacher_user_id,
+    fullName: presentedSession.full_name,
+    credentialVersion: Number(presentedSession.credential_version),
+    tokenHash: presentedSession.token_hash,
+    pendingScope: presentedSession.pending_scope,
+    expiresAt: presentedSession.expires_at,
+  };
+  const currentCode = normalizeCode(input.currentCode);
+  const newCode = normalizeCode(input.newCode);
+  const codeShape = new RegExp(`^[${CODE_ALPHABET}]{${VISIT_TEACHER_CODE_LENGTH}}$`, "u");
+  if (!codeShape.test(currentCode) || !codeShape.test(newCode)) {
+    throw new VisitScheduleError("validation_failed", 400, "Код має складатися з 10 дозволених символів.");
+  }
+  if (!strongTeacherCode(newCode)) {
+    throw new VisitScheduleError("weak_new_code", 400, "Новий код надто простий. Створіть інший код.");
+  }
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(input.requestId)) {
+    throw new VisitScheduleError("validation_failed", 400, "Некоректний requestId.");
+  }
+  const pepper = teacherAuthPepper();
+  const currentHmac = await hmacHex(pepper, `code:${teacher.teacherUserId}:${currentCode}`);
+  const newHmac = await hmacHex(pepper, `code:${teacher.teacherUserId}:${newCode}`);
+  if (constantTimeHexEqual(currentHmac, newHmac)) {
+    throw new VisitScheduleError("new_code_unchanged", 400, "Новий код має відрізнятися від поточного.");
+  }
+  const ownerKey = `teacher:${teacher.teacherUserId}`;
+  const requestHash = await sha256Hex(JSON.stringify({
+    kind: "teacher.code.rotate",
+    ownerKey,
+    requestId: input.requestId,
+    currentHmac,
+    newHmac,
+  }));
+  const existing = await db.prepare(`SELECT owner_auth_user_id,status,request_hash,result_json
+    FROM visit_mutation_commands WHERE id=? LIMIT 1`).bind(input.requestId).first<{
+      owner_auth_user_id: string; status: string; request_hash: string; result_json: string | null;
+    }>();
+  if (existing) {
+    if (existing.owner_auth_user_id !== ownerKey || existing.request_hash !== requestHash) {
+      throw new VisitScheduleError("request_id_conflict", 409, "Цей requestId уже використано для іншої зміни.");
+    }
+    if (existing.status !== "completed" || !existing.result_json) {
+      throw new VisitScheduleError("mutation_in_progress", 409, "Зміна коду ще виконується.");
+    }
+    let result: TeacherCodeRotationResult;
+    try { result = JSON.parse(existing.result_json) as TeacherCodeRotationResult; } catch {
+      throw new VisitScheduleError("mutation_result_invalid", 503, "Збережений результат зміни коду пошкоджено.");
+    }
+    if (presentedSession.revoked_at === null
+      && teacher.credentialVersion === result.credentialVersion
+      && teacher.pendingScope === result.pendingScope
+      && teacher.expiresAt === result.expiresAt) {
+      return { token: null, identity: teacher, result };
+    }
+    const recovered = await recoverRotatedTeacherSession(
+      db, request, teacher, input.requestId, requestHash, newHmac, result,
+    );
+    return recovered;
+  }
+
+  if (presentedSession.revoked_at !== null) {
+    throw new VisitScheduleError("authentication_required", 401, "Сеанс завершився. Увійдіть ще раз.");
+  }
+
+  const credential = await db.prepare(`SELECT c.teacher_user_id,u.full_name,c.login_id,c.code_hmac,c.status,
+      c.version,c.failed_attempts,c.failure_window_started_at,c.locked_until
+    FROM visit_teacher_credentials c JOIN users u ON u.id=c.teacher_user_id
+    WHERE c.teacher_user_id=? AND u.role='teacher' AND u.status='active' LIMIT 1`)
+    .bind(teacher.teacherUserId).first<CredentialRow>();
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
+  const ip = trustedClientIp(request);
+  const ipRateScopeHash = await hmacHex(pepper, `ip:${ip}`);
+  const pairRateScopeHash = credential
+    ? await hmacHex(pepper, `pair:${ip}:${credential.login_id}`)
+    : null;
+  if ((credential?.locked_until && credential.locked_until > now)
+    || await anyRateLimitBlocked(
+      db,
+      pairRateScopeHash ? [ipRateScopeHash, pairRateScopeHash] : [ipRateScopeHash],
+      now,
+    )) {
+    throw new VisitScheduleError("rate_limited", 429, "Забагато спроб зміни коду. Спробуйте пізніше.");
+  }
+  if (!credential || credential.status !== "active" || credential.version !== teacher.credentialVersion
+    || !constantTimeHexEqual(credential.code_hmac, currentHmac)) {
+    if (credential) {
+      await recordFailedLogin(
+        db,
+        ipRateScopeHash,
+        pairRateScopeHash!,
+        credential,
+        nowDate,
+        currentHmac,
+      );
+    }
+    throw new VisitScheduleError("invalid_current_code", 401, "Поточний код неправильний.");
+  }
+
+  const token = randomOpaque(32);
+  const tokenHash = await sha256Hex(token);
+  const pendingScope = randomOpaque(18);
+  const ipScopeHash = await hmacHex(pepper, `session-ip:${ip}`);
+  const expiresAt = new Date(nowDate.getTime() + VISIT_TEACHER_SESSION_SECONDS * 1000).toISOString();
+  const nextVersion = teacher.credentialVersion + 1;
+  const result: TeacherCodeRotationResult = { credentialVersion: nextVersion, pendingScope, expiresAt };
+  const statements = [
+    db.prepare(`INSERT INTO visit_mutation_commands (
+      id,owner_auth_user_id,kind,request_hash,status,target_id,result_json,created_at,updated_at,completed_at
+    ) VALUES (?,?, 'teacher_code_rotate',?,'processing',?,NULL,?,?,NULL)`)
+      .bind(input.requestId, ownerKey, requestHash, teacher.teacherUserId, now, now),
+    db.prepare(`UPDATE visit_teacher_credentials SET code_hmac=?,version=version+1,
+        failed_attempts=0,failure_window_started_at=NULL,locked_until=NULL,last_login_at=?,
+        code_rotated_at=?,last_access_command_id=?,updated_by_user_id=?,updated_at=?
+      WHERE teacher_user_id=? AND status='active' AND version=? AND code_hmac=?
+        AND (locked_until IS NULL OR locked_until<=?)
+        AND NOT EXISTS (SELECT 1 FROM visit_teacher_login_limits
+          WHERE scope_hash IN (?,?) AND blocked_until IS NOT NULL AND blocked_until>?)
+        AND EXISTS (SELECT 1 FROM users WHERE id=? AND role='teacher' AND status='active')
+        AND EXISTS (SELECT 1 FROM visit_teacher_sessions WHERE token_hash=? AND teacher_user_id=?
+          AND credential_version=? AND revoked_at IS NULL AND expires_at>?)`)
+      .bind(newHmac, now, now, input.requestId, teacher.teacherUserId, now,
+        teacher.teacherUserId, teacher.credentialVersion, currentHmac,
+        now, ipRateScopeHash, pairRateScopeHash, now, teacher.teacherUserId,
+        teacher.tokenHash, teacher.teacherUserId, teacher.credentialVersion, now),
+    db.prepare(`INSERT INTO visit_teacher_sessions (
+      token_hash,teacher_user_id,credential_version,pending_scope,ip_scope_hash,
+      expires_at,last_seen_at,revoked_at,created_at
+    ) SELECT ?,c.teacher_user_id,c.version,?,?,?, ?,NULL,?
+      FROM visit_teacher_credentials c JOIN users u ON u.id=c.teacher_user_id
+      WHERE c.teacher_user_id=? AND c.status='active' AND c.version=? AND c.code_hmac=?
+        AND c.last_access_command_id=? AND u.role='teacher' AND u.status='active'
+        AND EXISTS (SELECT 1 FROM visit_teacher_sessions s WHERE s.token_hash=?
+          AND s.teacher_user_id=c.teacher_user_id AND s.credential_version=?
+          AND s.revoked_at IS NULL AND s.expires_at>?)`)
+      .bind(tokenHash, pendingScope, ipScopeHash, expiresAt, now, now,
+        teacher.teacherUserId, nextVersion, newHmac, input.requestId,
+        teacher.tokenHash, teacher.credentialVersion, now),
+    db.prepare(`INSERT INTO audit_events (
+      id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,
+      before_json,after_json,metadata_json,created_at
+    ) VALUES (?,?,'teacher-code@local.invalid','teacher.code.rotate.guard','visit_teacher_credential',
+      CASE WHEN EXISTS (SELECT 1 FROM visit_teacher_credentials c JOIN users u ON u.id=c.teacher_user_id
+        WHERE c.teacher_user_id=? AND c.status='active' AND c.version=? AND c.code_hmac=?
+          AND c.last_access_command_id=? AND u.role='teacher' AND u.status='active')
+      AND EXISTS (SELECT 1 FROM visit_teacher_sessions WHERE token_hash=? AND teacher_user_id=?
+        AND credential_version=? AND pending_scope=? AND revoked_at IS NULL AND expires_at=?)
+      THEN ? ELSE NULL END,?,NULL,json_object('version',?),NULL,?)`)
+      .bind(`AUD-${crypto.randomUUID()}`, teacher.teacherUserId, teacher.teacherUserId,
+        nextVersion, newHmac, input.requestId, tokenHash, teacher.teacherUserId,
+        nextVersion, pendingScope, expiresAt, teacher.teacherUserId, input.requestId,
+        nextVersion, now),
+    db.prepare(`UPDATE visit_teacher_sessions SET revoked_at=?,last_seen_at=?
+      WHERE teacher_user_id=? AND token_hash!=? AND revoked_at IS NULL`)
+      .bind(now, now, teacher.teacherUserId, tokenHash),
+    db.prepare(`UPDATE visit_mutation_commands SET status='completed',result_json=?,updated_at=?,completed_at=?
+      WHERE id=? AND owner_auth_user_id=? AND request_hash=? AND status='processing'
+        AND EXISTS (SELECT 1 FROM visit_teacher_sessions WHERE token_hash=? AND teacher_user_id=?
+          AND credential_version=? AND revoked_at IS NULL AND expires_at=?)
+        AND NOT EXISTS (SELECT 1 FROM visit_teacher_sessions WHERE teacher_user_id=?
+          AND token_hash!=? AND revoked_at IS NULL)`)
+      .bind(JSON.stringify(result), now, now, input.requestId, ownerKey, requestHash,
+        tokenHash, teacher.teacherUserId, nextVersion, expiresAt, teacher.teacherUserId, tokenHash),
+    db.prepare(`INSERT INTO audit_events (
+      id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,
+      before_json,after_json,metadata_json,created_at
+    ) VALUES (?,?,'teacher-code@local.invalid','teacher.code.rotate','visit_teacher_credential',
+      CASE WHEN EXISTS (SELECT 1 FROM visit_mutation_commands WHERE id=? AND owner_auth_user_id=?
+        AND request_hash=? AND status='completed') THEN ? ELSE NULL END,?,NULL,
+      json_object('version',?),NULL,?)`)
+      .bind(`AUD-${crypto.randomUUID()}`, teacher.teacherUserId, input.requestId, ownerKey,
+        requestHash, teacher.teacherUserId, input.requestId, nextVersion, now),
+    boundedSessionCleanup(db, now),
+    boundedLimitCleanup(db, nowDate),
+  ];
+  try { await db.batch(statements); } catch {
+    const replay = await db.prepare(`SELECT status,request_hash,result_json FROM visit_mutation_commands
+      WHERE id=? AND owner_auth_user_id=? LIMIT 1`).bind(input.requestId, ownerKey)
+      .first<{ status: string; request_hash: string; result_json: string | null }>();
+    if (replay?.status === "completed" && replay.request_hash === requestHash && replay.result_json) {
+      const replayResult = JSON.parse(replay.result_json) as TeacherCodeRotationResult;
+      const identity = await readVisitTeacherSessionByHash(db, tokenHash, now);
+      if (identity) return { token, identity, result: replayResult };
+    }
+    const blockedCredential = await db.prepare(`SELECT locked_until FROM visit_teacher_credentials
+      WHERE teacher_user_id=? LIMIT 1`).bind(teacher.teacherUserId)
+      .first<{ locked_until: string | null }>();
+    if ((blockedCredential?.locked_until && blockedCredential.locked_until > now)
+      || await anyRateLimitBlocked(db, [ipRateScopeHash, pairRateScopeHash!], now)) {
+      throw new VisitScheduleError("rate_limited", 429, "Забагато спроб зміни коду. Спробуйте пізніше.");
+    }
+    throw new VisitScheduleError("credential_version_conflict", 409, "Код або сесія вже змінилися. Увійдіть ще раз.");
+  }
+  const identity = await readVisitTeacherSessionByHash(db, tokenHash, now);
+  if (!identity) throw new VisitScheduleError("teacher_auth_unavailable", 503, "Нову сесію не вдалося підтвердити.");
+  return { token, identity, result };
+}
+
+async function recoverRotatedTeacherSession(
+  db: VisitD1Database,
+  request: Request,
+  presented: VisitTeacherIdentity,
+  requestId: string,
+  requestHash: string,
+  expectedNewHmac: string,
+  result: TeacherCodeRotationResult,
+): Promise<{ token: string; identity: VisitTeacherIdentity; result: TeacherCodeRotationResult }> {
+  const credential = await db.prepare(`SELECT version,code_hmac,status,last_access_command_id
+    FROM visit_teacher_credentials WHERE teacher_user_id=? LIMIT 1`)
+    .bind(presented.teacherUserId).first<{
+      version: number; code_hmac: string; status: string; last_access_command_id: string | null;
+    }>();
+  if (!credential || credential.status !== "active" || Number(credential.version) !== result.credentialVersion
+    || credential.last_access_command_id !== requestId
+    || !constantTimeHexEqual(credential.code_hmac, expectedNewHmac)) {
+    throw new VisitScheduleError("authentication_required", 401, "Сеанс завершився. Увійдіть ще раз.");
+  }
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
+  const token = randomOpaque(32);
+  const tokenHash = await sha256Hex(token);
+  const pendingScope = randomOpaque(18);
+  const expiresAt = new Date(nowDate.getTime() + VISIT_TEACHER_SESSION_SECONDS * 1000).toISOString();
+  const ipScopeHash = await hmacHex(teacherAuthPepper(), `session-ip:${trustedClientIp(request)}`);
+  const recoveredResult = { ...result, pendingScope, expiresAt };
+  try {
+    await db.batch([
+      db.prepare(`UPDATE visit_teacher_sessions SET revoked_at=?,last_seen_at=?
+        WHERE token_hash=(SELECT token_hash FROM visit_teacher_sessions
+          WHERE teacher_user_id=? AND revoked_at IS NULL AND expires_at>?
+          ORDER BY created_at,token_hash LIMIT 1)
+        AND (SELECT COUNT(*) FROM visit_teacher_sessions
+          WHERE teacher_user_id=? AND revoked_at IS NULL AND expires_at>?)>=?`)
+        .bind(now, now, presented.teacherUserId, now,
+          presented.teacherUserId, now, MAX_ACTIVE_SESSIONS),
+      db.prepare(`INSERT INTO visit_teacher_sessions (
+        token_hash,teacher_user_id,credential_version,pending_scope,ip_scope_hash,
+        expires_at,last_seen_at,revoked_at,created_at
+      ) SELECT ?,c.teacher_user_id,c.version,?,?,?, ?,NULL,?
+        FROM visit_teacher_credentials c JOIN users u ON u.id=c.teacher_user_id
+        WHERE c.teacher_user_id=? AND c.version=? AND c.code_hmac=? AND c.status='active'
+          AND c.last_access_command_id=? AND u.role='teacher' AND u.status='active'`)
+        .bind(tokenHash, pendingScope, ipScopeHash, expiresAt, now, now,
+          presented.teacherUserId, result.credentialVersion, expectedNewHmac, requestId),
+      db.prepare(`UPDATE visit_mutation_commands SET result_json=?,updated_at=?
+        WHERE id=? AND owner_auth_user_id=? AND request_hash=? AND status='completed'
+          AND EXISTS (SELECT 1 FROM visit_teacher_sessions WHERE token_hash=?
+            AND teacher_user_id=? AND credential_version=? AND pending_scope=?
+            AND revoked_at IS NULL AND expires_at=?)
+          AND (SELECT COUNT(*) FROM visit_teacher_sessions
+            WHERE teacher_user_id=? AND revoked_at IS NULL AND expires_at>?)<=?`)
+        .bind(JSON.stringify(recoveredResult), now, requestId, `teacher:${presented.teacherUserId}`,
+          requestHash, tokenHash, presented.teacherUserId, result.credentialVersion, pendingScope, expiresAt,
+          presented.teacherUserId, now, MAX_ACTIVE_SESSIONS),
+      db.prepare(`INSERT INTO audit_events (
+        id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,
+        before_json,after_json,metadata_json,created_at
+      ) VALUES (?,?,'teacher-code@local.invalid','teacher.code.rotate.recover_session',
+        'visit_teacher_session',CASE WHEN EXISTS (
+          SELECT 1 FROM visit_teacher_sessions WHERE token_hash=? AND teacher_user_id=?
+            AND credential_version=? AND pending_scope=? AND revoked_at IS NULL AND expires_at=?
+        ) AND (SELECT COUNT(*) FROM visit_teacher_sessions
+          WHERE teacher_user_id=? AND revoked_at IS NULL AND expires_at>?)<=?
+          AND EXISTS (SELECT 1 FROM visit_mutation_commands WHERE id=?
+            AND owner_auth_user_id=? AND request_hash=? AND status='completed'
+            AND result_json=?)
+        THEN ? ELSE NULL END,?,NULL,NULL,NULL,?)`)
+        .bind(`AUD-${crypto.randomUUID()}`, presented.teacherUserId, tokenHash,
+          presented.teacherUserId, result.credentialVersion, pendingScope, expiresAt,
+          presented.teacherUserId, now, MAX_ACTIVE_SESSIONS, requestId,
+          `teacher:${presented.teacherUserId}`, requestHash, JSON.stringify(recoveredResult),
+          tokenHash, requestId, now),
+      boundedSessionCleanup(db, now),
+    ]);
+  } catch {
+    throw new VisitScheduleError("teacher_auth_unavailable", 503, "Не вдалося відновити нову сесію. Увійдіть новим кодом.");
+  }
+  const identity = await readVisitTeacherSessionByHash(db, tokenHash, now);
+  if (!identity) throw new VisitScheduleError("teacher_auth_unavailable", 503, "Не вдалося відновити нову сесію.");
+  return { token, identity, result: recoveredResult };
 }
 
 export function teacherSessionCookie(token: string): string {
@@ -752,10 +1068,12 @@ function boundedLimitCleanup(db: VisitD1Database, nowDate: Date) {
 }
 
 function boundedSessionCleanup(db: VisitD1Database, now: string) {
+  const revokedBefore = new Date(new Date(now).getTime() - 24 * 60 * 60 * 1000).toISOString();
   return db.prepare(`DELETE FROM visit_teacher_sessions WHERE token_hash IN (
     SELECT token_hash FROM visit_teacher_sessions
-    WHERE expires_at<=? OR revoked_at IS NOT NULL ORDER BY expires_at LIMIT 100
-  )`).bind(now);
+    WHERE expires_at<=? OR (revoked_at IS NOT NULL AND revoked_at<=?)
+    ORDER BY expires_at LIMIT 100
+  )`).bind(now, revokedBefore);
 }
 
 async function accessCommand(db: VisitD1Database, requestId: string) {
@@ -782,6 +1100,16 @@ function trustedClientIp(request: Request): string {
 
 function normalizeCode(value: string): string {
   return value.normalize("NFKC").toUpperCase().replace(/[\s-]+/gu, "");
+}
+
+function strongTeacherCode(value: string): boolean {
+  if (new Set(value).size < 4) return false;
+  if (/(.)\1{3}/u.test(value)) return false;
+  if (value === Array.from(value).reverse().join("")) return false;
+  if (/^(.{1,5})\1+$/u.test(value)) return false;
+  const reversedAlphabet = Array.from(CODE_ALPHABET).reverse().join("");
+  if (CODE_ALPHABET.includes(value) || reversedAlphabet.includes(value)) return false;
+  return true;
 }
 
 function formatTeacherCode(value: string): string {

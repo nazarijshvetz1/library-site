@@ -25,6 +25,24 @@ export type VisitTeacherSessionEnvelope = {
   expiresAt?: string;
 };
 
+export type VisitGuestSessionEnvelope = {
+  success: true;
+  guest: { pendingScope: string; expiresAt: string };
+};
+
+export type VisitGuestTeacher = {
+  teacherRef: string;
+  fullName: string;
+};
+
+export type VisitGuestBooking = Omit<VisitBooking, "surname"> & {
+  teacher: VisitGuestTeacher;
+};
+
+export type GuestVisitsEnvelope = Omit<TeacherVisitsEnvelope, "bookingEnabled" | "bookings"> & {
+  bookings: VisitGuestBooking[];
+};
+
 export type VisitBooking = {
   id: string;
   surname: string;
@@ -36,6 +54,8 @@ export type VisitBooking = {
   classLabel: string | null;
   status: string;
   version: number;
+  ownerKind?: "guest" | "teacher" | "legacy";
+  identityVerified?: boolean;
   ownerEmail?: string;
 };
 
@@ -46,6 +66,15 @@ export type VisitBusyPeriod = {
   startTime?: string;
   endTime?: string;
   status?: string;
+};
+
+export type PublicVisitsEnvelope = {
+  success: true;
+  timeZone: string;
+  slotMinutes: number;
+  hours: Record<string, Array<{ startTime: string; endTime: string }>>;
+  closures: Array<{ date: string; startTime: string; endTime: string; status: "closed" }>;
+  busy: VisitBusyPeriod[];
 };
 
 export type TeacherVisitsEnvelope = {
@@ -83,8 +112,13 @@ export type VisitCancelPayload = {
   reason?: string | null;
 };
 
+export type VisitPatchPayload = VisitCreatePayload & { expectedVersion: number };
+
+export type VisitGuestCreatePayload = VisitCreatePayload & { teacherRef: string };
+
 export type VisitPendingIntent =
   | { kind: "create"; requestId: string; payload: VisitCreatePayload }
+  | { kind: "patch"; requestId: string; bookingId: string; payload: VisitPatchPayload }
   | {
       kind: "cancel";
       requestId: string;
@@ -94,7 +128,46 @@ export type VisitPendingIntent =
 
 export type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
+export type PortalPendingIntent = {
+  kind: string;
+  requestId: string;
+  payload: object;
+  resourceId?: string;
+};
+
 const STORAGE_PREFIX = "library.visit.pending.v1";
+
+export const PERSONAL_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+
+export type PersonalCodeStrength = {
+  complete: boolean;
+  diverse: boolean;
+  noLongRun: boolean;
+  notObvious: boolean;
+  strong: boolean;
+};
+
+export function normalizedPersonalCode(value: string): string {
+  return value.normalize("NFKC").toUpperCase().replace(/[^23456789ABCDEFGHJKMNPQRSTUVWXYZ]/gu, "").slice(0, 10);
+}
+
+export function formatPersonalCode(value: string): string {
+  const normalized = normalizedPersonalCode(value);
+  return normalized.length > 5 ? `${normalized.slice(0, 5)}-${normalized.slice(5)}` : normalized;
+}
+
+export function personalCodeStrength(value: string): PersonalCodeStrength {
+  const normalized = normalizedPersonalCode(value);
+  const complete = normalized.length === 10;
+  const diverse = new Set(normalized).size >= 4;
+  const noLongRun = !/(.)\1{3}/u.test(normalized);
+  const reversedAlphabet = Array.from(PERSONAL_CODE_ALPHABET).reverse().join("");
+  const notObvious = normalized !== Array.from(normalized).reverse().join("")
+    && !/^(.{1,5})\1+$/u.test(normalized)
+    && !PERSONAL_CODE_ALPHABET.includes(normalized)
+    && !reversedAlphabet.includes(normalized);
+  return { complete, diverse, noLongRun, notObvious, strong: complete && diverse && noLongRun && notObvious };
+}
 
 export class VisitApiError extends Error {
   status: number;
@@ -133,12 +206,12 @@ export function readVisitPendingIntent(
     if (!value || typeof value !== "object") return null;
     const candidate = value as Partial<VisitPendingIntent>;
     if (
-      (candidate.kind !== "create" && candidate.kind !== "cancel") ||
+      (candidate.kind !== "create" && candidate.kind !== "patch" && candidate.kind !== "cancel") ||
       typeof candidate.requestId !== "string" ||
       !candidate.payload ||
       typeof candidate.payload !== "object"
     ) return null;
-    if (candidate.kind === "cancel" && typeof candidate.bookingId !== "string") return null;
+    if ((candidate.kind === "patch" || candidate.kind === "cancel") && typeof candidate.bookingId !== "string") return null;
     return candidate as VisitPendingIntent;
   } catch {
     return null;
@@ -164,6 +237,66 @@ export function clearVisitPendingIntent(storage: StorageLike, key: string): void
   } catch {
     // A denied storage cleanup must not turn a confirmed request into an error.
   }
+}
+
+export function readPortalPendingIntent<T extends PortalPendingIntent>(
+  storage: StorageLike,
+  key: string,
+  allowedKinds: readonly string[],
+): T | null {
+  try {
+    const raw = storage.getItem(key);
+    if (!raw) return null;
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object") return null;
+    const candidate = value as Partial<PortalPendingIntent>;
+    if (
+      typeof candidate.kind !== "string"
+      || !allowedKinds.includes(candidate.kind)
+      || typeof candidate.requestId !== "string"
+      || !candidate.payload
+      || typeof candidate.payload !== "object"
+    ) return null;
+    if (candidate.resourceId !== undefined && typeof candidate.resourceId !== "string") return null;
+    return candidate as T;
+  } catch {
+    return null;
+  }
+}
+
+export function writePortalPendingIntent<T extends PortalPendingIntent>(
+  storage: StorageLike,
+  key: string,
+  intent: T,
+): boolean {
+  try {
+    storage.setItem(key, JSON.stringify(intent));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function clearPortalPendingIntent(storage: StorageLike, key: string): void {
+  clearVisitPendingIntent(storage, key);
+}
+
+export function mergePortalPageById<T extends { id: string }>(
+  current: readonly T[],
+  nextPage: readonly T[],
+): T[] {
+  const merged = [...current];
+  const positions = new Map(merged.map((item, index) => [item.id, index]));
+  for (const item of nextPage) {
+    const position = positions.get(item.id);
+    if (position === undefined) {
+      positions.set(item.id, merged.length);
+      merged.push(item);
+    } else {
+      merged[position] = item;
+    }
+  }
+  return merged;
 }
 
 export function busyPeriodParts(period: VisitBusyPeriod): {
@@ -218,12 +351,17 @@ export function teacherVisitsUrl(today: string): string {
   return `/api/visits/teacher?${params.toString()}`;
 }
 
-export function teacherSearchUrl(query: string): string {
-  const params = new URLSearchParams({ q: query.trim() });
-  return `/api/visits/teacher/directory?${params.toString()}`;
+export function publicVisitsUrl(from: string, to: string): string {
+  const params = new URLSearchParams({ from, to });
+  return `/api/visits/public?${params.toString()}`;
 }
 
-export const teacherSessionUrl = "/api/visits/teacher/session";
+export function teacherSearchUrl(query: string): string {
+  const params = new URLSearchParams({ q: query.trim() });
+  return `/api/teacher/directory?${params.toString()}`;
+}
+
+export const teacherSessionUrl = "/api/teacher/session";
 
 export function weekdayKey(date: string): string {
   const [year, month, day] = date.split("-").map(Number);
@@ -234,21 +372,48 @@ export function weekdayKey(date: string): string {
 export function isUncertainVisitFailure(error: unknown): boolean {
   if (!(error instanceof VisitApiError)) return true;
   const definitiveCodes = new Set([
+    "actor_not_mapped",
     "authentication_required",
     "authorization_required",
     "booking_limit_reached",
+    "booking_not_editable",
     "booking_not_found",
     "booking_not_cancellable",
     "booking_version_conflict",
     "class_year_not_active",
+    "credential_version_conflict",
     "cross_origin_request",
+    "fulfillment_source_not_found",
+    "guest_session_expired",
+    "guest_session_required",
+    "insufficient_stock",
+    "invalid_current_code",
+    "invalid_due_date",
+    "invalid_request_transition",
+    "material_not_found",
+    "mutation_failed",
+    "new_code_unchanged",
+    "notification_already_read",
+    "notification_not_found",
+    "notification_version_conflict",
     "outside_booking_horizon",
     "outside_business_hours",
+    "pickup_location_not_found",
+    "rate_limited",
     "request_id_conflict",
+    "request_items_mismatch",
+    "request_not_cancellable",
+    "request_not_found",
+    "request_too_large",
+    "request_version_conflict",
     "slot_unavailable",
+    "stock_quantity_conflict",
     "teacher_access_revoked",
+    "teacher_not_found",
     "validation_failed",
     "visit_time_elapsed",
+    "weak_new_code",
+    "writes_disabled",
   ]);
   return !definitiveCodes.has(error.code);
 }

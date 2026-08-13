@@ -7,6 +7,7 @@ import test from "node:test";
 globalThis.__VISIT_TEST_ENV = {
   VISIT_TEACHER_CODE_AUTH_ENABLED: "true",
   VISIT_TEACHER_AUTH_PEPPER: "test-only-pepper-that-is-at-least-32-characters-long",
+  VISIT_GUEST_AUTH_PEPPER: "guest-test-pepper-that-is-at-least-32-characters-long",
 };
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -21,6 +22,8 @@ registerHooks({
 });
 
 const auth = await import("../lib/visit-teacher-auth.ts");
+const guestAuth = await import("../lib/visit-guest-auth.ts");
+const guestStore = await import("../lib/visit-guest-store.ts");
 const store = await import("../lib/visit-schedule-store.ts");
 const validation = await import("../lib/visit-schedule-validation.ts");
 
@@ -69,6 +72,7 @@ async function database() {
     "0000_librarian_drafts.sql", "0001_draft_workflow.sql", "0002_remove_legacy_audit_triggers.sql",
     "0003_odd_the_order.sql", "0004_staging_import_runs.sql", "0005_young_night_nurse.sql",
     "0006_pale_sauron.sql", "0007_cold_whiplash.sql", "0008_sudden_thunderbird.sql",
+    "0009_happy_silver_samurai.sql",
   ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
   const now = new Date().toISOString();
   insertUser(sqlite, "USR-LIB", "Бібліотекар", "library@example.test", "auth-library", "librarian", now);
@@ -87,6 +91,12 @@ function request(ip = "203.0.113.10", cookie = null) {
   const headers = new Headers({ "CF-Connecting-IP": ip });
   if (cookie) headers.set("Cookie", `${auth.VISIT_TEACHER_COOKIE}=${cookie}`);
   return new Request("https://library.example.test/api/visits/teacher/session", { headers });
+}
+
+function guestRequest(ip = "203.0.113.210", cookie = null) {
+  const headers = new Headers({ "CF-Connecting-IP": ip });
+  if (cookie) headers.set("Cookie", `${guestAuth.VISIT_GUEST_COOKIE}=${cookie}`);
+  return new Request("https://library.example.test/api/visits/guest", { headers });
 }
 
 function commandId() { return crypto.randomUUID(); }
@@ -305,6 +315,317 @@ test("credential lock blocks only new login, while established session remains u
     () => auth.createVisitTeacherSession(context.db, request("203.0.113.11"), { loginId, code: issued.code }),
     (error) => error.code === "invalid_teacher_credentials",
   );
+});
+
+test("guest token owns unverified canonical bookings and atomic reschedule rolls back on overlap", async () => {
+  const context = await database();
+  const opened = await guestAuth.createVisitGuestSession(context.db, guestRequest());
+  assert.notEqual(opened.token, opened.identity.tokenHash);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM visit_guest_sessions WHERE token_hash=?")
+    .get(opened.token).n, 0);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM visit_guest_sessions WHERE token_hash=?")
+    .get(opened.identity.tokenHash).n, 1);
+  assert.match(guestAuth.guestSessionCookie(opened.token), /^__Host-visit_guest=.*Max-Age=2592000; HttpOnly; Secure; SameSite=Lax$/u);
+
+  const fullName = context.sqlite.prepare("SELECT full_name FROM users WHERE id='USR-T1'").get().full_name;
+  const query = Array.from(fullName).slice(0, 3).join("").toLocaleLowerCase("uk-UA");
+  const directory = await guestAuth.listGuestTeacherDirectory(context.db, guestRequest(), query);
+  assert.equal(directory.length, 1);
+  assert.equal(directory[0].fullName, fullName);
+  assert.match(directory[0].teacherRef, /^[0-9a-f]{64}$/u);
+
+  const date = futureWeekday();
+  const input = {
+    requestId: commandId(), teacherRef: directory[0].teacherRef, date,
+    startTime: "09:00", endTime: "09:20", classYearId: null, purpose: "Lesson",
+  };
+  const created = await guestStore.createGuestVisitBooking(context.db, opened.identity, input);
+  assert.deepEqual(await guestStore.createGuestVisitBooking(context.db, opened.identity, input), created);
+  const persisted = context.sqlite.prepare(`SELECT owner_kind,owner_user_id,owner_auth_user_id,
+    owner_email,guest_owner_id,selected_teacher_user_id,surname,status,version
+    FROM visit_bookings WHERE id=?`).get(created.id);
+  assert.deepEqual({ ...persisted }, {
+    owner_kind: "guest", owner_user_id: null, owner_auth_user_id: null, owner_email: null,
+    guest_owner_id: opened.identity.guestOwnerId, selected_teacher_user_id: "USR-T1",
+    surname: fullName, status: "active", version: 1,
+  });
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM visit_slot_claims WHERE booking_id=?")
+    .get(created.id).n, 4);
+
+  context.sqlite.prepare(`INSERT INTO visit_bookings (
+    id,owner_kind,owner_user_id,owner_auth_user_id,owner_email,guest_owner_id,
+    selected_teacher_user_id,surname,class_year_id,class_label,visit_date,start_time,end_time,
+    purpose,status,cancel_reason,cancelled_by_auth_user_id,cancelled_by_user_id,
+    cancelled_by_guest_owner_id,last_mutation_request_id,version,created_at,updated_at,cancelled_at
+  ) VALUES ('VIS-VERIFIED','teacher','USR-T1',NULL,NULL,NULL,NULL,?,NULL,NULL,
+    ?,'12:00','12:20','','active','',NULL,NULL,NULL,NULL,1,?,?,NULL)`)
+    .run(fullName, date, new Date().toISOString(), new Date().toISOString());
+  const privateSchedule = await store.readVisitSchedule(context.db, { from: date, to: date }, {
+    includePrivateBookings: true,
+  });
+  assert.deepEqual(privateSchedule.bookings.map((booking) => ({
+    id: booking.id, ownerKind: booking.ownerKind, identityVerified: booking.identityVerified,
+  })), [
+    { id: created.id, ownerKind: "guest", identityVerified: false },
+    { id: "VIS-VERIFIED", ownerKind: "teacher", identityVerified: true },
+  ]);
+  const publicSchedule = await store.readVisitSchedule(context.db, { from: date, to: date });
+  const publicJson = JSON.stringify(publicSchedule);
+  assert.doesNotMatch(publicJson, /ownerKind|identityVerified|Portal Teacher|guest_owner/iu);
+
+  const other = await guestAuth.createVisitGuestSession(context.db, guestRequest("203.0.113.211"));
+  assert.deepEqual(await guestStore.listOwnGuestVisits(context.db, other.identity, { from: date, to: date }), []);
+  await assert.rejects(
+    () => guestStore.updateGuestVisitBooking(context.db, other.identity, created.id, {
+      requestId: commandId(), expectedVersion: 1, date,
+      startTime: "09:30", endTime: "09:50", classYearId: null, purpose: null,
+    }),
+    (error) => error.code === "booking_not_found",
+  );
+
+  const oldClaims = context.sqlite.prepare(
+    "SELECT segment_key FROM visit_slot_claims WHERE booking_id=? ORDER BY segment_key",
+  ).all(created.id).map((row) => row.segment_key);
+  context.db.beforeBatch = () => {
+    const now = new Date().toISOString();
+    context.sqlite.prepare(`INSERT INTO visit_schedule_closures (
+      id,visit_date,start_time,end_time,status,reason,created_by_user_id,cancelled_by_user_id,
+      version,created_at,updated_at,cancelled_at
+    ) VALUES ('CLO-GUEST-RACE',?,'09:30','09:50','active','','USR-LIB',NULL,1,?,?,NULL)`)
+      .run(date, now, now);
+    context.sqlite.prepare(`INSERT INTO visit_slot_claims(segment_key,booking_id,closure_id,created_at)
+      VALUES (?,NULL,'CLO-GUEST-RACE',?)`).run(`${date}T09:30`, now);
+  };
+  await assert.rejects(
+    () => guestStore.updateGuestVisitBooking(context.db, opened.identity, created.id, {
+      requestId: commandId(), expectedVersion: 1, date,
+      startTime: "09:30", endTime: "09:50", classYearId: null, purpose: "Changed",
+    }),
+    (error) => error.code === "slot_unavailable",
+  );
+  assert.deepEqual(context.sqlite.prepare(
+    "SELECT segment_key FROM visit_slot_claims WHERE booking_id=? ORDER BY segment_key",
+  ).all(created.id).map((row) => row.segment_key), oldClaims);
+  assert.deepEqual({ ...context.sqlite.prepare(
+    "SELECT start_time,end_time,version FROM visit_bookings WHERE id=?",
+  ).get(created.id) }, { start_time: "09:00", end_time: "09:20", version: 1 });
+
+  const cancelled = await guestStore.cancelGuestVisitBooking(context.db, opened.identity, created.id, {
+    requestId: commandId(), expectedVersion: 1, reason: "Changed plans",
+  });
+  assert.equal(cancelled.status, "cancelled");
+  assert.equal(cancelled.version, 2);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM visit_slot_claims WHERE booking_id=?")
+    .get(created.id).n, 0);
+  assert.equal(context.sqlite.prepare(
+    "SELECT cancelled_by_guest_owner_id FROM visit_bookings WHERE id=?",
+  ).get(created.id).cancelled_by_guest_owner_id, opened.identity.guestOwnerId);
+  const serialized = JSON.stringify(context.sqlite.prepare("SELECT * FROM visit_guest_sessions").all())
+    + JSON.stringify(context.sqlite.prepare("SELECT * FROM visit_mutation_commands").all());
+  assert.doesNotMatch(serialized, new RegExp(opened.token, "u"));
+});
+
+test("guest create reasserts the 20-active-booking cap inside the atomic batch", async () => {
+  const context = await database();
+  const opened = await guestAuth.createVisitGuestSession(context.db, guestRequest());
+  const teacherRef = await guestAuth.guestTeacherRef("USR-T1");
+  const date = futureWeekday();
+  const now = new Date().toISOString();
+  for (let index = 0; index < 19; index += 1) {
+    context.sqlite.prepare(`INSERT INTO visit_bookings (
+      id,owner_kind,owner_user_id,owner_auth_user_id,owner_email,guest_owner_id,
+      selected_teacher_user_id,surname,class_year_id,class_label,visit_date,start_time,end_time,
+      purpose,status,cancel_reason,cancelled_by_auth_user_id,cancelled_by_user_id,
+      cancelled_by_guest_owner_id,last_mutation_request_id,version,created_at,updated_at,cancelled_at
+    ) VALUES (?,'guest',NULL,NULL,NULL,?,'USR-T1','Guest Teacher',NULL,NULL,?,'08:00','08:05',
+      '','active','',NULL,NULL,NULL,NULL,1,?,?,NULL)`)
+      .run(`VIS-CAP-${String(index).padStart(2, "0")}`, opened.identity.guestOwnerId, date, now, now);
+  }
+  const requestId = commandId();
+  context.db.beforeBatch = () => context.sqlite.prepare(`INSERT INTO visit_bookings (
+    id,owner_kind,owner_user_id,owner_auth_user_id,owner_email,guest_owner_id,
+    selected_teacher_user_id,surname,class_year_id,class_label,visit_date,start_time,end_time,
+    purpose,status,cancel_reason,cancelled_by_auth_user_id,cancelled_by_user_id,
+    cancelled_by_guest_owner_id,last_mutation_request_id,version,created_at,updated_at,cancelled_at
+  ) VALUES ('VIS-CAP-RACE','guest',NULL,NULL,NULL,?,'USR-T1','Guest Teacher',NULL,NULL,
+    ?,'08:05','08:10','','active','',NULL,NULL,NULL,NULL,1,?,?,NULL)`)
+    .run(opened.identity.guestOwnerId, date, now, now);
+  await assert.rejects(
+    () => guestStore.createGuestVisitBooking(context.db, opened.identity, {
+      requestId, teacherRef, date, startTime: "11:00", endTime: "11:20",
+      classYearId: null, purpose: null,
+    }),
+    (error) => error.code === "booking_limit_reached",
+  );
+  assert.equal(context.sqlite.prepare(
+    "SELECT COUNT(*) AS n FROM visit_bookings WHERE guest_owner_id=? AND status='active'",
+  ).get(opened.identity.guestOwnerId).n, 20);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM visit_mutation_commands WHERE id=?")
+    .get(requestId).n, 0);
+});
+
+test("guest session and mutation rate caps are reasserted atomically", async () => {
+  const sessionContext = await database();
+  for (let attempt = 0; attempt < 59; attempt += 1) {
+    await guestAuth.createVisitGuestSession(sessionContext.db, guestRequest("203.0.113.220"));
+  }
+  const sessionScope = sessionContext.sqlite.prepare(
+    "SELECT scope_hash FROM visit_guest_rate_limits WHERE attempts=59",
+  ).get().scope_hash;
+  sessionContext.db.beforeBatch = () => sessionContext.sqlite.prepare(
+    "UPDATE visit_guest_rate_limits SET attempts=60 WHERE scope_hash=?",
+  ).run(sessionScope);
+  await assert.rejects(
+    () => guestAuth.createVisitGuestSession(sessionContext.db, guestRequest("203.0.113.220")),
+    (error) => error.code === "rate_limited",
+  );
+  assert.equal(sessionContext.sqlite.prepare(
+    "SELECT attempts FROM visit_guest_rate_limits WHERE scope_hash=?",
+  ).get(sessionScope).attempts, 60);
+  assert.equal(sessionContext.sqlite.prepare("SELECT COUNT(*) AS n FROM visit_guest_sessions").get().n, 59);
+
+  const mutationContext = await database();
+  const opened = await guestAuth.createVisitGuestSession(mutationContext.db, guestRequest("203.0.113.221"));
+  for (let attempt = 0; attempt < 19; attempt += 1) {
+    await guestAuth.enforceGuestMutationRate(
+      mutationContext.db, guestRequest("203.0.113.221", opened.token), opened.identity,
+    );
+  }
+  mutationContext.db.beforeBatch = () => mutationContext.sqlite.prepare(
+    "UPDATE visit_guest_rate_limits SET attempts=20 WHERE attempts=19",
+  ).run();
+  await assert.rejects(
+    () => guestAuth.enforceGuestMutationRate(
+      mutationContext.db, guestRequest("203.0.113.221", opened.token), opened.identity,
+    ),
+    (error) => error.code === "rate_limited",
+  );
+  assert.deepEqual(mutationContext.sqlite.prepare(
+    "SELECT attempts FROM visit_guest_rate_limits WHERE attempts>=20 ORDER BY scope_hash",
+  ).all().map((row) => row.attempts), [20, 20]);
+});
+
+test("teacher code rotation revokes prior sessions and replay recovery stays capped at three", async () => {
+  const context = await database();
+  const issued = await issuedCredential(context);
+  const loginId = context.sqlite.prepare("SELECT login_id FROM visit_teacher_credentials").get().login_id;
+  const loggedIn = await auth.createVisitTeacherSession(context.db, request(), { loginId, code: issued.code });
+  const requestId = commandId();
+  const newCode = "24ACE-GJMPZ";
+  const rotated = await auth.rotateVisitTeacherCode(
+    context.db, request("203.0.113.10", loggedIn.token), { requestId, currentCode: issued.code, newCode },
+  );
+  assert.ok(rotated.token);
+  assert.equal(rotated.result.credentialVersion, 2);
+  await assert.rejects(
+    () => auth.requireVisitTeacherSession(context.db, request("203.0.113.10", loggedIn.token)),
+    (error) => error.code === "authentication_required",
+  );
+  assert.equal((await auth.requireVisitTeacherSession(
+    context.db, request("203.0.113.10", rotated.token),
+  )).credentialVersion, 2);
+  const beforeActiveReplay = context.sqlite.prepare(
+    "SELECT COUNT(*) AS n FROM visit_teacher_sessions",
+  ).get().n;
+  const activeReplay = await auth.rotateVisitTeacherCode(
+    context.db, request("203.0.113.10", rotated.token), { requestId, currentCode: issued.code, newCode },
+  );
+  assert.equal(activeReplay.token, null);
+  assert.deepEqual(activeReplay.result, rotated.result);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM visit_teacher_sessions").get().n, beforeActiveReplay);
+
+  for (let replay = 0; replay < 5; replay += 1) {
+    const recovered = await auth.rotateVisitTeacherCode(
+      context.db, request("203.0.113.10", loggedIn.token), { requestId, currentCode: issued.code, newCode },
+    );
+    assert.ok(recovered.token);
+  }
+  assert.equal(context.sqlite.prepare(`SELECT COUNT(*) AS n FROM visit_teacher_sessions
+    WHERE teacher_user_id='USR-T1' AND revoked_at IS NULL AND expires_at>?`)
+    .get(new Date().toISOString()).n, 3);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM visit_mutation_commands WHERE id=?")
+    .get(requestId).n, 1);
+  const secretDump = JSON.stringify(context.sqlite.prepare(
+    "SELECT request_hash,result_json FROM visit_mutation_commands WHERE id=?",
+  ).all(requestId)) + JSON.stringify(context.sqlite.prepare(
+    "SELECT before_json,after_json,metadata_json FROM audit_events WHERE request_id=?",
+  ).all(requestId));
+  assert.doesNotMatch(secretDump, /24ACEGJMPZ/u);
+
+  const before = context.sqlite.prepare(`SELECT token_hash,revoked_at FROM visit_teacher_sessions
+    WHERE teacher_user_id='USR-T1' AND revoked_at IS NULL ORDER BY token_hash`).all()
+    .map((row) => ({ ...row }));
+  context.db.beforeBatch = () => context.sqlite.prepare(
+    "UPDATE visit_teacher_credentials SET status='disabled' WHERE teacher_user_id='USR-T1'",
+  ).run();
+  await assert.rejects(
+    () => auth.rotateVisitTeacherCode(
+      context.db, request("203.0.113.10", loggedIn.token), { requestId, currentCode: issued.code, newCode },
+    ),
+    (error) => error.code === "teacher_auth_unavailable",
+  );
+  assert.deepEqual(context.sqlite.prepare(`SELECT token_hash,revoked_at FROM visit_teacher_sessions
+    WHERE teacher_user_id='USR-T1' AND revoked_at IS NULL ORDER BY token_hash`).all()
+    .map((row) => ({ ...row })), before);
+});
+
+test("teacher code rotation honors failed-attempt limits and an atomic credential lock", async () => {
+  const context = await database();
+  const issued = await issuedCredential(context);
+  const loginId = context.sqlite.prepare("SELECT login_id FROM visit_teacher_credentials").get().login_id;
+  const loggedIn = await auth.createVisitTeacherSession(
+    context.db, request("203.0.113.70"), { loginId, code: issued.code },
+  );
+  const newCode = "24ACE-GJMPZ";
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await assert.rejects(
+      () => auth.rotateVisitTeacherCode(
+        context.db,
+        request("203.0.113.70", loggedIn.token),
+        { requestId: commandId(), currentCode: wrongCode(issued.code), newCode },
+      ),
+      (error) => error.code === "invalid_current_code",
+    );
+  }
+  await assert.rejects(
+    () => auth.rotateVisitTeacherCode(
+      context.db,
+      request("203.0.113.70", loggedIn.token),
+      { requestId: commandId(), currentCode: issued.code, newCode },
+    ),
+    (error) => error.code === "rate_limited" && error.status === 429,
+  );
+  assert.equal(context.sqlite.prepare(
+    "SELECT version FROM visit_teacher_credentials WHERE teacher_user_id='USR-T1'",
+  ).get().version, 1);
+  assert.equal(context.sqlite.prepare(
+    "SELECT revoked_at FROM visit_teacher_sessions WHERE token_hash=?",
+  ).get(loggedIn.identity.tokenHash).revoked_at, null);
+
+  context.sqlite.prepare("DELETE FROM visit_teacher_login_limits").run();
+  context.sqlite.prepare(`UPDATE visit_teacher_credentials
+    SET failed_attempts=0,failure_window_started_at=NULL,locked_until=NULL`).run();
+  const racedRequestId = commandId();
+  context.db.beforeBatch = () => context.sqlite.prepare(`UPDATE visit_teacher_credentials
+    SET locked_until='2999-01-01T00:00:00.000Z' WHERE teacher_user_id='USR-T1'`).run();
+  await assert.rejects(
+    () => auth.rotateVisitTeacherCode(
+      context.db,
+      request("203.0.113.71", loggedIn.token),
+      { requestId: racedRequestId, currentCode: issued.code, newCode },
+    ),
+    (error) => error.code === "rate_limited" && error.status === 429,
+  );
+  assert.equal(context.sqlite.prepare(
+    "SELECT version FROM visit_teacher_credentials WHERE teacher_user_id='USR-T1'",
+  ).get().version, 1);
+  assert.equal(context.sqlite.prepare(
+    "SELECT COUNT(*) AS n FROM visit_mutation_commands WHERE id=?",
+  ).get(racedRequestId).n, 0);
+  assert.equal(context.sqlite.prepare(
+    "SELECT revoked_at FROM visit_teacher_sessions WHERE token_hash=?",
+  ).get(loggedIn.identity.tokenHash).revoked_at, null);
 });
 
 test("same-millisecond reset and access-action losers roll back by exact command marker", async () => {

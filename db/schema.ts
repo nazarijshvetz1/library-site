@@ -146,6 +146,7 @@ const inventoryTransactionKinds = [
 const inventoryTransactionStatuses = ["posted", "reversed"] as const;
 const mutationCommandStatuses = ["processing", "completed", "failed"] as const;
 const visitBookingStatuses = ["active", "cancelled"] as const;
+const visitBookingOwnerKinds = ["teacher", "guest", "legacy"] as const;
 const visitClosureStatuses = ["active", "cancelled"] as const;
 const visitHourStatuses = ["active", "inactive"] as const;
 const visitTeacherCredentialStatuses = ["active", "disabled"] as const;
@@ -157,6 +158,16 @@ const visitTeacherAccessCommandKinds = [
   "credential.unlock",
   "sessions.revoke",
 ] as const;
+const materialRequestStatuses = [
+  "submitted",
+  "in_review",
+  "ready",
+  "partially_ready",
+  "completed",
+  "rejected",
+  "cancelled",
+] as const;
+const materialRequestActorKinds = ["teacher", "librarian", "system"] as const;
 
 /**
  * Canonical bibliographic record. `id` is the durable CAT-ID while
@@ -492,6 +503,46 @@ export const visitTeacherLoginLimits = sqliteTable(
     index("idx_visit_teacher_login_limits_updated").on(table.updatedAt),
     check("visit_teacher_login_limits_scope_valid", sql`length(${table.scopeHash}) = 64 and lower(${table.scopeHash}) not glob '*[^0-9a-f]*'`),
     check("visit_teacher_login_limits_attempts_nonnegative", sql`${table.attempts} >= 0`),
+  ],
+);
+
+/** Anonymous browser ownership for unverified visit bookings. Only token digests are stored. */
+export const visitGuestSessions = sqliteTable(
+  "visit_guest_sessions",
+  {
+    id: text("id").primaryKey(),
+    tokenHash: text("token_hash").notNull(),
+    pendingScope: text("pending_scope").notNull(),
+    ipScopeHash: text("ip_scope_hash").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    lastSeenAt: text("last_seen_at").notNull(),
+    revokedAt: text("revoked_at"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_visit_guest_sessions_token_hash").on(table.tokenHash),
+    uniqueIndex("idx_visit_guest_sessions_pending_scope").on(table.pendingScope),
+    index("idx_visit_guest_sessions_expires").on(table.expiresAt),
+    check("visit_guest_sessions_token_hash_valid", sql`length(${table.tokenHash}) = 64 and lower(${table.tokenHash}) not glob '*[^0-9a-f]*'`),
+    check("visit_guest_sessions_ip_hash_valid", sql`length(${table.ipScopeHash}) = 64 and lower(${table.ipScopeHash}) not glob '*[^0-9a-f]*'`),
+    check("visit_guest_sessions_pending_scope_not_blank", sql`length(trim(${table.pendingScope})) between 16 and 128`),
+  ],
+);
+
+/** Coarse abuse limits for anonymous session creation and visit mutations. */
+export const visitGuestRateLimits = sqliteTable(
+  "visit_guest_rate_limits",
+  {
+    scopeHash: text("scope_hash").primaryKey(),
+    attempts: integer("attempts").notNull().default(0),
+    windowStartedAt: text("window_started_at").notNull(),
+    blockedUntil: text("blocked_until"),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("idx_visit_guest_rate_limits_updated").on(table.updatedAt),
+    check("visit_guest_rate_limits_scope_valid", sql`length(${table.scopeHash}) = 64 and lower(${table.scopeHash}) not glob '*[^0-9a-f]*'`),
+    check("visit_guest_rate_limits_attempts_nonnegative", sql`${table.attempts} >= 0`),
   ],
 );
 
@@ -1172,17 +1223,26 @@ export const visitScheduleClosures = sqliteTable(
   ],
 );
 
-/** Teacher-owned bookings. Legacy SIWC owner fields remain nullable for migration history. */
+/** Verified-teacher, unverified-guest, and legacy visit bookings with explicit ownership. */
 export const visitBookings = sqliteTable(
   "visit_bookings",
   {
     id: text("id").primaryKey(),
+    ownerKind: text("owner_kind", { enum: visitBookingOwnerKinds }).notNull().default("teacher"),
     ownerUserId: text("owner_user_id").references(() => users.id, {
       onDelete: "restrict",
       onUpdate: "cascade",
     }),
     ownerAuthUserId: text("owner_auth_user_id"),
     ownerEmail: text("owner_email"),
+    guestOwnerId: text("guest_owner_id").references(() => visitGuestSessions.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    selectedTeacherUserId: text("selected_teacher_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
     surname: text("surname").notNull(),
     classYearId: text("class_year_id").references(() => classYears.id, {
       onDelete: "restrict",
@@ -1200,6 +1260,11 @@ export const visitBookings = sqliteTable(
       onDelete: "restrict",
       onUpdate: "cascade",
     }),
+    cancelledByGuestOwnerId: text("cancelled_by_guest_owner_id").references(() => visitGuestSessions.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    lastMutationRequestId: text("last_mutation_request_id"),
     version: integer("version").notNull().default(1),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
@@ -1221,11 +1286,27 @@ export const visitBookings = sqliteTable(
       table.status,
       table.visitDate,
     ),
+    index("idx_visit_bookings_guest_owner_status_date").on(
+      table.guestOwnerId,
+      table.status,
+      table.visitDate,
+    ),
+    index("idx_visit_bookings_selected_teacher_date").on(
+      table.selectedTeacherUserId,
+      table.visitDate,
+    ),
     index("idx_visit_bookings_class_date").on(table.classYearId, table.visitDate),
     check(
       "visit_bookings_owner_valid",
-      sql`(${table.ownerUserId} is not null and ${table.ownerAuthUserId} is null and ${table.ownerEmail} is null)
-        or (${table.ownerUserId} is null and length(trim(${table.ownerAuthUserId})) > 0 and length(trim(${table.ownerEmail})) > 0)`,
+      sql`(${table.ownerKind} = 'teacher' and ${table.ownerUserId} is not null
+          and ${table.ownerAuthUserId} is null and ${table.ownerEmail} is null
+          and ${table.guestOwnerId} is null and ${table.selectedTeacherUserId} is null)
+        or (${table.ownerKind} = 'guest' and ${table.ownerUserId} is null
+          and ${table.ownerAuthUserId} is null and ${table.ownerEmail} is null
+          and ${table.guestOwnerId} is not null and ${table.selectedTeacherUserId} is not null)
+        or (${table.ownerKind} = 'legacy' and ${table.ownerUserId} is null
+          and length(trim(${table.ownerAuthUserId})) > 0 and length(trim(${table.ownerEmail})) > 0
+          and ${table.guestOwnerId} is null and ${table.selectedTeacherUserId} is null)`,
     ),
     check("visit_bookings_surname_length", sql`length(trim(${table.surname})) between 2 and 80`),
     check(
@@ -1250,12 +1331,18 @@ export const visitBookings = sqliteTable(
     check(
       "visit_bookings_cancel_consistent",
       sql`(${table.status} = 'active' and ${table.cancelledAt} is null
-          and ${table.cancelledByAuthUserId} is null and ${table.cancelledByUserId} is null)
+          and ${table.cancelledByAuthUserId} is null and ${table.cancelledByUserId} is null
+          and ${table.cancelledByGuestOwnerId} is null)
         or (${table.status} = 'cancelled' and ${table.cancelledAt} is not null
-          and ((${table.cancelledByAuthUserId} is not null and ${table.cancelledByUserId} is null)
-            or (${table.cancelledByAuthUserId} is null and ${table.cancelledByUserId} is not null)))`,
+          and ((${table.cancelledByAuthUserId} is not null and ${table.cancelledByUserId} is null
+              and ${table.cancelledByGuestOwnerId} is null)
+            or (${table.cancelledByAuthUserId} is null and ${table.cancelledByUserId} is not null
+              and ${table.cancelledByGuestOwnerId} is null)
+            or (${table.cancelledByAuthUserId} is null and ${table.cancelledByUserId} is null
+              and ${table.cancelledByGuestOwnerId} is not null)))`,
     ),
     check("visit_bookings_version_positive", sql`${table.version} > 0`),
+    check("visit_bookings_mutation_request_valid", sql`${table.lastMutationRequestId} is null or length(${table.lastMutationRequestId}) = 36`),
   ],
 );
 
@@ -1424,6 +1511,147 @@ export const auditEvents = sqliteTable(
       "audit_events_metadata_json_valid",
       sql`${table.metadataJson} is null or json_valid(${table.metadataJson})`,
     ),
+  ],
+);
+
+/** Teacher request workflow. Stock remains unchanged until the ready transition creates a loan. */
+export const materialRequests = sqliteTable(
+  "material_requests",
+  {
+    id: text("id").primaryKey(),
+    teacherUserId: text("teacher_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    status: text("status", { enum: materialRequestStatuses }).notNull().default("submitted"),
+    teacherNotes: text("teacher_notes").notNull().default(""),
+    librarianNote: text("librarian_note").notNull().default(""),
+    rejectionReason: text("rejection_reason").notNull().default(""),
+    pickupLocationId: text("pickup_location_id").references(() => locations.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    resultingLoanId: text("resulting_loan_id").references(() => loans.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    cancelledByUserId: text("cancelled_by_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    version: integer("version").notNull().default(1),
+    submittedAt: text("submitted_at").notNull(),
+    readyAt: text("ready_at"),
+    completedAt: text("completed_at"),
+    rejectedAt: text("rejected_at"),
+    cancelledAt: text("cancelled_at"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("idx_material_requests_teacher_created").on(table.teacherUserId, table.createdAt),
+    index("idx_material_requests_status_created").on(table.status, table.createdAt),
+    uniqueIndex("idx_material_requests_resulting_loan").on(table.resultingLoanId),
+    check("material_requests_status_valid", sql`${table.status} in ('submitted','in_review','ready','partially_ready','completed','rejected','cancelled')`),
+    check("material_requests_version_positive", sql`${table.version} > 0`),
+    check("material_requests_terminal_times", sql`
+      (${table.status} not in ('ready','partially_ready','completed') or (${table.readyAt} is not null and ${table.resultingLoanId} is not null and ${table.pickupLocationId} is not null))
+      and (${table.status} != 'completed' or ${table.completedAt} is not null)
+      and (${table.status} != 'rejected' or ${table.rejectedAt} is not null)
+      and (${table.status} != 'cancelled' or ${table.cancelledAt} is not null)`),
+  ],
+);
+
+export const materialRequestItems = sqliteTable(
+  "material_request_items",
+  {
+    id: text("id").primaryKey(),
+    requestId: text("request_id")
+      .notNull()
+      .references(() => materialRequests.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    materialId: text("material_id")
+      .notNull()
+      .references(() => materials.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    titleSnapshot: text("title_snapshot").notNull(),
+    authorSnapshot: text("author_snapshot").notNull().default(""),
+    requestedQuantity: integer("requested_quantity").notNull(),
+    approvedQuantity: integer("approved_quantity"),
+    fulfilledQuantity: integer("fulfilled_quantity").notNull().default(0),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_material_request_items_request_material").on(table.requestId, table.materialId),
+    index("idx_material_request_items_material_request").on(table.materialId, table.requestId),
+    check("material_request_items_title_not_blank", sql`length(trim(${table.titleSnapshot})) > 0`),
+    check("material_request_items_quantity_valid", sql`${table.requestedQuantity} > 0
+      and (${table.approvedQuantity} is null or (${table.approvedQuantity} >= 0 and ${table.approvedQuantity} <= ${table.requestedQuantity}))
+      and ${table.fulfilledQuantity} >= 0
+      and (${table.approvedQuantity} is null or ${table.fulfilledQuantity} <= ${table.approvedQuantity})`),
+    check("material_request_items_sort_order_nonnegative", sql`${table.sortOrder} >= 0`),
+  ],
+);
+
+/** Immutable request history; metadata must never contain credentials or session tokens. */
+export const materialRequestEvents = sqliteTable(
+  "material_request_events",
+  {
+    id: text("id").primaryKey(),
+    requestId: text("request_id")
+      .notNull()
+      .references(() => materialRequests.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    actorUserId: text("actor_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    actorKind: text("actor_kind", { enum: materialRequestActorKinds }).notNull(),
+    kind: text("kind").notNull(),
+    fromStatus: text("from_status", { enum: materialRequestStatuses }),
+    toStatus: text("to_status", { enum: materialRequestStatuses }).notNull(),
+    metadataJson: text("metadata_json"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    index("idx_material_request_events_request_created").on(table.requestId, table.createdAt),
+    check("material_request_events_actor_kind_valid", sql`${table.actorKind} in ('teacher','librarian','system')`),
+    check("material_request_events_actor_consistent", sql`(${table.actorKind} = 'system' and ${table.actorUserId} is null)
+      or (${table.actorKind} in ('teacher','librarian') and ${table.actorUserId} is not null)`),
+    check("material_request_events_kind_not_blank", sql`length(trim(${table.kind})) > 0`),
+    check("material_request_events_metadata_valid", sql`${table.metadataJson} is null or json_valid(${table.metadataJson})`),
+  ],
+);
+
+/** In-app notifications for authenticated teachers. */
+export const portalNotifications = sqliteTable(
+  "portal_notifications",
+  {
+    id: text("id").primaryKey(),
+    teacherUserId: text("teacher_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    dedupeKey: text("dedupe_key").notNull(),
+    type: text("type").notNull(),
+    title: text("title").notNull(),
+    message: text("message").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    readAt: text("read_at"),
+    version: integer("version").notNull().default(1),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_portal_notifications_dedupe").on(table.dedupeKey),
+    index("idx_portal_notifications_teacher_read_created").on(table.teacherUserId, table.readAt, table.createdAt),
+    check("portal_notifications_dedupe_not_blank", sql`length(trim(${table.dedupeKey})) > 0`),
+    check("portal_notifications_type_not_blank", sql`length(trim(${table.type})) > 0`),
+    check("portal_notifications_title_not_blank", sql`length(trim(${table.title})) > 0`),
+    check("portal_notifications_entity_not_blank", sql`length(trim(${table.entityType})) > 0 and length(trim(${table.entityId})) > 0`),
+    check("portal_notifications_version_positive", sql`${table.version} > 0`),
   ],
 );
 

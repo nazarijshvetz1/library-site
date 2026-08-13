@@ -64,6 +64,13 @@
       "when": 1786597889768,
       "tag": "0008_sudden_thunderbird",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1786605754733,
+      "tag": "0009_happy_silver_samurai",
+      "breakpoints": true
     }
   ]
 }

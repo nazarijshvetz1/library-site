@@ -37,6 +37,7 @@ const migrationUrls = [
     "0004_staging_import_runs.sql",
     "0005_young_night_nurse.sql",
     "0006_pale_sauron.sql", "0007_cold_whiplash.sql", "0008_sudden_thunderbird.sql",
+    "0009_happy_silver_samurai.sql",
   ].map((file) => new URL(`../drizzle/${file}`, import.meta.url));
 
 async function fixturePlan() {
@@ -356,6 +357,37 @@ test("staging reset atomically clears domain/import rows while preserving migrat
       'completed', '{"version":1}', '2026-09-10T00:00:00.000Z',
       '2026-09-10T00:00:00.000Z', '2026-09-10T00:00:00.000Z')
   `).run(actorId, teacherId, "f".repeat(64));
+  database.prepare(`INSERT INTO visit_guest_sessions (
+    id,token_hash,pending_scope,ip_scope_hash,expires_at,last_seen_at,revoked_at,created_at
+  ) VALUES ('GST-RESET',?,'guest-reset-scope',?,'2026-09-11T00:00:00.000Z',
+    '2026-09-10T00:00:00.000Z',NULL,'2026-09-10T00:00:00.000Z')`)
+    .run("1".repeat(64), "2".repeat(64));
+  database.prepare(`INSERT INTO visit_guest_rate_limits (
+    scope_hash,attempts,window_started_at,blocked_until,updated_at
+  ) VALUES (?,1,'2026-09-10T00:00:00.000Z',NULL,'2026-09-10T00:00:00.000Z')`)
+    .run("3".repeat(64));
+  database.prepare(`INSERT INTO material_requests (
+    id,teacher_user_id,status,teacher_notes,librarian_note,rejection_reason,
+    pickup_location_id,resulting_loan_id,reviewed_by_user_id,cancelled_by_user_id,
+    version,submitted_at,ready_at,completed_at,rejected_at,cancelled_at,created_at,updated_at
+  ) VALUES ('MRQ-RESET',?,'submitted','','','',NULL,NULL,NULL,NULL,1,
+    '2026-09-10T00:00:00.000Z',NULL,NULL,NULL,NULL,
+    '2026-09-10T00:00:00.000Z','2026-09-10T00:00:00.000Z')`).run(teacherId);
+  database.prepare(`INSERT INTO material_request_items (
+    id,request_id,material_id,title_snapshot,author_snapshot,requested_quantity,
+    approved_quantity,fulfilled_quantity,sort_order,created_at,updated_at
+  ) VALUES ('MRI-RESET','MRQ-RESET',?,'Reset material','',1,NULL,0,0,
+    '2026-09-10T00:00:00.000Z','2026-09-10T00:00:00.000Z')`).run(materialId);
+  database.prepare(`INSERT INTO material_request_events (
+    id,request_id,actor_user_id,actor_kind,kind,from_status,to_status,metadata_json,created_at
+  ) VALUES ('MRE-RESET','MRQ-RESET',?,'teacher','submitted',NULL,'submitted',NULL,
+    '2026-09-10T00:00:00.000Z')`).run(teacherId);
+  database.prepare(`INSERT INTO portal_notifications (
+    id,teacher_user_id,dedupe_key,type,title,message,entity_type,entity_id,
+    read_at,version,created_at,updated_at
+  ) VALUES ('NTF-RESET',?,'reset-notification','request_submitted','Reset','',
+    'material_request','MRQ-RESET',NULL,1,
+    '2026-09-10T00:00:00.000Z','2026-09-10T00:00:00.000Z')`).run(teacherId);
   const schemaBefore = database.prepare(`
     SELECT name, type, sql FROM sqlite_schema ORDER BY type, name
   `).all();
@@ -377,6 +409,12 @@ test("staging reset atomically clears domain/import rows while preserving migrat
   assert.equal(report.deletedByTable.visit_teacher_login_limits, 1);
   assert.equal(report.deletedByTable.visit_teacher_access_commands, 1);
   assert.equal(report.deletedByTable.visit_teacher_credentials, 1);
+  assert.equal(report.deletedByTable.visit_guest_sessions, 1);
+  assert.equal(report.deletedByTable.visit_guest_rate_limits, 1);
+  assert.equal(report.deletedByTable.material_request_events, 1);
+  assert.equal(report.deletedByTable.material_request_items, 1);
+  assert.equal(report.deletedByTable.portal_notifications, 1);
+  assert.equal(report.deletedByTable.material_requests, 1);
   assert.ok(report.batchStatements <= 50, `reset used ${report.batchStatements} statements`);
   assert.equal(database.prepare("SELECT count(*) AS count FROM librarian_drafts").get().count, 1);
   assert.equal(database.prepare("SELECT count(*) AS count FROM librarian_draft_events").get().count, 1);

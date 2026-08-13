@@ -16,17 +16,32 @@ import {
 
 import {
   busyPeriodParts,
+  clearPortalPendingIntent,
   clearVisitPendingIntent,
+  formatPersonalCode,
   formatVisitDateTime,
   isUncertainVisitFailure,
+  mergePortalPageById,
+  normalizedPersonalCode,
+  PERSONAL_CODE_ALPHABET,
+  personalCodeStrength,
+  readPortalPendingIntent,
   readVisitPendingIntent,
+  publicVisitsUrl,
   teacherSearchUrl,
   teacherSessionUrl,
   teacherVisitsUrl,
+  type PublicVisitsEnvelope,
+  type GuestVisitsEnvelope,
   type TeacherVisitsEnvelope,
   type VisitBooking,
   type VisitCancelPayload,
   type VisitCreatePayload,
+  type VisitGuestBooking,
+  type VisitGuestCreatePayload,
+  type VisitGuestSessionEnvelope,
+  type VisitGuestTeacher,
+  type VisitPatchPayload,
   type VisitPendingIntent,
   type VisitTeacher,
   type VisitTeacherIdentity,
@@ -35,9 +50,11 @@ import {
   validVisitDuration,
   visitApi,
   VisitApiError,
+  visitDateRange,
   visitHorizonEnd,
   visitPendingKey,
   weekdayKey,
+  writePortalPendingIntent,
   writeVisitPendingIntent,
 } from "./visit-client";
 import styles from "./visits.module.css";
@@ -49,12 +66,29 @@ type Props = {
   initialDate: string;
   initialStartTime: string;
   initialEndTime: string;
+  initialTab?: "overview" | "visits" | "orders" | "notifications";
 };
+
+type TeacherTab = NonNullable<Props["initialTab"]>;
+
+const TEACHER_TABS: Array<{ id: TeacherTab; label: string; icon: string }> = [
+  { id: "overview", label: "Огляд", icon: "⌂" },
+  { id: "visits", label: "Відвідування", icon: "◷" },
+  { id: "orders", label: "Замовлення", icon: "▤" },
+  { id: "notifications", label: "Повідомлення", icon: "●" },
+];
+
+function clearTeacherPortalPendingStorage(storage: Storage, pendingScope: string): void {
+  clearVisitPendingIntent(storage, visitPendingKey("teacher", pendingScope));
+  clearPortalPendingIntent(storage, `library.teacher.orders.pending.v1:${pendingScope}`);
+  clearPortalPendingIntent(storage, `library.teacher.notifications.pending.v1:${pendingScope}`);
+}
 
 export default function VisitBookingWorkspace({
   initialDate,
   initialStartTime,
   initialEndTime,
+  initialTab = "overview",
 }: Props) {
   const [session, setSession] = useState<VisitTeacherSessionEnvelope | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
@@ -110,10 +144,7 @@ export default function VisitBookingWorkspace({
     try {
       await visitApi<{ success: true }>(teacherSessionUrl, { method: "DELETE" });
       if (session?.pendingScope) {
-        clearVisitPendingIntent(
-          window.sessionStorage,
-          visitPendingKey("teacher", session.pendingScope),
-        );
+        clearTeacherPortalPendingStorage(window.sessionStorage, session.pendingScope);
       }
       setSession(null);
     } catch {
@@ -123,14 +154,33 @@ export default function VisitBookingWorkspace({
     }
   }
 
-  if (checkingSession) {
-    return <VisitShell><div className={styles.authLoading} role="status">Перевіряємо доступ…</div></VisitShell>;
-  }
-
   if (!session) {
     return (
       <VisitShell>
-        <TeacherSignIn onSignIn={signIn} busy={authBusy} notice={authNotice} />
+        <section className={styles.page}>
+          <div className={styles.intro}>
+            <p className={styles.eyebrow}>Кабінет учителя</p>
+            <h1>Бібліотека у вашому розкладі</h1>
+            <p>Перегляньте вільний час без входу. Для підтвердженого запису, замовлень і власної історії увійдіть за персональним кодом.</p>
+          </div>
+          <PublicVisitSchedule
+            initialDate={initialDate}
+            initialStartTime={initialStartTime}
+            initialEndTime={initialEndTime}
+          />
+          <div className={styles.accessModes} id="teacher-access">
+            {checkingSession
+              ? <div className={`${styles.card} ${styles.authLoading}`} role="status">Перевіряємо, чи ви вже увійшли…</div>
+              : <>
+                <GuestBookingPanel
+                  initialDate={initialDate}
+                  initialStartTime={initialStartTime}
+                  initialEndTime={initialEndTime}
+                />
+                <TeacherSignIn onSignIn={signIn} busy={authBusy} notice={authNotice} />
+              </>}
+          </div>
+        </section>
       </VisitShell>
     );
   }
@@ -142,9 +192,11 @@ export default function VisitBookingWorkspace({
       signingOut={authBusy}
       signOutNotice={authNotice}
       onSignOut={signOut}
+      onSessionRotated={(rotated) => setSession((current) => current ? { ...current, ...rotated } : current)}
       initialDate={initialDate}
       initialStartTime={initialStartTime}
       initialEndTime={initialEndTime}
+      initialTab={initialTab}
     />
   );
 }
@@ -155,12 +207,407 @@ function VisitShell({ children }: { children: React.ReactNode }) {
       <header className={styles.header}>
         <Link className={styles.brand} href="/">
           <img src={LOGO_URL} alt="" width="48" height="48" />
-          <span><strong>Єдина бібліотека</strong><small>Запис учителя</small></span>
+          <span><strong>Єдина бібліотека</strong><small>Кабінет учителя</small></span>
         </Link>
         <a className={styles.catalogLink} href={PUBLIC_CATALOG_URL}>Публічний каталог</a>
       </header>
       {children}
     </main>
+  );
+}
+
+type PublicScheduleSlot = {
+  startTime: string;
+  endTime: string;
+  status: "free" | "busy" | "closed";
+};
+
+function PublicVisitSchedule({
+  initialDate,
+  initialStartTime,
+  initialEndTime,
+}: Pick<Props, "initialDate" | "initialStartTime" | "initialEndTime">) {
+  const today = useMemo(() => todayInKyiv(), []);
+  const [weekStart, setWeekStart] = useState(() => publicWeekStart(initialDate, today));
+  const [data, setData] = useState<PublicVisitsEnvelope | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [notice, setNotice] = useState("");
+  const dates = useMemo(() => visitDates(weekStart, 7), [weekStart]);
+  const currentTime = currentTimeInKyiv();
+  const selectedWeekContainsInitial = dates.includes(initialDate);
+
+  const load = useCallback(async () => {
+    const range = visitDates(weekStart, 7);
+    setLoading(true);
+    setNotice("");
+    try {
+      setData(await visitApi<PublicVisitsEnvelope>(publicVisitsUrl(range[0], range.at(-1) ?? range[0])));
+    } catch {
+      setNotice("Не вдалося оновити публічний графік. Спробуйте ще раз.");
+    } finally {
+      setLoading(false);
+    }
+  }, [weekStart]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  return (
+    <section className={`${styles.card} ${styles.publicSchedule}`} aria-labelledby="public-schedule-title">
+      <div className={styles.cardHeading}>
+        <div>
+          <span>Доступно без входу</span>
+          <h2 id="public-schedule-title">Публічний графік</h2>
+        </div>
+        <div className={styles.weekControls} aria-label="Перемикання тижня">
+          <button
+            type="button"
+            aria-label="Попередній тиждень"
+            disabled={weekStart <= today || loading}
+            onClick={() => setWeekStart(shiftVisitDate(weekStart, -7, today))}
+          >←</button>
+          <strong>{formatWeek(dates)}</strong>
+          <button
+            type="button"
+            aria-label="Наступний тиждень"
+            disabled={weekStart >= lastPublicWeekStart(today) || loading}
+            onClick={() => setWeekStart(shiftVisitDate(weekStart, 7, today))}
+          >→</button>
+        </div>
+      </div>
+
+      <p className={styles.publicPrivacy}>Видно лише вільні, зайняті та закриті проміжки. Імена, класи й мета відвідувань тут не публікуються.</p>
+      {notice ? <div className={styles.error} role="alert">{notice} <button type="button" onClick={() => void load()}>Повторити</button></div> : null}
+      {loading ? <p className={styles.empty} role="status">Оновлюємо графік…</p> : null}
+      {!loading && data ? (
+        <div className={styles.publicDays} aria-live="polite">
+          {dates.map((date) => {
+            const slots = publicSlots(data, date);
+            return (
+              <article key={date} className={date === today ? styles.today : undefined}>
+                <h3><time dateTime={date}>{formatVisitDay(date)}</time>{date === today ? <span>Сьогодні</span> : null}</h3>
+                {slots.length ? (
+                  <ul>
+                    {slots.map((slot) => {
+                      const selected = selectedWeekContainsInitial
+                        && date === initialDate
+                        && slot.startTime <= initialStartTime
+                        && slot.endTime >= initialEndTime;
+                      if (slot.status !== "free") {
+                        return <li key={`${slot.startTime}-${slot.endTime}`} data-status={slot.status}><strong>{slot.startTime}–{slot.endTime}</strong><span>{slot.status === "busy" ? "Зайнято" : "Зачинено"}</span></li>;
+                      }
+                      const start = bookableSlotStart(date, slot, today, currentTime);
+                      if (!start) {
+                        return <li key={`${slot.startTime}-${slot.endTime}`} data-status="closed"><strong>{slot.startTime}–{slot.endTime}</strong><span>Час минув</span></li>;
+                      }
+                      const end = boundedSlotEnd(start, slot.endTime, 40);
+                      const href = `/teacher?${new URLSearchParams({ date, start, end, tab: "visits" }).toString()}#teacher-access`;
+                      return (
+                        <li key={`${slot.startTime}-${slot.endTime}`} data-status="free" data-selected={selected || undefined}>
+                          <a href={href}><strong>{start}–{slot.endTime}</strong><span>{selected ? "Обрано" : "Обрати"}</span></a>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : <p>Бібліотека зачинена</p>}
+              </article>
+            );
+          })}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+type GuestPendingIntent =
+  | { kind: "guest-create"; requestId: string; payload: VisitGuestCreatePayload }
+  | { kind: "guest-patch"; requestId: string; resourceId: string; payload: VisitPatchPayload }
+  | { kind: "guest-cancel"; requestId: string; resourceId: string; payload: VisitCancelPayload };
+
+const GUEST_PENDING_KINDS = ["guest-create", "guest-patch", "guest-cancel"] as const;
+const VISIT_PURPOSES = [
+  "Урок у бібліотеці",
+  "Добір літератури",
+  "Класна година",
+  "Робота над навчальним проєктом",
+] as const;
+
+function GuestBookingPanel({
+  initialDate,
+  initialStartTime,
+  initialEndTime,
+}: Pick<Props, "initialDate" | "initialStartTime" | "initialEndTime">) {
+  const teacherListId = useId();
+  const teacherSearchRef = useRef<HTMLInputElement>(null);
+  const today = useMemo(() => todayInKyiv(), []);
+  const [activated, setActivated] = useState(false);
+  const [session, setSession] = useState<VisitGuestSessionEnvelope | null>(null);
+  const [data, setData] = useState<GuestVisitsEnvelope | null>(null);
+  const [initializing, setInitializing] = useState(false);
+  const [endingSession, setEndingSession] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [noticeTone, setNoticeTone] = useState<"success" | "error" | "info">("info");
+  const [pending, setPending] = useState<GuestPendingIntent | null>(null);
+  const [editing, setEditing] = useState<VisitGuestBooking | null>(null);
+  const [teacherQuery, setTeacherQuery] = useState("");
+  const [teacherResults, setTeacherResults] = useState<VisitGuestTeacher[]>([]);
+  const [selectedTeacher, setSelectedTeacher] = useState<VisitGuestTeacher | null>(null);
+  const [teacherSearchNotice, setTeacherSearchNotice] = useState("");
+  const [activeTeacherIndex, setActiveTeacherIndex] = useState(-1);
+  const [date, setDate] = useState(() => validDate(initialDate) ? initialDate : today);
+  const [startTime, setStartTime] = useState(() => validTime(initialStartTime) ? initialStartTime : "09:00");
+  const [endTime, setEndTime] = useState(() => validTime(initialEndTime) ? initialEndTime : "09:40");
+  const [classYearId, setClassYearId] = useState("");
+  const [purpose, setPurpose] = useState("");
+  const storageKey = session ? `library.guest.pending.v1:${session.guest.pendingScope}` : "";
+
+  const load = useCallback(async () => {
+    const range = visitDateRange(todayInKyiv(), 90);
+    setData(await visitApi<GuestVisitsEnvelope>(`/api/visits/guest?${new URLSearchParams(range).toString()}`));
+  }, []);
+
+  async function activateGuestBooking() {
+    if (initializing || session) return;
+    setActivated(true);
+    setInitializing(true);
+    setNotice("");
+    try {
+      let active: VisitGuestSessionEnvelope;
+      try {
+        active = await visitApi<VisitGuestSessionEnvelope>("/api/visits/guest/session");
+      } catch (error) {
+        if (!(error instanceof VisitApiError) || error.status !== 401) throw error;
+        active = await visitApi<VisitGuestSessionEnvelope>("/api/visits/guest/session", {
+          method: "POST",
+          body: JSON.stringify({}),
+        });
+      }
+      const range = visitDateRange(todayInKyiv(), 90);
+      const guestData = await visitApi<GuestVisitsEnvelope>(`/api/visits/guest?${new URLSearchParams(range).toString()}`);
+      setSession(active);
+      setData(guestData);
+      const key = `library.guest.pending.v1:${active.guest.pendingScope}`;
+      setPending(readPortalPendingIntent<GuestPendingIntent>(window.sessionStorage, key, GUEST_PENDING_KINDS));
+      window.setTimeout(() => teacherSearchRef.current?.focus(), 0);
+    } catch (error) {
+      setNotice(errorMessage(error));
+      setNoticeTone("error");
+    } finally {
+      setInitializing(false);
+    }
+  }
+
+  const normalizedTeacherQuery = teacherQuery.trim();
+  useEffect(() => {
+    if (!activated || !session || selectedTeacher || normalizedTeacherQuery.length < 3) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setTeacherSearchNotice("Шукаємо…");
+      try {
+        const params = new URLSearchParams({ q: normalizedTeacherQuery });
+        const response = await visitApi<{ success: true; teachers: VisitGuestTeacher[] }>(`/api/visits/guest/directory?${params.toString()}`, { signal: controller.signal });
+        setTeacherResults(response.teachers);
+        setActiveTeacherIndex(response.teachers.length ? 0 : -1);
+        setTeacherSearchNotice(response.teachers.length ? "" : "Збігів не знайдено.");
+      } catch {
+        if (!controller.signal.aborted) {
+          setTeacherResults([]);
+          setActiveTeacherIndex(-1);
+          setTeacherSearchNotice("Не вдалося виконати пошук.");
+        }
+      }
+    }, 300);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [activated, normalizedTeacherQuery, selectedTeacher, session]);
+
+  function changeTeacherQuery(value: string) {
+    setTeacherQuery(value);
+    if (selectedTeacher && value !== selectedTeacher.fullName) setSelectedTeacher(null);
+    if (value.trim().length < 3) {
+      setTeacherResults([]);
+      setActiveTeacherIndex(-1);
+      setTeacherSearchNotice("");
+    }
+  }
+
+  function chooseGuestTeacher(teacher: VisitGuestTeacher) {
+    setSelectedTeacher(teacher);
+    setTeacherQuery(teacher.fullName);
+    setTeacherResults([]);
+    setActiveTeacherIndex(-1);
+    setTeacherSearchNotice("");
+  }
+
+  function guestTeacherKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (!teacherResults.length) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveTeacherIndex((index) => Math.min(teacherResults.length - 1, index + 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveTeacherIndex((index) => Math.max(0, index - 1));
+    } else if (event.key === "Enter" && activeTeacherIndex >= 0) {
+      event.preventDefault();
+      chooseGuestTeacher(teacherResults[activeTeacherIndex]);
+    } else if (event.key === "Escape") {
+      setTeacherResults([]);
+      setActiveTeacherIndex(-1);
+    }
+  }
+
+  async function sendGuestIntent(intent: GuestPendingIntent) {
+    if (!storageKey) return;
+    if (!writePortalPendingIntent(window.sessionStorage, storageKey, intent)) {
+      setNotice("Браузер не дозволив безпечно зберегти запит для повторної перевірки.");
+      setNoticeTone("error");
+      return;
+    }
+    setPending(intent);
+    setSubmitting(true);
+    setNotice("");
+    const resourcePath = intent.kind === "guest-create" ? "" : `/${encodeURIComponent(intent.resourceId)}`;
+    const method = intent.kind === "guest-create" ? "POST" : intent.kind === "guest-patch" ? "PATCH" : "DELETE";
+    try {
+      await visitApi(`/api/visits/guest${resourcePath}`, { method, body: JSON.stringify(intent.payload) });
+      clearPortalPendingIntent(window.sessionStorage, storageKey);
+      setPending(null);
+      const successMessage = intent.kind === "guest-create" ? "Гостьовий запис створено." : intent.kind === "guest-patch" ? "Гостьовий запис оновлено." : "Гостьовий запис скасовано.";
+      setNotice(successMessage);
+      setNoticeTone("success");
+      setEditing(null);
+      if (intent.kind === "guest-create") {
+        setPurpose("");
+        setSelectedTeacher(null);
+        setTeacherQuery("");
+      }
+      try {
+        await load();
+      } catch {
+        setNotice(`${successMessage} Не вдалося оновити список; натисніть «Оновити» або перезавантажте сторінку.`);
+        setNoticeTone("info");
+      }
+    } catch (error) {
+      if (!isUncertainVisitFailure(error)) {
+        clearPortalPendingIntent(window.sessionStorage, storageKey);
+        setPending(null);
+      }
+      setNotice(errorMessage(error));
+      setNoticeTone("error");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function submitGuest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedTeacher || !validVisitDuration(startTime, endTime) || pending) return;
+    const requestId = crypto.randomUUID();
+    if (editing) {
+      const payload: VisitPatchPayload = { requestId, expectedVersion: editing.version, date, startTime, endTime, classYearId: classYearId || null, purpose: purpose || null };
+      void sendGuestIntent({ kind: "guest-patch", requestId, resourceId: editing.id, payload });
+    } else {
+      const payload: VisitGuestCreatePayload = { requestId, teacherRef: selectedTeacher.teacherRef, date, startTime, endTime, classYearId: classYearId || null, purpose: purpose || null };
+      void sendGuestIntent({ kind: "guest-create", requestId, payload });
+    }
+  }
+
+  function editGuestBooking(booking: VisitGuestBooking) {
+    setEditing(booking);
+    setSelectedTeacher(booking.teacher);
+    setTeacherQuery(booking.teacher.fullName);
+    setDate(booking.date);
+    setStartTime(booking.startTime);
+    setEndTime(booking.endTime);
+    setClassYearId(booking.classYearId || "");
+    setPurpose(booking.purpose || "");
+  }
+
+  function cancelGuestBooking(booking: VisitGuestBooking) {
+    if (!window.confirm("Скасувати цей непідтверджений гостьовий запис?")) return;
+    const requestId = crypto.randomUUID();
+    const payload = { requestId, expectedVersion: booking.version, reason: null };
+    void sendGuestIntent({ kind: "guest-cancel", requestId, resourceId: booking.id, payload });
+  }
+
+  async function endGuestSession() {
+    if (!session || endingSession || submitting) return;
+    const previousData = data;
+    setEndingSession(true);
+    setData(null);
+    setNotice("");
+    try {
+      await visitApi("/api/visits/guest/session", { method: "DELETE" });
+      if (storageKey) clearPortalPendingIntent(window.sessionStorage, storageKey);
+      setSession(null);
+      setPending(null);
+      setActivated(false);
+      resetGuestForm();
+      setNotice("Гостьовий сеанс завершено. Дані ваших гостьових записів більше не показуються в цьому кабінеті.");
+      setNoticeTone("success");
+    } catch (error) {
+      setData(previousData);
+      setNotice(errorMessage(error));
+      setNoticeTone("error");
+    } finally {
+      setEndingSession(false);
+    }
+  }
+
+  function resetGuestForm() {
+    setEditing(null);
+    setSelectedTeacher(null);
+    setTeacherQuery("");
+    setTeacherResults([]);
+    setActiveTeacherIndex(-1);
+    setDate(validDate(initialDate) ? initialDate : today);
+    setStartTime(validTime(initialStartTime) ? initialStartTime : "09:00");
+    setEndTime(validTime(initialEndTime) ? initialEndTime : "09:40");
+    setClassYearId("");
+    setPurpose("");
+  }
+
+  const activeBookings = (data?.bookings ?? []).filter((booking) => booking.status === "active");
+
+  return (
+    <section className={`${styles.card} ${styles.guestCard}`} aria-labelledby="guest-title">
+      <div className={styles.cardHeading}><div><span>Швидкий запис без коду</span><h2 id="guest-title">Гостьовий режим</h2></div></div>
+      <div className={styles.unverifiedNote} role="note"><strong>Особу не підтверджено.</strong> Ви лише заявляєте, від імені якого вчителя створюєте запис. Для підтвердженої особи та замовлень увійдіть персональним кодом.</div>
+      {!activated ? <button className={styles.primary} type="button" aria-expanded="false" aria-controls="guest-booking-form" onClick={() => void activateGuestBooking()}>Записатися без коду</button> : null}
+      {initializing ? <p className={styles.empty} role="status">Готуємо гостьовий запис…</p> : null}
+      {activated && !initializing && !session ? <button className={styles.quiet} type="button" onClick={() => void activateGuestBooking()}>Спробувати відкрити гостьовий запис ще раз</button> : null}
+      {pending ? <div className={styles.pending} role="status"><span>Результат попереднього гостьового запиту не підтверджено.</span><button type="button" onClick={() => void sendGuestIntent(pending)} disabled={submitting}>Перевірити результат</button></div> : null}
+      {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
+      {session ? <div className={styles.sharedDeviceNote} role="note"><span><strong>Працюєте на спільному пристрої?</strong> Завершіть гостьовий сеанс після запису, щоб наступна людина не побачила ваші дані.</span><button className={styles.quiet} type="button" onClick={() => void endGuestSession()} disabled={endingSession || submitting}>{endingSession ? "Завершуємо…" : "Завершити гостьовий сеанс"}</button></div> : null}
+      {!initializing && !endingSession && session ? (
+        <form id="guest-booking-form" onSubmit={submitGuest} aria-busy={submitting || endingSession}>
+          <div className={styles.fields}>
+            <div className={`${styles.wide} ${styles.comboboxField}`}>
+              <label htmlFor={`${teacherListId}-search`}>Учитель *</label>
+              <input ref={teacherSearchRef} id={`${teacherListId}-search`} type="search" role="combobox" aria-autocomplete="list" aria-expanded={teacherResults.length > 0} aria-controls={teacherListId} aria-activedescendant={activeTeacherIndex >= 0 ? `${teacherListId}-${activeTeacherIndex}` : undefined} aria-describedby={`${teacherListId}-help ${teacherListId}-status`} value={teacherQuery} onChange={(event) => changeTeacherQuery(event.currentTarget.value)} onKeyDown={guestTeacherKeyDown} placeholder="Введіть щонайменше 3 літери" disabled={Boolean(editing)} autoComplete="off" />
+              <small id={`${teacherListId}-help`}>Оберіть точне ім’я зі списку бази даних.</small>
+              <div id={`${teacherListId}-status`} className={styles.searchStatus} role="status" aria-live="polite">{teacherSearchNotice}</div>
+              {teacherResults.length ? <ul id={teacherListId} className={styles.teacherResults} role="listbox" aria-label="Знайдені вчителі">{teacherResults.map((teacher, index) => <li id={`${teacherListId}-${index}`} key={teacher.teacherRef} role="option" aria-selected={index === activeTeacherIndex}><button type="button" onMouseEnter={() => setActiveTeacherIndex(index)} onClick={() => chooseGuestTeacher(teacher)}>{teacher.fullName}</button></li>)}</ul> : null}
+            </div>
+            <label>Дата *<input required type="date" min={today} max={visitHorizonEnd(today)} value={date} onChange={(event) => setDate(event.currentTarget.value)} /></label>
+            <label>Початок *<input required type="time" step={300} value={startTime} onChange={(event) => setStartTime(event.currentTarget.value)} /></label>
+            <label>Завершення *<input required type="time" step={300} value={endTime} onChange={(event) => setEndTime(event.currentTarget.value)} /></label>
+            <label>Клас<select value={classYearId} onChange={(event) => setClassYearId(event.currentTarget.value)}><option value="">Без класу</option>{(data?.classYears ?? []).map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
+            <label className={styles.wide}>Мета візиту<select value={purpose} onChange={(event) => setPurpose(event.currentTarget.value)}><option value="">Не вказувати</option>{VISIT_PURPOSES.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
+          </div>
+          <div className={styles.guestActions}>
+            {editing ? <button className={styles.quiet} type="button" onClick={resetGuestForm} disabled={submitting}>Не редагувати</button> : null}
+            <button className={styles.primary} type="submit" disabled={!selectedTeacher || !validVisitDuration(startTime, endTime) || submitting || Boolean(pending)}>{submitting ? "Зберігаємо…" : editing ? "Зберегти зміни" : "Створити гостьовий запис"}</button>
+          </div>
+        </form>
+      ) : null}
+      {!endingSession && activeBookings.length ? <div className={styles.guestBookings}><h3>Гостьові записи в цьому браузері</h3>{activeBookings.map((booking) => <article key={booking.id}><div><strong>{formatVisitDateTime(`${booking.date}T${booking.startTime}`)}–{booking.endTime}</strong><span>{booking.teacher.fullName} · {booking.classLabel || "Без класу"}</span></div><div><button className={styles.quiet} type="button" onClick={() => editGuestBooking(booking)} disabled={submitting || Boolean(pending)}>Редагувати</button><button className={styles.danger} type="button" onClick={() => cancelGuestBooking(booking)} disabled={submitting || Boolean(pending)}>Скасувати</button></div></article>)}</div> : null}
+    </section>
   );
 }
 
@@ -258,15 +705,14 @@ function TeacherSignIn({
   }
 
   function changeCode(value: string) {
-    const normalized = value.toUpperCase().replace(/[^23456789ABCDEFGHJKMNPQRSTUVWXYZ]/gu, "").slice(0, 10);
-    setCode(normalized.length > 5 ? `${normalized.slice(0, 5)}-${normalized.slice(5)}` : normalized);
+    setCode(formatPersonalCode(value));
   }
 
   return (
-    <section className={`${styles.page} ${styles.authPage}`}>
+    <section className={`${styles.authPage}`} aria-labelledby={`${listId}-title`}>
       <div className={styles.intro}>
         <p className={styles.eyebrow}>Графік відвідування бібліотеки</p>
-        <h1>Увійдіть за своїм ім’ям</h1>
+        <h2 id={`${listId}-title`}>Увійдіть за своїм ім’ям</h2>
         <p>Знайдіть себе у списку вчителів і введіть особистий код, який видав бібліотекар. Email-адреса не потрібна.</p>
       </div>
 
@@ -369,26 +815,33 @@ function VisitBookingPanel({
   signingOut,
   signOutNotice,
   onSignOut,
+  onSessionRotated,
   initialDate,
   initialStartTime,
   initialEndTime,
+  initialTab,
 }: {
   teacher: VisitTeacherIdentity;
   pendingScope: string;
   signingOut: boolean;
   signOutNotice: string;
   onSignOut: () => Promise<void>;
+  onSessionRotated: (session: Pick<VisitTeacherSessionEnvelope, "pendingScope" | "expiresAt">) => void;
   initialDate: string;
   initialStartTime: string;
   initialEndTime: string;
+  initialTab: "overview" | "visits" | "orders" | "notifications";
 }) {
   const storageKey = visitPendingKey("teacher", pendingScope);
+  const [activeTab, setActiveTab] = useState(initialTab);
+  const [securityOpen, setSecurityOpen] = useState(false);
   const [data, setData] = useState<TeacherVisitsEnvelope | null>(null);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"success" | "error" | "info">("info");
   const [pending, setPending] = useState<VisitPendingIntent | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [editingBooking, setEditingBooking] = useState<VisitBooking | null>(null);
   const today = useMemo(() => todayInKyiv(), []);
   const [date, setDate] = useState(() => validDate(initialDate) ? initialDate : today);
   const [startTime, setStartTime] = useState(() => validTime(initialStartTime) ? initialStartTime : "09:00");
@@ -397,13 +850,15 @@ function VisitBookingPanel({
   const [purpose, setPurpose] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (afterMutation = false) => {
     setLoading(true);
     try {
       setData(await visitApi<TeacherVisitsEnvelope>(teacherVisitsUrl(todayInKyiv())));
     } catch (error) {
-      setNotice(errorMessage(error));
-      setNoticeTone("error");
+      setNotice(afterMutation
+        ? "Дію збережено, але список не вдалося оновити. Натисніть «Оновити»."
+        : errorMessage(error));
+      setNoticeTone(afterMutation ? "info" : "error");
     } finally {
       setLoading(false);
     }
@@ -451,7 +906,42 @@ function VisitBookingPanel({
       setNotice("Візит заброньовано. Він з’явився у ваших записах.");
       setNoticeTone("success");
       setPurpose("");
-      await load();
+      await load(true);
+    } catch (error) {
+      if (!isUncertainVisitFailure(error)) {
+        clearVisitPendingIntent(window.sessionStorage, storageKey);
+        setPending(null);
+      }
+      setNotice(errorMessage(error));
+      setNoticeTone("error");
+      if (error instanceof VisitApiError) setFieldErrors(error.fieldErrors);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function sendPatch(intent: Extract<VisitPendingIntent, { kind: "patch" }>) {
+    setSubmitting(true);
+    setNotice("");
+    setFieldErrors({});
+    if (!writeVisitPendingIntent(window.sessionStorage, storageKey, intent)) {
+      setNotice("Браузер не дозволив безпечно зберегти запит для повторної перевірки.");
+      setNoticeTone("error");
+      setSubmitting(false);
+      return;
+    }
+    setPending(intent);
+    try {
+      await visitApi(`/api/visits/teacher/${encodeURIComponent(intent.bookingId)}`, {
+        method: "PATCH",
+        body: JSON.stringify(intent.payload),
+      });
+      clearVisitPendingIntent(window.sessionStorage, storageKey);
+      setPending(null);
+      setEditingBooking(null);
+      setNotice("Запис перенесено. Попередній час звільнено лише після успішного збереження нового.");
+      setNoticeTone("success");
+      await load(true);
     } catch (error) {
       if (!isUncertainVisitFailure(error)) {
         clearVisitPendingIntent(window.sessionStorage, storageKey);
@@ -472,13 +962,25 @@ function VisitBookingPanel({
       setNoticeTone("error");
       return;
     }
-    const payload: VisitCreatePayload = {
-      requestId: crypto.randomUUID(),
+    const values = {
       date,
       startTime,
       endTime,
       purpose: purpose.trim() || null,
       classYearId: classYearId || null,
+    };
+    if (editingBooking) {
+      const payload: VisitPatchPayload = {
+        requestId: crypto.randomUUID(),
+        expectedVersion: editingBooking.version,
+        ...values,
+      };
+      void sendPatch({ kind: "patch", requestId: payload.requestId, bookingId: editingBooking.id, payload });
+      return;
+    }
+    const payload: VisitCreatePayload = {
+      requestId: crypto.randomUUID(),
+      ...values,
     };
     void sendCreate({ kind: "create", requestId: payload.requestId, payload });
   }
@@ -505,7 +1007,7 @@ function VisitBookingPanel({
       setPending(null);
       setNotice("Запис скасовано.");
       setNoticeTone("success");
-      await load();
+      await load(true);
     } catch (error) {
       if (!isUncertainVisitFailure(error)) {
         clearVisitPendingIntent(window.sessionStorage, storageKey);
@@ -532,7 +1034,24 @@ function VisitBookingPanel({
   function retryPending() {
     if (!pending) return;
     if (pending.kind === "create") void sendCreate(pending);
+    else if (pending.kind === "patch") void sendPatch(pending);
     else void sendCancel(pending.bookingId, pending.payload, pending);
+  }
+
+  function editBooking(booking: VisitBooking) {
+    setEditingBooking(booking);
+    setDate(booking.date);
+    setStartTime(booking.startTime);
+    setEndTime(booking.endTime);
+    setClassYearId(booking.classYearId || "");
+    setPurpose(booking.purpose || "");
+    window.setTimeout(() => document.querySelector<HTMLElement>("#teacher-visit-form")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  }
+
+  function stopEditing() {
+    setEditingBooking(null);
+    setPurpose("");
+    setClassYearId("");
   }
 
   const bookingEnabled = data?.bookingEnabled === true;
@@ -542,15 +1061,29 @@ function VisitBookingPanel({
       <section className={styles.page}>
         <div className={styles.bookingTopbar}>
           <div className={styles.intro}>
-            <p className={styles.eyebrow}>Відвідування бібліотеки</p>
-            <h1>Оберіть зручний час</h1>
-            <p>Зайняті проміжки видно без персональних даних. Ваші дані доступні лише вам і бібліотекарю.</p>
+            <p className={styles.eyebrow}>Кабінет учителя</p>
+            <h1>{teacherTabTitle(activeTab)}</h1>
+            <p>Ваші записи, замовлення й повідомлення доступні лише вам і бібліотекарю.</p>
           </div>
           <div className={styles.account}>
             <span><small>Ви увійшли як</small><strong>{teacher.fullName}</strong></span>
+            <button type="button" onClick={() => setSecurityOpen(true)} disabled={signingOut || submitting || Boolean(pending)}>Безпека</button>
             <button type="button" onClick={() => void onSignOut()} disabled={signingOut || submitting || Boolean(pending)}>Вийти</button>
           </div>
         </div>
+
+        <nav className={styles.teacherTabs} aria-label="Розділи кабінету">
+          {TEACHER_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              aria-current={activeTab === tab.id ? "page" : undefined}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              <span aria-hidden="true">{tab.icon}</span>{tab.label}
+            </button>
+          ))}
+        </nav>
 
         {pending ? (
           <div className={styles.pending} role="status">
@@ -561,10 +1094,21 @@ function VisitBookingPanel({
         {signOutNotice ? <div className={styles.error} role="alert">{signOutNotice}</div> : null}
         {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
 
+        {activeTab === "overview" ? (
+          <TeacherOverview
+            teacherName={teacher.fullName}
+            bookings={activeBookings}
+            loading={loading}
+            onOpenVisits={() => setActiveTab("visits")}
+            onOpenOrders={() => setActiveTab("orders")}
+          />
+        ) : null}
+
+        {activeTab === "visits" ? <>
         <div className={styles.teacherGrid}>
-          <form className={styles.card} onSubmit={submit} aria-busy={submitting}>
+          <form className={styles.card} id="teacher-visit-form" onSubmit={submit} aria-busy={submitting}>
             <div className={styles.cardHeading}>
-              <div><span>Новий запис</span><h2>Дані візиту</h2></div>
+              <div><span>{editingBooking ? "Редагування запису" : "Новий запис"}</span><h2>{editingBooking ? "Новий час і деталі" : "Дані візиту"}</h2></div>
               <span className={bookingEnabled ? styles.enabled : styles.disabled}>{bookingEnabled ? "Запис відкрито" : "Запис призупинено"}</span>
             </div>
             <div className={styles.identityBanner}>
@@ -595,9 +1139,12 @@ function VisitBookingPanel({
                 {fieldErrors.purpose ? <small className={styles.fieldError}>{fieldErrors.purpose}</small> : null}
               </label>
             </div>
-            <button className={styles.primary} type="submit" disabled={submitting || !bookingEnabled || Boolean(pending)}>
-              {submitting ? "Зберігаємо…" : "Забронювати час"}
-            </button>
+            <div className={styles.formActions}>
+              {editingBooking ? <button className={styles.quiet} type="button" onClick={stopEditing} disabled={submitting || Boolean(pending)}>Не редагувати</button> : null}
+              <button className={styles.primary} type="submit" disabled={submitting || !bookingEnabled || Boolean(pending)}>
+                {submitting ? "Зберігаємо…" : editingBooking ? "Перенести запис" : "Забронювати час"}
+              </button>
+            </div>
           </form>
 
           <aside className={styles.card} aria-labelledby="availability-title">
@@ -618,13 +1165,748 @@ function VisitBookingPanel({
           {activeBookings.length ? <div className={styles.bookingList}>{activeBookings.map((booking) => (
             <article key={booking.id}>
               <div><strong>{formatVisitDateTime(`${booking.date}T${booking.startTime}`)}–{booking.endTime}</strong><span>{booking.classLabel || "Без класу"}{booking.purpose ? ` · ${booking.purpose}` : ""}</span></div>
-              <button type="button" className={styles.danger} onClick={() => cancelBooking(booking)} disabled={!bookingEnabled || submitting || Boolean(pending)}>Скасувати</button>
+              <div className={styles.bookingActions}><button type="button" className={styles.quiet} onClick={() => editBooking(booking)} disabled={!bookingEnabled || submitting || Boolean(pending)}>Редагувати</button><button type="button" className={styles.danger} onClick={() => cancelBooking(booking)} disabled={!bookingEnabled || submitting || Boolean(pending)}>Скасувати</button></div>
             </article>
           ))}</div> : <p className={styles.empty}>Майбутніх записів немає.</p>}
         </section>
+        </> : null}
+
+        {activeTab === "orders" ? <TeacherOrdersPanel pendingScope={pendingScope} /> : null}
+        {activeTab === "notifications" ? <TeacherNotificationsPanel pendingScope={pendingScope} /> : null}
+        {securityOpen ? <TeacherSecurityPanel pendingScope={pendingScope} onClose={() => setSecurityOpen(false)} onSessionRotated={onSessionRotated} /> : null}
       </section>
     </VisitShell>
   );
+}
+
+type TeacherCatalogItem = {
+  id: string;
+  title: string;
+  author: string;
+  year: number | null;
+  thumbnailUrl: string;
+  availableQuantity: number;
+};
+
+type TeacherCatalogEnvelope = {
+  success: true;
+  items: TeacherCatalogItem[];
+};
+
+type MaterialRequestStatus = "submitted" | "in_review" | "ready" | "partially_ready" | "completed" | "rejected" | "cancelled";
+
+type MaterialRequest = {
+  id: string;
+  status: MaterialRequestStatus;
+  teacherNotes: string;
+  librarianNote: string | null;
+  rejectionReason: string | null;
+  pickupLocation: { id: string; name: string } | null;
+  resultingLoanId: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  readyAt: string | null;
+  completedAt: string | null;
+  cancelledAt: string | null;
+  items: Array<{
+    id: string;
+    material: { id: string; title: string; author: string; year: number | null; thumbnailUrl: string };
+    requestedQuantity: number;
+    approvedQuantity: number;
+    fulfilledQuantity: number;
+  }>;
+};
+
+type MaterialRequestsEnvelope = {
+  success: true;
+  requests: MaterialRequest[];
+  page: { limit: number; hasMore: boolean; nextCursor: string | null };
+};
+
+type OrderMutationPayload =
+  | { requestId: string; notes: string | null; items: Array<{ materialId: string; quantity: number }> }
+  | { requestId: string; expectedVersion: number; reason: string | null };
+
+type OrderPendingIntent = {
+  kind: "order-create" | "order-cancel";
+  requestId: string;
+  resourceId?: string;
+  payload: OrderMutationPayload;
+};
+
+type TeacherNotification = {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  entityType: string;
+  entityId: string;
+  read: boolean;
+  version: number;
+  createdAt: string;
+  readAt: string | null;
+};
+
+type NotificationsEnvelope = {
+  success: true;
+  notifications: TeacherNotification[];
+  page: { limit: number; hasMore: boolean; nextCursor: string | null };
+  unreadCount: number;
+};
+
+function teacherTabTitle(tab: TeacherTab): string {
+  if (tab === "visits") return "Мої відвідування";
+  if (tab === "orders") return "Замовлення матеріалів";
+  if (tab === "notifications") return "Мої повідомлення";
+  return "Вітаємо у вашому кабінеті";
+}
+
+function TeacherOverview({
+  teacherName,
+  bookings,
+  loading,
+  onOpenVisits,
+  onOpenOrders,
+}: {
+  teacherName: string;
+  bookings: VisitBooking[];
+  loading: boolean;
+  onOpenVisits: () => void;
+  onOpenOrders: () => void;
+}) {
+  const nextBooking = bookings[0] ?? null;
+  return (
+    <section className={styles.overviewGrid} aria-label="Огляд кабінету">
+      <article className={`${styles.card} ${styles.welcomeCard}`}>
+        <span>Підтверджений профіль</span>
+        <h2>{teacherName}</h2>
+        <p>Ім’я для записів і замовлень підставляється з бази даних, його не потрібно вводити вручну.</p>
+      </article>
+      <article className={styles.card}>
+        <div className={styles.cardHeading}><div><span>Найближче</span><h2>Відвідування</h2></div></div>
+        {loading ? <p className={styles.empty}>Оновлюємо…</p> : nextBooking ? (
+          <p className={styles.nextVisit}><strong>{formatVisitDateTime(`${nextBooking.date}T${nextBooking.startTime}`)}–{nextBooking.endTime}</strong><span>{nextBooking.classLabel || "Без класу"}</span></p>
+        ) : <p className={styles.empty}>Майбутніх записів немає.</p>}
+        <button className={styles.quiet} type="button" onClick={onOpenVisits}>Відкрити графік</button>
+      </article>
+      <article className={styles.card}>
+        <div className={styles.cardHeading}><div><span>Каталог</span><h2>Потрібні матеріали</h2></div></div>
+        <p className={styles.empty}>Знайдіть підручники або інші матеріали й надішліть одне замовлення бібліотекарю.</p>
+        <button className={styles.quiet} type="button" onClick={onOpenOrders}>Створити замовлення</button>
+      </article>
+    </section>
+  );
+}
+
+function TeacherOrdersPanel({ pendingScope }: { pendingScope: string }) {
+  const [query, setQuery] = useState("");
+  const [items, setItems] = useState<TeacherCatalogItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [noticeTone, setNoticeTone] = useState<"success" | "error" | "info">("info");
+  const [cart, setCart] = useState<Record<string, { item: TeacherCatalogItem; quantity: number }>>({});
+  const [notes, setNotes] = useState("");
+  const [requests, setRequests] = useState<MaterialRequest[]>([]);
+  const [requestPage, setRequestPage] = useState<MaterialRequestsEnvelope["page"] | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [pending, setPending] = useState<OrderPendingIntent | null>(null);
+  const normalizedQuery = query.trim();
+  const storageKey = `library.teacher.orders.pending.v1:${pendingScope}`;
+
+  const loadRequests = useCallback(async (afterMutation = false, cursor: string | null = null) => {
+    const append = Boolean(cursor);
+    if (append) setHistoryLoadingMore(true);
+    else setHistoryLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: "50" });
+      if (cursor) params.set("cursor", cursor);
+      const response = await visitApi<MaterialRequestsEnvelope>(`/api/teacher/material-requests?${params.toString()}`);
+      setRequests((current) => append ? mergePortalPageById(current, response.requests) : response.requests);
+      setRequestPage(response.page);
+    } catch (error) {
+      setNotice(afterMutation
+        ? "Дію збережено, але історію замовлень не вдалося оновити. Натисніть «Оновити»."
+        : append
+          ? "Не вдалося завантажити наступні замовлення. Спробуйте ще раз."
+          : errorMessage(error));
+      setNoticeTone(afterMutation ? "info" : "error");
+    } finally {
+      if (append) setHistoryLoadingMore(false);
+      else setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setPending(readPortalPendingIntent<OrderPendingIntent>(window.sessionStorage, storageKey, ["order-create", "order-cancel"]));
+      void loadRequests();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadRequests, storageKey]);
+
+  useEffect(() => {
+    if (normalizedQuery.length < 2) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setLoading(true);
+      setNotice("");
+      try {
+        const params = new URLSearchParams({ q: normalizedQuery, available: "true", limit: "12" });
+        const response = await visitApi<TeacherCatalogEnvelope>(`/api/catalog-v2?${params.toString()}`, { signal: controller.signal });
+        setItems(response.items);
+        if (!response.items.length) {
+          setNotice("За цим запитом доступних матеріалів не знайдено.");
+          setNoticeTone("info");
+        }
+      } catch {
+        if (!controller.signal.aborted) {
+          setNotice("Не вдалося виконати пошук у каталозі.");
+          setNoticeTone("error");
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }, 300);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [normalizedQuery]);
+
+  function changeQuery(value: string) {
+    setQuery(value);
+    if (value.trim().length < 2) {
+      setItems([]);
+      setLoading(false);
+      setNotice("");
+    }
+  }
+
+  async function sendOrderIntent(intent: OrderPendingIntent) {
+    if (!writePortalPendingIntent(window.sessionStorage, storageKey, intent)) {
+      setNotice("Браузер не дозволив безпечно зберегти замовлення для повторної перевірки.");
+      setNoticeTone("error");
+      return;
+    }
+    setPending(intent);
+    setSubmitting(true);
+    setNotice("");
+    try {
+      const suffix = intent.kind === "order-cancel" && intent.resourceId ? `/${encodeURIComponent(intent.resourceId)}` : "";
+      await visitApi<{ success: true; request: MaterialRequest }>(`/api/teacher/material-requests${suffix}`, {
+        method: intent.kind === "order-create" ? "POST" : "DELETE",
+        body: JSON.stringify(intent.payload),
+      });
+      clearPortalPendingIntent(window.sessionStorage, storageKey);
+      setPending(null);
+      setNotice(intent.kind === "order-create" ? "Замовлення надіслано бібліотекарю." : "Замовлення скасовано.");
+      setNoticeTone("success");
+      if (intent.kind === "order-create") {
+        setCart({});
+        setNotes("");
+      }
+      await loadRequests(true);
+    } catch (error) {
+      if (!isUncertainVisitFailure(error)) {
+        clearPortalPendingIntent(window.sessionStorage, storageKey);
+        setPending(null);
+      }
+      setNotice(errorMessage(error));
+      setNoticeTone("error");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function submitOrder() {
+    if (!cartRows.length || pending) return;
+    const requestId = crypto.randomUUID();
+    const payload = {
+      requestId,
+      notes: notes.trim() || null,
+      items: cartRows.map(({ item, quantity }) => ({ materialId: item.id, quantity })),
+    };
+    void sendOrderIntent({ kind: "order-create", requestId, payload });
+  }
+
+  function cancelOrder(request: MaterialRequest) {
+    if (!window.confirm("Скасувати це замовлення?")) return;
+    const requestId = crypto.randomUUID();
+    const payload = { requestId, expectedVersion: request.version, reason: null };
+    void sendOrderIntent({ kind: "order-cancel", requestId, resourceId: request.id, payload });
+  }
+
+  function add(item: TeacherCatalogItem) {
+    setCart((current) => {
+      const existing = current[item.id];
+      const quantity = Math.min(item.availableQuantity, (existing?.quantity ?? 0) + 1);
+      return { ...current, [item.id]: { item, quantity } };
+    });
+  }
+
+  function updateQuantity(id: string, quantity: number) {
+    setCart((current) => {
+      const existing = current[id];
+      if (!existing) return current;
+      if (quantity <= 0) {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      }
+      return { ...current, [id]: { ...existing, quantity: Math.min(existing.item.availableQuantity, quantity) } };
+    });
+  }
+
+  const cartRows = Object.values(cart);
+  return (
+    <section aria-labelledby="orders-title">
+      {pending ? <div className={styles.pending} role="status"><span>Результат попередньої дії із замовленням не підтверджено.</span><button type="button" onClick={() => void sendOrderIntent(pending)} disabled={submitting}>Перевірити результат</button></div> : null}
+      {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
+      <div className={styles.orderLayout}>
+      <div className={styles.card}>
+        <div className={styles.cardHeading}><div><span>Крок 1</span><h2 id="orders-title">Знайдіть матеріали</h2></div></div>
+        <label className={styles.portalSearch}>Назва, автор або CAT-ID
+          <input type="search" value={query} onChange={(event) => changeQuery(event.currentTarget.value)} placeholder="Введіть щонайменше 2 символи" autoComplete="off" />
+        </label>
+        <div className={styles.searchStatus} role="status" aria-live="polite">{loading ? "Шукаємо…" : ""}</div>
+        {items.length ? <div className={styles.catalogCards}>{items.map((item) => (
+          <article key={item.id}>
+            <TeacherCover item={item} />
+            <div><strong>{item.title}</strong><span>{[item.author || "Автор не вказаний", item.year || "Рік не вказано"].join(" · ")}</span><small>{item.availableQuantity} доступно</small></div>
+            <button type="button" onClick={() => add(item)} disabled={item.availableQuantity < 1 || cartRows.length >= 10 && !cart[item.id]}>Додати</button>
+          </article>
+        ))}</div> : null}
+      </div>
+      <aside className={styles.card} aria-labelledby="cart-title">
+        <div className={styles.cardHeading}><div><span>Крок 2 · до 10 позицій</span><h2 id="cart-title">Кошик</h2></div><strong>{cartRows.length}/10</strong></div>
+        {cartRows.length ? <ul className={styles.cartList}>{cartRows.map(({ item, quantity }) => (
+          <li key={item.id}>
+            <span><strong>{item.title}</strong><small>{item.id}</small></span>
+            <label>Кількість<input type="number" min="0" max={item.availableQuantity} value={quantity} onChange={(event) => updateQuantity(item.id, Number(event.currentTarget.value))} /></label>
+            <button type="button" onClick={() => updateQuantity(item.id, 0)} aria-label={`Прибрати ${item.title} з кошика`}>×</button>
+          </li>
+        ))}</ul> : <p className={styles.empty}>Додайте матеріали з результатів пошуку.</p>}
+        <label className={styles.portalSearch}>Примітка бібліотекарю
+          <textarea maxLength={300} value={notes} onChange={(event) => setNotes(event.currentTarget.value)} placeholder="Необов’язково: для якого уроку або класу" />
+        </label>
+        <button className={styles.primary} type="button" onClick={submitOrder} disabled={!cartRows.length || submitting || Boolean(pending)}>{submitting ? "Надсилаємо…" : "Надіслати замовлення"}</button>
+        <p className={styles.authHelp}>Фактичний залишок бібліотекар перевірить під час підготовки замовлення.</p>
+      </aside>
+      </div>
+      <section className={`${styles.card} ${styles.requestHistory}`} aria-labelledby="request-history-title">
+        <div className={styles.cardHeading}><div><span>Лише для вас</span><h2 id="request-history-title">Історія замовлень</h2></div><button className={styles.quiet} type="button" onClick={() => void loadRequests()} disabled={historyLoading || historyLoadingMore || submitting}>↻ Оновити</button></div>
+        {historyLoading ? <p className={styles.empty}>Оновлюємо замовлення…</p> : requests.length ? <div className={styles.requestList}>{requests.map((request) => (
+          <article key={request.id}>
+            <header><span className={styles.requestStatus} data-status={request.status}>{materialRequestStatusLabel(request.status)}</span><time dateTime={request.createdAt}>{formatPortalDate(request.createdAt)}</time></header>
+            <ul>{request.items.map((item) => <li key={item.id}><span><strong>{item.material.title}</strong><small>{[item.material.author, item.material.year].filter(Boolean).join(" · ")}</small></span><span>{item.approvedQuantity ? `${item.approvedQuantity} із ${item.requestedQuantity}` : `${item.requestedQuantity} запитано`}</span></li>)}</ul>
+            {request.pickupLocation ? <p>Отримання: <strong>{request.pickupLocation.name}</strong></p> : null}
+            {request.rejectionReason ? <p className={styles.requestReason}>{request.rejectionReason}</p> : null}
+            {request.status === "submitted" ? <button className={styles.danger} type="button" onClick={() => cancelOrder(request)} disabled={submitting || Boolean(pending)}>Скасувати замовлення</button> : null}
+          </article>
+        ))}</div> : <p className={styles.empty}>Замовлень ще немає.</p>}
+        {requestPage?.hasMore && requestPage.nextCursor ? <button className={styles.loadMore} type="button" onClick={() => void loadRequests(false, requestPage.nextCursor)} disabled={historyLoading || historyLoadingMore || submitting}>{historyLoadingMore ? "Завантажуємо…" : "Завантажити ще"}</button> : null}
+      </section>
+    </section>
+  );
+}
+
+function TeacherCover({ item }: { item: TeacherCatalogItem }) {
+  return item.thumbnailUrl
+    ? <img className={styles.orderCover} src={item.thumbnailUrl} alt="" width="54" height="78" loading="lazy" />
+    : <span className={styles.orderCoverFallback} aria-hidden="true">{item.title.slice(0, 1)}</span>;
+}
+
+type NotificationPendingIntent = {
+  kind: "notification-read";
+  requestId: string;
+  resourceId: string;
+  payload: { requestId: string; expectedVersion: number; read: true };
+};
+
+function TeacherNotificationsPanel({ pendingScope }: { pendingScope: string }) {
+  const [data, setData] = useState<NotificationsEnvelope | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [pending, setPending] = useState<NotificationPendingIntent | null>(null);
+  const storageKey = `library.teacher.notifications.pending.v1:${pendingScope}`;
+
+  const load = useCallback(async (afterMutation = false, cursor: string | null = null) => {
+    const append = Boolean(cursor);
+    if (append) setLoadingMore(true);
+    else setLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: "50" });
+      if (cursor) params.set("cursor", cursor);
+      const response = await visitApi<NotificationsEnvelope>(`/api/teacher/notifications?${params.toString()}`);
+      setData((current) => append && current
+        ? { ...response, notifications: mergePortalPageById(current.notifications, response.notifications) }
+        : response);
+    } catch (error) {
+      setNotice(afterMutation
+        ? "Позначку збережено, але список повідомлень не вдалося оновити. Натисніть «Оновити»."
+        : append
+          ? "Не вдалося завантажити наступні повідомлення. Спробуйте ще раз."
+          : errorMessage(error));
+    } finally {
+      if (append) setLoadingMore(false);
+      else setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setPending(readPortalPendingIntent<NotificationPendingIntent>(window.sessionStorage, storageKey, ["notification-read"]));
+      void load();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [load, storageKey]);
+
+  async function sendRead(intent: NotificationPendingIntent) {
+    if (!writePortalPendingIntent(window.sessionStorage, storageKey, intent)) {
+      setNotice("Браузер не дозволив зберегти дію для повторної перевірки.");
+      return;
+    }
+    setPending(intent);
+    setSubmitting(true);
+    setNotice("");
+    try {
+      await visitApi(`/api/teacher/notifications/${encodeURIComponent(intent.resourceId)}`, {
+        method: "PATCH",
+        body: JSON.stringify(intent.payload),
+      });
+      clearPortalPendingIntent(window.sessionStorage, storageKey);
+      setPending(null);
+      await load(true);
+    } catch (error) {
+      if (!isUncertainVisitFailure(error)) {
+        clearPortalPendingIntent(window.sessionStorage, storageKey);
+        setPending(null);
+      }
+      setNotice(errorMessage(error));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function markRead(notification: TeacherNotification) {
+    const requestId = crypto.randomUUID();
+    void sendRead({
+      kind: "notification-read",
+      requestId,
+      resourceId: notification.id,
+      payload: { requestId, expectedVersion: notification.version, read: true },
+    });
+  }
+
+  return (
+    <section className={styles.card} aria-labelledby="notifications-title">
+      <div className={styles.cardHeading}><div><span>{data?.unreadCount ?? 0} непрочитаних</span><h2 id="notifications-title">Повідомлення</h2></div><button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading || loadingMore || submitting}>↻ Оновити</button></div>
+      {pending ? <div className={styles.pending} role="status"><span>Не вдалося підтвердити позначку «прочитано».</span><button type="button" onClick={() => void sendRead(pending)} disabled={submitting}>Перевірити результат</button></div> : null}
+      {notice ? <div className={styles.error} role="alert">{notice}</div> : null}
+      {loading ? <p className={styles.empty}>Оновлюємо повідомлення…</p> : data?.notifications.length ? <div className={styles.notificationList}>{data.notifications.map((notification) => (
+        <article key={notification.id} data-unread={!notification.read || undefined}>
+          <span aria-hidden="true" />
+          <div><header><strong>{notification.title}</strong><time dateTime={notification.createdAt}>{formatPortalDate(notification.createdAt)}</time></header><p>{notification.message}</p></div>
+          {!notification.read ? <button className={styles.quiet} type="button" onClick={() => markRead(notification)} disabled={submitting || Boolean(pending)}>Позначити прочитаним</button> : <small>Прочитано</small>}
+        </article>
+      ))}</div> : <p className={styles.empty}>Повідомлень ще немає.</p>}
+      {data?.page.hasMore && data.page.nextCursor ? <button className={styles.loadMore} type="button" onClick={() => void load(false, data.page.nextCursor)} disabled={loading || loadingMore || submitting}>{loadingMore ? "Завантажуємо…" : "Завантажити ще"}</button> : null}
+    </section>
+  );
+}
+
+type CodeRotationEnvelope = {
+  success: true;
+  credentialVersion: number;
+  expiresAt: string;
+  pendingScope: string;
+};
+
+type CodeRotationIntent = {
+  requestId: string;
+  payload: { requestId: string; currentCode: string; newCode: string };
+};
+
+function TeacherSecurityPanel({
+  pendingScope,
+  onClose,
+  onSessionRotated,
+}: {
+  pendingScope: string;
+  onClose: () => void;
+  onSessionRotated: (session: Pick<VisitTeacherSessionEnvelope, "pendingScope" | "expiresAt">) => void;
+}) {
+  const [currentCode, setCurrentCode] = useState("");
+  const [newCode, setNewCode] = useState("");
+  const [confirmNewCode, setConfirmNewCode] = useState("");
+  const [showNewCode, setShowNewCode] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [noticeTone, setNoticeTone] = useState<"success" | "error" | "info">("info");
+  const [pendingRotation, setPendingRotation] = useState<CodeRotationIntent | null>(null);
+  const [rotated, setRotated] = useState(false);
+  const strength = personalCodeStrength(newCode);
+  const confirmationComplete = normalizedPersonalCode(confirmNewCode).length === 10;
+  const codesMatch = confirmationComplete
+    && normalizedPersonalCode(confirmNewCode) === normalizedPersonalCode(newCode);
+
+  useEffect(() => {
+    function escape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape" && !submitting) onClose();
+    }
+    window.addEventListener("keydown", escape);
+    return () => window.removeEventListener("keydown", escape);
+  }, [onClose, submitting]);
+
+  async function sendRotation(intent: CodeRotationIntent) {
+    setPendingRotation(intent);
+    setSubmitting(true);
+    setNotice("");
+    try {
+      const response = await visitApi<CodeRotationEnvelope>("/api/teacher/security/code", {
+        method: "POST",
+        body: JSON.stringify(intent.payload),
+      });
+      setPendingRotation(null);
+      setRotated(true);
+      setCurrentCode("");
+      setConfirmed(false);
+      setNotice("Новий код активний. Збережіть його зараз: після закриття вікна сайт його не покаже.");
+      setNoticeTone("success");
+      clearTeacherPortalPendingStorage(window.sessionStorage, pendingScope);
+      onSessionRotated({ pendingScope: response.pendingScope, expiresAt: response.expiresAt });
+    } catch (error) {
+      setNotice(isUncertainVisitFailure(error)
+        ? "Результат зміни коду не підтверджено. Не закривайте вікно: повторіть той самий запит. Секретні коди не зберігаються у браузерному сховищі."
+        : errorMessage(error));
+      setNoticeTone("error");
+      if (!isUncertainVisitFailure(error)) setPendingRotation(null);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function submitRotation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!confirmed || normalizedPersonalCode(currentCode).length !== 10 || !strength.strong || !codesMatch) return;
+    const requestId = crypto.randomUUID();
+    void sendRotation({ requestId, payload: { requestId, currentCode: normalizedPersonalCode(currentCode), newCode: normalizedPersonalCode(newCode) } });
+  }
+
+  async function copyNewCode() {
+    try {
+      await navigator.clipboard.writeText(newCode);
+      setNotice("Новий код скопійовано.");
+      setNoticeTone("info");
+    } catch {
+      setNotice("Не вдалося скопіювати код. Перепишіть його вручну.");
+      setNoticeTone("error");
+    }
+  }
+
+  return (
+    <div className={styles.modalBackdrop} role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
+      <section className={`${styles.card} ${styles.securityDialog}`} role="dialog" aria-modal="true" aria-labelledby="security-title">
+        <div className={styles.cardHeading}><div><span>Профіль</span><h2 id="security-title">Змінити персональний код</h2></div><button className={styles.quiet} type="button" onClick={onClose} aria-label="Закрити" disabled={submitting}>×</button></div>
+        <p className={styles.empty}>Після зміни старий код і попередні сеанси перестануть працювати. Новий код не зберігається у відкритому вигляді.</p>
+        {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
+        <form onSubmit={submitRotation}>
+          <div className={styles.fields}>
+            <label className={styles.wide}>Поточний код *<input required type="password" inputMode="text" autoComplete="one-time-code" value={currentCode} onChange={(event) => setCurrentCode(formatPersonalCode(event.currentTarget.value))} placeholder="XXXXX-XXXXX" pattern="[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}" disabled={submitting || rotated || Boolean(pendingRotation)} /></label>
+            <label className={styles.wide}>Новий код *
+              <span className={styles.generatedCode}><input required type={showNewCode ? "text" : "password"} inputMode="text" autoComplete="one-time-code" maxLength={11} value={newCode} onChange={(event) => { setNewCode(formatPersonalCode(event.currentTarget.value)); setConfirmed(false); setRotated(false); }} placeholder="XXXXX-XXXXX" pattern="[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}" aria-invalid={newCode.length > 0 && !strength.strong} aria-describedby="new-code-help new-code-rules" disabled={submitting || rotated || Boolean(pendingRotation)} /><button className={styles.quiet} type="button" onClick={() => setShowNewCode((value) => !value)} disabled={!newCode || submitting}>{showNewCode ? "Сховати" : "Показати"}</button><button className={styles.quiet} type="button" onClick={() => { setNewCode(generatePersonalCode()); setConfirmNewCode(""); setShowNewCode(true); setConfirmed(false); setRotated(false); setNotice(""); }} disabled={submitting || rotated || Boolean(pendingRotation)}>Створити надійний код</button>{newCode ? <button className={styles.quiet} type="button" onClick={() => void copyNewCode()} disabled={submitting}>Копіювати</button> : null}</span>
+              <small id="new-code-help">Можна ввести власний код або створити випадковий. Дозволені лише символи 2–9 та великі латинські літери без I, L, O.</small>
+              <ul id="new-code-rules" className={styles.codeRules} aria-live="polite">
+                <li data-ok={strength.complete}>10 дозволених символів</li>
+                <li data-ok={strength.diverse}>Щонайменше 4 різні символи</li>
+                <li data-ok={strength.noLongRun}>Без 4 однакових символів поспіль</li>
+                <li data-ok={strength.notObvious}>Без паліндромів, повторюваних блоків і очевидних послідовностей</li>
+              </ul>
+            </label>
+            <label className={styles.wide}>Повторіть новий код *<input required type="password" inputMode="text" autoComplete="one-time-code" maxLength={11} value={confirmNewCode} onChange={(event) => setConfirmNewCode(formatPersonalCode(event.currentTarget.value))} placeholder="XXXXX-XXXXX" pattern="[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}" aria-invalid={confirmationComplete && !codesMatch} aria-describedby="confirm-new-code-help" disabled={submitting || rotated || Boolean(pendingRotation)} /><small id="confirm-new-code-help" className={confirmationComplete && !codesMatch ? styles.fieldError : undefined}>{confirmationComplete && !codesMatch ? "Коди не збігаються." : "Введіть новий код ще раз, щоб уникнути помилки."}</small></label>
+            <label className={`${styles.wide} ${styles.confirmCode}`}><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.currentTarget.checked)} disabled={!strength.strong || !codesMatch || submitting || rotated || Boolean(pendingRotation)} /><span>Я зберіг(ла) новий код і розумію, що старий перестане працювати.</span></label>
+          </div>
+          {pendingRotation ? <button className={styles.primary} type="button" onClick={() => void sendRotation(pendingRotation)} disabled={submitting}>{submitting ? "Перевіряємо…" : "Повторити той самий запит"}</button> : <button className={styles.primary} type="submit" disabled={!confirmed || normalizedPersonalCode(currentCode).length !== 10 || !strength.strong || !codesMatch || submitting || rotated}>{submitting ? "Змінюємо…" : rotated ? "Код змінено" : "Активувати новий код"}</button>}
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function visitDates(from: string, count: number): string[] {
+  const [year, month, day] = from.split("-").map(Number);
+  if (!year || !month || !day) return [];
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(Date.UTC(year, month - 1, day + index));
+    return date.toISOString().slice(0, 10);
+  });
+}
+
+function shiftVisitDate(date: string, days: number, minimum: string): string {
+  const shifted = visitDatesFromOffset(date, days);
+  return shifted < minimum ? minimum : shifted;
+}
+
+function lastPublicWeekStart(today: string): string {
+  return visitDatesFromOffset(visitHorizonEnd(today), -6);
+}
+
+function publicWeekStart(requested: string, today: string): string {
+  if (!validDate(requested) || requested < today) return today;
+  const lastStart = lastPublicWeekStart(today);
+  return requested > lastStart ? lastStart : requested;
+}
+
+function visitDatesFromOffset(date: string, days: number): string {
+  const [year, month, day] = date.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, day + days));
+  return shifted.toISOString().slice(0, 10);
+}
+
+function formatWeek(dates: string[]): string {
+  if (!dates.length) return "";
+  const formatter = new Intl.DateTimeFormat("uk-UA", { day: "numeric", month: "short", timeZone: "UTC" });
+  return `${formatter.format(new Date(`${dates[0]}T12:00:00Z`))} – ${formatter.format(new Date(`${dates.at(-1)}T12:00:00Z`))}`;
+}
+
+function formatVisitDay(date: string): string {
+  const value = new Intl.DateTimeFormat("uk-UA", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  }).format(new Date(`${date}T12:00:00Z`));
+  return value.charAt(0).toLocaleUpperCase("uk-UA") + value.slice(1);
+}
+
+function publicSlots(data: PublicVisitsEnvelope, date: string): PublicScheduleSlot[] {
+  const ranges = data.hours[weekdayKey(date)] ?? [];
+  const blockers = [
+    ...data.closures.filter((item) => item.date === date).map((item) => ({ ...item, status: "closed" as const })),
+    ...data.busy.map(busyPeriodParts).filter((item) => item.date === date).map((item) => ({ ...item, status: "busy" as const })),
+  ];
+  const slots: PublicScheduleSlot[] = [];
+  for (const range of ranges) {
+    const boundaries = new Set([timeMinutes(range.startTime), timeMinutes(range.endTime)]);
+    for (const blocker of blockers) {
+      const start = Math.max(timeMinutes(range.startTime), timeMinutes(blocker.startTime));
+      const end = Math.min(timeMinutes(range.endTime), timeMinutes(blocker.endTime));
+      if (start < end) {
+        boundaries.add(start);
+        boundaries.add(end);
+      }
+    }
+    const ordered = [...boundaries].sort((left, right) => left - right);
+    for (let index = 0; index < ordered.length - 1; index += 1) {
+      const start = ordered[index];
+      const end = ordered[index + 1];
+      if (end <= start) continue;
+      const status = blockers.some((item) => item.status === "closed" && covers(item, start, end))
+        ? "closed"
+        : blockers.some((item) => item.status === "busy" && covers(item, start, end))
+          ? "busy"
+          : "free";
+      const previous = slots.at(-1);
+      if (previous?.status === status && previous.endTime === minutesTime(start)) {
+        previous.endTime = minutesTime(end);
+      } else {
+        slots.push({ startTime: minutesTime(start), endTime: minutesTime(end), status });
+      }
+    }
+  }
+  return slots.filter((slot) => slot.status !== "free" || timeMinutes(slot.endTime) - timeMinutes(slot.startTime) >= 20);
+}
+
+function covers(
+  blocker: { startTime: string; endTime: string },
+  start: number,
+  end: number,
+): boolean {
+  return timeMinutes(blocker.startTime) < end && timeMinutes(blocker.endTime) > start;
+}
+
+function timeMinutes(value: string): number {
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function minutesTime(value: number): string {
+  return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
+}
+
+function strongPersonalCode(value: string): boolean {
+  return personalCodeStrength(value).strong;
+}
+
+function generatePersonalCode(): string {
+  while (true) {
+    const result: string[] = [];
+    while (result.length < 10) {
+      const bytes = crypto.getRandomValues(new Uint8Array(16));
+      for (const byte of bytes) {
+        const usableRange = Math.floor(256 / PERSONAL_CODE_ALPHABET.length) * PERSONAL_CODE_ALPHABET.length;
+        if (byte >= usableRange) continue;
+        result.push(PERSONAL_CODE_ALPHABET[byte % PERSONAL_CODE_ALPHABET.length]);
+        if (result.length === 10) break;
+      }
+    }
+    const candidate = result.join("");
+    if (strongPersonalCode(candidate)) return formatPersonalCode(candidate);
+  }
+}
+
+function materialRequestStatusLabel(status: MaterialRequestStatus): string {
+  const labels: Record<MaterialRequestStatus, string> = {
+    submitted: "Надіслано",
+    in_review: "Опрацьовується",
+    ready: "Готове",
+    partially_ready: "Частково готове",
+    completed: "Виконано",
+    rejected: "Відхилено",
+    cancelled: "Скасовано",
+  };
+  return labels[status];
+}
+
+function formatPortalDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("uk-UA", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Europe/Kyiv",
+  }).format(date);
+}
+
+function boundedSlotEnd(start: string, end: string, duration: number): string {
+  return minutesTime(Math.min(timeMinutes(end), timeMinutes(start) + duration));
+}
+
+function bookableSlotStart(date: string, slot: PublicScheduleSlot, today: string, currentTime: string): string | null {
+  if (date > today) return slot.startTime;
+  if (date < today) return null;
+  const nextFiveMinutes = Math.floor(timeMinutes(currentTime) / 5) * 5 + 5;
+  const start = Math.max(timeMinutes(slot.startTime), nextFiveMinutes);
+  return timeMinutes(slot.endTime) - start >= 20 ? minutesTime(start) : null;
+}
+
+function currentTimeInKyiv(): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Kyiv",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.hour}:${values.minute}`;
 }
 
 function todayInKyiv(): string {
