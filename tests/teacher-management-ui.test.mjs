@@ -36,6 +36,9 @@ test("teacher directory uses frozen server paging, search and status contract", 
   assert.match(client, /nextCursor: string \| null/u);
   assert.match(workspace, /load\(data\.page\.nextCursor\)/u);
   assert.match(workspace, /Прізвище або ім’я/u);
+  assert.match(workspace, /const handleDirectoryNotice = useCallback/u);
+  assert.match(workspace, /onNotice=\{handleDirectoryNotice\}/u);
+  assert.doesNotMatch(workspace, /onNotice=\{\(message, tone/u);
   assert.doesNotMatch(workspace, /DirectoryAttention/u);
 });
 

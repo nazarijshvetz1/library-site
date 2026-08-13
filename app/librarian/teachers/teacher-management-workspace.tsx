@@ -65,6 +65,11 @@ export default function TeacherManagementWorkspace({
     }
   }, []);
 
+  const handleDirectoryNotice = useCallback((message: string, tone: "success" | "error" | "info" = "success") => {
+    setNotice(message);
+    setNoticeTone(tone);
+  }, []);
+
   useEffect(() => {
     const timer = window.setTimeout(() => void loadSummary(), 0);
     return () => window.clearTimeout(timer);
@@ -126,7 +131,7 @@ export default function TeacherManagementWorkspace({
               initialData={directory}
               writesEnabled={effectiveWrites}
               onDirectoryChange={setDirectory}
-              onNotice={(message, tone = "success") => { setNotice(message); setNoticeTone(tone); }}
+              onNotice={handleDirectoryNotice}
             />
           ) : tab === "orders" ? (
             <OrdersPanel pendingScope={pendingScope} writesEnabled={effectiveWrites} />
