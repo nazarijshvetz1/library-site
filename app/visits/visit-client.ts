@@ -4,6 +4,27 @@ export type VisitClassOption = {
   version?: number;
 };
 
+export type VisitTeacherIdentity = {
+  fullName: string;
+};
+
+export type VisitTeacher = VisitTeacherIdentity & {
+  loginId: string;
+  publicHint?: string | null;
+};
+
+export type VisitTeacherSearchEnvelope = {
+  success: true;
+  teachers: VisitTeacher[];
+};
+
+export type VisitTeacherSessionEnvelope = {
+  success: true;
+  teacher: VisitTeacherIdentity;
+  pendingScope: string;
+  expiresAt?: string;
+};
+
 export type VisitBooking = {
   id: string;
   surname: string;
@@ -49,7 +70,6 @@ export type LibrarianVisitsEnvelope = {
 
 export type VisitCreatePayload = {
   requestId: string;
-  surname: string;
   date: string;
   startTime: string;
   endTime: string;
@@ -198,6 +218,13 @@ export function teacherVisitsUrl(today: string): string {
   return `/api/visits/teacher?${params.toString()}`;
 }
 
+export function teacherSearchUrl(query: string): string {
+  const params = new URLSearchParams({ q: query.trim() });
+  return `/api/visits/teacher/directory?${params.toString()}`;
+}
+
+export const teacherSessionUrl = "/api/visits/teacher/session";
+
 export function weekdayKey(date: string): string {
   const [year, month, day] = date.split("-").map(Number);
   const dayOfWeek = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
@@ -219,6 +246,7 @@ export function isUncertainVisitFailure(error: unknown): boolean {
     "outside_business_hours",
     "request_id_conflict",
     "slot_unavailable",
+    "teacher_access_revoked",
     "validation_failed",
     "visit_time_elapsed",
   ]);
@@ -230,6 +258,7 @@ export async function visitApi<T>(url: string, init: RequestInit = {}): Promise<
   try {
     response = await fetch(url, {
       ...init,
+      credentials: "same-origin",
       headers: {
         accept: "application/json",
         ...(init.body ? { "content-type": "application/json" } : {}),

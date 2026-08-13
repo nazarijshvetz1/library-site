@@ -10,7 +10,6 @@ export type VisitBookingCreateInput = {
   date: string;
   startTime: string;
   endTime: string;
-  surname: string;
   classYearId: string | null;
   purpose: string | null;
 };
@@ -41,18 +40,20 @@ const SAFE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 export function validateVisitBookingCreateInput(input: unknown): ValidationResult<VisitBookingCreateInput> {
   const errors: Record<string, string> = {};
   if (!isRecord(input)) return invalid("body", "Очікуються дані бронювання.");
+  // `surname` is accepted only as a transition field. The server always uses
+  // canonical `users.full_name` and never trusts this browser value.
   exactKeys(input, ["requestId", "date", "startTime", "endTime", "surname", "classYearId", "purpose"], errors);
   const requestId = uuid(input.requestId, "requestId", errors);
   const date = isoDate(input.date, "date", errors);
   const startTime = time(input.startTime, "startTime", errors);
   const endTime = time(input.endTime, "endTime", errors);
   validateDuration(startTime, endTime, errors);
-  const surname = text(input.surname, "surname", errors, 2, 80, false);
+  if (input.surname !== undefined) text(input.surname, "surname", errors, 2, 80, false);
   const classYearId = input.classYearId === null
     ? null
     : pattern(input.classYearId, "classYearId", SAFE_ID_RE, errors);
   const purpose = nullableText(input.purpose, "purpose", errors, 160);
-  return finish(errors, { requestId, date, startTime, endTime, surname, classYearId, purpose });
+  return finish(errors, { requestId, date, startTime, endTime, classYearId, purpose });
 }
 
 export function validateVisitCancelInput(input: unknown, admin = false): ValidationResult<VisitCancelInput> {

@@ -1,7 +1,6 @@
-import { getChatGPTUser, type ChatGPTUser } from "@/app/chatgpt-auth";
-import { getRuntimeBoolean, getRuntimeString } from "@/lib/runtime-env";
+import { getRuntimeBoolean } from "@/lib/runtime-env";
 import { isSameOriginRequest } from "@/lib/librarian-api";
-import { VisitScheduleError, type VisitD1Database } from "@/lib/visit-schedule-store";
+import { VisitScheduleError } from "@/lib/visit-schedule-store";
 
 const PRIVATE_HEADERS = {
   "Cache-Control": "private, no-store",
@@ -26,32 +25,6 @@ export function featureGate(write = false): Response | null {
   if (!visitScheduleEnabled()) return visitError(503, "feature_disabled", "Розклад відвідувань тимчасово вимкнено.");
   if (write && !visitBookingEnabled()) return visitError(503, "booking_disabled", "Бронювання тимчасово вимкнено.");
   return null;
-}
-
-export type TeacherAccessMode = "allowlist" | "directory";
-
-export async function authorizeTeacher(db: VisitD1Database): Promise<{ ok: true; user: ChatGPTUser; accessMode: TeacherAccessMode } | { ok: false; response: Response }> {
-  const user = await getChatGPTUser();
-  if (!user) return { ok: false, response: visitError(401, "authentication_required", "Увійдіть через ChatGPT.") };
-  const email = user.email.trim().toLowerCase();
-  const allowlist = (getRuntimeString("VISIT_TEACHER_ALLOWED_EMAILS") ?? "")
-    .split(/[\s,;]+/u).map((value) => value.trim().toLowerCase()).filter(Boolean);
-  if (allowlist.includes(email)) return { ok: true, user, accessMode: "allowlist" };
-  let rows: { results?: Array<{ id: string }> };
-  try {
-    rows = await db.prepare(`
-      SELECT id FROM users
-      WHERE status = 'active' AND role = 'teacher'
-        AND (auth_user_id = ? OR lower(email) = ?)
-      ORDER BY CASE WHEN auth_user_id = ? THEN 0 ELSE 1 END, id LIMIT 2
-    `).bind(user.userId, email, user.userId).all<{ id: string }>();
-  } catch {
-    return { ok: false, response: visitError(503, "teacher_access_unavailable", "Не вдалося перевірити доступ учителя. Спробуйте ще раз.") };
-  }
-  if ((rows.results ?? []).length !== 1) {
-    return { ok: false, response: visitError(403, "teacher_access_denied", "Бібліотекар ще не надав цьому обліковому запису доступ до бронювання.") };
-  }
-  return { ok: true, user, accessMode: "directory" };
 }
 
 export async function readVisitJson(request: Request): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false; response: Response }> {

@@ -1,5 +1,6 @@
 .shell { min-height: 100vh; background: radial-gradient(circle at 85% 8%, rgba(224,173,53,.15), transparent 30rem), #f4f5f0; color: var(--ink); }
 .header { min-height: 76px; padding: 0 max(24px, calc((100vw - 1180px) / 2)); display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); background: rgba(255,254,250,.95); }
+.catalogLink { min-height: 40px; padding: 0 14px; display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 11px; background: white; color: var(--green-900); font-size: 12px; font-weight: 800; }
 .brand, .account { display: flex; align-items: center; gap: 12px; }
 .brand img { border-radius: 50%; object-fit: cover; }
 .brand > span, .account > span { display: grid; gap: 2px; }
@@ -7,12 +8,22 @@
 .brand small, .account small { color: var(--muted); font-size: 11px; }
 .account { gap: 18px; text-align: right; font-size: 12px; }
 .account > a { min-height: 40px; padding: 0 14px; display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 11px; background: white; color: var(--green-900); font-weight: 800; }
+.account > button { min-height: 40px; padding: 0 14px; border: 1px solid var(--line); border-radius: 11px; background: white; color: var(--green-900); cursor: pointer; font-weight: 800; }
+.account > button:disabled { opacity: .55; cursor: not-allowed; }
 .page { width: min(1180px, calc(100% - 40px)); margin: auto; padding: 52px 0 80px; }
 .intro { max-width: 710px; margin-bottom: 28px; }
 .eyebrow, .cardHeading span { margin: 0; color: var(--green-700); font-size: 10px; font-weight: 850; letter-spacing: .12em; text-transform: uppercase; }
 .intro h1 { margin: 9px 0 12px; font: 650 clamp(38px, 6vw, 58px)/1 Georgia, serif; color: var(--green-950); }
 .intro > p:last-child, .empty, .hours { color: var(--muted); line-height: 1.55; }
 .intro .accessHint { margin: 10px 0 0; color: #728078; font-size: 12px; line-height: 1.5; }
+.bookingTopbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 28px; }
+.bookingTopbar .account { margin-top: 8px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.75); }
+.bookingTopbar .account span { text-align: left; }
+.authPage { display: grid; place-items: center; padding-top: clamp(40px, 7vw, 84px); }
+.authPage .intro { width: min(650px, 100%); text-align: center; }
+.authCard { position: relative; width: min(620px, 100%); overflow: visible; }
+.authLoading { width: min(620px, calc(100% - 32px)); margin: clamp(60px, 12vw, 140px) auto; padding: 40px; border: 1px solid var(--line); border-radius: 22px; background: var(--paper); color: var(--muted); text-align: center; box-shadow: 0 16px 44px rgba(23,53,34,.07); }
+.authHelp { margin: 16px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; text-align: center; }
 .teacherGrid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(300px, .75fr); gap: 20px; align-items: start; }
 .card { padding: clamp(20px, 3vw, 32px); border: 1px solid var(--line); border-radius: 22px; background: var(--paper); box-shadow: 0 16px 44px rgba(23,53,34,.07); }
 .cardHeading { display: flex; justify-content: space-between; align-items: flex-start; gap: 15px; margin-bottom: 23px; }
@@ -25,8 +36,26 @@
 .fields .wide { grid-column: 1 / -1; }
 .fields input, .fields select, .fields textarea { width: 100%; min-height: 48px; border: 1px solid #d5ded4; border-radius: 11px; background: #fff; padding: 11px 13px; color: var(--ink); }
 .fields textarea { min-height: 82px; resize: vertical; }
+.fields small { color: var(--muted); font-size: 10px; font-weight: 500; line-height: 1.45; }
 .fields [aria-invalid="true"] { border-color: #cf8176; background: #fff8f6; }
 .fieldError { color: var(--danger); font-size: 10px; line-height: 1.35; }
+.comboboxField { position: relative; display: grid; gap: 7px; color: #53645a; font-size: 11px; font-weight: 800; }
+.comboboxField > input { width: 100%; min-height: 48px; border: 1px solid #d5ded4; border-radius: 11px; background: #fff; padding: 11px 13px; color: var(--ink); }
+.searchStatus { min-height: 16px; color: var(--muted); font-size: 10px; font-weight: 500; }
+.teacherResults { position: absolute; z-index: 5; top: calc(100% - 17px); right: 0; left: 0; max-height: 270px; margin: 0; padding: 6px; overflow-y: auto; border: 1px solid #cbd6cc; border-radius: 12px; background: #fff; box-shadow: 0 18px 40px rgba(23,53,34,.16); list-style: none; }
+.teacherResults li { margin: 0; }
+.teacherResults button { width: 100%; min-height: 48px; padding: 9px 11px; display: grid; gap: 3px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); cursor: pointer; text-align: left; }
+.teacherResults button:hover, .teacherResults [aria-selected="true"] button { background: var(--green-100); }
+.teacherResults strong { font-size: 13px; }
+.teacherResults small { color: var(--muted); font-size: 10px; }
+.selectedTeacher { min-height: 68px; padding: 12px 14px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 3px 15px; border: 1px solid #c8d9c9; border-radius: 12px; background: #eef6ec; }
+.selectedTeacher > span { grid-column: 1; color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.selectedTeacher > strong { grid-column: 1; color: var(--green-950); font-size: 14px; }
+.selectedTeacher > button { grid-column: 2; grid-row: 1 / span 2; min-height: 38px; padding: 0 12px; border: 1px solid #b8cbb9; border-radius: 9px; background: #fff; color: var(--green-900); cursor: pointer; font-weight: 800; }
+.identityBanner { margin: -5px 0 18px; padding: 12px 14px; display: grid; gap: 3px; border-radius: 12px; background: var(--green-100); }
+.identityBanner span { color: var(--green-700); font-size: 9px; font-weight: 850; letter-spacing: .1em; text-transform: uppercase; }
+.identityBanner strong { color: var(--green-950); font-size: 14px; }
+.identityBanner small { color: #5f7668; font-size: 10px; }
 .primary, .danger, .quiet, .pending button { min-height: 44px; border-radius: 11px; padding: 0 16px; cursor: pointer; font-weight: 800; }
 .primary { width: 100%; margin-top: 20px; border: 0; background: var(--green-900); color: #fff; }
 .primary:disabled, .danger:disabled, .quiet:disabled, .pending button:disabled { opacity: .55; cursor: not-allowed; }
@@ -54,4 +83,5 @@
 .adminTable { width: 100%; border-collapse: collapse; font-size: 12px; }
 .adminTable th, .adminTable td { padding: 13px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
 .adminTable th { color: var(--muted); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
-@media (max-width: 760px) { .teacherGrid { display: block; } .teacherGrid > * + * { margin-top: 16px; } .account > span { display: none; } .page { width: min(100% - 26px, 1180px); padding-top: 34px; } .fields { grid-template-columns: 1fr; } .fields .wide { grid-column: auto; } .bookingList article { align-items: flex-start; flex-direction: column; } .danger { width: 100%; } .adminTable, .adminTable tbody, .adminTable tr, .adminTable td { display: block; } .adminTable thead { display: none; } .adminTable tr { margin-bottom: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; } .adminTable td { border: 0; padding: 6px; } }
+@media (max-width: 760px) { .teacherGrid { display: block; } .teacherGrid > * + * { margin-top: 16px; } .bookingTopbar { display: block; } .bookingTopbar .account { margin: -10px 0 24px; justify-content: space-between; } .bookingTopbar .account > span { display: grid; } .page { width: min(100% - 26px, 1180px); padding-top: 34px; } .authPage { padding-top: 38px; } .fields { grid-template-columns: 1fr; } .fields .wide { grid-column: auto; } .bookingList article { align-items: flex-start; flex-direction: column; } .danger { width: 100%; } .adminTable, .adminTable tbody, .adminTable tr, .adminTable td { display: block; } .adminTable thead { display: none; } .adminTable tr { margin-bottom: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; } .adminTable td { border: 0; padding: 6px; } }
+@media (max-width: 480px) { .header { padding-inline: 13px; } .brand strong { font-size: 16px; } .brand img { width: 42px; height: 42px; } .catalogLink { padding-inline: 10px; font-size: 10px; } .authCard { padding: 20px 16px; } .selectedTeacher { grid-template-columns: minmax(0, 1fr) auto; } .selectedTeacher strong { overflow-wrap: anywhere; } }

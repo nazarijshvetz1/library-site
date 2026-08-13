@@ -57,6 +57,13 @@
       "when": 1786529858062,
       "tag": "0007_cold_whiplash",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1786597889768,
+      "tag": "0008_sudden_thunderbird",
+      "breakpoints": true
     }
   ]
 }

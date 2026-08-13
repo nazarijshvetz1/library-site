@@ -1,0 +1,844 @@
+import { getRuntimeBoolean, getRuntimeString } from "./runtime-env.ts";
+import { VisitScheduleError, type VisitD1Database } from "./visit-schedule-store.ts";
+
+export const VISIT_TEACHER_COOKIE = "__Host-visit_teacher";
+export const VISIT_TEACHER_CODE_LENGTH = 10;
+export const VISIT_TEACHER_SESSION_SECONDS = 12 * 60 * 60;
+export const VISIT_TEACHER_BULK_LIMIT = 100;
+
+const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+const LOGIN_IP_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_PAIR_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_TEACHER_WINDOW_MS = 60 * 60 * 1000;
+const LOGIN_IP_LIMIT = 300;
+const LOGIN_PAIR_LIMIT = 5;
+const LOGIN_TEACHER_LIMIT = 20;
+const DIRECTORY_IP_LIMIT = 300;
+const MAX_ACTIVE_SESSIONS = 3;
+
+type CredentialRow = {
+  teacher_user_id: string;
+  full_name: string;
+  login_id: string;
+  code_hmac: string;
+  status: "active" | "disabled";
+  version: number;
+  failed_attempts: number;
+  failure_window_started_at: string | null;
+  locked_until: string | null;
+};
+
+export type VisitTeacherIdentity = {
+  teacherUserId: string;
+  fullName: string;
+  credentialVersion: number;
+  tokenHash: string;
+  pendingScope: string;
+  expiresAt: string;
+};
+
+export type VisitTeacherCredentialProjection = {
+  status: "active" | "disabled" | "locked";
+  version: number;
+  lastLoginAt: string | null;
+  lockedUntil: string | null;
+  activeSessions: number;
+};
+
+export type VisitTeacherAccessRow = {
+  id: string;
+  fullName: string;
+  status: "active" | "inactive";
+  credential: VisitTeacherCredentialProjection | null;
+};
+
+export function teacherAuthPepper(): string {
+  const pepper = getRuntimeString("VISIT_TEACHER_AUTH_PEPPER");
+  if (!pepper || pepper.length < 32) {
+    throw new VisitScheduleError(
+      "teacher_auth_unavailable",
+      503,
+      "Вхід учителя тимчасово недоступний.",
+    );
+  }
+  return pepper;
+}
+
+export function visitTeacherCodeAuthEnabled(): boolean {
+  return getRuntimeBoolean("VISIT_TEACHER_CODE_AUTH_ENABLED");
+}
+
+export function requireVisitTeacherCodeAuthEnabled(): void {
+  if (!visitTeacherCodeAuthEnabled()) {
+    throw new VisitScheduleError("teacher_code_auth_disabled", 503, "Вхід учителя тимчасово вимкнено.");
+  }
+}
+
+export async function listVisitTeacherDirectory(
+  db: VisitD1Database,
+  query: string,
+  request?: Request,
+): Promise<Array<{ loginId: string; fullName: string; publicHint: null }>> {
+  requireVisitTeacherCodeAuthEnabled();
+  if (request) await enforceDirectoryRateLimit(db, request);
+  const normalized = query.normalize("NFKC").trim().replace(/\s+/gu, " ");
+  if (normalized.length < 3 || normalized.length > 80) {
+    throw new VisitScheduleError("validation_failed", 400, "Введіть від 3 до 80 символів імені.");
+  }
+  const rows = await db.prepare(`
+    SELECT c.login_id, u.full_name
+    FROM visit_teacher_credentials c
+    JOIN users u ON u.id = c.teacher_user_id
+    WHERE c.status = 'active' AND u.status = 'active' AND u.role = 'teacher'
+    ORDER BY u.sort_name, u.id LIMIT 101
+  `).all<{ login_id: string; full_name: string }>();
+  if ((rows.results ?? []).length > 100) {
+    throw new VisitScheduleError("teacher_result_limit", 409, "У базі понад 100 учителів.");
+  }
+  const needle = normalized.toLocaleLowerCase("uk-UA");
+  const matches = (rows.results ?? []).filter((row) => row.full_name
+    .normalize("NFKC").toLocaleLowerCase("uk-UA").includes(needle));
+  if (matches.length > 10) {
+    throw new VisitScheduleError("teacher_search_too_broad", 400, "Уточніть ім’я вчителя.");
+  }
+  return matches.map((row) => ({
+    loginId: row.login_id,
+    fullName: row.full_name,
+    publicHint: null,
+  }));
+}
+
+async function enforceDirectoryRateLimit(db: VisitD1Database, request: Request): Promise<void> {
+  const ip = trustedClientIp(request);
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
+  const windowStart = new Date(nowDate.getTime() - 60_000).toISOString();
+  const scopeHash = await hmacHex(teacherAuthPepper(), `directory-ip:${ip}`);
+  const row = await db.prepare(`SELECT attempts, window_started_at FROM visit_teacher_login_limits
+    WHERE scope_hash = ? LIMIT 1`).bind(scopeHash).first<{ attempts: number; window_started_at: string }>();
+  if (row && row.window_started_at >= windowStart && Number(row.attempts) >= DIRECTORY_IP_LIMIT) {
+    throw new VisitScheduleError("rate_limited", 429, "Забагато запитів. Спробуйте за хвилину.");
+  }
+  await db.batch([db.prepare(`
+    INSERT INTO visit_teacher_login_limits (scope_hash, attempts, window_started_at, blocked_until, updated_at)
+    VALUES (?, 1, ?, NULL, ?)
+    ON CONFLICT(scope_hash) DO UPDATE SET
+      attempts = CASE WHEN visit_teacher_login_limits.window_started_at < ? THEN 1 ELSE visit_teacher_login_limits.attempts + 1 END,
+      window_started_at = CASE WHEN visit_teacher_login_limits.window_started_at < ? THEN excluded.window_started_at ELSE visit_teacher_login_limits.window_started_at END,
+      blocked_until = NULL, updated_at = excluded.updated_at
+  `).bind(scopeHash, now, now, windowStart, windowStart),
+  boundedLimitCleanup(db, nowDate)]);
+}
+
+export async function createVisitTeacherSession(
+  db: VisitD1Database,
+  request: Request,
+  input: { loginId: string; code: string },
+): Promise<{ token: string; identity: VisitTeacherIdentity }> {
+  requireVisitTeacherCodeAuthEnabled();
+  const pepper = teacherAuthPepper();
+  const loginId = input.loginId.trim();
+  const code = normalizeCode(input.code);
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
+  const ip = trustedClientIp(request);
+  const ipRateScopeHash = await hmacHex(pepper, `ip:${ip}`);
+  const pairRateScopeHash = await hmacHex(pepper, `pair:${ip}:${loginId}`);
+  if (await anyRateLimitBlocked(db, [ipRateScopeHash, pairRateScopeHash], now)) {
+    throw new VisitScheduleError("rate_limited", 429, "Забагато спроб входу. Спробуйте пізніше.");
+  }
+  const safeShape = /^[A-Za-z0-9_-]{16,128}$/u.test(loginId)
+    && new RegExp(`^[${CODE_ALPHABET}]{${VISIT_TEACHER_CODE_LENGTH}}$`, "u").test(code);
+  const credential = safeShape
+    ? await db.prepare(`
+        SELECT c.teacher_user_id, u.full_name, c.login_id, c.code_hmac, c.status,
+               c.version, c.failed_attempts, c.failure_window_started_at, c.locked_until
+        FROM visit_teacher_credentials c
+        JOIN users u ON u.id = c.teacher_user_id
+        WHERE c.login_id = ? AND u.status = 'active' AND u.role = 'teacher' LIMIT 1
+      `).bind(loginId).first<CredentialRow>()
+    : null;
+  const presented = credential
+    ? await hmacHex(pepper, `code:${credential.teacher_user_id}:${code}`)
+    : await hmacHex(pepper, `code:unknown:${code}`);
+  const allowed = credential?.status === "active"
+    && (!credential.locked_until || credential.locked_until <= now)
+    && constantTimeHexEqual(presented, credential.code_hmac);
+
+  if (!allowed || !credential) {
+    await recordFailedLogin(
+      db,
+      ipRateScopeHash,
+      pairRateScopeHash,
+      credential,
+      nowDate,
+      presented,
+    );
+    throw new VisitScheduleError("invalid_teacher_credentials", 401, "Не вдалося увійти. Перевірте ім’я та код.");
+  }
+
+  const token = randomOpaque(32);
+  const tokenHash = await sha256Hex(token);
+  const sessionIpScopeHash = await hmacHex(pepper, `session-ip:${ip}`);
+  const pendingScope = randomOpaque(18);
+  const expiresAt = new Date(nowDate.getTime() + VISIT_TEACHER_SESSION_SECONDS * 1000).toISOString();
+  const statements = [
+    db.prepare(`UPDATE visit_teacher_sessions SET revoked_at=?
+      WHERE token_hash=(SELECT token_hash FROM visit_teacher_sessions
+        WHERE teacher_user_id=? AND revoked_at IS NULL AND expires_at>?
+        ORDER BY created_at, token_hash LIMIT 1)
+      AND (SELECT COUNT(*) FROM visit_teacher_sessions
+        WHERE teacher_user_id=? AND revoked_at IS NULL AND expires_at>?) >= ?`)
+      .bind(now, credential.teacher_user_id, now, credential.teacher_user_id, now, MAX_ACTIVE_SESSIONS),
+    db.prepare(`
+      INSERT INTO visit_teacher_sessions (
+        token_hash, teacher_user_id, credential_version, pending_scope, ip_scope_hash,
+        expires_at, last_seen_at, revoked_at, created_at
+      )
+      SELECT ?, c.teacher_user_id, c.version, ?, ?, ?, ?, NULL, ?
+      FROM visit_teacher_credentials c
+      JOIN users u ON u.id = c.teacher_user_id
+      WHERE c.teacher_user_id = ? AND c.login_id = ? AND c.code_hmac = ?
+        AND c.status = 'active' AND c.version = ?
+        AND (c.locked_until IS NULL OR c.locked_until <= ?)
+        AND u.status = 'active' AND u.role = 'teacher'
+    `).bind(
+      tokenHash, pendingScope, sessionIpScopeHash, expiresAt, now, now,
+      credential.teacher_user_id, loginId, presented, credential.version, now,
+    ),
+    db.prepare(`
+      UPDATE visit_teacher_credentials
+      SET failed_attempts = 0, failure_window_started_at = NULL, locked_until = NULL,
+          last_login_at = ?, updated_at = ?
+      WHERE teacher_user_id = ? AND version = ? AND status = 'active' AND code_hmac = ?
+    `).bind(now, now, credential.teacher_user_id, credential.version, presented),
+    db.prepare(`INSERT INTO audit_events (
+      id, actor_user_id, actor_email, action, entity_type, entity_id,
+      request_id, before_json, after_json, metadata_json, created_at
+    ) VALUES (?, ?, 'teacher-code@local.invalid', 'visit.teacher_session.guard',
+      'visit_teacher_session',
+      CASE WHEN EXISTS (
+        SELECT 1 FROM visit_teacher_sessions s
+        JOIN visit_teacher_credentials c ON c.teacher_user_id=s.teacher_user_id
+        JOIN users u ON u.id=s.teacher_user_id
+        WHERE s.token_hash=? AND s.teacher_user_id=? AND s.credential_version=?
+          AND s.pending_scope=? AND s.revoked_at IS NULL AND s.expires_at=?
+          AND c.login_id=? AND c.code_hmac=? AND c.status='active' AND c.version=?
+          AND (c.locked_until IS NULL OR c.locked_until<=?)
+          AND u.status='active' AND u.role='teacher'
+      ) THEN ? ELSE NULL END,
+      ?, NULL, NULL, NULL, ?)`)
+      .bind(
+        `AUD-${crypto.randomUUID()}`, credential.teacher_user_id,
+        tokenHash, credential.teacher_user_id, credential.version, pendingScope, expiresAt,
+        loginId, presented, credential.version, now, tokenHash, tokenHash, now,
+      ),
+  ];
+  statements.push(
+    db.prepare("DELETE FROM visit_teacher_login_limits WHERE scope_hash = ?").bind(pairRateScopeHash),
+    boundedSessionCleanup(db, now),
+    boundedLimitCleanup(db, nowDate),
+  );
+  try {
+    await db.batch(statements);
+  } catch {
+    throw new VisitScheduleError("teacher_auth_unavailable", 503, "Вхід учителя тимчасово недоступний.");
+  }
+  const identity = await readVisitTeacherSessionByHash(db, tokenHash, now);
+  if (!identity) throw new VisitScheduleError("invalid_teacher_credentials", 401, "Не вдалося увійти. Перевірте ім’я та код.");
+  return { token, identity };
+}
+
+export async function requireVisitTeacherSession(
+  db: VisitD1Database,
+  request: Request,
+): Promise<VisitTeacherIdentity> {
+  requireVisitTeacherCodeAuthEnabled();
+  const token = readCookie(request.headers.get("Cookie"), VISIT_TEACHER_COOKIE);
+  if (!token || !/^[A-Za-z0-9_-]{40,128}$/u.test(token)) {
+    throw new VisitScheduleError("authentication_required", 401, "Увійдіть за ім’ям і особистим кодом.");
+  }
+  const identity = await readVisitTeacherSessionByHash(db, await sha256Hex(token), new Date().toISOString());
+  if (!identity) {
+    throw new VisitScheduleError("authentication_required", 401, "Сеанс завершився. Увійдіть ще раз.");
+  }
+  return identity;
+}
+
+export async function revokeVisitTeacherSession(
+  db: VisitD1Database,
+  request: Request,
+): Promise<void> {
+  const token = readCookie(request.headers.get("Cookie"), VISIT_TEACHER_COOKIE);
+  if (!token || !/^[A-Za-z0-9_-]{40,128}$/u.test(token)) return;
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare(`UPDATE visit_teacher_sessions SET revoked_at = ?, last_seen_at = ?
+      WHERE token_hash = ? AND revoked_at IS NULL`).bind(now, now, await sha256Hex(token)),
+  ]);
+}
+
+export function teacherSessionCookie(token: string): string {
+  return `${VISIT_TEACHER_COOKIE}=${token}; Path=/; Max-Age=${VISIT_TEACHER_SESSION_SECONDS}; HttpOnly; Secure; SameSite=Lax`;
+}
+
+export function clearTeacherSessionCookie(): string {
+  return `${VISIT_TEACHER_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
+}
+
+export async function listVisitTeacherAccess(db: VisitD1Database): Promise<VisitTeacherAccessRow[]> {
+  const now = new Date().toISOString();
+  const rows = await db.prepare(`
+    SELECT u.id, u.full_name, u.status AS user_status,
+           c.status, c.version, c.last_login_at, c.locked_until,
+           (SELECT COUNT(*) FROM visit_teacher_sessions s
+             WHERE s.teacher_user_id = u.id AND s.revoked_at IS NULL AND s.expires_at > ?) AS active_sessions
+    FROM users u
+    LEFT JOIN visit_teacher_credentials c ON c.teacher_user_id = u.id
+    WHERE u.role = 'teacher' AND u.status = 'active'
+    ORDER BY u.status DESC, u.sort_name, u.id LIMIT 101
+  `).bind(now).all<{
+    id: string; full_name: string; user_status: "active" | "inactive";
+    status: "active" | "disabled" | null; version: number | null;
+    last_login_at: string | null; locked_until: string | null; active_sessions: number;
+  }>();
+  if ((rows.results ?? []).length > 100) throw new VisitScheduleError("teacher_result_limit", 409, "У базі понад 100 учителів.");
+  return (rows.results ?? []).map((row) => ({
+    id: row.id,
+    fullName: row.full_name,
+    status: row.user_status,
+    credential: row.status === null ? null : {
+      status: row.status === "active" && row.locked_until && row.locked_until > now ? "locked" : row.status,
+      version: Number(row.version),
+      lastLoginAt: row.last_login_at,
+      lockedUntil: row.locked_until,
+      activeSessions: Number(row.active_sessions),
+    },
+  }));
+}
+
+export async function issueVisitTeacherCode(
+  db: VisitD1Database,
+  actor: { id: string; email: string },
+  teacherUserId: string,
+  input: { requestId: string; expectedVersion: number },
+) {
+  const requestHash = await sha256Hex(JSON.stringify({ kind: "code.issue", actor: actor.id, teacherUserId, ...input }));
+  const existingCommand = await accessCommand(db, input.requestId);
+  if (existingCommand) {
+    if (existingCommand.request_hash !== requestHash) throw new VisitScheduleError("request_id_conflict", 409, "requestId уже використано.");
+    throw unrecoverableCodeResult(existingCommand.request_hash);
+  }
+  const teacher = await db.prepare(`
+    SELECT u.id, u.full_name, c.login_id, c.version
+    FROM users u LEFT JOIN visit_teacher_credentials c ON c.teacher_user_id = u.id
+    WHERE u.id = ? AND u.role = 'teacher' AND u.status = 'active' LIMIT 1
+  `).bind(teacherUserId).first<{ id: string; full_name: string; login_id: string | null; version: number | null }>();
+  if (!teacher) throw new VisitScheduleError("teacher_not_found", 404, "Активного вчителя не знайдено.");
+  const currentVersion = teacher.version === null ? 0 : Number(teacher.version);
+  if (currentVersion !== input.expectedVersion) throw new VisitScheduleError("credential_version_conflict", 409, "Доступ уже змінився. Оновіть список.");
+  const code = randomTeacherCode();
+  const loginId = teacher.login_id ?? randomOpaque(18);
+  const codeHmac = await hmacHex(teacherAuthPepper(), `code:${teacherUserId}:${code}`);
+  const nextVersion = currentVersion + 1;
+  const now = new Date().toISOString();
+  const publicCredential = { status: "active" as const, version: nextVersion, lastLoginAt: null, lockedUntil: null, activeSessions: 0 };
+  const statements = [
+    insertAccessCommand(db, input.requestId, actor.id, "code.issue", teacherUserId, requestHash, now),
+    db.prepare(`
+      INSERT INTO visit_teacher_credentials (
+        teacher_user_id, login_id, code_hmac, status, version, failed_attempts,
+        locked_until, last_login_at, code_rotated_at, last_access_command_id, created_by_user_id,
+        updated_by_user_id, created_at, updated_at
+      )
+      SELECT u.id, ?, ?, 'active', 1, 0, NULL, NULL, ?, ?, ?, ?, ?, ?
+      FROM users u WHERE u.id = ? AND u.role = 'teacher' AND u.status = 'active'
+      ON CONFLICT(teacher_user_id) DO UPDATE SET
+        code_hmac = excluded.code_hmac, status = 'active', version = visit_teacher_credentials.version + 1,
+        failed_attempts = 0, locked_until = NULL, last_login_at = NULL,
+        code_rotated_at = excluded.code_rotated_at, updated_by_user_id = excluded.updated_by_user_id,
+        last_access_command_id = excluded.last_access_command_id,
+        failure_window_started_at = NULL,
+        updated_at = excluded.updated_at
+      WHERE visit_teacher_credentials.version = ?
+    `).bind(loginId, codeHmac, now, input.requestId, actor.id, actor.id, now, now, teacherUserId, currentVersion),
+    db.prepare(`UPDATE visit_teacher_sessions SET revoked_at = ?
+      WHERE teacher_user_id = ? AND revoked_at IS NULL AND ? > 0`).bind(now, teacherUserId, currentVersion),
+    guardedAccessAudit(db, {
+      actor, requestId: input.requestId, action: "visit.teacher_code.issue", teacherUserId,
+      expectedVersion: nextVersion, expectedStatus: "active", expectedCodeHmac: codeHmac,
+      expectedLoginId: loginId, expectedUpdatedAt: now,
+      metadata: { previousVersion: currentVersion }, now,
+    }),
+    activeActorGuardAudit(db, actor, input.requestId, now),
+    completeAccessCommand(db, input.requestId, { teacherUserId, version: nextVersion }, now),
+  ];
+  try {
+    await db.batch(statements);
+  } catch {
+    throw new VisitScheduleError("credential_version_conflict", 409, "Доступ уже змінився. Оновіть список.");
+  }
+  return {
+    teacher: { id: teacher.id, fullName: teacher.full_name },
+    credential: publicCredential,
+    code: formatTeacherCode(code),
+  };
+}
+
+export async function bulkIssueVisitTeacherCodes(
+  db: VisitD1Database,
+  actor: { id: string; email: string },
+  input: { requestId: string; confirmation: "ISSUE_MISSING_ONLY" },
+) {
+  const requestHash = await sha256Hex(JSON.stringify({ kind: "code.bulk_issue", actor: actor.id, ...input }));
+  const existingCommand = await accessCommand(db, input.requestId);
+  if (existingCommand) {
+    if (existingCommand.request_hash !== requestHash) throw new VisitScheduleError("request_id_conflict", 409, "requestId уже використано.");
+    throw unrecoverableCodeResult(existingCommand.request_hash);
+  }
+  const rows = await db.prepare(`
+    SELECT u.id, u.full_name FROM users u
+    LEFT JOIN visit_teacher_credentials c ON c.teacher_user_id = u.id
+    WHERE u.role = 'teacher' AND u.status = 'active' AND c.teacher_user_id IS NULL
+    ORDER BY u.sort_name, u.id LIMIT 101
+  `).all<{ id: string; full_name: string }>();
+  const teachers = rows.results ?? [];
+  if (teachers.length > VISIT_TEACHER_BULK_LIMIT) {
+    throw new VisitScheduleError("teacher_bulk_limit", 409, "За один раз можна створити не більше 100 кодів.");
+  }
+  const pepper = teacherAuthPepper();
+  const now = new Date().toISOString();
+  const issued = await Promise.all(teachers.map(async (teacher) => {
+    const code = randomTeacherCode();
+    return {
+      teacherUserId: teacher.id,
+      fullName: teacher.full_name,
+      code,
+      loginId: randomOpaque(18),
+      codeHmac: await hmacHex(pepper, `code:${teacher.id}:${code}`),
+      auditId: `AUD-${crypto.randomUUID()}`,
+      version: 1,
+    };
+  }));
+  const credentialRows = issued.map(({ teacherUserId, loginId, codeHmac }) => ({ teacherUserId, loginId, codeHmac }));
+  const auditRows = issued.map(({ teacherUserId, auditId, loginId, codeHmac }) => ({ teacherUserId, auditId, loginId, codeHmac }));
+  const safeResult = { teacherUserIds: issued.map((row) => row.teacherUserId), count: issued.length };
+  const statements = [
+    insertAccessCommand(db, input.requestId, actor.id, "code.bulk_issue", null, requestHash, now),
+    db.prepare(`
+      INSERT INTO visit_teacher_credentials (
+        teacher_user_id, login_id, code_hmac, status, version, failed_attempts,
+        locked_until, last_login_at, code_rotated_at, last_access_command_id, created_by_user_id,
+        updated_by_user_id, created_at, updated_at
+      )
+      SELECT json_extract(value,'$.teacherUserId'), json_extract(value,'$.loginId'),
+             json_extract(value,'$.codeHmac'), 'active', 1, 0, NULL, NULL, ?, ?, ?, ?, ?, ?
+      FROM json_each(?) j
+      WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = json_extract(j.value,'$.teacherUserId')
+        AND u.role='teacher' AND u.status='active')
+        AND NOT EXISTS (SELECT 1 FROM visit_teacher_credentials c
+          WHERE c.teacher_user_id = json_extract(j.value,'$.teacherUserId'))
+    `).bind(now, input.requestId, actor.id, actor.id, now, now, JSON.stringify(credentialRows)),
+    db.prepare(`
+      INSERT INTO audit_events (
+        id, actor_user_id, actor_email, action, entity_type, entity_id,
+        request_id, before_json, after_json, metadata_json, created_at
+      )
+      SELECT json_extract(value,'$.auditId'), ?, ?, 'visit.teacher_code.bulk_issue',
+             'visit_teacher_credential', json_extract(value,'$.teacherUserId'), ?, NULL,
+             json_object('version',1,'status','active'), NULL, ?
+      FROM json_each(?) j
+      WHERE EXISTS (SELECT 1 FROM visit_teacher_credentials c
+        WHERE c.teacher_user_id = json_extract(j.value,'$.teacherUserId') AND c.version = 1
+          AND c.login_id = json_extract(j.value,'$.loginId')
+          AND c.code_hmac = json_extract(j.value,'$.codeHmac')
+          AND c.last_access_command_id = ?)
+    `).bind(actor.id, actor.email.toLowerCase(), input.requestId, now, JSON.stringify(auditRows), input.requestId),
+    db.prepare(`UPDATE visit_teacher_access_commands SET status='completed', result_json=?,
+      updated_at=?, completed_at=?
+      WHERE id=? AND status='processing'
+        AND (SELECT COUNT(*) FROM visit_teacher_credentials c JOIN json_each(?) j
+          ON c.teacher_user_id=json_extract(j.value,'$.teacherUserId')
+           AND c.login_id=json_extract(j.value,'$.loginId')
+           AND c.code_hmac=json_extract(j.value,'$.codeHmac') AND c.version=1
+           AND c.last_access_command_id=?) = ?`)
+      .bind(JSON.stringify(safeResult), now, now, input.requestId, JSON.stringify(credentialRows), input.requestId, issued.length),
+    db.prepare(`INSERT INTO audit_events (
+      id, actor_user_id, actor_email, action, entity_type, entity_id, request_id,
+      before_json, after_json, metadata_json, created_at
+    ) VALUES (?, ?, ?, 'visit.teacher_code.bulk_guard', 'visit_teacher_bulk',
+      CASE WHEN EXISTS (SELECT 1 FROM visit_teacher_access_commands
+        WHERE id=? AND status='completed') THEN ? ELSE NULL END,
+      ?, NULL, json_object('count',?), NULL, ?)`)
+      .bind(`AUD-${crypto.randomUUID()}`, actor.id, actor.email.toLowerCase(), input.requestId,
+        input.requestId, input.requestId, issued.length, now),
+    activeActorGuardAudit(db, actor, input.requestId, now),
+  ];
+  try {
+    await db.batch(statements);
+  } catch {
+    throw new VisitScheduleError("teacher_access_update_failed", 409, "Список учителів змінився. Оновіть сторінку.");
+  }
+  return {
+    issued: issued.map(({ teacherUserId, fullName, code, version }) => ({ teacherUserId, fullName, code: formatTeacherCode(code), version })),
+    skippedExisting: 0,
+    statementCount: statements.length,
+  };
+}
+
+export async function updateVisitTeacherAccess(
+  db: VisitD1Database,
+  actor: { id: string; email: string },
+  teacherUserId: string,
+  input: { requestId: string; expectedVersion: number; action: "enable" | "disable" | "unlock" | "revoke_sessions" },
+) {
+  const existing = await accessCommand(db, input.requestId);
+  const requestHash = await sha256Hex(JSON.stringify({ kind: input.action, actor: actor.id, teacherUserId, ...input }));
+  if (existing) {
+    if (existing.request_hash !== requestHash) throw new VisitScheduleError("request_id_conflict", 409, "requestId уже використано.");
+    if (existing.result_json) return JSON.parse(existing.result_json) as { teacher: { id: string; fullName: string }; credential: VisitTeacherCredentialProjection };
+    throw new VisitScheduleError("mutation_in_progress", 409, "Зміна ще виконується.");
+  }
+  const row = await db.prepare(`
+    SELECT u.id, u.full_name, c.status, c.version, c.last_login_at, c.locked_until
+    FROM users u JOIN visit_teacher_credentials c ON c.teacher_user_id = u.id
+    WHERE u.id = ? AND u.role='teacher' AND u.status='active' LIMIT 1
+  `).bind(teacherUserId).first<{
+    id: string; full_name: string; status: "active" | "disabled"; version: number;
+    last_login_at: string | null; locked_until: string | null;
+  }>();
+  if (!row) throw new VisitScheduleError("credential_not_found", 404, "Код доступу вчителя не створено.");
+  if (Number(row.version) !== input.expectedVersion) throw new VisitScheduleError("credential_version_conflict", 409, "Доступ уже змінився. Оновіть список.");
+  const now = new Date().toISOString();
+  const nextVersion = input.expectedVersion + 1;
+  const nextStatus = input.action === "disable" ? "disabled" : input.action === "enable" ? "active" : row.status;
+  const nextLockedUntil = input.action === "unlock" ? null : row.locked_until;
+  const credential: VisitTeacherCredentialProjection = {
+    status: nextStatus === "active" && nextLockedUntil && nextLockedUntil > now ? "locked" : nextStatus,
+    version: nextVersion,
+    lastLoginAt: row.last_login_at,
+    lockedUntil: nextLockedUntil,
+    activeSessions: 0,
+  };
+  const result = { teacher: { id: row.id, fullName: row.full_name }, credential };
+  const commandKind = ({
+    enable: "credential.enable", disable: "credential.disable", unlock: "credential.unlock", revoke_sessions: "sessions.revoke",
+  } as const)[input.action];
+  const statements = [
+    insertAccessCommand(db, input.requestId, actor.id, commandKind, teacherUserId, requestHash, now),
+    db.prepare(`
+      UPDATE visit_teacher_credentials SET status = ?,
+        failed_attempts = CASE WHEN ? = 'unlock' THEN 0 ELSE failed_attempts END,
+        failure_window_started_at = CASE WHEN ? = 'unlock' THEN NULL ELSE failure_window_started_at END,
+        locked_until = CASE WHEN ? = 'unlock' THEN NULL ELSE locked_until END,
+        version = version + 1, updated_by_user_id = ?, updated_at = ?,
+        last_access_command_id = ?
+      WHERE teacher_user_id = ? AND version = ?
+        AND EXISTS (SELECT 1 FROM users WHERE id=? AND status='active' AND role='teacher')
+    `).bind(
+      nextStatus, input.action, input.action, input.action, actor.id, now,
+      input.requestId, teacherUserId, input.expectedVersion, teacherUserId,
+    ),
+    db.prepare(`UPDATE visit_teacher_sessions SET revoked_at = ?
+      WHERE teacher_user_id = ? AND revoked_at IS NULL`).bind(now, teacherUserId),
+    guardedAccessAudit(db, {
+      actor, requestId: input.requestId, action: `visit.teacher_access.${input.action}`,
+      teacherUserId, expectedVersion: nextVersion, expectedStatus: nextStatus,
+      expectedLockedUntil: nextLockedUntil, checkLockedUntil: input.action === "unlock",
+      expectedUpdatedAt: now,
+      metadata: { previousVersion: input.expectedVersion }, now,
+    }),
+    activeActorGuardAudit(db, actor, input.requestId, now),
+    completeAccessCommand(db, input.requestId, result, now),
+  ];
+  try {
+    await db.batch(statements);
+  } catch {
+    throw new VisitScheduleError("credential_version_conflict", 409, "Доступ уже змінився. Оновіть список.");
+  }
+  return result;
+}
+
+function insertAccessCommand(
+  db: VisitD1Database,
+  id: string,
+  actorUserId: string,
+  kind: string,
+  teacherUserId: string | null,
+  requestHash: string,
+  now: string,
+) {
+  return db.prepare(`INSERT INTO visit_teacher_access_commands (
+    id, actor_user_id, kind, teacher_user_id, request_hash, status,
+    result_json, created_at, updated_at, completed_at
+  ) VALUES (?, ?, ?, ?, ?, 'processing', NULL, ?, ?, NULL)`)
+    .bind(id, actorUserId, kind, teacherUserId, requestHash, now, now);
+}
+
+function completeAccessCommand(db: VisitD1Database, id: string, result: unknown, now: string) {
+  return db.prepare(`UPDATE visit_teacher_access_commands SET status='completed', result_json=?,
+    updated_at=?, completed_at=? WHERE id=? AND status='processing'`)
+    .bind(JSON.stringify(result), now, now, id);
+}
+
+function guardedAccessAudit(db: VisitD1Database, input: {
+  actor: { id: string; email: string }; requestId: string; action: string;
+  teacherUserId: string; expectedVersion: number; expectedStatus?: "active" | "disabled";
+  expectedCodeHmac?: string; expectedLoginId?: string; expectedLockedUntil?: string | null;
+  checkLockedUntil?: boolean;
+  expectedUpdatedAt?: string; metadata: unknown; now: string;
+}) {
+  return db.prepare(`INSERT INTO audit_events (
+    id, actor_user_id, actor_email, action, entity_type, entity_id,
+    request_id, before_json, after_json, metadata_json, created_at
+  ) VALUES (?, ?, ?, ?, 'visit_teacher_credential',
+    CASE WHEN EXISTS (SELECT 1 FROM visit_teacher_credentials
+      WHERE teacher_user_id = ? AND version = ?
+        AND last_access_command_id = ?
+        AND (? IS NULL OR status = ?)
+        AND (? IS NULL OR code_hmac = ?)
+        AND (? IS NULL OR login_id = ?)
+        AND (? IS NULL OR updated_at = ?)
+        AND (? = 0 OR ((? IS NULL AND locked_until IS NULL) OR (? IS NOT NULL AND locked_until = ?)))
+    ) THEN ? ELSE NULL END,
+    ?, NULL, json_object('version', ?), ?, ?)`)
+    .bind(
+      `AUD-${crypto.randomUUID()}`, input.actor.id, input.actor.email.toLowerCase(), input.action,
+      input.teacherUserId, input.expectedVersion,
+      input.requestId,
+      input.expectedStatus ?? null, input.expectedStatus ?? null,
+      input.expectedCodeHmac ?? null, input.expectedCodeHmac ?? null,
+      input.expectedLoginId ?? null, input.expectedLoginId ?? null,
+      input.expectedUpdatedAt ?? null, input.expectedUpdatedAt ?? null,
+      input.checkLockedUntil ? 1 : 0,
+      input.expectedLockedUntil ?? null, input.expectedLockedUntil ?? null, input.expectedLockedUntil ?? null,
+      input.teacherUserId, input.requestId,
+      input.expectedVersion, JSON.stringify(input.metadata), input.now,
+    );
+}
+
+function activeActorGuardAudit(
+  db: VisitD1Database,
+  actor: { id: string; email: string },
+  requestId: string,
+  now: string,
+) {
+  return db.prepare(`INSERT INTO audit_events (
+    id, actor_user_id, actor_email, action, entity_type, entity_id,
+    request_id, before_json, after_json, metadata_json, created_at
+  ) VALUES (?, ?, ?, 'visit.teacher_access.actor_guard', 'visit_teacher_access',
+    CASE WHEN EXISTS (SELECT 1 FROM users WHERE id=? AND status='active'
+      AND role IN ('admin','librarian')) THEN ? ELSE NULL END,
+    ?, NULL, NULL, NULL, ?)`)
+    .bind(`AUD-${crypto.randomUUID()}`, actor.id, actor.email.toLowerCase(), actor.id,
+      requestId, requestId, now);
+}
+
+async function readVisitTeacherSessionByHash(
+  db: VisitD1Database,
+  tokenHash: string,
+  now: string,
+): Promise<VisitTeacherIdentity | null> {
+  const row = await db.prepare(`
+    SELECT s.token_hash, s.teacher_user_id, s.credential_version, s.pending_scope,
+           s.expires_at, u.full_name
+    FROM visit_teacher_sessions s
+    JOIN visit_teacher_credentials c ON c.teacher_user_id = s.teacher_user_id
+    JOIN users u ON u.id = s.teacher_user_id
+    WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > ?
+      AND c.status = 'active' AND c.version = s.credential_version
+      AND u.status = 'active' AND u.role = 'teacher' LIMIT 1
+  `).bind(tokenHash, now).first<{
+    token_hash: string; teacher_user_id: string; credential_version: number;
+    pending_scope: string; expires_at: string; full_name: string;
+  }>();
+  return row ? {
+    teacherUserId: row.teacher_user_id,
+    fullName: row.full_name,
+    credentialVersion: Number(row.credential_version),
+    tokenHash: row.token_hash,
+    pendingScope: row.pending_scope,
+    expiresAt: row.expires_at,
+  } : null;
+}
+
+async function recordFailedLogin(
+  db: VisitD1Database,
+  ipScopeHash: string,
+  pairScopeHash: string,
+  credential: CredentialRow | null,
+  nowDate: Date,
+  presentedHmac: string,
+) {
+  const now = nowDate.toISOString();
+  const teacherWindowStart = new Date(nowDate.getTime() - LOGIN_TEACHER_WINDOW_MS).toISOString();
+  const teacherBlockedUntil = new Date(nowDate.getTime() + LOGIN_TEACHER_WINDOW_MS).toISOString();
+  const statements = [
+    rateLimitFailureStatement(db, ipScopeHash, nowDate, LOGIN_IP_WINDOW_MS, LOGIN_IP_LIMIT),
+    rateLimitFailureStatement(db, pairScopeHash, nowDate, LOGIN_PAIR_WINDOW_MS, LOGIN_PAIR_LIMIT),
+  ];
+  if (credential) {
+    statements.push(db.prepare(`
+      UPDATE visit_teacher_credentials SET
+        failed_attempts = CASE WHEN failure_window_started_at IS NULL OR failure_window_started_at<?
+          THEN 1 ELSE failed_attempts+1 END,
+        failure_window_started_at = CASE WHEN failure_window_started_at IS NULL OR failure_window_started_at<?
+          THEN ? ELSE failure_window_started_at END,
+        locked_until = CASE
+          WHEN failure_window_started_at IS NOT NULL AND failure_window_started_at>=?
+            AND failed_attempts+1>=? THEN ?
+          ELSE NULL END,
+        updated_at = ?
+      WHERE teacher_user_id = ? AND version = ? AND code_hmac != ?
+    `).bind(
+      teacherWindowStart,
+      teacherWindowStart,
+      now,
+      teacherWindowStart,
+      LOGIN_TEACHER_LIMIT,
+      teacherBlockedUntil,
+      now,
+      credential.teacher_user_id,
+      credential.version,
+      presentedHmac,
+    ));
+  }
+  statements.push(boundedLimitCleanup(db, nowDate));
+  try { await db.batch(statements); } catch { /* Keep the public failure generic. */ }
+}
+
+function rateLimitFailureStatement(
+  db: VisitD1Database,
+  scopeHash: string,
+  nowDate: Date,
+  windowMs: number,
+  limit: number,
+) {
+  const now = nowDate.toISOString();
+  const windowStart = new Date(nowDate.getTime() - windowMs).toISOString();
+  const blockedUntil = new Date(nowDate.getTime() + windowMs).toISOString();
+  return db.prepare(`
+    INSERT INTO visit_teacher_login_limits (scope_hash, attempts, window_started_at, blocked_until, updated_at)
+    VALUES (?, 1, ?, NULL, ?)
+    ON CONFLICT(scope_hash) DO UPDATE SET
+      attempts = CASE WHEN visit_teacher_login_limits.window_started_at < ? THEN 1 ELSE visit_teacher_login_limits.attempts + 1 END,
+      window_started_at = CASE WHEN visit_teacher_login_limits.window_started_at < ? THEN excluded.window_started_at ELSE visit_teacher_login_limits.window_started_at END,
+      blocked_until = CASE
+        WHEN visit_teacher_login_limits.window_started_at < ? THEN NULL
+        WHEN visit_teacher_login_limits.attempts + 1 >= ? THEN ?
+        ELSE visit_teacher_login_limits.blocked_until END,
+      updated_at = excluded.updated_at
+  `).bind(scopeHash, now, now, windowStart, windowStart, windowStart, limit, blockedUntil);
+}
+
+async function anyRateLimitBlocked(
+  db: VisitD1Database,
+  hashes: Array<string | null>,
+  now: string,
+): Promise<boolean> {
+  for (const hash of hashes) {
+    if (!hash) continue;
+    const row = await db.prepare(`SELECT blocked_until FROM visit_teacher_login_limits
+      WHERE scope_hash=? LIMIT 1`).bind(hash).first<{ blocked_until: string | null }>();
+    if (row?.blocked_until && row.blocked_until > now) return true;
+  }
+  return false;
+}
+
+function boundedLimitCleanup(db: VisitD1Database, nowDate: Date) {
+  return db.prepare(`DELETE FROM visit_teacher_login_limits WHERE scope_hash IN (
+    SELECT scope_hash FROM visit_teacher_login_limits WHERE updated_at<? ORDER BY updated_at LIMIT 100
+  )`).bind(new Date(nowDate.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString());
+}
+
+function boundedSessionCleanup(db: VisitD1Database, now: string) {
+  return db.prepare(`DELETE FROM visit_teacher_sessions WHERE token_hash IN (
+    SELECT token_hash FROM visit_teacher_sessions
+    WHERE expires_at<=? OR revoked_at IS NOT NULL ORDER BY expires_at LIMIT 100
+  )`).bind(now);
+}
+
+async function accessCommand(db: VisitD1Database, requestId: string) {
+  return db.prepare(`SELECT request_hash, status, result_json FROM visit_teacher_access_commands WHERE id=? LIMIT 1`)
+    .bind(requestId).first<{ request_hash: string; status: string; result_json: string | null }>();
+}
+
+function unrecoverableCodeResult(requestHash: string) {
+  void requestHash;
+  return new VisitScheduleError(
+    "code_result_unrecoverable",
+    409,
+    "Код уже було створено й показано один раз. Створіть новий код окремою підтвердженою дією.",
+  );
+}
+
+function trustedClientIp(request: Request): string {
+  const value = request.headers.get("CF-Connecting-IP")?.trim();
+  if (!value) {
+    throw new VisitScheduleError("client_ip_unavailable", 503, "Не вдалося безпечно перевірити запит. Спробуйте пізніше.");
+  }
+  return value.slice(0, 128);
+}
+
+function normalizeCode(value: string): string {
+  return value.normalize("NFKC").toUpperCase().replace(/[\s-]+/gu, "");
+}
+
+function formatTeacherCode(value: string): string {
+  return `${value.slice(0, 5)}-${value.slice(5)}`;
+}
+
+function randomTeacherCode(): string {
+  const result: string[] = [];
+  const unbiasedLimit = Math.floor(256 / CODE_ALPHABET.length) * CODE_ALPHABET.length;
+  while (result.length < VISIT_TEACHER_CODE_LENGTH) {
+    const bytes = crypto.getRandomValues(new Uint8Array(VISIT_TEACHER_CODE_LENGTH * 2));
+    for (const byte of bytes) {
+      if (byte >= unbiasedLimit) continue;
+      result.push(CODE_ALPHABET[byte % CODE_ALPHABET.length]);
+      if (result.length === VISIT_TEACHER_CODE_LENGTH) break;
+    }
+  }
+  return result.join("");
+}
+
+function randomOpaque(bytes: number): string {
+  const value = crypto.getRandomValues(new Uint8Array(bytes));
+  let binary = "";
+  for (const byte of value) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+}
+
+async function hmacHex(secret: string, value: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  return bytesToHex(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value)));
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  return bytesToHex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
+}
+
+function bytesToHex(value: ArrayBuffer): string {
+  return Array.from(new Uint8Array(value), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function constantTimeHexEqual(left: string, right: string): boolean {
+  if (left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  return difference === 0;
+}
+
+function readCookie(header: string | null, name: string): string | null {
+  for (const part of (header ?? "").split(";")) {
+    const [rawName, ...rawValue] = part.trim().split("=");
+    if (rawName === name) return rawValue.join("=") || null;
+  }
+  return null;
+}
