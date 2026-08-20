@@ -842,7 +842,7 @@ function renderMaterialDialog(item, detailState = {}) {
     ${linksMarkup(item, detailState)}
     <div class="dialog-order">
       ${canOrder
-        ? `<a class="order-material-button" href="${escapeHtml(orderUrl)}" target="_blank" rel="noopener noreferrer">Замовити примірники <span aria-hidden="true">→</span></a><p>Матеріал буде додано до кошика в кабінеті учителя. Там можна змінити кількість і надіслати замовлення бібліотекарю.</p>`
+        ? `<a class="order-material-button" href="${escapeHtml(orderUrl)}" target="_blank" rel="noopener noreferrer">Замовити <span aria-hidden="true">→</span></a><p>Матеріал буде додано до кошика в кабінеті учителя. Там можна змінити кількість і надіслати замовлення бібліотекарю.</p>`
         : `<span class="order-material-unavailable" aria-disabled="true">Зараз немає доступних примірників для замовлення</span><p>Перевірте картку пізніше — доступність оновлюється з бібліотечної бази.</p>`}
     </div>
     <div class="dialog-actions" aria-label="Дії з карткою">

@@ -239,7 +239,7 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(app, /class="material-links"/);
   assert.match(app, /class="cover-wrap cover-button"[^>]*data-details=/u);
   assert.match(app, /class="order-material-button"/u);
-  assert.match(app, /Замовити примірники/u);
+  assert.match(app, />Замовити <span aria-hidden="true">→<\/span>/u);
   assert.match(app, /target="_blank" rel="noopener noreferrer"/);
   assert.match(app, /raw\.thumbnailUrl/);
   assert.match(app, /raw\.publicationType/);
