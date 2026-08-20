@@ -35,6 +35,11 @@ test("teacher codes are one-time values and never enter browser persistence", as
   assert.match(access, /Закрити й забути/u);
   assert.match(access, /Сайт не зберігає ці коди у відкритому вигляді/u);
   assert.match(access, /navigator\.clipboard\.writeText/u);
+  assert.match(access, /copyTextWithFallback/u);
+  assert.match(access, /document\.createElement\("textarea"\)/u);
+  assert.match(access, /textarea\.setSelectionRange\(0, text\.length\)/u);
+  assert.match(access, /document\.execCommand\("copy"\)/u);
+  assert.match(access, /textarea\.remove\(\)/u);
   assert.match(access, /new Blob\(\["\\uFEFF", csv\]/u);
   assert.match(csv, /ПІБ,Код/u);
   assert.match(access, /type: "text\/csv;charset=utf-8"/u);

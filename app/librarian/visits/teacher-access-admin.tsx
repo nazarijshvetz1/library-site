@@ -204,11 +204,11 @@ export default function TeacherAccessAdmin({ writesEnabled }: { writesEnabled: b
   }
 
   async function copyCodes(codes = oneTimeCodes) {
-    try {
-      await navigator.clipboard.writeText(codeListText(codes));
+    const copied = await copyTextWithFallback(codeListText(codes));
+    if (copied) {
       setClipboardNotice(codes.length === 1 ? "Код скопійовано." : "Список кодів скопійовано.");
-    } catch {
-      setClipboardNotice("Не вдалося скопіювати. Виділіть код вручну або завантажте список.");
+    } else {
+      setClipboardNotice("Браузер не дозволив автоматичне копіювання. Виділіть код вручну або завантажте список.");
     }
   }
 
@@ -419,6 +419,38 @@ function codeListText(codes: OneTimeCode[]): string {
     "",
     ...codes.map((item) => `${item.fullName}\t${item.code}`),
   ].join("\n");
+}
+
+async function copyTextWithFallback(text: string): Promise<boolean> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Some browsers expose the modern API but deny it inside embedded pages.
+      // Continue with the selection-based fallback while the click is active.
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.readOnly = true;
+  textarea.setAttribute("aria-hidden", "true");
+  textarea.style.position = "fixed";
+  textarea.style.inset = "0 auto auto -9999px";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+
+  try {
+    textarea.focus({ preventScroll: true });
+    textarea.select();
+    textarea.setSelectionRange(0, text.length);
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    textarea.remove();
+  }
 }
 
 function formatDateTime(value: string): string {
