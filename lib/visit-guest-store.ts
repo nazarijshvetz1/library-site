@@ -24,6 +24,7 @@ export type GuestVisitBooking = {
   startTime: string;
   endTime: string;
   teacher: { teacherRef: string; fullName: string };
+  publicDisplayConsent: boolean;
   classYearId: string | null;
   classLabel: string | null;
   purpose: string | null;
@@ -43,6 +44,7 @@ type GuestBookingRow = {
   visit_date: string;
   start_time: string;
   end_time: string;
+  public_display_consent: number;
   purpose: string;
   status: "active" | "cancelled";
   version: number;
@@ -64,7 +66,7 @@ export async function listOwnGuestVisits(
   range: { from: string; to: string },
 ): Promise<GuestVisitBooking[]> {
   const rows = await db.prepare(`SELECT id,guest_owner_id,selected_teacher_user_id,surname,
-      class_year_id,class_label,visit_date,start_time,end_time,purpose,status,version,
+      class_year_id,class_label,visit_date,start_time,end_time,public_display_consent,purpose,status,version,
       created_at,updated_at,cancelled_at
     FROM visit_bookings
     WHERE owner_kind='guest' AND guest_owner_id=? AND visit_date BETWEEN ? AND ?
@@ -105,6 +107,7 @@ export async function createGuestVisitBooking(
     startTime: input.startTime,
     endTime: input.endTime,
     teacher: { teacherRef: input.teacherRef, fullName: teacher.fullName },
+    publicDisplayConsent: input.publicDisplayConsent,
     classYearId: classYear?.id ?? null,
     classLabel: classYear?.class_name ?? null,
     purpose: input.purpose,
@@ -120,10 +123,12 @@ export async function createGuestVisitBooking(
     insertCommand(db, input.requestId, ownerKey, "visit_guest_create", requestHash, id, now),
     db.prepare(`INSERT INTO visit_bookings (
       id,owner_kind,owner_user_id,owner_auth_user_id,owner_email,guest_owner_id,selected_teacher_user_id,
-      surname,class_year_id,class_label,visit_date,start_time,end_time,purpose,status,cancel_reason,
+      surname,class_year_id,class_label,visit_date,start_time,end_time,public_display_consent,purpose,status,cancel_reason,
       cancelled_by_auth_user_id,cancelled_by_user_id,cancelled_by_guest_owner_id,last_mutation_request_id,
       version,created_at,updated_at,cancelled_at
-    ) SELECT ?,'guest',NULL,NULL,NULL,?,?, ?,?,?, ?,?,?,?,'active','',NULL,NULL,NULL,?,1,?,?,NULL
+    ) SELECT
+      ?,'guest',NULL,NULL,NULL,?,?,
+      ?,?,?,?,?,?,?,?,'active','',NULL,NULL,NULL,?,1,?,?,NULL
       WHERE EXISTS (SELECT 1 FROM visit_guest_sessions
         WHERE id=? AND token_hash=? AND revoked_at IS NULL AND expires_at>?)
       AND EXISTS (SELECT 1 FROM users WHERE id=? AND role='teacher' AND status='active' AND full_name=?)
@@ -137,7 +142,8 @@ export async function createGuestVisitBooking(
           AND ? BETWEEN 1 AND 5 AND ?>=? AND ?<=?))`)
       .bind(
         id, guest.guestOwnerId, teacher.id, teacher.fullName, classYear?.id ?? null,
-        classYear?.class_name ?? null, input.date, input.startTime, input.endTime, input.purpose ?? "",
+        classYear?.class_name ?? null, input.date, input.startTime, input.endTime,
+        input.publicDisplayConsent === true ? 1 : 0, input.purpose ?? "",
         input.requestId, now, now, guest.guestOwnerId, guest.tokenHash, now,
         teacher.id, teacher.fullName, input.classYearId, input.classYearId,
         guest.guestOwnerId, localNow.date, VISIT_MAX_ACTIVE_BOOKINGS,
@@ -194,6 +200,7 @@ export async function updateGuestVisitBooking(
     startTime: input.startTime,
     endTime: input.endTime,
     teacher: { teacherRef: await guestTeacherRef(row.selected_teacher_user_id), fullName: row.surname },
+    publicDisplayConsent: input.publicDisplayConsent,
     classYearId: classYear?.id ?? null,
     classLabel: classYear?.class_name ?? null,
     purpose: input.purpose,
@@ -215,7 +222,7 @@ export async function updateGuestVisitBooking(
     )`).bind(bookingId, bookingId, guest.guestOwnerId, input.expectedVersion,
       guest.guestOwnerId, guest.tokenHash, now),
     db.prepare(`UPDATE visit_bookings SET class_year_id=?,class_label=?,visit_date=?,start_time=?,end_time=?,
-        purpose=?,last_mutation_request_id=?,version=version+1,updated_at=?
+        public_display_consent=?,purpose=?,last_mutation_request_id=?,version=version+1,updated_at=?
       WHERE id=? AND owner_kind='guest' AND guest_owner_id=? AND status='active' AND version=?
         AND ${sessionGuard}
         AND EXISTS (SELECT 1 FROM users WHERE id=selected_teacher_user_id AND role='teacher' AND status='active')
@@ -227,7 +234,8 @@ export async function updateGuestVisitBooking(
             AND ? BETWEEN 1 AND 5 AND ?>=? AND ?<=?))`)
       .bind(
         classYear?.id ?? null, classYear?.class_name ?? null, input.date, input.startTime,
-        input.endTime, input.purpose ?? "", input.requestId, now, bookingId, guest.guestOwnerId,
+        input.endTime, input.publicDisplayConsent === true ? 1 : 0, input.purpose ?? "",
+        input.requestId, now, bookingId, guest.guestOwnerId,
         input.expectedVersion, guest.guestOwnerId, guest.tokenHash, now,
         input.classYearId, input.classYearId,
         `${input.date}T${input.startTime}`, `${localNow.date}T${localNow.time}`,
@@ -329,7 +337,7 @@ export async function cancelGuestVisitBooking(
 
 async function ownGuestBooking(db: VisitD1Database, guestOwnerId: string, bookingId: string) {
   return db.prepare(`SELECT id,guest_owner_id,selected_teacher_user_id,surname,class_year_id,class_label,
-      visit_date,start_time,end_time,purpose,status,version,created_at,updated_at,cancelled_at
+      visit_date,start_time,end_time,public_display_consent,purpose,status,version,created_at,updated_at,cancelled_at
     FROM visit_bookings WHERE id=? AND owner_kind='guest' AND guest_owner_id=? LIMIT 1`)
     .bind(bookingId, guestOwnerId).first<GuestBookingRow>();
 }
@@ -397,6 +405,7 @@ async function mapGuestBooking(row: GuestBookingRow): Promise<GuestVisitBooking>
     startTime: row.start_time,
     endTime: row.end_time,
     teacher: { teacherRef: await guestTeacherRef(row.selected_teacher_user_id), fullName: row.surname },
+    publicDisplayConsent: Number(row.public_display_consent) === 1,
     classYearId: row.class_year_id,
     classLabel: row.class_label,
     purpose: row.purpose || null,

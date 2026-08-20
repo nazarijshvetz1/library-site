@@ -57,6 +57,7 @@ export type VisitBooking = {
   ownerKind?: "guest" | "teacher" | "legacy";
   identityVerified?: boolean;
   ownerEmail?: string;
+  publicDisplayConsent: boolean;
 };
 
 export type VisitBusyPeriod = {
@@ -68,6 +69,14 @@ export type VisitBusyPeriod = {
   status?: string;
 };
 
+export type VisitPublicBooking = {
+  date: string;
+  startTime: string;
+  endTime: string;
+  displayName: string;
+  identityVerified: boolean;
+};
+
 export type PublicVisitsEnvelope = {
   success: true;
   timeZone: string;
@@ -75,6 +84,7 @@ export type PublicVisitsEnvelope = {
   hours: Record<string, Array<{ startTime: string; endTime: string }>>;
   closures: Array<{ date: string; startTime: string; endTime: string; status: "closed" }>;
   busy: VisitBusyPeriod[];
+  publicBookings: VisitPublicBooking[];
 };
 
 export type TeacherVisitsEnvelope = {
@@ -104,6 +114,7 @@ export type VisitCreatePayload = {
   endTime: string;
   purpose: string | null;
   classYearId: string | null;
+  publicDisplayConsent: true;
 };
 
 export type VisitCancelPayload = {

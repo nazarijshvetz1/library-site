@@ -72,7 +72,7 @@
 .publicDays li[data-status="closed"] { color: #777; background: #ededeb; }
 .publicDays li[data-selected="true"] a { outline: 2px solid var(--green-700); background: #daeacc; }
 .publicDays li strong { font-size: 11px; }
-.publicDays li span { font-size: 9px; }
+.publicDays li span { overflow-wrap: anywhere; font-size: 9px; line-height: 1.35; }
 .publicDays article > p { margin: 0; color: var(--muted); font-size: 10px; }
 .teacherGrid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(300px, .75fr); gap: 20px; align-items: start; }
 .card { padding: clamp(20px, 3vw, 32px); border: 1px solid var(--line); border-radius: 22px; background: var(--paper); box-shadow: 0 16px 44px rgba(23,53,34,.07); }
@@ -88,6 +88,9 @@
 .fields textarea { min-height: 82px; resize: vertical; }
 .fields small { color: var(--muted); font-size: 10px; font-weight: 500; line-height: 1.45; }
 .fields [aria-invalid="true"] { border-color: #cf8176; background: #fff8f6; }
+.fields .publicConsent { padding: 13px 14px; display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 9px; border: 1px solid #bfd0bc; border-radius: 12px; background: #eef6ec; color: var(--green-950); font-weight: 700; line-height: 1.5; }
+.fields .publicConsent input { width: 18px; min-height: 18px; margin: 2px 0 0; padding: 0; accent-color: var(--green-900); }
+.fields .publicConsent .fieldError { grid-column: 2; }
 .fieldError { color: var(--danger); font-size: 10px; line-height: 1.35; }
 .comboboxField { position: relative; display: grid; gap: 7px; color: #53645a; font-size: 11px; font-weight: 800; }
 .comboboxField > input { width: 100%; min-height: 48px; border: 1px solid #d5ded4; border-radius: 11px; background: #fff; padding: 11px 13px; color: var(--ink); }

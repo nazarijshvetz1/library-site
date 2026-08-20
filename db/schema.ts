@@ -1303,6 +1303,7 @@ export const visitBookings = sqliteTable(
     visitDate: text("visit_date").notNull(),
     startTime: text("start_time").notNull(),
     endTime: text("end_time").notNull(),
+    publicDisplayConsent: integer("public_display_consent", { mode: "boolean" }).notNull().default(false),
     purpose: text("purpose").notNull().default(""),
     status: text("status", { enum: visitBookingStatuses }).notNull().default("active"),
     cancelReason: text("cancel_reason").notNull().default(""),
@@ -1378,6 +1379,10 @@ export const visitBookings = sqliteTable(
     check(
       "visit_bookings_status_valid",
       sql`${table.status} in ('active', 'cancelled')`,
+    ),
+    check(
+      "visit_bookings_public_display_consent_valid",
+      sql`${table.publicDisplayConsent} in (0, 1)`,
     ),
     check(
       "visit_bookings_cancel_consistent",

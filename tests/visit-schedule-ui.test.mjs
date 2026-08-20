@@ -84,6 +84,7 @@ test("uncertain teacher requests retain the exact request and payload", () => {
       date: "2026-09-10",
       startTime: "09:00",
       endTime: "09:30",
+      publicDisplayConsent: true,
       purpose: null,
       classYearId: "CY-2026-7A",
     },

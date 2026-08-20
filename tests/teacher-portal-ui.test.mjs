@@ -31,20 +31,47 @@ test("teacher cabinet is the primary route and legacy visits keeps bounded deep 
   assert.match(workspace, /initialEndTime=\{initialEndTime\}/u);
 });
 
-test("public teacher entry renders PII-free schedule through the full 90 day horizon", async () => {
-  const workspace = await read("app/visits/visit-booking-workspace.tsx");
+test("public teacher entry renders a privacy-limited schedule through the full 90 day horizon", async () => {
+  const [workspace, client] = await Promise.all([
+    read("app/visits/visit-booking-workspace.tsx"),
+    read("app/visits/visit-client.ts"),
+  ]);
   assert.match(workspace, /<PublicVisitSchedule/u);
   assert.match(workspace, /publicVisitsUrl\(range\[0\], range\.at\(-1\)/u);
   assert.match(workspace, /weekStart >= lastPublicWeekStart\(today\)/u);
   assert.match(workspace, /return visitDatesFromOffset\(visitHorizonEnd\(today\), -6\)/u);
   assert.match(workspace, /function bookableSlotStart/u);
   assert.match(workspace, /timeMinutes\(slot\.endTime\) - start >= 20/u);
-  assert.match(workspace, /Імена, класи й мета відвідувань тут не публікуються/u);
+  assert.match(workspace, /Графік відкритий для всіх без входу/u);
+  assert.match(workspace, /Для підтверджених записів видно ім’я вчителя й точний час/u);
+  assert.match(workspace, /Клас, мета візиту та контактні дані не публікуються/u);
+  assert.match(workspace, /slot\.displayName \|\| "Заброньовано"/u);
+  assert.match(workspace, /item\.identityVerified === false \? "Непідтверджений гостьовий запис" : item\.displayName/u);
+  assert.match(workspace, /previous\.sourceKey === sourceKey/u);
+  const publicBookingType = client.slice(client.indexOf("export type VisitPublicBooking"), client.indexOf("export type PublicVisitsEnvelope"));
+  assert.match(publicBookingType, /date: string;[\s\S]*startTime: string;[\s\S]*endTime: string;[\s\S]*displayName: string;[\s\S]*identityVerified: boolean;/u);
+  assert.doesNotMatch(publicBookingType, /\bid\b|class|purpose|email|owner/u);
   assert.doesNotMatch(workspace, /data\.bookings.*surname|data\.bookings.*purpose/u);
   assert.equal(publicVisitsUrl("2026-09-01", "2026-09-07"), "/api/visits/public?from=2026-09-01&to=2026-09-07");
   assert.equal(visitHorizonEnd("2026-09-01"), "2026-11-30");
   assert.doesNotMatch(workspace, /if \(checkingSession\) \{\s*return/u);
   assert.ok(workspace.indexOf("<PublicVisitSchedule") < workspace.indexOf("{checkingSession"), "public schedule must render before private session controls settle");
+});
+
+test("every guest and authenticated booking explicitly consents to the limited public display", async () => {
+  const [workspace, client] = await Promise.all([
+    read("app/visits/visit-booking-workspace.tsx"),
+    read("app/visits/visit-client.ts"),
+  ]);
+  assert.match(client, /publicDisplayConsent: true;/u);
+  assert.match(client, /publicDisplayConsent: boolean;/u);
+  assert.match(workspace, /publicDisplayConsent: true/u);
+  assert.match(workspace, /booking\.publicDisplayConsent === true/u);
+  assert.match(workspace, /Я погоджуюся, що моє ім’я та точний час цього запису будуть видимі всім/u);
+  assert.match(workspace, /Ім’я обраного вчителя, клас і мета візиту не публікуватимуться/u);
+  assert.match(workspace, /checked=\{publicDisplayConsent\}/u);
+  assert.match(workspace, /disabled=\{submitting \|\| !bookingEnabled \|\| !publicDisplayConsent/u);
+  assert.match(workspace, /disabled=\{!selectedTeacher \|\| !publicDisplayConsent/u);
 });
 
 test("guest booking is explicitly unverified, canonical, controlled, and retry-safe", async () => {

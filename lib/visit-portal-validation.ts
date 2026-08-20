@@ -14,12 +14,13 @@ const TEACHER_REF_RE = /^[0-9a-f]{64}$/u;
 export function validateGuestVisitCreateInput(input: unknown): ValidationResult<GuestVisitCreateInput> {
   if (!record(input)) return invalid("body", "Очікуються дані бронювання.");
   const errors: Record<string, string> = {};
-  exact(input, ["requestId", "teacherRef", "date", "startTime", "endTime", "classYearId", "purpose"], errors);
+  exact(input, ["requestId", "teacherRef", "date", "startTime", "endTime", "publicDisplayConsent", "classYearId", "purpose"], errors);
   const base = validateVisitBookingCreateInput({
     requestId: input.requestId,
     date: input.date,
     startTime: input.startTime,
     endTime: input.endTime,
+    publicDisplayConsent: input.publicDisplayConsent,
     classYearId: input.classYearId,
     purpose: input.purpose,
   });
@@ -33,12 +34,13 @@ export function validateGuestVisitCreateInput(input: unknown): ValidationResult<
 export function validateVisitBookingUpdateInput(input: unknown): ValidationResult<VisitBookingUpdateInput> {
   if (!record(input)) return invalid("body", "Очікуються оновлені дані бронювання.");
   const errors: Record<string, string> = {};
-  exact(input, ["requestId", "expectedVersion", "date", "startTime", "endTime", "classYearId", "purpose"], errors);
+  exact(input, ["requestId", "expectedVersion", "date", "startTime", "endTime", "publicDisplayConsent", "classYearId", "purpose"], errors);
   const base = validateVisitBookingCreateInput({
     requestId: input.requestId,
     date: input.date,
     startTime: input.startTime,
     endTime: input.endTime,
+    publicDisplayConsent: input.publicDisplayConsent,
     classYearId: input.classYearId,
     purpose: input.purpose,
   });

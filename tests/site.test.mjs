@@ -94,6 +94,7 @@ test("normalizes the privacy-safe weekly visit schedule and derives free interva
     },
     closures: [{ date: "2026-08-10", startTime: "10:30", endTime: "11:00", status: "closed" }],
     busy: [{ date: "2026-08-10", startTime: "09:00", endTime: "09:40", status: "busy" }],
+    publicBookings: [{ date: "2026-08-10", startTime: "09:00", endTime: "09:40", displayName: "Іваненко Олена", identityVerified: true, classLabel: "7-А", purpose: "private" }],
     generatedAt: "2026-08-10T06:00:00.000Z",
     privateTeacherName: "must be discarded",
   }, "2026-08-10", "2026-08-16");
@@ -108,9 +109,38 @@ test("normalizes the privacy-safe weekly visit schedule and derives free interva
       { startTime: "11:00", endTime: "12:00", status: "free" },
     ],
   );
+  assert.equal(schedule.publicBookings[0].displayName, "Іваненко Олена");
+  assert.equal(schedule.publicBookings[0].classLabel, undefined);
+  assert.equal(schedule.publicBookings[0].purpose, undefined);
   assert.equal(schedule.privateTeacherName, undefined);
   assert.throws(() => normalizeVisitSchedule({ ...schedule, slotMinutes: 15 }), /точність/);
   assert.throws(() => normalizeVisitSchedule({ ...schedule, timeZone: "UTC" }), /відповідь/);
+});
+
+test("keeps adjacent public bookings separate and hides unverified guest-selected names", () => {
+  const schedule = normalizeVisitSchedule({
+    schemaVersion: 1,
+    success: true,
+    timeZone: "Europe/Kyiv",
+    slotMinutes: 5,
+    hours: { 1: [{ startTime: "08:00", endTime: "11:00" }], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [] },
+    closures: [],
+    busy: [{ date: "2026-08-10", startTime: "09:00", endTime: "10:00", status: "busy" }],
+    publicBookings: [
+      { date: "2026-08-10", startTime: "09:00", endTime: "09:30", displayName: "Іваненко Олена", identityVerified: true },
+      { date: "2026-08-10", startTime: "09:30", endTime: "10:00", displayName: "Чуже ім’я", identityVerified: false },
+    ],
+  }, "2026-08-10", "2026-08-16");
+
+  assert.deepEqual(
+    visitSegmentsForDate(schedule, "2026-08-10")
+      .filter((segment) => segment.status === "busy")
+      .map(({ startTime, endTime, displayName, identityVerified }) => ({ startTime, endTime, displayName, identityVerified })),
+    [
+      { startTime: "09:00", endTime: "09:30", displayName: "Іваненко Олена", identityVerified: true },
+      { startTime: "09:30", endTime: "10:00", displayName: "Непідтверджений гостьовий запис", identityVerified: false },
+    ],
+  );
 });
 
 test("creates bounded week requests and PII-free protected booking handoffs", () => {
@@ -217,7 +247,8 @@ test("ships an accessible responsive public visit schedule and protected handoff
   assert.match(html, /href="#visit-schedule"[^>]*>Графік<\/a>/);
   assert.match(html, /href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/teacher"[\s\S]*>Кабінет учителя<\/a>/);
   assert.match(html, /id="visit-schedule" aria-labelledby="visit-schedule-title"/);
-  assert.match(html, /Перевірте вільний час і забронюйте відвідування класом/);
+  assert.match(html, /Графік доступний усім без входу/);
+  assert.match(html, /видно ім’я вчителя й точний час/);
   assert.match(html, /id="visitScheduleStatus"[^>]*role="status"[^>]*aria-live="polite"/);
   assert.match(html, /id="visitScheduleContent"[^>]*aria-busy="true"/);
   assert.match(html, /data-visit-status="free"[\s\S]*Вільно/);
@@ -227,6 +258,9 @@ test("ships an accessible responsive public visit schedule and protected handoff
   assert.match(app, /fetch\(url, \{ headers: \{ Accept: "application\/json" \}, cache: "no-store" \}\)/);
   assert.match(app, /target="_blank" rel="noopener noreferrer"/);
   assert.match(app, /visitsBookingUrl\(config\.visitsBookingUrl/);
+  assert.match(app, /publicBookings: normalizeVisitPublicBookings/u);
+  assert.match(app, /segment\.displayName \|\| "Заброньовано"/u);
+  assert.match(app, /Непідтверджений гостьовий запис/u);
   assert.match(app, /elements\.visitPrevWeek\.disabled = !navigation\.canPrevious/);
   assert.match(app, /data-visit-booking="true"/);
   assert.doesNotMatch(app, /localStorage.*visit|sessionStorage.*visit|fetch\([^\n]*method:\s*"POST"/);

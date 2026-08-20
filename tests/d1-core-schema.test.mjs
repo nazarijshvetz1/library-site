@@ -16,6 +16,7 @@ const migrationFiles = [
   "drizzle/0009_happy_silver_samurai.sql",
   "drizzle/0010_shocking_cobalt_man.sql",
   "drizzle/0011_normalize_holding_conditions.sql",
+  "drizzle/0012_elite_victor_mancha.sql",
 ];
 
 async function migratedDatabase() {
@@ -30,7 +31,7 @@ async function migratedDatabase() {
 async function databaseBeforeConditionNormalization() {
   const database = new DatabaseSync(":memory:");
   database.exec("PRAGMA foreign_keys = ON;");
-  for (const file of migrationFiles.slice(0, -1)) {
+  for (const file of migrationFiles.slice(0, -2)) {
     database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
   }
   return database;

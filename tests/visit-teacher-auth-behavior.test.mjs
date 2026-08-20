@@ -74,6 +74,7 @@ async function database() {
     "0006_pale_sauron.sql", "0007_cold_whiplash.sql", "0008_sudden_thunderbird.sql",
     "0009_happy_silver_samurai.sql", "0010_shocking_cobalt_man.sql",
     "0011_normalize_holding_conditions.sql",
+    "0012_elite_victor_mancha.sql",
   ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
   const now = new Date().toISOString();
   insertUser(sqlite, "USR-LIB", "Бібліотекар", "library@example.test", "auth-library", "librarian", now);
@@ -306,7 +307,7 @@ test("credential lock blocks only new login, while established session remains u
   assert.equal((await auth.requireVisitTeacherSession(context.db, request("203.0.113.10", session.token))).teacherUserId, "USR-T1");
   const booking = await store.createVisitBooking(context.db, session.identity, {
     requestId: commandId(), date: futureWeekday(), startTime: "09:00", endTime: "09:20",
-    classYearId: null, purpose: null,
+    publicDisplayConsent: true, classYearId: null, purpose: null,
   });
   const cancelled = await store.cancelOwnVisitBooking(context.db, session.identity, booking.id, {
     requestId: commandId(), expectedVersion: booking.version, reason: null,
@@ -338,17 +339,17 @@ test("guest token owns unverified canonical bookings and atomic reschedule rolls
   const date = futureWeekday();
   const input = {
     requestId: commandId(), teacherRef: directory[0].teacherRef, date,
-    startTime: "09:00", endTime: "09:20", classYearId: null, purpose: "Lesson",
+    startTime: "09:00", endTime: "09:20", publicDisplayConsent: true, classYearId: null, purpose: "Lesson",
   };
   const created = await guestStore.createGuestVisitBooking(context.db, opened.identity, input);
   assert.deepEqual(await guestStore.createGuestVisitBooking(context.db, opened.identity, input), created);
   const persisted = context.sqlite.prepare(`SELECT owner_kind,owner_user_id,owner_auth_user_id,
-    owner_email,guest_owner_id,selected_teacher_user_id,surname,status,version
+    owner_email,guest_owner_id,selected_teacher_user_id,surname,public_display_consent,status,version
     FROM visit_bookings WHERE id=?`).get(created.id);
   assert.deepEqual({ ...persisted }, {
     owner_kind: "guest", owner_user_id: null, owner_auth_user_id: null, owner_email: null,
     guest_owner_id: opened.identity.guestOwnerId, selected_teacher_user_id: "USR-T1",
-    surname: fullName, status: "active", version: 1,
+    surname: fullName, public_display_consent: 1, status: "active", version: 1,
   });
   assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM visit_slot_claims WHERE booking_id=?")
     .get(created.id).n, 4);
@@ -371,15 +372,22 @@ test("guest token owns unverified canonical bookings and atomic reschedule rolls
     { id: "VIS-VERIFIED", ownerKind: "teacher", identityVerified: true },
   ]);
   const publicSchedule = await store.readVisitSchedule(context.db, { from: date, to: date });
-  const publicJson = JSON.stringify(publicSchedule);
-  assert.doesNotMatch(publicJson, /ownerKind|identityVerified|Portal Teacher|guest_owner/iu);
+  assert.deepEqual(publicSchedule.publicBookings, [{
+    date,
+    startTime: "09:00",
+    endTime: "09:20",
+    displayName: "Непідтверджений гостьовий запис",
+    identityVerified: false,
+  }]);
+  const publicJson = JSON.stringify(publicSchedule.publicBookings);
+  assert.doesNotMatch(publicJson, /Portal Teacher|guest_owner|USR-T1|Lesson/iu);
 
   const other = await guestAuth.createVisitGuestSession(context.db, guestRequest("203.0.113.211"));
   assert.deepEqual(await guestStore.listOwnGuestVisits(context.db, other.identity, { from: date, to: date }), []);
   await assert.rejects(
     () => guestStore.updateGuestVisitBooking(context.db, other.identity, created.id, {
       requestId: commandId(), expectedVersion: 1, date,
-      startTime: "09:30", endTime: "09:50", classYearId: null, purpose: null,
+      startTime: "09:30", endTime: "09:50", publicDisplayConsent: true, classYearId: null, purpose: null,
     }),
     (error) => error.code === "booking_not_found",
   );
@@ -400,7 +408,7 @@ test("guest token owns unverified canonical bookings and atomic reschedule rolls
   await assert.rejects(
     () => guestStore.updateGuestVisitBooking(context.db, opened.identity, created.id, {
       requestId: commandId(), expectedVersion: 1, date,
-      startTime: "09:30", endTime: "09:50", classYearId: null, purpose: "Changed",
+      startTime: "09:30", endTime: "09:50", publicDisplayConsent: true, classYearId: null, purpose: "Changed",
     }),
     (error) => error.code === "slot_unavailable",
   );
@@ -454,7 +462,7 @@ test("guest create reasserts the 20-active-booking cap inside the atomic batch",
   await assert.rejects(
     () => guestStore.createGuestVisitBooking(context.db, opened.identity, {
       requestId, teacherRef, date, startTime: "11:00", endTime: "11:20",
-      classYearId: null, purpose: null,
+      publicDisplayConsent: true, classYearId: null, purpose: null,
     }),
     (error) => error.code === "booking_limit_reached",
   );

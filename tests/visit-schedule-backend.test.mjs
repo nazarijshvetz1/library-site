@@ -41,6 +41,7 @@ async function visitDatabase() {
     "0006_pale_sauron.sql", "0007_cold_whiplash.sql", "0008_sudden_thunderbird.sql",
     "0009_happy_silver_samurai.sql", "0010_shocking_cobalt_man.sql",
     "0011_normalize_holding_conditions.sql",
+    "0012_elite_victor_mancha.sql",
   ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
   const now = new Date().toISOString();
   sqlite.prepare(`INSERT INTO users
@@ -88,16 +89,28 @@ function futureWeekday() {
 }
 
 function bookingInput(requestId, date = futureWeekday()) {
-  return { requestId, date, startTime: "09:00", endTime: "09:20", surname: "Шевченко", classYearId: null, purpose: null };
+  return { requestId, date, startTime: "09:00", endTime: "09:20", surname: "Шевченко", publicDisplayConsent: true, classYearId: null, purpose: null };
 }
 
 test("visit validators enforce 5-minute grid, duration, control characters and exact fields", () => {
   const valid = validation.validateVisitBookingCreateInput({
     requestId: "11111111-1111-4111-8111-111111111111",
     date: "2026-09-01", startTime: "09:00", endTime: "09:20",
-    surname: "Шевченко", classYearId: null, purpose: null,
+    surname: "Шевченко", publicDisplayConsent: true, classYearId: null, purpose: null,
   });
   assert.equal(valid.ok, true);
+  const missingConsent = validation.validateVisitBookingCreateInput({
+    requestId: "11111111-1111-4111-8111-111111111111",
+    date: "2026-09-01", startTime: "09:00", endTime: "09:20",
+    classYearId: null, purpose: null,
+  });
+  assert.equal(missingConsent.ok, false);
+  assert.ok(missingConsent.fieldErrors.publicDisplayConsent);
+  assert.equal(validation.validateVisitBookingCreateInput({
+    requestId: "11111111-1111-4111-8111-111111111111",
+    date: "2026-09-01", startTime: "09:00", endTime: "09:20",
+    publicDisplayConsent: false, classYearId: null, purpose: null,
+  }).ok, false);
 
   const misalignedClosure = validation.validateVisitClosureCreateInput({
     requestId: "22222222-2222-4222-8222-222222222222",
@@ -110,7 +123,7 @@ test("visit validators enforce 5-minute grid, duration, control characters and e
   const controls = validation.validateVisitBookingCreateInput({
     requestId: "33333333-3333-4333-8333-333333333333",
     date: "2026-09-01", startTime: "09:00", endTime: "09:20",
-    surname: "Шев\nченко", classYearId: null, purpose: null,
+    surname: "Шев\nченко", publicDisplayConsent: true, classYearId: null, purpose: null,
   });
   assert.equal(controls.ok, false);
   assert.ok(controls.fieldErrors.surname);
@@ -120,7 +133,7 @@ test("guest and portal validators require exact versioned mutation bodies", () =
   const guest = {
     requestId: "16161616-1616-4616-8616-161616161616",
     teacherRef: "a".repeat(64), date: "2026-09-01", startTime: "09:00", endTime: "09:20",
-    classYearId: null, purpose: null,
+    publicDisplayConsent: true, classYearId: null, purpose: null,
   };
   assert.equal(portalValidation.validateGuestVisitCreateInput(guest).ok, true);
   assert.equal(portalValidation.validateGuestVisitCreateInput({ ...guest, surname: "Injected" }).ok, false);
@@ -130,7 +143,7 @@ test("guest and portal validators require exact versioned mutation bodies", () =
   const update = {
     requestId: "17171717-1717-4717-8717-171717171717", expectedVersion: 3,
     date: "2026-09-01", startTime: "10:00", endTime: "10:20",
-    classYearId: null, purpose: null,
+    publicDisplayConsent: true, classYearId: null, purpose: null,
   };
   assert.equal(portalValidation.validateVisitBookingUpdateInput(update).ok, true);
   assert.equal(portalValidation.validateVisitBookingUpdateInput({ ...update, expectedVersion: 0 }).ok, false);
@@ -347,6 +360,42 @@ test("visit migration rejects impossible local dates", async () => {
   `).run("VIS-BAD", "auth-teacher", "teacher@example.test", "Шевченко", "2026-02-30", "09:00", "09:20", now, now), /visit_bookings_date_valid/);
 });
 
+test("public-display consent migration keeps legacy bookings private with foreign keys enabled", async () => {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec("PRAGMA foreign_keys = ON;");
+  for (const file of [
+    "0000_librarian_drafts.sql", "0001_draft_workflow.sql", "0002_remove_legacy_audit_triggers.sql",
+    "0003_odd_the_order.sql", "0004_staging_import_runs.sql", "0005_young_night_nurse.sql",
+    "0006_pale_sauron.sql", "0007_cold_whiplash.sql", "0008_sudden_thunderbird.sql",
+    "0009_happy_silver_samurai.sql", "0010_shocking_cobalt_man.sql",
+    "0011_normalize_holding_conditions.sql",
+  ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
+  const now = new Date().toISOString();
+  sqlite.prepare(`INSERT INTO users
+    (id,full_name,sort_name,email,auth_user_id,role,status,created_at,updated_at)
+    VALUES ('USR-CONSENT-MIG','Legacy Teacher','legacy teacher','legacy@example.test','auth-legacy',
+      'teacher','active',?,?)`).run(now, now);
+  sqlite.prepare(`INSERT INTO visit_bookings (
+    id,owner_kind,owner_user_id,surname,visit_date,start_time,end_time,purpose,status,cancel_reason,
+    version,created_at,updated_at
+  ) VALUES ('VIS-CONSENT-MIG','teacher','USR-CONSENT-MIG','Legacy Teacher','2026-09-01',
+    '09:00','09:20','','active','',1,?,?)`).run(now, now);
+  sqlite.prepare(`INSERT INTO visit_slot_claims(segment_key,booking_id,closure_id,created_at)
+    VALUES ('2026-09-01T09:00','VIS-CONSENT-MIG',NULL,?)`).run(now);
+
+  const migration = await readFile(new URL("../drizzle/0012_elite_victor_mancha.sql", import.meta.url), "utf8");
+  assert.doesNotMatch(migration, /PRAGMA foreign_keys\s*=\s*OFF/iu);
+  sqlite.exec(migration);
+
+  assert.equal(sqlite.prepare("SELECT public_display_consent FROM visit_bookings WHERE id='VIS-CONSENT-MIG'").get().public_display_consent, 0);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) total FROM visit_slot_claims WHERE booking_id='VIS-CONSENT-MIG'").get().total, 1);
+  assert.deepEqual(sqlite.prepare("PRAGMA foreign_key_check").all(), []);
+  assert.throws(
+    () => sqlite.prepare("UPDATE visit_bookings SET public_display_consent=2 WHERE id='VIS-CONSENT-MIG'").run(),
+    /visit_bookings\.public_display_consent|CHECK constraint failed/iu,
+  );
+});
+
 test("visit routes keep public payload PII-free and protect teacher writes", async () => {
   const [publicRoute, teacherRoute, cancelRoute, store, api] = await Promise.all([
     readFile(new URL("../app/api/visits/public/route.ts", import.meta.url), "utf8"),
@@ -442,7 +491,7 @@ test("authenticated teacher reschedule moves claims atomically and rejects a con
   );
   const moved = await store.updateOwnVisitBooking(db, teacher, created.id, {
     requestId: "14141414-1414-4414-8414-141414141414", expectedVersion: 1,
-    date, startTime: "10:00", endTime: "10:20", classYearId: null, purpose: "Moved",
+    date, startTime: "10:00", endTime: "10:20", publicDisplayConsent: true, classYearId: null, purpose: "Moved",
   });
   assert.equal(moved.version, 2);
   assert.deepEqual(sqlite.prepare(
@@ -452,7 +501,7 @@ test("authenticated teacher reschedule moves claims atomically and rejects a con
   ]);
   assert.deepEqual(await store.updateOwnVisitBooking(db, teacher, created.id, {
     requestId: "14141414-1414-4414-8414-141414141414", expectedVersion: 1,
-    date, startTime: "10:00", endTime: "10:20", classYearId: null, purpose: "Moved",
+    date, startTime: "10:00", endTime: "10:20", publicDisplayConsent: true, classYearId: null, purpose: "Moved",
   }), moved);
 
   const oldClaims = sqlite.prepare(
@@ -471,7 +520,7 @@ test("authenticated teacher reschedule moves claims atomically and rejects a con
   await assert.rejects(
     () => store.updateOwnVisitBooking(db, teacher, created.id, {
       requestId: "15151515-1515-4515-8515-151515151515", expectedVersion: 2,
-      date, startTime: "11:00", endTime: "11:20", classYearId: null, purpose: null,
+      date, startTime: "11:00", endTime: "11:20", publicDisplayConsent: true, classYearId: null, purpose: null,
     }),
     (error) => error.code === "slot_unavailable",
   );
@@ -541,7 +590,7 @@ test("teacher and librarian revocation during cancellation roll back every write
   assert.equal(sqlite.prepare("SELECT COUNT(*) total FROM visit_mutation_commands").get().total, 1);
 });
 
-test("public schedule projection contains generic busy intervals without private booking fields", async () => {
+test("public schedule exposes only consented verified names alongside generic busy intervals", async () => {
   const { db } = await visitDatabase();
   const teacher = teacherIdentity();
   const date = futureWeekday();
@@ -550,8 +599,36 @@ test("public schedule projection contains generic busy intervals without private
   });
   const schedule = await store.readVisitSchedule(db, { from: date, to: date });
   assert.deepEqual(schedule.busy, [{ date, startTime: "09:00", endTime: "09:20", status: "busy" }]);
+  assert.deepEqual(schedule.publicBookings, [{
+    date, startTime: "09:00", endTime: "09:20", displayName: "Учитель", identityVerified: true,
+  }]);
   assert.equal("bookings" in schedule, false);
-  assert.doesNotMatch(JSON.stringify(schedule), /Шевченко|Приватна мета|teacher@example|VIS-/);
+  assert.doesNotMatch(JSON.stringify(schedule), /Шевченко|Приватна мета|teacher@example|VIS-|classLabel|purpose/);
+});
+
+test("public schedule never attributes an unverified guest booking to the selected teacher", async () => {
+  const { sqlite, db } = await visitDatabase();
+  const date = futureWeekday();
+  const now = new Date().toISOString();
+  sqlite.prepare(`INSERT INTO visit_guest_sessions (
+    id,token_hash,pending_scope,ip_scope_hash,expires_at,last_seen_at,revoked_at,created_at
+  ) VALUES ('GUEST-PUBLIC',?,?,?,'2999-01-01T00:00:00.000Z',?,NULL,?)`)
+    .run("d".repeat(64), "guest-public-scope", "e".repeat(64), now, now);
+  sqlite.prepare(`INSERT INTO visit_bookings (
+    id,owner_kind,guest_owner_id,selected_teacher_user_id,surname,visit_date,start_time,end_time,
+    public_display_consent,purpose,status,cancel_reason,version,created_at,updated_at
+  ) VALUES ('VIS-GUEST-PUBLIC','guest','GUEST-PUBLIC','USR-TEACHER','Учитель',?,'09:00','09:20',
+    1,'Приватна мета','active','',1,?,?)`).run(date, now, now);
+
+  const schedule = await store.readVisitSchedule(db, { from: date, to: date });
+  assert.deepEqual(schedule.publicBookings, [{
+    date,
+    startTime: "09:00",
+    endTime: "09:20",
+    displayName: "Непідтверджений гостьовий запис",
+    identityVerified: false,
+  }]);
+  assert.doesNotMatch(JSON.stringify(schedule.publicBookings), /Учитель|Приватна мета|GUEST|VIS-/u);
 });
 
 test("teacher list omits elapsed visits and teacher cannot cancel visit history", async () => {

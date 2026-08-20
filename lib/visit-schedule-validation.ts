@@ -10,6 +10,7 @@ export type VisitBookingCreateInput = {
   date: string;
   startTime: string;
   endTime: string;
+  publicDisplayConsent: true;
   classYearId: string | null;
   purpose: string | null;
 };
@@ -42,18 +43,19 @@ export function validateVisitBookingCreateInput(input: unknown): ValidationResul
   if (!isRecord(input)) return invalid("body", "Очікуються дані бронювання.");
   // `surname` is accepted only as a transition field. The server always uses
   // canonical `users.full_name` and never trusts this browser value.
-  exactKeys(input, ["requestId", "date", "startTime", "endTime", "surname", "classYearId", "purpose"], errors);
+  exactKeys(input, ["requestId", "date", "startTime", "endTime", "surname", "publicDisplayConsent", "classYearId", "purpose"], errors);
   const requestId = uuid(input.requestId, "requestId", errors);
   const date = isoDate(input.date, "date", errors);
   const startTime = time(input.startTime, "startTime", errors);
   const endTime = time(input.endTime, "endTime", errors);
   validateDuration(startTime, endTime, errors);
+  const publicDisplayConsent = requiredPublicDisplayConsent(input.publicDisplayConsent, errors);
   if (input.surname !== undefined) text(input.surname, "surname", errors, 2, 80, false);
   const classYearId = input.classYearId === null
     ? null
     : pattern(input.classYearId, "classYearId", SAFE_ID_RE, errors);
   const purpose = nullableText(input.purpose, "purpose", errors, 160);
-  return finish(errors, { requestId, date, startTime, endTime, classYearId, purpose });
+  return finish(errors, { requestId, date, startTime, endTime, publicDisplayConsent, classYearId, purpose });
 }
 
 export function validateVisitCancelInput(input: unknown, admin = false): ValidationResult<VisitCancelInput> {
@@ -183,5 +185,6 @@ function pattern(value: unknown, key: string, re: RegExp, errors: Record<string,
 function text(value: unknown, key: string, errors: Record<string, string>, min: number, max: number, allowEmpty: boolean) { const raw = String(value ?? ""); const hasControl = Array.from(raw).some((character) => { const code = character.charCodeAt(0); return code <= 31 || code === 127; }); const result = raw.trim().replace(/\s+/gu, " "); if ((!allowEmpty && result.length < min) || result.length > max || hasControl) errors[key] = `Укажіть від ${min} до ${max} символів без службових символів.`; return result; }
 function nullableText(value: unknown, key: string, errors: Record<string, string>, max: number) { if (value === null) return null; const result = text(value, key, errors, 0, max, true); return result || null; }
 function integer(value: unknown, key: string, errors: Record<string, string>, min: number, max: number) { if (!Number.isSafeInteger(value) || Number(value) < min || Number(value) > max) errors[key] = "Некоректне ціле число."; return Number(value) || 0; }
+function requiredPublicDisplayConsent(value: unknown, errors: Record<string, string>): true { if (value !== true) errors.publicDisplayConsent = "Підтвердьте публічне відображення імені та часу запису."; return true; }
 function invalid(key: string, message: string): ValidationResult<never> { return { ok: false, fieldErrors: { [key]: message } }; }
 function finish<T>(errors: Record<string, string>, value: T): ValidationResult<T> { return Object.keys(errors).length ? { ok: false, fieldErrors: errors } : { ok: true, value }; }

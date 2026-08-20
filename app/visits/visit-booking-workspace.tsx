@@ -219,6 +219,9 @@ type PublicScheduleSlot = {
   startTime: string;
   endTime: string;
   status: "free" | "busy" | "closed";
+  displayName?: string;
+  identityVerified?: boolean;
+  sourceKey?: string;
 };
 
 function PublicVisitSchedule({
@@ -277,7 +280,7 @@ function PublicVisitSchedule({
         </div>
       </div>
 
-      <p className={styles.publicPrivacy}>Видно лише вільні, зайняті та закриті проміжки. Імена, класи й мета відвідувань тут не публікуються.</p>
+      <p className={styles.publicPrivacy}>Графік відкритий для всіх без входу. Для підтверджених записів видно ім’я вчителя й точний час. Клас, мета візиту та контактні дані не публікуються.</p>
       {notice ? <div className={styles.error} role="alert">{notice} <button type="button" onClick={() => void load()}>Повторити</button></div> : null}
       {loading ? <p className={styles.empty} role="status">Оновлюємо графік…</p> : null}
       {!loading && data ? (
@@ -295,7 +298,7 @@ function PublicVisitSchedule({
                         && slot.startTime <= initialStartTime
                         && slot.endTime >= initialEndTime;
                       if (slot.status !== "free") {
-                        return <li key={`${slot.startTime}-${slot.endTime}`} data-status={slot.status}><strong>{slot.startTime}–{slot.endTime}</strong><span>{slot.status === "busy" ? "Зайнято" : "Зачинено"}</span></li>;
+                        return <li key={`${slot.startTime}-${slot.endTime}-${slot.sourceKey ?? slot.status}`} data-status={slot.status}><strong>{slot.startTime}–{slot.endTime}</strong><span>{slot.status === "closed" ? "Зачинено" : slot.displayName || "Заброньовано"}</span></li>;
                       }
                       const start = bookableSlotStart(date, slot, today, currentTime);
                       if (!start) {
@@ -361,6 +364,7 @@ function GuestBookingPanel({
   const [endTime, setEndTime] = useState(() => validTime(initialEndTime) ? initialEndTime : "09:40");
   const [classYearId, setClassYearId] = useState("");
   const [purpose, setPurpose] = useState("");
+  const [publicDisplayConsent, setPublicDisplayConsent] = useState(false);
   const storageKey = session ? `library.guest.pending.v1:${session.guest.pendingScope}` : "";
 
   const load = useCallback(async () => {
@@ -480,6 +484,7 @@ function GuestBookingPanel({
       setNotice(successMessage);
       setNoticeTone("success");
       setEditing(null);
+      setPublicDisplayConsent(false);
       if (intent.kind === "guest-create") {
         setPurpose("");
         setSelectedTeacher(null);
@@ -505,13 +510,13 @@ function GuestBookingPanel({
 
   function submitGuest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedTeacher || !validVisitDuration(startTime, endTime) || pending) return;
+    if (!selectedTeacher || !publicDisplayConsent || !validVisitDuration(startTime, endTime) || pending) return;
     const requestId = crypto.randomUUID();
     if (editing) {
-      const payload: VisitPatchPayload = { requestId, expectedVersion: editing.version, date, startTime, endTime, classYearId: classYearId || null, purpose: purpose || null };
+      const payload: VisitPatchPayload = { requestId, expectedVersion: editing.version, date, startTime, endTime, classYearId: classYearId || null, purpose: purpose || null, publicDisplayConsent: true };
       void sendGuestIntent({ kind: "guest-patch", requestId, resourceId: editing.id, payload });
     } else {
-      const payload: VisitGuestCreatePayload = { requestId, teacherRef: selectedTeacher.teacherRef, date, startTime, endTime, classYearId: classYearId || null, purpose: purpose || null };
+      const payload: VisitGuestCreatePayload = { requestId, teacherRef: selectedTeacher.teacherRef, date, startTime, endTime, classYearId: classYearId || null, purpose: purpose || null, publicDisplayConsent: true };
       void sendGuestIntent({ kind: "guest-create", requestId, payload });
     }
   }
@@ -525,6 +530,7 @@ function GuestBookingPanel({
     setEndTime(booking.endTime);
     setClassYearId(booking.classYearId || "");
     setPurpose(booking.purpose || "");
+    setPublicDisplayConsent(booking.publicDisplayConsent === true);
   }
 
   function cancelGuestBooking(booking: VisitGuestBooking) {
@@ -569,6 +575,7 @@ function GuestBookingPanel({
     setEndTime(validTime(initialEndTime) ? initialEndTime : "09:40");
     setClassYearId("");
     setPurpose("");
+    setPublicDisplayConsent(false);
   }
 
   const activeBookings = (data?.bookings ?? []).filter((booking) => booking.status === "active");
@@ -598,10 +605,11 @@ function GuestBookingPanel({
             <label>Завершення *<input required type="time" step={300} value={endTime} onChange={(event) => setEndTime(event.currentTarget.value)} /></label>
             <label>Клас<select value={classYearId} onChange={(event) => setClassYearId(event.currentTarget.value)}><option value="">Без класу</option>{(data?.classYears ?? []).map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
             <label className={styles.wide}>Мета візиту<select value={purpose} onChange={(event) => setPurpose(event.currentTarget.value)}><option value="">Не вказувати</option>{VISIT_PURPOSES.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
+            <label className={`${styles.wide} ${styles.publicConsent}`}><input required type="checkbox" checked={publicDisplayConsent} onChange={(event) => setPublicDisplayConsent(event.currentTarget.checked)} /><span>Я розумію, що у відкритому графіку всі бачитимуть час і позначку «Непідтверджений гостьовий запис». Ім’я обраного вчителя, клас і мета візиту не публікуватимуться.</span></label>
           </div>
           <div className={styles.guestActions}>
             {editing ? <button className={styles.quiet} type="button" onClick={resetGuestForm} disabled={submitting}>Не редагувати</button> : null}
-            <button className={styles.primary} type="submit" disabled={!selectedTeacher || !validVisitDuration(startTime, endTime) || submitting || Boolean(pending)}>{submitting ? "Зберігаємо…" : editing ? "Зберегти зміни" : "Створити гостьовий запис"}</button>
+            <button className={styles.primary} type="submit" disabled={!selectedTeacher || !publicDisplayConsent || !validVisitDuration(startTime, endTime) || submitting || Boolean(pending)}>{submitting ? "Зберігаємо…" : editing ? "Зберегти зміни" : "Створити гостьовий запис"}</button>
           </div>
         </form>
       ) : null}
@@ -847,6 +855,7 @@ function VisitBookingPanel({
   const [endTime, setEndTime] = useState(() => validTime(initialEndTime) ? initialEndTime : "09:30");
   const [classYearId, setClassYearId] = useState("");
   const [purpose, setPurpose] = useState("");
+  const [publicDisplayConsent, setPublicDisplayConsent] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const load = useCallback(async (afterMutation = false) => {
@@ -905,6 +914,7 @@ function VisitBookingPanel({
       setNotice("Візит заброньовано. Він з’явився у ваших записах.");
       setNoticeTone("success");
       setPurpose("");
+      setPublicDisplayConsent(false);
       await load(true);
     } catch (error) {
       if (!isUncertainVisitFailure(error)) {
@@ -938,6 +948,7 @@ function VisitBookingPanel({
       clearVisitPendingIntent(window.sessionStorage, storageKey);
       setPending(null);
       setEditingBooking(null);
+      setPublicDisplayConsent(false);
       setNotice("Запис перенесено. Попередній час звільнено лише після успішного збереження нового.");
       setNoticeTone("success");
       await load(true);
@@ -956,6 +967,12 @@ function VisitBookingPanel({
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!publicDisplayConsent) {
+      setFieldErrors({ publicDisplayConsent: "Підтвердьте публічний показ вашого імені та часу." });
+      setNotice("Потрібно підтвердити, що ім’я та час будуть видимі у відкритому графіку.");
+      setNoticeTone("error");
+      return;
+    }
     if (!validVisitDuration(startTime, endTime)) {
       setNotice("Візит має тривати від 20 хвилин до 4 годин, із кроком 5 хвилин.");
       setNoticeTone("error");
@@ -967,6 +984,7 @@ function VisitBookingPanel({
       endTime,
       purpose: purpose.trim() || null,
       classYearId: classYearId || null,
+      publicDisplayConsent: true as const,
     };
     if (editingBooking) {
       const payload: VisitPatchPayload = {
@@ -1044,6 +1062,7 @@ function VisitBookingPanel({
     setEndTime(booking.endTime);
     setClassYearId(booking.classYearId || "");
     setPurpose(booking.purpose || "");
+    setPublicDisplayConsent(booking.publicDisplayConsent === true);
     window.setTimeout(() => document.querySelector<HTMLElement>("#teacher-visit-form")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
 
@@ -1051,6 +1070,7 @@ function VisitBookingPanel({
     setEditingBooking(null);
     setPurpose("");
     setClassYearId("");
+    setPublicDisplayConsent(false);
   }
 
   const bookingEnabled = data?.bookingEnabled === true;
@@ -1062,7 +1082,7 @@ function VisitBookingPanel({
           <div className={styles.intro}>
             <p className={styles.eyebrow}>Кабінет учителя</p>
             <h1>{teacherTabTitle(activeTab)}</h1>
-            <p>Ваші записи, замовлення й повідомлення доступні лише вам і бібліотекарю.</p>
+            <p>У відкритому графіку видно лише погоджені ім’я та час. Клас, мета, замовлення й повідомлення доступні лише вам і бібліотекарю.</p>
           </div>
           <div className={styles.account}>
             <span><small>Ви увійшли як</small><strong>{teacher.fullName}</strong></span>
@@ -1137,10 +1157,15 @@ function VisitBookingPanel({
                 <textarea maxLength={160} value={purpose} aria-invalid={Boolean(fieldErrors.purpose)} onChange={(event) => setPurpose(event.currentTarget.value)} placeholder="Необов’язково: урок, добір літератури…" />
                 {fieldErrors.purpose ? <small className={styles.fieldError}>{fieldErrors.purpose}</small> : null}
               </label>
+              <label className={`${styles.wide} ${styles.publicConsent}`}>
+                <input required type="checkbox" checked={publicDisplayConsent} aria-invalid={Boolean(fieldErrors.publicDisplayConsent)} onChange={(event) => { setPublicDisplayConsent(event.currentTarget.checked); setFieldErrors((current) => ({ ...current, publicDisplayConsent: "" })); }} />
+                <span>Я погоджуюся, що моє ім’я та точний час цього запису будуть видимі всім у відкритому графіку. Клас і мета візиту залишаться приватними.</span>
+                {fieldErrors.publicDisplayConsent ? <small className={styles.fieldError}>{fieldErrors.publicDisplayConsent}</small> : null}
+              </label>
             </div>
             <div className={styles.formActions}>
               {editingBooking ? <button className={styles.quiet} type="button" onClick={stopEditing} disabled={submitting || Boolean(pending)}>Не редагувати</button> : null}
-              <button className={styles.primary} type="submit" disabled={submitting || !bookingEnabled || Boolean(pending)}>
+              <button className={styles.primary} type="submit" disabled={submitting || !bookingEnabled || !publicDisplayConsent || Boolean(pending)}>
                 {submitting ? "Зберігаємо…" : editingBooking ? "Перенести запис" : "Забронювати час"}
               </button>
             </div>
@@ -1788,9 +1813,18 @@ function formatVisitDay(date: string): string {
 
 function publicSlots(data: PublicVisitsEnvelope, date: string): PublicScheduleSlot[] {
   const ranges = data.hours[weekdayKey(date)] ?? [];
+  const namedBookings = (data.publicBookings ?? [])
+    .filter((item) => item.date === date)
+    .map((item, index) => ({
+      ...item,
+      status: "busy" as const,
+      displayName: item.identityVerified === false ? "Непідтверджений гостьовий запис" : item.displayName,
+      sourceKey: `booking-${index}-${item.startTime}-${item.endTime}`,
+    }));
   const blockers = [
     ...data.closures.filter((item) => item.date === date).map((item) => ({ ...item, status: "closed" as const })),
     ...data.busy.map(busyPeriodParts).filter((item) => item.date === date).map((item) => ({ ...item, status: "busy" as const })),
+    ...namedBookings,
   ];
   const slots: PublicScheduleSlot[] = [];
   for (const range of ranges) {
@@ -1808,16 +1842,25 @@ function publicSlots(data: PublicVisitsEnvelope, date: string): PublicScheduleSl
       const start = ordered[index];
       const end = ordered[index + 1];
       if (end <= start) continue;
+      const namedBooking = namedBookings.find((item) => covers(item, start, end));
       const status = blockers.some((item) => item.status === "closed" && covers(item, start, end))
         ? "closed"
-        : blockers.some((item) => item.status === "busy" && covers(item, start, end))
+        : namedBooking || blockers.some((item) => item.status === "busy" && covers(item, start, end))
           ? "busy"
           : "free";
+      const displayName = status === "busy" ? namedBooking?.displayName : undefined;
+      const identityVerified = status === "busy" ? namedBooking?.identityVerified : undefined;
+      const sourceKey = status === "busy" ? namedBooking?.sourceKey : undefined;
       const previous = slots.at(-1);
-      if (previous?.status === status && previous.endTime === minutesTime(start)) {
+      if (
+        previous?.status === status
+        && previous.displayName === displayName
+        && previous.sourceKey === sourceKey
+        && previous.endTime === minutesTime(start)
+      ) {
         previous.endTime = minutesTime(end);
       } else {
-        slots.push({ startTime: minutesTime(start), endTime: minutesTime(end), status });
+        slots.push({ startTime: minutesTime(start), endTime: minutesTime(end), status, displayName, identityVerified, sourceKey });
       }
     }
   }

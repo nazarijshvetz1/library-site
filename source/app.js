@@ -258,6 +258,37 @@ function normalizeVisitBlockers(items, status, from, to) {
   }).sort((left, right) => left.date.localeCompare(right.date) || left.start - right.start || left.end - right.end);
 }
 
+function normalizeVisitPublicBookings(items, from, to) {
+  if (!Array.isArray(items)) throw new Error("Некоректні публічні записи графіка");
+  return items.map((raw) => {
+    const date = isoDateValue(raw && raw.date);
+    const interval = normalizeVisitInterval(raw);
+    const identityVerified = raw && raw.identityVerified;
+    const rawName = String(raw && raw.displayName || "");
+    const hasControl = Array.from(rawName).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 31 || code === 127;
+    });
+    const normalizedName = rawName.normalize("NFKC").trim().replace(/\s+/gu, " ");
+    if (!date || !interval || (from && date < from) || (to && date > to)
+      || typeof identityVerified !== "boolean" || hasControl
+      || (identityVerified && (normalizedName.length < 2 || normalizedName.length > 80))) {
+      throw new Error("Некоректний публічний запис графіка");
+    }
+    return {
+      date,
+      startTime: interval.startTime,
+      endTime: interval.endTime,
+      start: interval.start,
+      end: interval.end,
+      status: "busy",
+      displayName: identityVerified ? normalizedName : "Непідтверджений гостьовий запис",
+      identityVerified,
+    };
+  }).sort((left, right) => left.date.localeCompare(right.date) || left.start - right.start || left.end - right.end)
+    .map((booking, index) => ({ ...booking, sourceKey: `public-booking-${index}` }));
+}
+
 export function normalizeVisitSchedule(payload, from = "", to = "") {
   const firstDate = from ? isoDateValue(from) : "";
   const lastDate = to ? isoDateValue(to) : "";
@@ -287,6 +318,7 @@ export function normalizeVisitSchedule(payload, from = "", to = "") {
     hours,
     closures: normalizeVisitBlockers(payload.closures, "closed", firstDate, lastDate),
     busy: normalizeVisitBlockers(payload.busy, "busy", firstDate, lastDate),
+    publicBookings: normalizeVisitPublicBookings(payload.publicBookings || [], firstDate, lastDate),
     generatedAt,
   };
 }
@@ -294,7 +326,10 @@ export function normalizeVisitSchedule(payload, from = "", to = "") {
 function mergeVisitSegments(segments) {
   return segments.reduce((result, segment) => {
     const previous = result.at(-1);
-    if (previous && previous.status === segment.status && previous.end === segment.start) {
+    if (previous && previous.status === segment.status
+      && previous.displayName === segment.displayName
+      && previous.sourceKey === segment.sourceKey
+      && previous.end === segment.start) {
       previous.end = segment.end;
       previous.endTime = segment.endTime;
     } else result.push({ ...segment });
@@ -310,6 +345,7 @@ export function visitSegmentsForDate(schedule, value) {
   const blockers = [
     ...(Array.isArray(schedule.busy) ? schedule.busy : []),
     ...(Array.isArray(schedule.closures) ? schedule.closures : []),
+    ...(Array.isArray(schedule.publicBookings) ? schedule.publicBookings : []),
   ].filter((item) => item.date === date);
   const segments = [];
   openings.forEach((opening) => {
@@ -325,9 +361,20 @@ export function visitSegmentsForDate(schedule, value) {
       const end = points[index + 1];
       if (end <= start) continue;
       const active = overlapping.filter((item) => item.start < end && item.end > start);
+      const publicBooking = active.find((item) => item.sourceKey && item.status === "busy");
       const status = active.some((item) => item.status === "closed") ? "closed"
         : active.some((item) => item.status === "busy") ? "busy" : "free";
-      segments.push({ date, startTime: visitTimeValue(start), endTime: visitTimeValue(end), start, end, status });
+      segments.push({
+        date,
+        startTime: visitTimeValue(start),
+        endTime: visitTimeValue(end),
+        start,
+        end,
+        status,
+        displayName: status === "busy" ? publicBooking && publicBooking.displayName : undefined,
+        identityVerified: status === "busy" ? publicBooking && publicBooking.identityVerified : undefined,
+        sourceKey: status === "busy" ? publicBooking && publicBooking.sourceKey : undefined,
+      });
     }
   });
   return mergeVisitSegments(segments.sort((left, right) => left.start - right.start || left.end - right.end));
@@ -932,7 +979,7 @@ function formatVisitWeekLabel(dates) {
 function visitSegmentLabel(segment) {
   const day = visitDateFormatter.format(new Date(`${segment.date}T00:00:00.000Z`));
   const prefix = day.charAt(0).toLocaleUpperCase("uk") + day.slice(1);
-  const status = segment.status === "free" ? "Вільно" : segment.status === "busy" ? "Заброньовано" : "Бібліотека зачинена";
+  const status = segment.status === "free" ? "Вільно" : segment.status === "busy" ? segment.displayName || "Заброньовано" : "Бібліотека зачинена";
   return `${status}: ${prefix}, ${segment.startTime}–${segment.endTime}${segment.status === "free" ? ". Забронювати відвідування" : ""}`;
 }
 
@@ -946,7 +993,8 @@ function unavailableVisitReason(segment, now, horizonEnd) {
 function visitSegmentMarkup(segment, now, horizonEnd) {
   let time = `${escapeHtml(segment.startTime)}–${escapeHtml(segment.endTime)}`;
   if (segment.status !== "free") {
-    return `<li class="visit-slot" data-status="${segment.status}" aria-label="${escapeHtml(visitSegmentLabel(segment))}"><strong>${time}</strong><span>${segment.status === "busy" ? "Заброньовано" : "Зачинено"}</span></li>`;
+    const status = segment.status === "busy" ? segment.displayName || "Заброньовано" : "Зачинено";
+    return `<li class="visit-slot" data-status="${segment.status}" aria-label="${escapeHtml(visitSegmentLabel(segment))}"><strong>${time}</strong><span>${escapeHtml(status)}</span></li>`;
   }
   const constraints = { today: now.date, currentTime: now.time, horizonEnd };
   const selection = visitBookingSelection(segment, 40, constraints);

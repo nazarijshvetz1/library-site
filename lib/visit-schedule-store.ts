@@ -32,6 +32,13 @@ export type VisitInterval = { startTime: string; endTime: string };
 export type VisitHours = Record<string, VisitInterval[]>;
 export type PublicVisitClosure = { date: string; startTime: string; endTime: string; status: "closed" };
 export type PublicVisitBusy = { date: string; startTime: string; endTime: string; status: "busy" };
+export type PublicVisitBooking = {
+  date: string;
+  startTime: string;
+  endTime: string;
+  displayName: string;
+  identityVerified: boolean;
+};
 export type VisitClassYear = { id: string; label: string; version: number };
 
 export type VisitBooking = {
@@ -40,6 +47,7 @@ export type VisitBooking = {
   startTime: string;
   endTime: string;
   surname: string;
+  publicDisplayConsent: boolean;
   classYearId: string | null;
   classLabel: string | null;
   purpose: string | null;
@@ -85,6 +93,7 @@ type BookingRow = {
   visit_date: string;
   start_time: string;
   end_time: string;
+  public_display_consent: number;
   purpose: string;
   status: "active" | "cancelled";
   version: number;
@@ -145,11 +154,18 @@ export async function readVisitSchedule(
       ORDER BY visit_date, start_time, id LIMIT 3001
     `).bind(range.from, range.to).all<ClosureRow>(),
     db.prepare(`
-      SELECT visit_date, start_time, end_time
+      SELECT owner_kind, surname, visit_date, start_time, end_time, public_display_consent
       FROM visit_bookings
       WHERE visit_date BETWEEN ? AND ? AND status = 'active'
       ORDER BY visit_date, start_time, id LIMIT 3001
-    `).bind(range.from, range.to).all<{ visit_date: string; start_time: string; end_time: string }>(),
+    `).bind(range.from, range.to).all<{
+      owner_kind: "teacher" | "guest" | "legacy";
+      surname: string;
+      visit_date: string;
+      start_time: string;
+      end_time: string;
+      public_display_consent: number;
+    }>(),
   ]);
   assertScheduleBound(closureRows.results, "закриттів");
   assertScheduleBound(busyRows.results, "бронювань");
@@ -160,6 +176,7 @@ export async function readVisitSchedule(
     hours: VisitHours;
     closures: PublicVisitClosure[];
     busy: PublicVisitBusy[];
+    publicBookings: PublicVisitBooking[];
     classYears?: VisitClassYear[];
     bookings?: Array<VisitBooking | PrivateVisitBooking>;
     adminClosures?: VisitClosure[];
@@ -174,6 +191,9 @@ export async function readVisitSchedule(
       endTime: row.end_time,
       status: "busy" as const,
     }))),
+    publicBookings: (busyRows.results ?? [])
+      .filter((row) => Number(row.public_display_consent) === 1 && row.owner_kind !== "legacy")
+      .map(publicVisitBooking),
   };
 
   if (options.includeClasses) {
@@ -199,7 +219,7 @@ export async function readVisitSchedule(
     bindings.push(limit + 1);
     const rows = await db.prepare(`
       SELECT id, owner_kind, owner_user_id, owner_auth_user_id, owner_email, surname, class_year_id, class_label,
-             visit_date, start_time, end_time, purpose, status, version, created_at, cancelled_at
+             visit_date, start_time, end_time, public_display_consent, purpose, status, version, created_at, cancelled_at
       FROM visit_bookings
       WHERE visit_date BETWEEN ? AND ? ${statusSql} ${ownerSql} ${futureSql}
       ORDER BY visit_date, start_time, id LIMIT ?
@@ -266,6 +286,7 @@ export async function createVisitBooking(
     startTime: input.startTime,
     endTime: input.endTime,
     surname: teacher.fullName,
+    publicDisplayConsent: input.publicDisplayConsent,
     classYearId: classYear?.id ?? null,
     classLabel: classYear?.class_name ?? null,
     purpose: input.purpose,
@@ -281,11 +302,11 @@ export async function createVisitBooking(
     db.prepare(`
       INSERT INTO visit_bookings (
         id, owner_kind, owner_user_id, owner_auth_user_id, owner_email, surname, class_year_id, class_label,
-        visit_date, start_time, end_time, purpose, status, cancel_reason,
+        visit_date, start_time, end_time, public_display_consent, purpose, status, cancel_reason,
         cancelled_by_auth_user_id, cancelled_by_user_id, version,
         created_at, updated_at, cancelled_at
       )
-      SELECT ?, 'teacher', ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, 'active', '', NULL, NULL, 1, ?, ?, NULL
+      SELECT ?, 'teacher', ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'active', '', NULL, NULL, 1, ?, ?, NULL
       WHERE (? IS NULL OR EXISTS (
         SELECT 1 FROM class_years WHERE id = ? AND status = 'active'
       ))
@@ -310,7 +331,7 @@ export async function createVisitBooking(
     `).bind(
       id, teacher.teacherUserId, teacher.fullName, classYear?.id ?? null,
       classYear?.class_name ?? null, input.date, input.startTime, input.endTime,
-      input.purpose ?? "", now, now,
+      input.publicDisplayConsent === true ? 1 : 0, input.purpose ?? "", now, now,
       input.classYearId, input.classYearId,
       teacher.teacherUserId, today, VISIT_MAX_ACTIVE_BOOKINGS,
       `${input.date}T${input.startTime}`, `${localNow.date}T${localNow.time}`,
@@ -370,7 +391,7 @@ export async function updateOwnVisitBooking(
   const replayed = await replayCompletedCommand<VisitBooking>(db, input.requestId, requestHash, owner);
   if (replayed) return replayed;
   const row = await db.prepare(`SELECT id,owner_kind,owner_user_id,owner_auth_user_id,owner_email,surname,
-      class_year_id,class_label,visit_date,start_time,end_time,purpose,status,version,created_at,cancelled_at
+      class_year_id,class_label,visit_date,start_time,end_time,public_display_consent,purpose,status,version,created_at,cancelled_at
     FROM visit_bookings WHERE id=? AND owner_kind='teacher' AND owner_user_id=? LIMIT 1`)
     .bind(bookingId, teacher.teacherUserId).first<BookingRow>();
   if (!row) throw new VisitScheduleError("booking_not_found", 404, "Бронювання не знайдено.");
@@ -404,6 +425,7 @@ export async function updateOwnVisitBooking(
     startTime: input.startTime,
     endTime: input.endTime,
     surname: teacher.fullName,
+    publicDisplayConsent: input.publicDisplayConsent,
     classYearId: classYear?.id ?? null,
     classLabel: classYear?.class_name ?? null,
     purpose: input.purpose,
@@ -434,7 +456,7 @@ export async function updateOwnVisitBooking(
     )`).bind(bookingId, bookingId, teacher.teacherUserId, input.expectedVersion,
       ...accessBindings, `${localNow.date}T${localNow.time}`),
     db.prepare(`UPDATE visit_bookings SET surname=?,class_year_id=?,class_label=?,visit_date=?,
-        start_time=?,end_time=?,purpose=?,last_mutation_request_id=?,version=version+1,updated_at=?
+        start_time=?,end_time=?,public_display_consent=?,purpose=?,last_mutation_request_id=?,version=version+1,updated_at=?
       WHERE id=? AND owner_kind='teacher' AND owner_user_id=? AND status='active' AND version=?
         AND ${accessGuard}
         AND (? IS NULL OR EXISTS (SELECT 1 FROM class_years WHERE id=? AND status='active'))
@@ -444,7 +466,8 @@ export async function updateOwnVisitBooking(
           OR (NOT EXISTS (SELECT 1 FROM visit_schedule_hours WHERE weekday=?)
             AND ? BETWEEN 1 AND 5 AND ?>=? AND ?<=?))`)
       .bind(teacher.fullName, classYear?.id ?? null, classYear?.class_name ?? null,
-        input.date, input.startTime, input.endTime, input.purpose ?? "", input.requestId, now,
+        input.date, input.startTime, input.endTime, input.publicDisplayConsent === true ? 1 : 0,
+        input.purpose ?? "", input.requestId, now,
         bookingId, teacher.teacherUserId, input.expectedVersion, ...accessBindings,
         input.classYearId, input.classYearId,
         `${input.date}T${input.startTime}`, `${localNow.date}T${localNow.time}`,
@@ -519,7 +542,7 @@ async function cancelBooking(
   const row = await db.prepare(`
     SELECT id, owner_kind, owner_user_id, owner_auth_user_id, owner_email, surname,
            class_year_id, class_label, visit_date, start_time, end_time,
-           purpose, status, version, created_at, cancelled_at
+           public_display_consent, purpose, status, version, created_at, cancelled_at
     FROM visit_bookings WHERE id = ? ${ownerGuard} LIMIT 1
   `).bind(...rowBindings).first<BookingRow>();
   if (!row) throw new VisitScheduleError("booking_not_found", 404, "Бронювання не знайдено.");
@@ -879,9 +902,27 @@ function closure(row: ClosureRow): VisitClosure {
 function booking(row: BookingRow): VisitBooking {
   return {
     id: row.id, date: row.visit_date, startTime: row.start_time, endTime: row.end_time,
-    surname: row.surname, classYearId: row.class_year_id, classLabel: row.class_label,
+    surname: row.surname, publicDisplayConsent: Number(row.public_display_consent) === 1,
+    classYearId: row.class_year_id, classLabel: row.class_label,
     purpose: row.purpose || null, status: row.status, version: Number(row.version),
     createdAt: row.created_at, cancelledAt: row.cancelled_at,
+  };
+}
+
+function publicVisitBooking(row: {
+  owner_kind: "teacher" | "guest" | "legacy";
+  surname: string;
+  visit_date: string;
+  start_time: string;
+  end_time: string;
+}): PublicVisitBooking {
+  const identityVerified = row.owner_kind === "teacher";
+  return {
+    date: row.visit_date,
+    startTime: row.start_time,
+    endTime: row.end_time,
+    displayName: identityVerified ? row.surname : "Непідтверджений гостьовий запис",
+    identityVerified,
   };
 }
 
@@ -899,7 +940,8 @@ function privateBooking(row: BookingRow): PrivateVisitBooking {
 function stripOwner(value: PrivateVisitBooking): VisitBooking {
   return {
     id: value.id, date: value.date, startTime: value.startTime, endTime: value.endTime,
-    surname: value.surname, classYearId: value.classYearId, classLabel: value.classLabel,
+    surname: value.surname, publicDisplayConsent: value.publicDisplayConsent,
+    classYearId: value.classYearId, classLabel: value.classLabel,
     purpose: value.purpose, status: value.status, version: value.version,
     createdAt: value.createdAt, cancelledAt: value.cancelledAt,
   };
