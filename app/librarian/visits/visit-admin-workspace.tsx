@@ -2,7 +2,6 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -113,13 +112,13 @@ export default function LibrarianVisitWorkspace({ pendingScope, displayName, wri
   return (
     <main className={styles.shell}>
       <header className={styles.header}>
-        <Link className={styles.brand} href="/librarian">
+        <a className={styles.brand} href="/librarian">
           <img src={LOGO_URL} alt="" width="48" height="48" />
           <span><strong>Єдина бібліотека</strong><small>Розклад відвідувань</small></span>
-        </Link>
+        </a>
         <div className={styles.account}>
-          <Link href="/librarian">Кабінет</Link>
-          <Link href="/librarian/teachers">Вчителі</Link>
+          <a href="/librarian">Кабінет</a>
+          <a href="/librarian/teachers">Вчителі</a>
           <span><strong>{displayName}</strong><small>Бібліотекар</small></span>
           <a href={signOutHref}>Вийти</a>
         </div>

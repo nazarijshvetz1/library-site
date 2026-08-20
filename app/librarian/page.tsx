@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+
+/* eslint-disable @next/next/no-html-link-for-pages -- Vinext Link navigation fails in production; full-page anchors are intentional. */
+
 import { chatGPTSignOutPath, requireChatGPTUser } from "@/app/chatgpt-auth";
 import { getLibrarianAccess } from "@/lib/librarian-access";
 import D1LibrarianWorkspace from "./d1-workspace";
@@ -50,7 +52,7 @@ export default async function LibrarianPage() {
           </dl>
 
           <div className="access-actions">
-            <Link className="button button-primary" href="/">Повернутися на головну</Link>
+            <a className="button button-primary" href="/">Повернутися на головну</a>
             <a className="button button-secondary" href={chatGPTSignOutPath("/")}>Вийти з облікового запису</a>
           </div>
         </section>

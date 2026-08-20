@@ -1,6 +1,7 @@
 "use client";
 
-import Link from "next/link";
+/* eslint-disable @next/next/no-html-link-for-pages -- Vinext Link navigation fails in production; full-page anchors are intentional. */
+
 import {
   FormEvent,
   useCallback,
@@ -705,10 +706,10 @@ export default function LibrarianWorkspace({
   return (
     <main className="workspace-shell">
       <header className="workspace-header">
-        <Link className="brand-lockup compact" href="/" aria-label="Єдина бібліотека — головна">
+        <a className="brand-lockup compact" href="/" aria-label="Єдина бібліотека — головна">
           <img className="brand-logo" src={LOGO_URL} alt="" width="48" height="48" />
           <span><strong>Єдина бібліотека</strong><small>Кабінет бібліотекаря</small></span>
-        </Link>
+        </a>
 
         <div className="account-cluster">
           <a className="catalog-link" href={PUBLIC_CATALOG_URL}>Каталог <span aria-hidden="true">↗</span></a>

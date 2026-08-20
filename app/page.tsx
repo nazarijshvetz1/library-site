@@ -1,4 +1,4 @@
-import Link from "next/link";
+/* eslint-disable @next/next/no-html-link-for-pages -- Vinext Link navigation fails in production; full-page anchors are intentional. */
 
 import {
   chatGPTSignInPath,
@@ -17,13 +17,13 @@ export default async function Home() {
   return (
     <main className="landing-shell">
       <nav className="landing-nav" aria-label="Головна навігація">
-        <Link className="brand-lockup" href="/" aria-label="Єдина бібліотека — головна">
+        <a className="brand-lockup" href="/" aria-label="Єдина бібліотека — головна">
           <img className="brand-logo" src={LOGO_URL} alt="" width="56" height="56" />
           <span>
             <strong>Єдина бібліотека</strong>
             <small>Міжнародний ліцей МАУП</small>
           </span>
-        </Link>
+        </a>
 
         <a className="nav-link" href={PUBLIC_CATALOG_URL}>
           Відкрити каталог
@@ -42,15 +42,15 @@ export default async function Home() {
           </p>
 
           <div className="hero-actions">
-            <Link className="button button-secondary" href="/teacher">
+            <a className="button button-secondary" href="/teacher">
               Кабінет учителя
-            </Link>
+            </a>
             {user ? (
               <>
-                <Link className="button button-primary" href="/librarian">
+                <a className="button button-primary" href="/librarian">
                   Перейти до кабінету
                   <span aria-hidden="true">→</span>
-                </Link>
+                </a>
                 <a className="button button-quiet" href={chatGPTSignOutPath("/")}>
                   Вийти
                 </a>

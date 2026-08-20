@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+
+/* eslint-disable @next/next/no-html-link-for-pages -- Vinext Link navigation fails in production; full-page anchors are intentional. */
 
 import { chatGPTSignOutPath, requireChatGPTUser } from "@/app/chatgpt-auth";
 import { getLibrarianAccess } from "@/lib/librarian-access";
@@ -24,7 +25,7 @@ export default async function LibrarianTeachersPage() {
           <h1 id="teachers-access-title">Доступ до карток учителів не надано</h1>
           <p>Цей обліковий запис не входить до списку працівників бібліотеки.</p>
           <div className="access-actions">
-            <Link className="button button-primary" href="/">На головну</Link>
+            <a className="button button-primary" href="/">На головну</a>
           </div>
         </section>
       </main>

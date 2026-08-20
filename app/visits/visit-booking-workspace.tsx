@@ -1,8 +1,7 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element */
+/* eslint-disable @next/next/no-img-element, @next/next/no-html-link-for-pages -- Vinext Link navigation fails in production; full-page anchors are intentional. */
 
-import Link from "next/link";
 import {
   type FormEvent,
   type KeyboardEvent,
@@ -205,10 +204,10 @@ function VisitShell({ children }: { children: React.ReactNode }) {
   return (
     <main className={styles.shell}>
       <header className={styles.header}>
-        <Link className={styles.brand} href="/">
+        <a className={styles.brand} href="/">
           <img src={LOGO_URL} alt="" width="48" height="48" />
           <span><strong>Єдина бібліотека</strong><small>Кабінет учителя</small></span>
-        </Link>
+        </a>
         <a className={styles.catalogLink} href={PUBLIC_CATALOG_URL}>Публічний каталог</a>
       </header>
       {children}

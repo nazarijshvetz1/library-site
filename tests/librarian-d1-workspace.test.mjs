@@ -430,3 +430,19 @@ test("new librarian route renders D1 workspace and keeps legacy workspace intact
   const legacy = await read("app/librarian/workspace.tsx");
   assert.match(legacy, /revision\.count/u);
 });
+
+test("protected navigation uses full-page anchors so Vinext cannot swallow clicks", async () => {
+  const [catalog, visits, teachers] = await Promise.all([
+    read("app/librarian/d1-workspace.tsx"),
+    read("app/librarian/visits/visit-admin-workspace.tsx"),
+    read("app/librarian/teachers/teacher-management-workspace.tsx"),
+  ]);
+
+  for (const source of [catalog, visits, teachers]) {
+    assert.doesNotMatch(source, /from "next\/link"/u);
+  }
+  assert.match(catalog, /<a href="\/librarian\/visits" className=\{styles\.catalogLink\}>/u);
+  assert.match(catalog, /<a href="\/librarian\/teachers" className=\{styles\.catalogLink\}>/u);
+  assert.match(visits, /<a href="\/librarian\/teachers">Вчителі<\/a>/u);
+  assert.match(teachers, /<a href="\/librarian\/visits">Розклад<\/a>/u);
+});

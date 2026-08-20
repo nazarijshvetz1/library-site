@@ -2,7 +2,6 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import Link from "next/link";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 
 import { visitApi, VisitApiError } from "@/app/visits/visit-client";
@@ -85,13 +84,13 @@ export default function TeacherManagementWorkspace({
   return (
     <main className={styles.shell}>
       <header className={styles.header}>
-        <Link className={styles.brand} href="/librarian">
+        <a className={styles.brand} href="/librarian">
           <img src={LOGO_URL} alt="" width="48" height="48" />
           <span><strong>Єдина бібліотека</strong><small>Керування вчителями</small></span>
-        </Link>
+        </a>
         <nav className={styles.headerNav} aria-label="Розділи кабінету бібліотекаря">
-          <Link href="/librarian">Каталог</Link>
-          <Link href="/librarian/visits">Розклад</Link>
+          <a href="/librarian">Каталог</a>
+          <a href="/librarian/visits">Розклад</a>
         </nav>
         <div className={styles.account}>
           <span><strong>{displayName}</strong><small>{role === "admin" ? "Адміністратор" : "Бібліотекар"}</small></span>
@@ -558,7 +557,7 @@ function VisitManagementPanel() {
 
   return (
     <section className={styles.card} aria-labelledby="visits-title">
-      <div className={styles.cardHeading}><div><span>{data?.bookings.length ?? 0} записів</span><h2 id="visits-title">Відвідування бібліотеки</h2></div><Link className={styles.secondaryLink} href="/librarian/visits">Повне керування розкладом →</Link></div>
+      <div className={styles.cardHeading}><div><span>{data?.bookings.length ?? 0} записів</span><h2 id="visits-title">Відвідування бібліотеки</h2></div><a className={styles.secondaryLink} href="/librarian/visits">Повне керування розкладом →</a></div>
       <div className={styles.filters}><label>Дата<input type="date" value={date} onChange={(event) => setDate(event.currentTarget.value)} /></label><label>Стан<select value={status} onChange={(event) => setStatus(event.currentTarget.value)}><option value="active">Активні</option><option value="cancelled">Скасовані</option><option value="">Усі</option></select></label></div>
       {error ? <div className={styles.error} role="alert">{error}</div> : loading ? <p className={styles.empty}>Оновлюємо розклад…</p> : data?.bookings.length ? <div className={styles.visitList}>{data.bookings.map((booking) => <article key={booking.id}><time>{booking.startTime}–{booking.endTime}</time><span><strong>{booking.surname}</strong><small>{[booking.classLabel, booking.purpose].filter(Boolean).join(" · ") || "Без додаткових відомостей"}</small></span><StatusPill value={booking.status} /></article>)}</div> : <p className={styles.empty}>На цю дату записів немає.</p>}
     </section>

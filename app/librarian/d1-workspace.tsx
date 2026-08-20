@@ -1,8 +1,7 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element */
+/* eslint-disable @next/next/no-img-element, @next/next/no-html-link-for-pages -- Vinext Link navigation fails in production; full-page anchors are intentional. */
 
-import Link from "next/link";
 import {
   type FormEvent,
   type KeyboardEvent,
@@ -580,13 +579,13 @@ export default function D1LibrarianWorkspace({
   return (
     <main className={styles.shell}>
       <header className={styles.header}>
-        <Link className={styles.brand} href="/">
+        <a className={styles.brand} href="/">
           <img src={LOGO_URL} alt="" width="48" height="48" />
           <span>
             <strong>Єдина бібліотека</strong>
             <small>Швидкий кабінет бібліотекаря</small>
           </span>
-        </Link>
+        </a>
         <div className={styles.account}>
           <a
             href={PUBLIC_CATALOG_URL}
@@ -598,14 +597,14 @@ export default function D1LibrarianWorkspace({
             <span className={styles.catalogLinkLabel}>Публічний каталог</span>{" "}
             <span aria-hidden="true">↗</span>
           </a>
-          <Link href="/librarian/visits" className={styles.catalogLink}>
+          <a href="/librarian/visits" className={styles.catalogLink}>
             <span className={styles.catalogLinkLabel}>Відвідування</span>{" "}
             <span aria-hidden="true">▣</span>
-          </Link>
-          <Link href="/librarian/teachers" className={styles.catalogLink}>
+          </a>
+          <a href="/librarian/teachers" className={styles.catalogLink}>
             <span className={styles.catalogLinkLabel}>Вчителі</span>{" "}
             <span aria-hidden="true">●</span>
-          </Link>
+          </a>
           <span>
             <strong>{displayName}</strong>
             <small>{role === "admin" ? "Адміністратор" : "Бібліотекар"}</small>

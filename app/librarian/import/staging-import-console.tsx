@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { STAGING_RESET_CONFIRMATION } from "@/lib/staging-reset-contract";
@@ -195,7 +194,7 @@ export default function ImportConsole({
             <p>Внутрішній інструмент · {production ? "production cutover" : "staging"}</p>
             <h1 id="import-title">Одноразовий імпорт до D1</h1>
           </div>
-          <Link href="/librarian">← Кабінет</Link>
+          <a href="/librarian">← Кабінет</a>
         </div>
 
         <div className={production ? styles.productionWarning : styles.warning}>
