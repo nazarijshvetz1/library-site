@@ -219,7 +219,7 @@ export default function ExcelExportWorkspace({
         <section className={styles.classExportCard} aria-labelledby="class-export-title" aria-busy={classLoading}>
           <div className={styles.cardHeading}>
             <div><p>Окремі документи</p><h2 id="class-export-title">Видані матеріали по класах</h2></div>
-            <span aria-hidden="true">2 XLSX</span>
+            <span aria-hidden="true">2 аркуші</span>
           </div>
           <p className={styles.description}>
             Для кожного активного класу формується окремий Excel-документ. У ньому є два аркуші: «Підручники» та «Методична література, зошити».
