@@ -619,9 +619,13 @@ export default function D1LibrarianWorkspace({
             <span className={styles.catalogLinkLabel}>Вчителі</span>{" "}
             <span aria-hidden="true">●</span>
           </a>
+          <a href="/librarian/export" className={styles.catalogLink}>
+            <span className={styles.catalogLinkLabel}>Експорт в Excel</span>{" "}
+            <span aria-hidden="true">⇩</span>
+          </a>
           <a href="/librarian/import" className={styles.catalogLink}>
             <span className={styles.catalogLinkLabel}>Імпорт з Excel</span>{" "}
-            <span aria-hidden="true">⇩</span>
+            <span aria-hidden="true">⇧</span>
           </a>
           <span>
             <strong>{displayName}</strong>

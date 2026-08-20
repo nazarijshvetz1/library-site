@@ -91,6 +91,7 @@ export default function TeacherManagementWorkspace({
         <nav className={styles.headerNav} aria-label="Розділи кабінету бібліотекаря">
           <a href="/librarian">Каталог</a>
           <a href="/librarian/visits">Розклад</a>
+          <a href="/librarian/export">Експорт в Excel</a>
           <a href="/librarian/import">Імпорт з Excel</a>
         </nav>
         <div className={styles.account}>
