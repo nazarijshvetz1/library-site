@@ -198,6 +198,9 @@ test("teacher orders and notifications page with the frozen opaque cursor", asyn
   assert.match(orders, /useState\(initialMaterialId\)/u);
   assert.match(orders, /response\.items\.find\(\(item\) => item\.id === initialMaterialId\)/u);
   assert.match(orders, /\[selected\.id\]: \{ item: selected, quantity: 1 \}/u);
+  assert.match(orders, /currentQuantity >= item\.availableQuantity/u);
+  assert.match(orders, /maximumInCart \? "У кошику" : cartQuantity > 0 \? "Додати ще" : "Додати"/u);
+  assert.match(orders, /Кількість «\$\{item\.title\}» у кошику збільшено до \$\{nextQuantity\}/u);
   assert.match(orders, /Завантажити ще/u);
   assert.match(notifications, /params\.set\("cursor", cursor\)/u);
   assert.match(notifications, /mergePortalPageById\(current\.notifications, response\.notifications\)/u);

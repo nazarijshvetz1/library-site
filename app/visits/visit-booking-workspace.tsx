@@ -1517,11 +1517,22 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
   }
 
   function add(item: TeacherCatalogItem) {
+    const currentQuantity = cart[item.id]?.quantity ?? 0;
+    if (currentQuantity >= item.availableQuantity) {
+      setNotice(`У кошику вже вся доступна кількість «${item.title}».`);
+      setNoticeTone("info");
+      return;
+    }
     setCart((current) => {
       const existing = current[item.id];
       const quantity = Math.min(item.availableQuantity, (existing?.quantity ?? 0) + 1);
       return { ...current, [item.id]: { item, quantity } };
     });
+    const nextQuantity = currentQuantity + 1;
+    setNotice(currentQuantity
+      ? `Кількість «${item.title}» у кошику збільшено до ${nextQuantity}.`
+      : `«${item.title}» додано до кошика.`);
+    setNoticeTone("success");
   }
 
   function updateQuantity(id: string, quantity: number) {
@@ -1549,13 +1560,17 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
           <input type="search" value={query} onChange={(event) => changeQuery(event.currentTarget.value)} placeholder="Введіть щонайменше 2 символи" autoComplete="off" />
         </label>
         <div className={styles.searchStatus} role="status" aria-live="polite">{loading ? "Шукаємо…" : ""}</div>
-        {items.length ? <div className={styles.catalogCards}>{items.map((item) => (
-          <article key={item.id}>
+        {items.length ? <div className={styles.catalogCards}>{items.map((item) => {
+          const cartQuantity = cart[item.id]?.quantity ?? 0;
+          const maximumInCart = cartQuantity >= item.availableQuantity;
+          return <article key={item.id}>
             <TeacherCover item={item} />
             <div><strong>{item.title}</strong><span>{[item.author || "Автор не вказаний", item.year || "Рік не вказано"].join(" · ")}</span><small>{item.availableQuantity} доступно</small></div>
-            <button type="button" onClick={() => add(item)} disabled={item.availableQuantity < 1 || cartRows.length >= 10 && !cart[item.id]}>Додати</button>
+            <button type="button" onClick={() => add(item)} disabled={item.availableQuantity < 1 || maximumInCart || cartRows.length >= 10 && !cart[item.id]}>
+              {maximumInCart ? "У кошику" : cartQuantity > 0 ? "Додати ще" : "Додати"}
+            </button>
           </article>
-        ))}</div> : null}
+        })}</div> : null}
       </div>
       <aside className={styles.card} aria-labelledby="cart-title">
         <div className={styles.cardHeading}><div><span>Крок 2 · до 10 позицій</span><h2 id="cart-title">Кошик</h2></div><strong>{cartRows.length}/10</strong></div>
