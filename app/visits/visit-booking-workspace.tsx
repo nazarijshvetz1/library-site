@@ -67,6 +67,7 @@ type Props = {
   initialStartTime: string;
   initialEndTime: string;
   initialTab?: "overview" | "visits" | "orders" | "notifications";
+  initialOrderMaterialId?: string;
 };
 
 type TeacherTab = NonNullable<Props["initialTab"]>;
@@ -89,6 +90,7 @@ export default function VisitBookingWorkspace({
   initialStartTime,
   initialEndTime,
   initialTab = "overview",
+  initialOrderMaterialId = "",
 }: Props) {
   const [session, setSession] = useState<VisitTeacherSessionEnvelope | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
@@ -224,6 +226,7 @@ export default function VisitBookingWorkspace({
       initialStartTime={initialStartTime}
       initialEndTime={initialEndTime}
       initialTab={initialTab}
+      initialOrderMaterialId={initialOrderMaterialId}
     />
   );
 }
@@ -860,6 +863,7 @@ function VisitBookingPanel({
   initialStartTime,
   initialEndTime,
   initialTab,
+  initialOrderMaterialId,
 }: {
   teacher: VisitTeacherIdentity;
   pendingScope: string;
@@ -871,6 +875,7 @@ function VisitBookingPanel({
   initialStartTime: string;
   initialEndTime: string;
   initialTab: "overview" | "visits" | "orders" | "notifications";
+  initialOrderMaterialId: string;
 }) {
   const storageKey = visitPendingKey("teacher", pendingScope);
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -1228,7 +1233,7 @@ function VisitBookingPanel({
         </section>
         </> : null}
 
-        {activeTab === "orders" ? <TeacherOrdersPanel pendingScope={pendingScope} /> : null}
+        {activeTab === "orders" ? <TeacherOrdersPanel pendingScope={pendingScope} initialMaterialId={initialOrderMaterialId} /> : null}
         {activeTab === "notifications" ? <TeacherNotificationsPanel pendingScope={pendingScope} /> : null}
         {securityOpen ? <TeacherSecurityPanel pendingScope={pendingScope} onClose={() => setSecurityOpen(false)} onSessionRotated={onSessionRotated} /> : null}
       </section>
@@ -1356,8 +1361,8 @@ function TeacherOverview({
   );
 }
 
-function TeacherOrdersPanel({ pendingScope }: { pendingScope: string }) {
-  const [query, setQuery] = useState("");
+function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope: string; initialMaterialId: string }) {
+  const [query, setQuery] = useState(initialMaterialId);
   const [items, setItems] = useState<TeacherCatalogItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
@@ -1370,6 +1375,7 @@ function TeacherOrdersPanel({ pendingScope }: { pendingScope: string }) {
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [pending, setPending] = useState<OrderPendingIntent | null>(null);
+  const initialMaterialApplied = useRef(false);
   const normalizedQuery = query.trim();
   const storageKey = `library.teacher.orders.pending.v1:${pendingScope}`;
 
@@ -1414,8 +1420,22 @@ function TeacherOrdersPanel({ pendingScope }: { pendingScope: string }) {
         const params = new URLSearchParams({ q: normalizedQuery, available: "true", limit: "12" });
         const response = await visitApi<TeacherCatalogEnvelope>(`/api/catalog-v2?${params.toString()}`, { signal: controller.signal });
         setItems(response.items);
+        if (initialMaterialId && !initialMaterialApplied.current) {
+          initialMaterialApplied.current = true;
+          const selected = response.items.find((item) => item.id === initialMaterialId);
+          if (selected) {
+            setCart((current) => current[selected.id]
+              ? current
+              : { ...current, [selected.id]: { item: selected, quantity: 1 } });
+            setNotice(`«${selected.title}» додано до кошика. Перевірте кількість і надішліть замовлення.`);
+            setNoticeTone("success");
+          } else {
+            setNotice("Цей матеріал зараз недоступний для замовлення. Можна знайти інший у каталозі нижче.");
+            setNoticeTone("info");
+          }
+        }
         if (!response.items.length) {
-          setNotice("За цим запитом доступних матеріалів не знайдено.");
+          if (!initialMaterialId) setNotice("За цим запитом доступних матеріалів не знайдено.");
           setNoticeTone("info");
         }
       } catch {
@@ -1431,7 +1451,7 @@ function TeacherOrdersPanel({ pendingScope }: { pendingScope: string }) {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [normalizedQuery]);
+  }, [initialMaterialId, normalizedQuery]);
 
   function changeQuery(value: string) {
     setQuery(value);

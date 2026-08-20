@@ -5,6 +5,7 @@ import worker from "../dist-catalog/server/index.js";
 import {
   catalogDetailApiUrl,
   materialIdFromUrl,
+  materialOrderUrl,
   materialIssueText,
   materialShareText,
   newestMaterialsByCatalogId,
@@ -24,6 +25,14 @@ import {
   visitsPublicApiUrl,
   visitWeekDates,
 } from "../source/app.js";
+
+test("builds a privacy-limited teacher order handoff URL", () => {
+  const url = materialOrderUrl("https://library.example/teacher", "cat-0112");
+  assert.equal(url, "https://library.example/teacher?tab=orders&material=CAT-0112");
+  assert.equal(materialOrderUrl("https://library.example/librarian", "CAT-0112"), "");
+  assert.equal(materialOrderUrl("https://library.example/teacher", "bad-id"), "");
+  assert.doesNotMatch(url, /[?&](?:name|email|teacher|class|purpose)=/u);
+});
 
 test("offers bounded title suggestions with stable relevance", () => {
   const items = [
@@ -228,6 +237,9 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(app, /item\.year \|\| "Рік не вказаний"/);
   assert.match(app, /data-report-error/);
   assert.match(app, /class="material-links"/);
+  assert.match(app, /class="cover-wrap cover-button"[^>]*data-details=/u);
+  assert.match(app, /class="order-material-button"/u);
+  assert.match(app, /Замовити примірники/u);
   assert.match(app, /target="_blank" rel="noopener noreferrer"/);
   assert.match(app, /raw\.thumbnailUrl/);
   assert.match(app, /raw\.publicationType/);
@@ -235,6 +247,8 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(css, /env\(safe-area-inset-bottom\)/);
   assert.match(css, /min-height:44px/);
   assert.match(css, /\.title-suggestions/);
+  assert.match(css, /\.cover-button/);
+  assert.match(css, /\.dialog-order/);
 });
 
 test("ships an accessible responsive public visit schedule and protected handoff", async () => {

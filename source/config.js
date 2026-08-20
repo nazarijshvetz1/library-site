@@ -5,5 +5,6 @@ window.LIBRARY_CONFIG = Object.freeze({
   visitsApiUrl: "https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/api/visits/public",
   // Заявки створюються лише після переходу до захищеного кабінету.
   visitsBookingUrl: "https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/teacher",
+  teacherPortalUrl: "https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/teacher",
   refreshMinutes: 10,
 });

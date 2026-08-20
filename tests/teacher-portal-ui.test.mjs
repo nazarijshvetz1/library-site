@@ -27,10 +27,13 @@ test("teacher cabinet is the primary route and legacy visits keeps bounded deep 
   ]);
   assert.match(teacherPage, /title: "Кабінет учителя"/u);
   assert.match(teacherPage, /initialTab=\{boundedTab\(params\?\.tab\)\}/u);
+  assert.match(teacherPage, /initialOrderMaterialId=\{boundedMaterialId\(params\?\.material\)\}/u);
+  assert.match(teacherPage, /\^CAT-\\d\{4,\}\$/u);
   assert.match(visitsPage, /initialTab="visits"/u);
   assert.match(workspace, /initialDate=\{initialDate\}/u);
   assert.match(workspace, /initialStartTime=\{initialStartTime\}/u);
   assert.match(workspace, /initialEndTime=\{initialEndTime\}/u);
+  assert.match(workspace, /initialOrderMaterialId=\{initialOrderMaterialId\}/u);
 });
 
 test("public teacher entry renders a privacy-limited schedule through the full 90 day horizon", async () => {
@@ -192,6 +195,9 @@ test("teacher orders and notifications page with the frozen opaque cursor", asyn
   assert.match(orders, /params\.set\("cursor", cursor\)/u);
   assert.match(orders, /mergePortalPageById\(current, response\.requests\)/u);
   assert.match(orders, /requestPage\.nextCursor/u);
+  assert.match(orders, /useState\(initialMaterialId\)/u);
+  assert.match(orders, /response\.items\.find\(\(item\) => item\.id === initialMaterialId\)/u);
+  assert.match(orders, /\[selected\.id\]: \{ item: selected, quantity: 1 \}/u);
   assert.match(orders, /Завантажити ще/u);
   assert.match(notifications, /params\.set\("cursor", cursor\)/u);
   assert.match(notifications, /mergePortalPageById\(current\.notifications, response\.notifications\)/u);

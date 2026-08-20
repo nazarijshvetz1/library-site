@@ -39,6 +39,16 @@ export function newestMaterialsByCatalogId(items, limit = 12) {
     .slice(0, maximum);
 }
 
+export function materialOrderUrl(value, materialId, baseUrl = "https://catalog.invalid/") {
+  const endpoint = normalizeVisitsBookingUrl(value, baseUrl);
+  const id = normalizeCatalogId(materialId);
+  if (!endpoint || !id) return "";
+  const url = new URL(endpoint);
+  url.searchParams.set("tab", "orders");
+  url.searchParams.set("material", id);
+  return url.toString();
+}
+
 function normalizedSearchText(value) {
   return String(value || "")
     .toLocaleLowerCase("uk")
@@ -686,9 +696,9 @@ function filteredMaterials() {
 }
 
 function coverMarkup(item, large = false) {
-  const fallback = `<div class="cover-fallback"><span>${escapeHtml(item.subject)}</span></div>`;
+  const fallback = `<span class="cover-fallback"><span>${escapeHtml(item.subject)}</span></span>`;
   if (!item.cover) return fallback;
-  return `<img data-cover src="${escapeHtml(item.cover)}" alt="Обкладинка: ${escapeHtml(item.title)}" loading="${large ? "eager" : "lazy"}"><div class="cover-fallback" hidden><span>${escapeHtml(item.subject)}</span></div>`;
+  return `<img data-cover src="${escapeHtml(item.cover)}" alt="Обкладинка: ${escapeHtml(item.title)}" loading="${large ? "eager" : "lazy"}"><span class="cover-fallback" hidden><span>${escapeHtml(item.subject)}</span></span>`;
 }
 
 function bindCoverErrors(root) {
@@ -700,7 +710,7 @@ function bindCoverErrors(root) {
 
 function cardMarkup(item) {
   const available = Number(item.availableQuantity) > 0;
-  return `<article class="material-card"><div class="cover-wrap"><span class="class-badge">${escapeHtml(classLabel(item))}</span>${coverMarkup(item)}</div><div class="card-body">
+  return `<article class="material-card"><button class="cover-wrap cover-button" type="button" data-details="${escapeHtml(item.id)}" aria-label="Відкрити інформацію про ${escapeHtml(item.title)}"><span class="class-badge">${escapeHtml(classLabel(item))}</span>${coverMarkup(item)}</button><div class="card-body">
     <div class="card-kicker"><span>${escapeHtml(item.subject)}</span><span class="availability ${available ? "" : "none"}">${available ? "У наявності" : "Немає"}</span></div>
     <h3>${escapeHtml(item.title)}</h3><p class="author-line">${escapeHtml(item.author)}${item.year ? ` · ${escapeHtml(item.year)}` : ""}</p>
     <div class="card-footer"><span class="quantity"><strong>${escapeHtml(item.quantity)}</strong><span>примірників</span></span><button class="details-button" type="button" data-details="${escapeHtml(item.id)}">Детальніше →</button></div>
@@ -820,6 +830,8 @@ function directMaterialUrl(id) {
 
 function renderMaterialDialog(item, detailState = {}) {
   const directUrl = directMaterialUrl(item.id);
+  const orderUrl = materialOrderUrl(config.teacherPortalUrl || config.visitsBookingUrl, item.id, window.location.href);
+  const canOrder = Boolean(orderUrl) && Number(item.availableQuantity) > 0;
   const secondaryMeta = [item.publisher, item.isbn ? `ISBN ${item.isbn}` : ""].filter(Boolean);
   elements.dialogContent.innerHTML = `<div class="dialog-layout"><div class="dialog-cover">${coverMarkup(item, true)}</div><div class="dialog-copy">
     <p class="dialog-id">${escapeHtml(item.id)} · ${escapeHtml(item.rubric)}</p><h2>${escapeHtml(item.title)}</h2>
@@ -828,12 +840,17 @@ function renderMaterialDialog(item, detailState = {}) {
     <div class="dialog-tags"><span>${escapeHtml(classLabel(item))}</span><span>${escapeHtml(item.subject)}</span><span>${escapeHtml(item.type)}</span></div>
     ${stockMarkup(item, detailState)}
     ${linksMarkup(item, detailState)}
+    <div class="dialog-order">
+      ${canOrder
+        ? `<a class="order-material-button" href="${escapeHtml(orderUrl)}" target="_blank" rel="noopener noreferrer">Замовити примірники <span aria-hidden="true">→</span></a><p>Матеріал буде додано до кошика в кабінеті учителя. Там можна змінити кількість і надіслати замовлення бібліотекарю.</p>`
+        : `<span class="order-material-unavailable" aria-disabled="true">Зараз немає доступних примірників для замовлення</span><p>Перевірте картку пізніше — доступність оновлюється з бібліотечної бази.</p>`}
+    </div>
     <div class="dialog-actions" aria-label="Дії з карткою">
       <button type="button" data-copy-material="${escapeHtml(item.id)}">Скопіювати посилання</button>
       <button type="button" data-share-material="${escapeHtml(item.id)}">Поділитися</button>
       <button class="report-error-button" type="button" data-report-error="${escapeHtml(item.id)}">Повідомити про помилку</button>
     </div>
-    <p class="dialog-note">Каталог доступний лише для перегляду. Зміни вносяться у захищеному кабінеті бібліотекаря.</p>
+    <p class="dialog-note">Перегляд каталогу відкритий для всіх. Замовлення та їхня історія доступні після входу до кабінету учителя.</p>
   </div></div>`;
   bindCoverErrors(elements.dialogContent);
   return directUrl;

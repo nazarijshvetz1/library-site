@@ -22,6 +22,7 @@ export default async function TeacherPage({ searchParams }: PageProps) {
       initialStartTime={boundedTime(params?.start)}
       initialEndTime={boundedTime(params?.end)}
       initialTab={boundedTab(params?.tab)}
+      initialOrderMaterialId={boundedMaterialId(params?.material)}
     />
   );
 }
@@ -36,6 +37,11 @@ function boundedTime(value: string | string[] | undefined): string {
   return typeof value === "string" && /^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(value)
     ? value
     : "";
+}
+
+function boundedMaterialId(value: string | string[] | undefined): string {
+  const candidate = typeof value === "string" ? value.trim().toUpperCase() : "";
+  return /^CAT-\d{4,}$/u.test(candidate) ? candidate : "";
 }
 
 function boundedTab(value: string | string[] | undefined): "overview" | "visits" | "orders" | "notifications" {
