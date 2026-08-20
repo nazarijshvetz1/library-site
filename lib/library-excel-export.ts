@@ -5,12 +5,24 @@ import type {
   LibraryExportSnapshot,
 } from "./library-export-store.ts";
 
-type ColumnKind = "text" | "number" | "date" | "datetime";
-type Column = { header: string; width: number; kind?: ColumnKind; hidden?: boolean };
+export type ExcelColumnKind = "text" | "number" | "date" | "datetime";
+export type ExcelColumn = { header: string; width: number; kind?: ExcelColumnKind; hidden?: boolean };
 type FormulaCell = { formula: string; value: number; kind?: ColumnKind };
 type TypedCell = { value: string | number; kind: ColumnKind };
-type Cell = string | number | null | FormulaCell | TypedCell;
-type Sheet = { name: string; columns: Column[]; rows: Cell[][] };
+export type ExcelCell = string | number | null | FormulaCell | TypedCell;
+export type ExcelSheet = {
+  name: string;
+  columns: ExcelColumn[];
+  rows: ExcelCell[][];
+  metadata?: Array<[label: string, value: string]>;
+  emptyMessage?: string;
+  printLandscape?: boolean;
+};
+
+type ColumnKind = ExcelColumnKind;
+type Column = ExcelColumn;
+type Cell = ExcelCell;
+type Sheet = ExcelSheet;
 
 export type LibraryExcelExport = {
   bytes: Uint8Array;
@@ -41,6 +53,20 @@ export function createLibraryExcelExport(snapshot: LibraryExportSnapshot): Libra
     sheetCount: sheets.length,
     rowCount: sheets.reduce((total, sheet) => total + sheet.rows.length, 0),
   };
+}
+
+export function createExcelWorkbookBytes(
+  sheets: ExcelSheet[],
+  generatedAt: string,
+): Uint8Array {
+  return zipStore(workbookEntries(sheets, generatedAt), generatedAt);
+}
+
+export function createStoredZipArchive(
+  entries: Array<{ name: string; data: Uint8Array }>,
+  generatedAt: string,
+): Uint8Array {
+  return zipStore(entries, generatedAt);
 }
 
 export function exportFileName(isoDate: string): string {
@@ -415,23 +441,53 @@ function workbookEntries(sheets: Sheet[], generatedAt: string): Array<{ name: st
 
 function worksheetXml(sheet: Sheet): string {
   const lastColumn = columnName(sheet.columns.length);
-  const lastRow = Math.max(1, sheet.rows.length + 1);
+  const metadata = sheet.metadata ?? [];
+  const headerRow = metadata.length > 0 ? metadata.length + 2 : 1;
+  const bodyStartRow = headerRow + 1;
+  const hasEmptyMessage = sheet.rows.length === 0 && Boolean(sheet.emptyMessage);
+  const lastRow = Math.max(headerRow, sheet.rows.length + headerRow, hasEmptyMessage ? bodyStartRow : headerRow);
   const cols = sheet.columns.map((column, index) => `<col min="${index + 1}" max="${index + 1}" width="${column.width}" customWidth="1"${column.hidden ? ' hidden="1"' : ""}/>`).join("");
-  const header = `<row r="1" ht="30" customHeight="1">${sheet.columns.map((column, index) => cellXml(index + 1, 1, column.header, "text", true)).join("")}</row>`;
-  const body = sheet.rows.map((row, rowIndex) => {
-    const excelRow = rowIndex + 2;
-    const cells = sheet.columns.map((column, columnIndex) => cellXml(columnIndex + 1, excelRow, row[columnIndex] ?? "", column.kind ?? "text", false)).join("");
-    return `<row r="${excelRow}" ht="24" customHeight="1">${cells}</row>`;
+  const metadataRows = metadata.map(([label, value], index) => {
+    const row = index + 1;
+    return `<row r="${row}" ht="25" customHeight="1">${styledTextCellXml(1, row, label, 6)}${styledTextCellXml(2, row, value, 7)}</row>`;
   }).join("");
+  const header = `<row r="${headerRow}" ht="30" customHeight="1">${sheet.columns.map((column, index) => cellXml(index + 1, headerRow, column.header, "text", true)).join("")}</row>`;
+  const body = sheet.rows.map((row, rowIndex) => {
+    const excelRow = rowIndex + bodyStartRow;
+    const cells = sheet.columns.map((column, columnIndex) => cellXml(columnIndex + 1, excelRow, row[columnIndex] ?? "", column.kind ?? "text", false)).join("");
+    return `<row r="${excelRow}" ht="32" customHeight="1">${cells}</row>`;
+  }).join("");
+  const emptyRow = hasEmptyMessage
+    ? `<row r="${bodyStartRow}" ht="32" customHeight="1">${styledTextCellXml(1, bodyStartRow, sheet.emptyMessage ?? "", 7)}</row>`
+    : "";
+  const mergeRanges = [
+    ...metadata.map((_, index) => `B${index + 1}:${lastColumn}${index + 1}`),
+    ...(hasEmptyMessage ? [`A${bodyStartRow}:${lastColumn}${bodyStartRow}`] : []),
+  ];
+  const merges = mergeRanges.length > 0
+    ? `<mergeCells count="${mergeRanges.length}">${mergeRanges.map((range) => `<mergeCell ref="${range}"/>`).join("")}</mergeCells>`
+    : "";
+  const filterEnd = Math.max(headerRow, sheet.rows.length + headerRow);
+  const printSettings = sheet.printLandscape
+    ? `<pageMargins left="0.25" right="0.25" top="0.5" bottom="0.5" header="0.2" footer="0.2"/><pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>`
+    : "";
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  ${sheet.printLandscape ? '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>' : ""}
   <dimension ref="A1:${lastColumn}${lastRow}"/>
-  <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews>
+  <sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="${headerRow}" topLeftCell="A${bodyStartRow}" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A${bodyStartRow}" sqref="A${bodyStartRow}"/></sheetView></sheetViews>
   <sheetFormatPr defaultRowHeight="24"/>
   <cols>${cols}</cols>
-  <sheetData>${header}${body}</sheetData>
-  <autoFilter ref="A1:${lastColumn}${lastRow}"/>
+  <sheetData>${metadataRows}${header}${body}${emptyRow}</sheetData>
+  ${merges}
+  <autoFilter ref="A${headerRow}:${lastColumn}${filterEnd}"/>
+  ${printSettings}
 </worksheet>`;
+}
+
+function styledTextCellXml(column: number, row: number, value: string, style: number): string {
+  const safe = cleanXmlText(value);
+  return `<c r="${columnName(column)}${row}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(safe)}</t></is></c>`;
 }
 
 function cellXml(column: number, row: number, cell: Cell, fallbackKind: ColumnKind, header: boolean): string {
@@ -519,17 +575,19 @@ function stylesXml(): string {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <numFmts count="2"><numFmt numFmtId="164" formatCode="yyyy-mm-dd"/><numFmt numFmtId="165" formatCode="yyyy-mm-dd hh:mm"/></numFmts>
-  <fonts count="2"><font><sz val="14"/><name val="Times New Roman"/><family val="1"/><charset val="204"/></font><font><b/><sz val="14"/><color rgb="FFFFFFFF"/><name val="Times New Roman"/><family val="1"/><charset val="204"/></font></fonts>
+  <fonts count="3"><font><sz val="14"/><name val="Times New Roman"/><family val="1"/><charset val="204"/></font><font><b/><sz val="14"/><color rgb="FFFFFFFF"/><name val="Times New Roman"/><family val="1"/><charset val="204"/></font><font><b/><sz val="14"/><color rgb="FF163420"/><name val="Times New Roman"/><family val="1"/><charset val="204"/></font></fonts>
   <fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF215732"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFEAF2E7"/><bgColor indexed="64"/></patternFill></fill></fills>
   <borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFD7E0D5"/></left><right style="thin"><color rgb="FFD7E0D5"/></right><top style="thin"><color rgb="FFD7E0D5"/></top><bottom style="thin"><color rgb="FFD7E0D5"/></bottom><diagonal/></border></borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="6">
+  <cellXfs count="8">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyFont="1"/>
     <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
     <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
     <xf numFmtId="3" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
     <xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
     <xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
   </cellXfs>
   <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;

@@ -37,6 +37,7 @@
 .primaryCard, .sideCard { border: 1px solid #d7e0d3; border-radius: 22px; background: #fffefb; box-shadow: 0 18px 48px rgba(22, 52, 32, 0.08); }
 .primaryCard { padding: 30px; }
 .sideCard { padding: 26px; }
+.classExportCard { margin-top: 22px; padding: 30px; border: 1px solid #d7e0d3; border-radius: 22px; background: #fffefb; box-shadow: 0 18px 48px rgba(22, 52, 32, 0.08); }
 .cardHeading { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
 .cardHeading h2, .sideCard h2 { margin: 0; font: 650 30px/1.15 Georgia, serif; }
 .cardHeading > span { min-width: 58px; min-height: 42px; display: grid; place-items: center; border-radius: 10px; background: #e7f0df; color: #29653a; font-size: 12px; font-weight: 900; }
@@ -53,6 +54,21 @@
 .downloadButton:hover:not(:disabled) { background: #194728; }
 .downloadButton:disabled { cursor: wait; opacity: 0.68; }
 .downloadButton:focus-visible { outline: 3px solid rgba(224, 173, 53, 0.6); outline-offset: 3px; }
+
+.classExportGrid { margin-top: 22px; display: grid; grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.1fr); gap: 18px; align-items: end; }
+.classSelect { display: grid; gap: 8px; }
+.classSelect > span { color: #35563f; font-size: 12px; font-weight: 850; }
+.classSelect select { width: 100%; min-height: 48px; padding: 0 42px 0 14px; border: 1px solid #cfdacd; border-radius: 12px; background: #fff; color: #163420; font: inherit; font-size: 14px; }
+.classSelect select:focus-visible { outline: 3px solid rgba(47, 116, 65, 0.24); outline-offset: 2px; }
+.classDetails { min-height: 48px; padding: 11px 14px; display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; border-radius: 12px; background: #f2f6ee; color: #50655a; font-size: 12px; line-height: 1.45; }
+.classDetails strong { color: #234c2f; }
+.inlineError { color: #8d2f27; }
+.classActions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.classActions .downloadButton { margin-top: 0; }
+.secondaryButton { width: 100%; min-height: 54px; border: 1px solid #b8cbb8; border-radius: 13px; background: #eef4e9; color: #204d2d; cursor: pointer; font-size: 15px; font-weight: 900; }
+.secondaryButton:hover:not(:disabled) { background: #e2eddd; }
+.secondaryButton:disabled { cursor: wait; opacity: 0.62; }
+.secondaryButton:focus-visible { outline: 3px solid rgba(224, 173, 53, 0.6); outline-offset: 3px; }
 
 .error, .success { margin: 14px 0 0; padding: 14px; border-radius: 12px; font-size: 13px; line-height: 1.5; }
 .error { background: #fff0ed; color: #8d2f27; }
@@ -74,6 +90,7 @@
   .header { grid-template-columns: 1fr auto; }
   .headerNav { grid-column: 1 / -1; grid-row: 2; padding-bottom: 14px; overflow-x: auto; }
   .layout { grid-template-columns: 1fr; }
+  .classExportGrid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 620px) {
@@ -84,7 +101,8 @@
   .headerNav { gap: 16px; }
   .page { width: min(100% - 26px, 1180px); padding-top: 34px; }
   .intro h1 { font-size: 38px; }
-  .primaryCard, .sideCard { padding: 20px; border-radius: 17px; }
+  .primaryCard, .sideCard, .classExportCard { padding: 20px; border-radius: 17px; }
   .cardHeading h2, .sideCard h2 { font-size: 25px; }
   .checkList { grid-template-columns: 1fr; }
+  .classActions { grid-template-columns: 1fr; }
 }
