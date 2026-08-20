@@ -119,6 +119,7 @@ export default function LibrarianVisitWorkspace({ pendingScope, displayName, wri
         <div className={styles.account}>
           <a href="/librarian">Кабінет</a>
           <a href="/librarian/teachers">Вчителі</a>
+          <a href="/librarian/import">Імпорт з Excel</a>
           <span><strong>{displayName}</strong><small>Бібліотекар</small></span>
           <a href={signOutHref}>Вийти</a>
         </div>
