@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 
 import {
   type CatalogD1Database,
-  listCatalogRubrics,
+  listCatalogMaterialFacets,
 } from "@/lib/catalog-d1";
 import {
   authorizeLibrarianApi,
@@ -18,20 +18,20 @@ export async function GET(): Promise<Response> {
   const { access } = authorization.value;
 
   try {
-    const rubrics = await listCatalogRubrics(
+    const facets = await listCatalogMaterialFacets(
       env.DB as unknown as CatalogD1Database,
     );
     return librarianJson({
       schemaVersion: 2,
       success: true,
-      rubrics,
+      ...facets,
       writesEnabled: access.writesEnabled,
     });
   } catch {
     return librarianError(
       503,
       "catalog_facets_unavailable",
-      "Не вдалося завантажити рубрики каталогу.",
+      "Не вдалося завантажити параметри каталогу.",
       access.writesEnabled,
     );
   }

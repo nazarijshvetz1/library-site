@@ -133,6 +133,8 @@ type SearchEnvelope = {
 type CatalogFacetsEnvelope = {
   success: boolean;
   rubrics: string[];
+  subjects: string[];
+  publicationTypes: string[];
 };
 
 type DetailEnvelope = {
@@ -414,7 +416,9 @@ export default function D1LibrarianWorkspace({
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [rubrics, setRubrics] = useState<string[]>([]);
-  const [rubricState, setRubricState] = useState<LoadState>("loading");
+  const [subjects, setSubjects] = useState<string[]>([]);
+  const [publicationTypes, setPublicationTypes] = useState<string[]>([]);
+  const [facetsState, setFacetsState] = useState<LoadState>("loading");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selectedIdRef = useRef<string | null>(null);
   const detailRequestRef = useRef(0);
@@ -487,10 +491,12 @@ export default function D1LibrarianWorkspace({
       signal: controller.signal,
     }).then((response) => {
       setRubrics(response.rubrics);
-      setRubricState("ready");
+      setSubjects(response.subjects ?? []);
+      setPublicationTypes(response.publicationTypes ?? []);
+      setFacetsState("ready");
     }).catch(() => {
       if (controller.signal.aborted) return;
-      setRubricState("error");
+      setFacetsState("error");
     });
     return () => controller.abort();
   }, [refreshToken]);
@@ -700,7 +706,9 @@ export default function D1LibrarianWorkspace({
                 state={searchState}
                 error={searchError}
                 rubrics={rubrics}
-                rubricState={rubricState}
+                subjects={subjects}
+                publicationTypes={publicationTypes}
+                facetsState={facetsState}
                 suggestionsReady={resolvedSearchScope === catalogFiltersKey(filters)}
                 selectedId={selectedId}
                 onSelect={selectMaterial}
@@ -860,7 +868,9 @@ function CatalogSearch({
   state,
   error,
   rubrics,
-  rubricState,
+  subjects,
+  publicationTypes,
+  facetsState,
   suggestionsReady,
   selectedId,
   onSelect,
@@ -874,7 +884,9 @@ function CatalogSearch({
   state: LoadState;
   error: string;
   rubrics: string[];
-  rubricState: LoadState;
+  subjects: string[];
+  publicationTypes: string[];
+  facetsState: LoadState;
   suggestionsReady: boolean;
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -1050,10 +1062,10 @@ function CatalogSearch({
                 <option key={rubric} value={rubric}>{rubric}</option>
               ))}
             </select>
-            {rubricState === "loading" ? (
+            {facetsState === "loading" ? (
               <small className={styles.filterHint}>Оновлюємо список рубрик…</small>
             ) : null}
-            {rubricState === "error" ? (
+            {facetsState === "error" ? (
               <small className={styles.filterError}>Рубрики тимчасово недоступні.</small>
             ) : null}
           </label>
@@ -1071,21 +1083,71 @@ function CatalogSearch({
               ))}
             </select>
           </label>
-          <label>
+          <label className={styles.autocompleteFilter}>
             <span>Предмет</span>
             <input
+              type="search"
+              list="catalog-subject-options"
               value={filters.subject}
               onChange={(event) => update("subject", event.target.value)}
               placeholder="Наприклад, математика"
+              autoComplete="off"
+              aria-autocomplete="list"
+              aria-describedby="catalog-subject-filter-hint"
             />
+            <datalist id="catalog-subject-options">
+              {subjects.map((subject) => (
+                <option key={subject} value={subject} />
+              ))}
+            </datalist>
+            {facetsState === "loading" ? (
+              <small id="catalog-subject-filter-hint" className={styles.filterHint}>
+                Оновлюємо список предметів…
+              </small>
+            ) : null}
+            {facetsState === "ready" ? (
+              <small id="catalog-subject-filter-hint" className={styles.filterHint}>
+                Почніть вводити — з’являться предмети з каталогу.
+              </small>
+            ) : null}
+            {facetsState === "error" ? (
+              <small id="catalog-subject-filter-hint" className={styles.filterError}>
+                Підказки недоступні. Введіть повну назву предмета вручну.
+              </small>
+            ) : null}
           </label>
-          <label>
+          <label className={styles.autocompleteFilter}>
             <span>Тип видання</span>
             <input
+              type="search"
+              list="catalog-publication-type-options"
               value={filters.publicationType}
               onChange={(event) => update("publicationType", event.target.value)}
               placeholder="Підручник, атлас…"
+              autoComplete="off"
+              aria-autocomplete="list"
+              aria-describedby="catalog-publication-type-filter-hint"
             />
+            <datalist id="catalog-publication-type-options">
+              {publicationTypes.map((publicationType) => (
+                <option key={publicationType} value={publicationType} />
+              ))}
+            </datalist>
+            {facetsState === "loading" ? (
+              <small id="catalog-publication-type-filter-hint" className={styles.filterHint}>
+                Оновлюємо список типів видань…
+              </small>
+            ) : null}
+            {facetsState === "ready" ? (
+              <small id="catalog-publication-type-filter-hint" className={styles.filterHint}>
+                Почніть вводити — з’являться типи видань із каталогу.
+              </small>
+            ) : null}
+            {facetsState === "error" ? (
+              <small id="catalog-publication-type-filter-hint" className={styles.filterError}>
+                Підказки недоступні. Введіть повну назву типу видання вручну.
+              </small>
+            ) : null}
           </label>
           <label className={styles.checkField}>
             <input

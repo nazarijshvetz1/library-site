@@ -574,6 +574,15 @@
 .filterHint { color: #6d7a71; }
 .filterError { color: #a33a2c; }
 
+.filterGrid .autocompleteFilter {
+  align-content: start;
+}
+
+.autocompleteFilter .filterHint,
+.autocompleteFilter .filterError {
+  min-height: 22px;
+}
+
 .filterGrid .checkField {
   grid-column: 1 / -1;
   display: flex;

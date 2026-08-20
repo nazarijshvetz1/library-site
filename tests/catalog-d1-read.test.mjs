@@ -7,6 +7,7 @@ import {
   CatalogQueryValidationError,
   getCatalogCoverAsset,
   getCatalogMaterialDetail,
+  listCatalogMaterialFacets,
   listCatalogMaterials,
   listCatalogRubrics,
   normalizeCatalogSearchText,
@@ -294,6 +295,24 @@ test("catalog rubrics are bounded, sorted and exclude archived materials", async
   }
 });
 
+test("catalog facets return bounded, sorted values from active materials", async () => {
+  const { sqlite, db } = fixture();
+  try {
+    assert.deepEqual(await listCatalogMaterialFacets(db), {
+      rubrics: ["Збірники", "Зошити", "Підручники"],
+      subjects: ["Історія", "Математика", "Фізика"],
+      publicationTypes: ["Атлас", "Збірник", "Підручник"],
+    });
+    assert.deepEqual(await listCatalogMaterialFacets(db, 2), {
+      rubrics: ["Збірники", "Зошити"],
+      subjects: ["Історія", "Математика"],
+      publicationTypes: ["Атлас", "Збірник"],
+    });
+  } finally {
+    sqlite.close();
+  }
+});
+
 test("cursor pagination is stable, scoped to filters and supports newest sorting", async () => {
   const { sqlite, db } = fixture();
   try {
@@ -468,7 +487,8 @@ test("public routes are cacheable and librarian material routes require authoriz
   assert.match(cover, /max-age=31536000, immutable/);
   assert.match(privateSearch, /authorizeLibrarianApi\(\)/);
   assert.match(privateFacets, /authorizeLibrarianApi\(\)/);
-  assert.match(privateFacets, /listCatalogRubrics/u);
+  assert.match(privateFacets, /listCatalogMaterialFacets/u);
+  assert.match(privateFacets, /\.\.\.facets/u);
   assert.match(privateDetail, /authorizeLibrarianApi\(\)/);
   assert.match(privateDetail, /getCatalogMaterialDetail\([\s\S]*"librarian"/);
 });

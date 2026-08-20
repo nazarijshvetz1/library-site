@@ -11,6 +11,7 @@ export const MAX_PUBLIC_CATALOG_LIMIT = 48;
 export const DEFAULT_LIBRARIAN_SEARCH_LIMIT = 12;
 export const MAX_LIBRARIAN_SEARCH_LIMIT = 20;
 export const MAX_CATALOG_RUBRIC_OPTIONS = 200;
+export const MAX_CATALOG_FACET_OPTIONS = 200;
 
 type D1Value = string | number | null;
 
@@ -114,6 +115,12 @@ export type CatalogListResult = {
   items: CatalogSummary[];
   nextCursor: string | null;
   hasMore: boolean;
+};
+
+export type CatalogMaterialFacets = {
+  rubrics: string[];
+  subjects: string[];
+  publicationTypes: string[];
 };
 
 export type CatalogCoverAsset = {
@@ -270,23 +277,19 @@ export async function listCatalogRubrics(
   db: CatalogD1Database,
   limit = MAX_CATALOG_RUBRIC_OPTIONS,
 ): Promise<string[]> {
-  const boundedLimit = Number.isInteger(limit)
-    ? Math.max(1, Math.min(limit, MAX_CATALOG_RUBRIC_OPTIONS))
-    : MAX_CATALOG_RUBRIC_OPTIONS;
-  const response = await db.prepare(`
-    SELECT DISTINCT rubric
-    FROM materials
-    WHERE status = 'active' AND archived_at IS NULL
-      AND rubric != ''
-    ORDER BY rubric ASC
-    LIMIT ?
-  `).bind(boundedLimit).all();
-  const rubrics = (response.results ?? [])
-    .map((row) => boundedText(asRow(row).rubric, 180))
-    .filter((rubric) => rubric && !containsControlCharacter(rubric));
-  return [...new Set(rubrics)].sort((left, right) =>
-    left.localeCompare(right, "uk-UA", { sensitivity: "base" })
-  );
+  return listCatalogFacetValues(db, "rubric", 180, limit);
+}
+
+export async function listCatalogMaterialFacets(
+  db: CatalogD1Database,
+  limit = MAX_CATALOG_FACET_OPTIONS,
+): Promise<CatalogMaterialFacets> {
+  const [rubrics, subjects, publicationTypes] = await Promise.all([
+    listCatalogFacetValues(db, "rubric", 180, limit),
+    listCatalogFacetValues(db, "subject", 180, limit),
+    listCatalogFacetValues(db, "publication_type", 120, limit),
+  ]);
+  return { rubrics, subjects, publicationTypes };
 }
 
 export async function getCatalogMaterialDetail(
@@ -716,6 +719,33 @@ function mapHoldingRow(
     quantity: Math.min(availableQuantity, nonNegativeInteger(row.quantity)),
     updatedAt: boundedText(row.updated_at, 40),
   };
+}
+
+type CatalogFacetColumn = "rubric" | "subject" | "publication_type";
+
+async function listCatalogFacetValues(
+  db: CatalogD1Database,
+  column: CatalogFacetColumn,
+  maximumLength: number,
+  limit: number,
+): Promise<string[]> {
+  const boundedLimit = Number.isInteger(limit)
+    ? Math.max(1, Math.min(limit, MAX_CATALOG_FACET_OPTIONS))
+    : MAX_CATALOG_FACET_OPTIONS;
+  const response = await db.prepare(`
+    SELECT DISTINCT TRIM(${column}) AS value
+    FROM materials
+    WHERE status = 'active' AND archived_at IS NULL
+      AND TRIM(${column}) != ''
+    ORDER BY value ASC
+    LIMIT ?
+  `).bind(boundedLimit).all();
+  const values = (response.results ?? [])
+    .map((row) => boundedText(asRow(row).value, maximumLength))
+    .filter((value) => value && !containsControlCharacter(value));
+  return [...new Set(values)].sort((left, right) =>
+    left.localeCompare(right, "uk-UA", { sensitivity: "base" })
+  );
 }
 
 function coverUrlFromRow(row: Record<string, unknown>): string {

@@ -247,6 +247,46 @@ test("an uncertain class circulation request survives remount with its exact pay
   }, "class-issue"), null);
 });
 
+test("catalog facet filters keep free-text search and add native subject and publication type suggestions", async () => {
+  const [workspace, styles] = await Promise.all([
+    read("app/librarian/d1-workspace.tsx"),
+    read("app/librarian/d1-workspace.module.css"),
+  ]);
+  const catalogSearch = workspace.match(
+    /function CatalogSearch[\s\S]*?(?=function MaterialCard)/u,
+  )?.[0] ?? "";
+  const subjectField = catalogSearch.match(
+    /<span>Предмет<\/span>[\s\S]*?<\/label>/u,
+  )?.[0] ?? "";
+  const publicationTypeField = catalogSearch.match(
+    /<span>Тип видання<\/span>[\s\S]*?<\/label>/u,
+  )?.[0] ?? "";
+
+  assert.match(workspace, /subjects: string\[\]/u);
+  assert.match(workspace, /publicationTypes: string\[\]/u);
+  assert.match(workspace, /setSubjects\(response\.subjects \?\? \[\]\)/u);
+  assert.match(workspace, /setPublicationTypes\(response\.publicationTypes \?\? \[\]\)/u);
+
+  assert.match(subjectField, /list="catalog-subject-options"/u);
+  assert.match(subjectField, /aria-autocomplete="list"/u);
+  assert.match(subjectField, /onChange=\{\(event\) => update\("subject", event\.target\.value\)\}/u);
+  assert.doesNotMatch(subjectField, /<select/u, "subject search must still accept a new text value");
+  assert.match(catalogSearch, /<datalist id="catalog-subject-options">/u);
+  assert.match(catalogSearch, /subjects\.map\(\(subject\) =>/u);
+
+  assert.match(publicationTypeField, /list="catalog-publication-type-options"/u);
+  assert.match(publicationTypeField, /aria-autocomplete="list"/u);
+  assert.match(publicationTypeField, /onChange=\{\(event\) => update\("publicationType", event\.target\.value\)\}/u);
+  assert.doesNotMatch(publicationTypeField, /<select/u, "publication type search must still accept a new text value");
+  assert.match(catalogSearch, /<datalist id="catalog-publication-type-options">/u);
+  assert.match(catalogSearch, /publicationTypes\.map\(\(publicationType\) =>/u);
+
+  assert.match(catalogSearch, /<span>Рубрика<\/span>[\s\S]*?<select/u);
+  assert.match(catalogSearch, /Підказки недоступні\. Введіть повну назву предмета вручну\./u);
+  assert.match(catalogSearch, /Підказки недоступні\. Введіть повну назву типу видання вручну\./u);
+  assert.match(styles, /\.autocompleteFilter/u);
+});
+
 test("new librarian route renders D1 workspace and keeps legacy workspace intact", async () => {
   const [page, workspace, client, styles] = await Promise.all([
     read("app/librarian/page.tsx"),
