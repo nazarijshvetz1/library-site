@@ -378,6 +378,14 @@ function catalogFiltersKey(filters: CatalogSearchFilters): string {
   ]);
 }
 
+function buildMaterialTitleSuggestionUrl(title: string): string {
+  const params = new URLSearchParams();
+  params.set("title", title.trim());
+  params.set("sort", "title");
+  params.set("limit", "20");
+  return `/api/librarian/materials/search?${params.toString()}`;
+}
+
 const TOOLS: Array<{ id: Tool; icon: string; label: string; hint: string }> = [
   { id: "catalog", icon: "⌕", label: "Каталог", hint: "Пошук і картка" },
   { id: "create", icon: "+", label: "Новий матеріал", hint: "Додати без чернетки" },
@@ -758,9 +766,17 @@ export default function D1LibrarianWorkspace({
                   locations={locations}
                   referenceState={referenceState}
                   referenceError={referenceError}
+                  rubrics={rubrics}
+                  subjects={subjects}
+                  publicationTypes={publicationTypes}
+                  facetsState={facetsState}
                   onCreated={async (materialId) => {
                     setRefreshToken((value) => value + 1);
                     selectMaterial(materialId);
+                  }}
+                  onOpenExisting={(materialId) => {
+                    selectMaterial(materialId);
+                    chooseTool("catalog");
                   }}
                   onOpenMaterial={() => chooseTool("catalog")}
                 />
@@ -1842,14 +1858,24 @@ function MaterialCreatePanel({
   locations,
   referenceState,
   referenceError,
+  rubrics,
+  subjects,
+  publicationTypes,
+  facetsState,
   onCreated,
+  onOpenExisting,
   onOpenMaterial,
 }: {
   writesEnabled: boolean;
   locations: LibraryLocation[];
   referenceState: LoadState;
   referenceError: string;
+  rubrics: string[];
+  subjects: string[];
+  publicationTypes: string[];
+  facetsState: LoadState;
   onCreated: (materialId: string) => Promise<void>;
+  onOpenExisting: (materialId: string) => void;
   onOpenMaterial: () => void;
 }) {
   const [draft, setDraft] = useState<MaterialEditDraft>(emptyMaterialDraft);
@@ -1867,13 +1893,124 @@ function MaterialCreatePanel({
   const [message, setMessage] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [createdId, setCreatedId] = useState("");
+  const [titleSuggestions, setTitleSuggestions] = useState<CatalogMaterial[]>([]);
+  const [titleSuggestionsState, setTitleSuggestionsState] = useState<LoadState>("idle");
+  const [titleSuggestionsOpen, setTitleSuggestionsOpen] = useState(false);
+  const [activeTitleSuggestion, setActiveTitleSuggestion] = useState(-1);
+  const [chosenExistingId, setChosenExistingId] = useState("");
   const coverUpload = useDirectCoverUpload();
+
+  const titleQuery = draft.title.trim();
+  const normalizedTitleQuery = titleQuery.toLocaleLowerCase("uk-UA");
+  const titleQueryTokens = normalizedTitleQuery.split(/\s+/u).filter(Boolean);
+  const visibleTitleSuggestions = titleQuery.length >= 2
+    ? titleSuggestions.filter((item) => {
+      const normalizedTitle = item.title.toLocaleLowerCase("uk-UA");
+      return titleQueryTokens.every((token) => normalizedTitle.includes(token));
+    }).slice(0, 6)
+    : [];
+  const titleSuggestionsVisible = titleSuggestionsOpen && visibleTitleSuggestions.length > 0;
+  const activeTitleSuggestionItem = activeTitleSuggestion >= 0
+    ? visibleTitleSuggestions[activeTitleSuggestion] ?? null
+    : null;
+  const duplicateCandidate = titleSuggestions.find((item) => item.id === chosenExistingId)
+    ?? titleSuggestions.find((item) => item.title.trim().toLocaleLowerCase("uk-UA") === normalizedTitleQuery)
+    ?? null;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const query = draft.title.trim();
+    const timer = window.setTimeout(async () => {
+      if (query.length < 2) {
+        setTitleSuggestions([]);
+        setTitleSuggestionsState("idle");
+        setTitleSuggestionsOpen(false);
+        setActiveTitleSuggestion(-1);
+        return;
+      }
+      setTitleSuggestionsState("loading");
+      try {
+        const response = await apiJson<SearchEnvelope>(
+          buildMaterialTitleSuggestionUrl(query),
+          { signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
+        const tokens = query.toLocaleLowerCase("uk-UA").split(/\s+/u).filter(Boolean);
+        setTitleSuggestions(response.items.filter((item) => {
+          const normalizedTitle = item.title.toLocaleLowerCase("uk-UA");
+          return tokens.every((token) => normalizedTitle.includes(token));
+        }).slice(0, 6));
+        setActiveTitleSuggestion(-1);
+        setTitleSuggestionsState("ready");
+      } catch {
+        if (controller.signal.aborted) return;
+        setTitleSuggestions([]);
+        setActiveTitleSuggestion(-1);
+        setTitleSuggestionsState("error");
+      }
+    }, query.length < 2 ? 0 : 220);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [draft.title]);
 
   function update<K extends keyof MaterialEditDraft>(key: K, value: MaterialEditDraft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
   }
 
+  function updateTitle(value: string) {
+    setChosenExistingId("");
+    setActiveTitleSuggestion(-1);
+    setTitleSuggestionsOpen(true);
+    setTitleSuggestionsState(value.trim().length >= 2 ? "loading" : "idle");
+    if (value.trim().length < 2) setTitleSuggestions([]);
+    update("title", value);
+  }
+
+  function selectTitleSuggestion(item: CatalogMaterial) {
+    setDraft((current) => ({ ...current, title: item.title }));
+    setChosenExistingId(item.id);
+    setTitleSuggestionsOpen(false);
+    setActiveTitleSuggestion(-1);
+  }
+
+  function handleTitleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      if (titleSuggestionsOpen) event.preventDefault();
+      setTitleSuggestionsOpen(false);
+      setActiveTitleSuggestion(-1);
+      return;
+    }
+    if (event.key === "Tab") {
+      setTitleSuggestionsOpen(false);
+      setActiveTitleSuggestion(-1);
+      return;
+    }
+    if (!visibleTitleSuggestions.length) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setTitleSuggestionsOpen(true);
+      setActiveTitleSuggestion((current) => (current + 1) % visibleTitleSuggestions.length);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setTitleSuggestionsOpen(true);
+      setActiveTitleSuggestion((current) => current <= 0
+        ? visibleTitleSuggestions.length - 1
+        : current - 1);
+      return;
+    }
+    if (event.key === "Enter" && titleSuggestionsVisible) {
+      event.preventDefault();
+      selectTitleSuggestion(activeTitleSuggestionItem ?? visibleTitleSuggestions[0]);
+    }
+  }
+
   function applyBookCandidate(candidate: BookLookupCandidate) {
+    setChosenExistingId("");
     setDraft((current) => mergeBookLookupDraft(current, candidate));
     setLinks((current) => mergeBookLookupLink(current, candidate));
   }
@@ -1888,6 +2025,9 @@ function MaterialCreatePanel({
     setMessage("");
     setFieldErrors({});
     setCreatedId("");
+    setChosenExistingId("");
+    setTitleSuggestionsOpen(false);
+    setActiveTitleSuggestion(-1);
     coverUpload.clear();
   }
 
@@ -1977,20 +2117,144 @@ function MaterialCreatePanel({
       </div>
 
       <div className={styles.formGrid}>
-        <EditField label="Назва" required error={fieldError(fieldErrors, "title")} wide>
-          <input value={draft.title} onChange={(event) => update("title", event.target.value)} required />
-        </EditField>
+        <div
+          className={`${styles.fieldWide} ${styles.createTitleField}`}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) {
+              setTitleSuggestionsOpen(false);
+              setActiveTitleSuggestion(-1);
+            }
+          }}
+        >
+          <label htmlFor="create-material-title">Назва <b aria-hidden="true">*</b></label>
+          <div className={styles.createTitleInputWrap}>
+            <input
+              id="create-material-title"
+              type="search"
+              role="combobox"
+              value={draft.title}
+              onChange={(event) => updateTitle(event.target.value)}
+              onFocus={() => setTitleSuggestionsOpen(true)}
+              onKeyDown={handleTitleKeyDown}
+              required
+              autoComplete="off"
+              aria-autocomplete="list"
+              aria-expanded={titleSuggestionsVisible}
+              aria-controls="create-material-title-suggestions"
+              aria-activedescendant={
+                titleSuggestionsVisible && activeTitleSuggestionItem
+                  ? `create-title-suggestion-${activeTitleSuggestionItem.id}`
+                  : undefined
+              }
+              aria-describedby="create-material-title-help"
+              aria-invalid={Boolean(fieldError(fieldErrors, "title"))}
+            />
+            {titleSuggestionsVisible ? (
+              <div
+                id="create-material-title-suggestions"
+                className={`${styles.suggestions} ${styles.createTitleSuggestions}`}
+                role="listbox"
+                aria-label="Схожі матеріали в каталозі"
+              >
+                {visibleTitleSuggestions.map((item, index) => (
+                  <button
+                    id={`create-title-suggestion-${item.id}`}
+                    key={item.id}
+                    className={index === activeTitleSuggestion ? styles.suggestionActive : styles.suggestion}
+                    type="button"
+                    role="option"
+                    aria-selected={index === activeTitleSuggestion}
+                    onMouseEnter={() => setActiveTitleSuggestion(index)}
+                    onClick={() => selectTitleSuggestion(item)}
+                  >
+                    <Cover material={item} />
+                    <span>
+                      <strong>{item.title}</strong>
+                      <small>{[item.author || "Автора не вказано", item.year ? String(item.year) : "Рік не вказано"].join(" · ")}</small>
+                      <code>{item.id}</code>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <small id="create-material-title-help" className={titleSuggestionsState === "error" ? styles.filterError : styles.filterHint}>
+            {titleSuggestionsState === "loading"
+              ? "Шукаємо схожі назви…"
+              : titleSuggestionsState === "error"
+                ? "Підказки тимчасово недоступні. Назву можна ввести вручну."
+                : "Введіть щонайменше 2 літери — з’являться схожі матеріали з каталогу."}
+          </small>
+          {fieldError(fieldErrors, "title") ? <small className={styles.fieldError}>{fieldError(fieldErrors, "title")}</small> : null}
+        </div>
+        {titleQuery.length >= 2 && titleSuggestionsState === "ready" && visibleTitleSuggestions.length > 0 ? (
+          <div className={`${styles.fieldWide} ${styles.duplicateWarning}`} role="status" aria-live="polite">
+            <span aria-hidden="true">!</span>
+            <span>
+              <strong>{duplicateCandidate ? "Такий матеріал уже є в каталозі" : "У каталозі є схожі назви"}</strong>
+              <small>{duplicateCandidate
+                ? `${duplicateCandidate.title} · ${duplicateCandidate.id}. Перевірте картку перед створенням дубліката.`
+                : "Виберіть назву зі списку або продовжте вводити нову."}</small>
+            </span>
+            {duplicateCandidate ? (
+              <button type="button" onClick={() => onOpenExisting(duplicateCandidate.id)}>Відкрити картку</button>
+            ) : null}
+          </div>
+        ) : null}
         <EditField label="Автор" error={fieldError(fieldErrors, "author")} wide>
           <input value={draft.author} onChange={(event) => update("author", event.target.value)} />
         </EditField>
         <EditField label="Рубрика" required error={fieldError(fieldErrors, "rubric")}>
-          <input value={draft.rubric} onChange={(event) => update("rubric", event.target.value)} required />
+          <input
+            type="search"
+            list="create-material-rubric-options"
+            value={draft.rubric}
+            onChange={(event) => update("rubric", event.target.value)}
+            required
+            autoComplete="off"
+            aria-autocomplete="list"
+            aria-describedby="create-material-rubric-hint"
+          />
+          <datalist id="create-material-rubric-options">
+            {rubrics.map((rubric) => <option key={rubric} value={rubric} />)}
+          </datalist>
+          <small id="create-material-rubric-hint" className={facetsState === "error" ? styles.filterError : styles.filterHint}>
+            {facetInputHint(facetsState, "рубрик")}
+          </small>
         </EditField>
         <EditField label="Тип видання" error={fieldError(fieldErrors, "publicationType")}>
-          <input value={draft.publicationType} onChange={(event) => update("publicationType", event.target.value)} />
+          <input
+            type="search"
+            list="create-material-publication-type-options"
+            value={draft.publicationType}
+            onChange={(event) => update("publicationType", event.target.value)}
+            autoComplete="off"
+            aria-autocomplete="list"
+            aria-describedby="create-material-publication-type-hint"
+          />
+          <datalist id="create-material-publication-type-options">
+            {publicationTypes.map((publicationType) => <option key={publicationType} value={publicationType} />)}
+          </datalist>
+          <small id="create-material-publication-type-hint" className={facetsState === "error" ? styles.filterError : styles.filterHint}>
+            {facetInputHint(facetsState, "типів видань")}
+          </small>
         </EditField>
         <EditField label="Предмет" error={fieldError(fieldErrors, "subject")}>
-          <input value={draft.subject} onChange={(event) => update("subject", event.target.value)} />
+          <input
+            type="search"
+            list="create-material-subject-options"
+            value={draft.subject}
+            onChange={(event) => update("subject", event.target.value)}
+            autoComplete="off"
+            aria-autocomplete="list"
+            aria-describedby="create-material-subject-hint"
+          />
+          <datalist id="create-material-subject-options">
+            {subjects.map((subject) => <option key={subject} value={subject} />)}
+          </datalist>
+          <small id="create-material-subject-hint" className={facetsState === "error" ? styles.filterError : styles.filterHint}>
+            {facetInputHint(facetsState, "предметів")}
+          </small>
         </EditField>
         <EditField label="Рік видання" error={fieldError(fieldErrors, "publicationYear")}>
           <input type="number" min="1000" max="2100" value={draft.publicationYear} onChange={(event) => update("publicationYear", event.target.value)} />
@@ -5082,6 +5346,12 @@ function formatDate(value: string): string {
 
 function fieldError(errors: Record<string, string>, field: string): string {
   return errors[`changes.${field}`] || errors[field] || "";
+}
+
+function facetInputHint(state: LoadState, pluralLabel: string): string {
+  if (state === "loading") return `Оновлюємо список ${pluralLabel}…`;
+  if (state === "error") return `Список ${pluralLabel} тимчасово недоступний. Значення можна ввести вручну.`;
+  return "Почніть вводити — з’являться варіанти з каталогу.";
 }
 
 function errorMessage(error: unknown): string {

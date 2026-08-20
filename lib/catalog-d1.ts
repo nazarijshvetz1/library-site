@@ -36,6 +36,7 @@ export type CatalogSort = "title" | "newest";
 
 export type CatalogListQuery = {
   q: string;
+  title: string;
   rubric: string;
   grade: number | null;
   subject: string;
@@ -223,6 +224,7 @@ export function parseCatalogListQuery(
   );
   const limit = parseLimit(url.searchParams.get("limit"), defaultLimit, maxLimit);
   const q = readBoundedParameter(url, "q", 180);
+  const title = readBoundedParameter(url, "title", 180);
   const rubric = readBoundedParameter(url, "rubric", 180);
   const subject = readBoundedParameter(url, "subject", 180);
   const publicationType = readBoundedParameter(url, "type", 120);
@@ -234,6 +236,7 @@ export function parseCatalogListQuery(
   const sort = parseSort(url.searchParams.get("sort"));
   const queryWithoutCursor: Omit<CatalogListQuery, "cursor"> = {
     q,
+    title,
     rubric,
     grade,
     subject,
@@ -427,6 +430,16 @@ function buildCatalogListStatement(query: CatalogListQuery, useFts: boolean): {
       predicates.push("m.search_text LIKE ? ESCAPE '!'");
       bindings.push(`%${escapeLike(normalizedQuery)}%`);
     }
+  }
+  const normalizedTitle = normalizeCatalogSearchText(query.title);
+  const titleTokens = normalizedTitle
+    .split(" ")
+    .map((token) => token.trim().slice(0, 64))
+    .filter((token) => /[\p{L}\p{N}]/u.test(token))
+    .slice(0, 16);
+  for (const token of titleTokens) {
+    predicates.push("m.sort_title LIKE ? ESCAPE '!'");
+    bindings.push(`%${escapeLike(token)}%`);
   }
   if (query.rubric) {
     predicates.push("m.rubric = ?");
@@ -843,7 +856,7 @@ function decodeCatalogCursor(value: string, expectedScope: string): CatalogCurso
 function catalogQueryScope(
   query: Omit<CatalogListQuery, "cursor"> | CatalogListQuery,
 ): string {
-  const canonical = JSON.stringify([
+  const canonicalParts: Array<string | number | boolean | null> = [
     normalizeCatalogSearchText(query.q),
     query.rubric,
     query.grade,
@@ -851,8 +864,10 @@ function catalogQueryScope(
     query.publicationType,
     query.available,
     query.sort,
-  ]);
-  return `${query.sort}:${fnv1a(canonical)}`;
+  ];
+  const normalizedTitle = normalizeCatalogSearchText(query.title);
+  if (normalizedTitle) canonicalParts.push(`title:${normalizedTitle}`);
+  return `${query.sort}:${fnv1a(JSON.stringify(canonicalParts))}`;
 }
 
 function expectedScopeSort(scope: string): CatalogSort | "" {

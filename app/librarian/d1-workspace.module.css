@@ -1180,6 +1180,80 @@
   color: #6f7a73;
 }
 
+.createTitleField {
+  position: relative;
+  z-index: 5;
+}
+
+.createTitleField > label {
+  color: #4d5d53;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.createTitleInputWrap {
+  position: relative;
+}
+
+.createTitleSuggestions {
+  z-index: 12;
+}
+
+.duplicateWarning {
+  padding: 11px 12px;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #e5cf91;
+  border-radius: 11px;
+  background: #fff9e9;
+  color: #715707;
+}
+
+.duplicateWarning > span:first-child {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #f5dfa1;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.duplicateWarning > span:nth-child(2) {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.duplicateWarning strong {
+  font-size: 9px;
+}
+
+.duplicateWarning small {
+  color: #80691e;
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.duplicateWarning button {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid #d5bd75;
+  border-radius: 8px;
+  background: white;
+  color: #715707;
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.duplicateWarning button:hover {
+  background: #fff4d3;
+}
+
 .fieldError {
   color: var(--danger) !important;
   font-size: 8px !important;
@@ -2126,6 +2200,8 @@
   .classReturnItems article { grid-template-columns: 44px minmax(0, 1fr); }
   .classReturnItems article > label:not(.classReturnToggle) { grid-column: 2; }
   .linkEditorHeading { align-items: stretch; flex-direction: column; }
+  .duplicateWarning { grid-template-columns: 26px minmax(0, 1fr); }
+  .duplicateWarning button { grid-column: 2; width: fit-content; }
   .academicRows article { grid-template-columns: 1fr 1fr; }
 }
 
@@ -2162,6 +2238,8 @@
   .directCoverField { grid-template-columns: 66px minmax(0, 1fr); }
   .directCoverPreview { width: 66px; }
   .directCoverActions .secondaryButton { width: auto; }
+  .duplicateWarning { grid-template-columns: 26px minmax(0, 1fr); }
+  .duplicateWarning button { grid-column: 1 / -1; width: 100%; }
   .academicRows article { grid-template-columns: 1fr; }
   .academicRows article .fieldWide { grid-column: auto; }
 }

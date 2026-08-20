@@ -383,6 +383,100 @@ test("author, exact ISBN and CAT searches keep their existing behavior", async (
   }
 });
 
+test("title-only suggestions filter before the bounded result window", async () => {
+  const { sqlite, db } = fixture();
+  const time = "2026-08-11T10:00:00.000Z";
+  const insertMaterial = sqlite.prepare(`
+    INSERT INTO materials (
+      id, catalog_number, title, sort_title, search_text, rubric,
+      publication_type, subject, class_from, class_to, author,
+      publication_year, isbn, isbn_normalized, publisher, notes,
+      status, version, created_at, updated_at, archived_at
+    ) VALUES (?, ?, ?, ?, ?, 'Довідники', 'Посібник', ?, NULL, NULL, ?,
+      NULL, '', '', '', '', 'active', 1, ?, ?, NULL)
+  `);
+
+  try {
+    for (let index = 0; index < 25; index += 1) {
+      const catalogNumber = 100 + index;
+      const title = `Аа довідник ${String(index + 1).padStart(2, "0")}`;
+      insertMaterial.run(
+        `CAT-${String(catalogNumber).padStart(4, "0")}`,
+        catalogNumber,
+        title,
+        normalizeCatalogSearchText(title),
+        normalizeCatalogSearchText(`${title} Збір задач`),
+        "Алгебра",
+        "",
+        time,
+        time,
+      );
+    }
+    insertMaterial.run(
+      "CAT-0200",
+      200,
+      "Збірник вправ і задач з алгебри. 7 клас",
+      normalizeCatalogSearchText("Збірник вправ і задач з алгебри. 7 клас"),
+      normalizeCatalogSearchText("Збірник вправ і задач з алгебри. 7 клас Цільовий автор"),
+      "Математика",
+      "Цільовий автор",
+      time,
+      time,
+    );
+
+    const broad = await listCatalogMaterials(
+      db,
+      parseCatalogListQuery(
+        "https://catalog.test/api/librarian/materials/search?q=збір%20задач&sort=title&limit=20",
+        { defaultLimit: 12, maxLimit: 20 },
+      ),
+    );
+    assert.equal(broad.items.length, 20);
+    assert.equal(broad.hasMore, true);
+    assert.equal(broad.items.some((item) => item.id === "CAT-0200"), false);
+
+    const titleOnly = await listCatalogMaterials(
+      db,
+      parseCatalogListQuery(
+        "https://catalog.test/api/librarian/materials/search?title=збір%20задач&sort=title&limit=20",
+        { defaultLimit: 12, maxLimit: 20 },
+      ),
+    );
+    assert.deepEqual(
+      titleOnly.items.map(({ id, title }) => ({ id, title })),
+      [{ id: "CAT-0200", title: "Збірник вправ і задач з алгебри. 7 клас" }],
+    );
+    assert.equal(titleOnly.hasMore, false);
+
+    const firstPageQuery = parseCatalogListQuery(
+      "https://catalog.test/api/librarian/materials/search?title=збір&sort=title&limit=1",
+      { defaultLimit: 12, maxLimit: 20 },
+    );
+    const firstPage = await listCatalogMaterials(db, firstPageQuery);
+    assert.deepEqual(firstPage.items.map((item) => item.id), ["CAT-0200"]);
+    assert.equal(firstPage.hasMore, true);
+    assert.ok(firstPage.nextCursor);
+
+    const nextPageUrl = new URL(
+      "https://catalog.test/api/librarian/materials/search?title=збір&sort=title&limit=1",
+    );
+    nextPageUrl.searchParams.set("cursor", firstPage.nextCursor);
+    const nextPage = await listCatalogMaterials(
+      db,
+      parseCatalogListQuery(nextPageUrl, { defaultLimit: 12, maxLimit: 20 }),
+    );
+    assert.deepEqual(nextPage.items.map((item) => item.id), ["CAT-0010"]);
+
+    nextPageUrl.searchParams.set("title", "задач");
+    assert.throws(
+      () => parseCatalogListQuery(nextPageUrl, { defaultLimit: 12, maxLimit: 20 }),
+      CatalogQueryValidationError,
+    );
+  } finally {
+    sqlite.close();
+  }
+});
+
 test("text search falls back safely while the FTS migration is unavailable", async () => {
   const { sqlite, db } = fixture();
   try {

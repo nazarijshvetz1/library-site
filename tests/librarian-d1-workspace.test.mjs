@@ -287,6 +287,57 @@ test("catalog facet filters keep free-text search and add native subject and pub
   assert.match(styles, /\.autocompleteFilter/u);
 });
 
+test("new material form suggests catalog facets and similar titles without submitting", async () => {
+  const [workspace, styles] = await Promise.all([
+    read("app/librarian/d1-workspace.tsx"),
+    read("app/librarian/d1-workspace.module.css"),
+  ]);
+  const createPanel = workspace.match(
+    /function MaterialCreatePanel[\s\S]*?(?=function ReceiptPanel)/u,
+  )?.[0] ?? "";
+
+  assert.match(createPanel, /rubrics: string\[\]/u);
+  assert.match(createPanel, /subjects: string\[\]/u);
+  assert.match(createPanel, /publicationTypes: string\[\]/u);
+  assert.match(createPanel, /facetsState: LoadState/u);
+
+  assert.match(createPanel, /list="create-material-rubric-options"/u);
+  assert.match(createPanel, /<datalist id="create-material-rubric-options">[\s\S]*?rubrics\.map/u);
+  assert.match(createPanel, /list="create-material-subject-options"/u);
+  assert.match(createPanel, /<datalist id="create-material-subject-options">[\s\S]*?subjects\.map/u);
+  assert.match(createPanel, /list="create-material-publication-type-options"/u);
+  assert.match(createPanel, /<datalist id="create-material-publication-type-options">[\s\S]*?publicationTypes\.map/u);
+  assert.match(createPanel, /aria-autocomplete="list"/u);
+
+  assert.match(createPanel, /query\.length < 2/u);
+  assert.match(createPanel, /window\.setTimeout\(async \(\) =>/u);
+  assert.match(createPanel, /apiJson<SearchEnvelope>\([\s\S]*?buildMaterialTitleSuggestionUrl\(query\)/u);
+  assert.match(workspace, /function buildMaterialTitleSuggestionUrl[\s\S]*?params\.set\("title", title\.trim\(\)\)[\s\S]*?params\.set\("sort", "title"\)[\s\S]*?params\.set\("limit", "20"\)/u);
+  assert.match(createPanel, /\.slice\(0, 6\)/u);
+  assert.match(createPanel, /role="combobox"/u);
+  assert.match(createPanel, /role="listbox"/u);
+  assert.match(createPanel, /role="option"/u);
+  assert.match(createPanel, /event\.key === "ArrowDown"/u);
+  assert.match(createPanel, /event\.key === "ArrowUp"/u);
+  assert.match(createPanel, /event\.key === "Enter" && titleSuggestionsVisible/u);
+  assert.match(createPanel, /event\.key === "Escape"/u);
+
+  const selectTitleSuggestion = createPanel.match(
+    /function selectTitleSuggestion[\s\S]*?(?=function handleTitleKeyDown)/u,
+  )?.[0] ?? "";
+  assert.match(selectTitleSuggestion, /title: item\.title/u);
+  assert.match(selectTitleSuggestion, /setTitleSuggestionsOpen\(false\)/u);
+  assert.doesNotMatch(selectTitleSuggestion, /submit|requestId|method:/u);
+  assert.match(createPanel, /className=\{`\$\{styles\.fieldWide\} \$\{styles\.duplicateWarning\}`\}/u);
+  assert.match(createPanel, /Такий матеріал уже є в каталозі/u);
+  assert.match(createPanel, /onOpenExisting\(duplicateCandidate\.id\)/u);
+  assert.match(createPanel, /<button type="button" onClick=\{\(\) => onOpenExisting/u);
+
+  assert.match(styles, /\.createTitleInputWrap/u);
+  assert.match(styles, /\.createTitleSuggestions/u);
+  assert.match(styles, /\.duplicateWarning/u);
+});
+
 test("new librarian route renders D1 workspace and keeps legacy workspace intact", async () => {
   const [page, workspace, client, styles] = await Promise.all([
     read("app/librarian/page.tsx"),
