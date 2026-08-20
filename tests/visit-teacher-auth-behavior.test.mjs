@@ -75,6 +75,7 @@ async function database() {
     "0009_happy_silver_samurai.sql", "0010_shocking_cobalt_man.sql",
     "0011_normalize_holding_conditions.sql",
     "0012_elite_victor_mancha.sql",
+    "0013_strange_dark_beast.sql",
   ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
   const now = new Date().toISOString();
   insertUser(sqlite, "USR-LIB", "Бібліотекар", "library@example.test", "auth-library", "librarian", now);
@@ -136,12 +137,22 @@ test("one-time code, Ukrainian directory and opaque cookie session work without 
   const loginId = directory[0].loginId;
   const loggedIn = await auth.createVisitTeacherSession(context.db, request(), { loginId, code: issued.code });
   assert.equal(loggedIn.identity.fullName, "Шевченко Олена");
+  assert.equal(loggedIn.identity.mustChangePin, true);
+  assert.equal(issued.credential.mustChangePin, true);
   assert.notEqual(loggedIn.token, loggedIn.identity.tokenHash);
   assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM visit_teacher_sessions WHERE token_hash=?")
     .get(loggedIn.identity.tokenHash).n, 1);
   assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM visit_teacher_sessions WHERE token_hash=?")
     .get(loggedIn.token).n, 0);
-  assert.equal((await auth.requireVisitTeacherSession(context.db, request("203.0.113.10", loggedIn.token))).teacherUserId, "USR-T1");
+  await assert.rejects(
+    () => auth.requireVisitTeacherSession(context.db, request("203.0.113.10", loggedIn.token)),
+    (error) => error.code === "pin_change_required" && error.status === 403,
+  );
+  assert.equal((await auth.requireVisitTeacherSession(
+    context.db,
+    request("203.0.113.10", loggedIn.token),
+    { allowPinSetup: true },
+  )).teacherUserId, "USR-T1");
   assert.match(auth.teacherSessionCookie(loggedIn.token), /^__Host-visit_teacher=.*HttpOnly; Secure; SameSite=Lax$/u);
 
   const persisted = JSON.stringify(context.sqlite.prepare(
@@ -266,7 +277,7 @@ test("fourth successful login keeps exactly three sessions by revoking the oldes
     (error) => error.code === "authentication_required",
   );
   assert.equal((await auth.requireVisitTeacherSession(
-    context.db, request("203.0.113.30", sessions[3].token),
+    context.db, request("203.0.113.30", sessions[3].token), { allowPinSetup: true },
   )).teacherUserId, "USR-T1");
 });
 
@@ -304,7 +315,11 @@ test("credential lock blocks only new login, while established session remains u
   const loginId = context.sqlite.prepare("SELECT login_id FROM visit_teacher_credentials").get().login_id;
   const session = await auth.createVisitTeacherSession(context.db, request(), { loginId, code: issued.code });
   context.sqlite.prepare("UPDATE visit_teacher_credentials SET locked_until='2999-01-01T00:00:00.000Z'").run();
-  assert.equal((await auth.requireVisitTeacherSession(context.db, request("203.0.113.10", session.token))).teacherUserId, "USR-T1");
+  assert.equal((await auth.requireVisitTeacherSession(
+    context.db,
+    request("203.0.113.10", session.token),
+    { allowPinSetup: true },
+  )).teacherUserId, "USR-T1");
   const booking = await store.createVisitBooking(context.db, session.identity, {
     requestId: commandId(), date: futureWeekday(), startTime: "09:00", endTime: "09:20",
     publicDisplayConsent: true, classYearId: null, purpose: null,
@@ -514,18 +529,20 @@ test("guest session and mutation rate caps are reasserted atomically", async () 
   ).all().map((row) => row.attempts), [20, 20]);
 });
 
-test("teacher code rotation revokes prior sessions and replay recovery stays capped at three", async () => {
+test("first login changes the temporary code to a four-digit PIN and replay recovery stays capped at three", async () => {
   const context = await database();
   const issued = await issuedCredential(context);
   const loginId = context.sqlite.prepare("SELECT login_id FROM visit_teacher_credentials").get().login_id;
   const loggedIn = await auth.createVisitTeacherSession(context.db, request(), { loginId, code: issued.code });
   const requestId = commandId();
-  const newCode = "24ACE-GJMPZ";
+  const newPin = "4826";
   const rotated = await auth.rotateVisitTeacherCode(
-    context.db, request("203.0.113.10", loggedIn.token), { requestId, currentCode: issued.code, newCode },
+    context.db, request("203.0.113.10", loggedIn.token), { requestId, currentCode: issued.code, newPin },
   );
   assert.ok(rotated.token);
   assert.equal(rotated.result.credentialVersion, 2);
+  assert.equal(rotated.result.mustChangePin, false);
+  assert.equal(rotated.identity.mustChangePin, false);
   await assert.rejects(
     () => auth.requireVisitTeacherSession(context.db, request("203.0.113.10", loggedIn.token)),
     (error) => error.code === "authentication_required",
@@ -537,7 +554,7 @@ test("teacher code rotation revokes prior sessions and replay recovery stays cap
     "SELECT COUNT(*) AS n FROM visit_teacher_sessions",
   ).get().n;
   const activeReplay = await auth.rotateVisitTeacherCode(
-    context.db, request("203.0.113.10", rotated.token), { requestId, currentCode: issued.code, newCode },
+    context.db, request("203.0.113.10", rotated.token), { requestId, currentCode: issued.code, newPin },
   );
   assert.equal(activeReplay.token, null);
   assert.deepEqual(activeReplay.result, rotated.result);
@@ -545,7 +562,7 @@ test("teacher code rotation revokes prior sessions and replay recovery stays cap
 
   for (let replay = 0; replay < 5; replay += 1) {
     const recovered = await auth.rotateVisitTeacherCode(
-      context.db, request("203.0.113.10", loggedIn.token), { requestId, currentCode: issued.code, newCode },
+      context.db, request("203.0.113.10", loggedIn.token), { requestId, currentCode: issued.code, newPin },
     );
     assert.ok(recovered.token);
   }
@@ -559,7 +576,16 @@ test("teacher code rotation revokes prior sessions and replay recovery stays cap
   ).all(requestId)) + JSON.stringify(context.sqlite.prepare(
     "SELECT before_json,after_json,metadata_json FROM audit_events WHERE request_id=?",
   ).all(requestId));
-  assert.doesNotMatch(secretDump, /24ACEGJMPZ/u);
+  assert.doesNotMatch(secretDump, /4826/u);
+
+  await assert.rejects(
+    () => auth.createVisitTeacherSession(context.db, request("203.0.113.12"), { loginId, code: issued.code }),
+    (error) => error.code === "invalid_teacher_credentials",
+  );
+  const pinLogin = await auth.createVisitTeacherSession(
+    context.db, request("203.0.113.13"), { loginId, code: newPin },
+  );
+  assert.equal(pinLogin.identity.mustChangePin, false);
 
   const before = context.sqlite.prepare(`SELECT token_hash,revoked_at FROM visit_teacher_sessions
     WHERE teacher_user_id='USR-T1' AND revoked_at IS NULL ORDER BY token_hash`).all()
@@ -569,7 +595,7 @@ test("teacher code rotation revokes prior sessions and replay recovery stays cap
   ).run();
   await assert.rejects(
     () => auth.rotateVisitTeacherCode(
-      context.db, request("203.0.113.10", loggedIn.token), { requestId, currentCode: issued.code, newCode },
+      context.db, request("203.0.113.10", loggedIn.token), { requestId, currentCode: issued.code, newPin },
     ),
     (error) => error.code === "teacher_auth_unavailable",
   );
@@ -578,21 +604,21 @@ test("teacher code rotation revokes prior sessions and replay recovery stays cap
     .map((row) => ({ ...row })), before);
 });
 
-test("teacher code rotation honors failed-attempt limits and an atomic credential lock", async () => {
+test("teacher PIN setup honors failed-attempt limits and an atomic credential lock", async () => {
   const context = await database();
   const issued = await issuedCredential(context);
   const loginId = context.sqlite.prepare("SELECT login_id FROM visit_teacher_credentials").get().login_id;
   const loggedIn = await auth.createVisitTeacherSession(
     context.db, request("203.0.113.70"), { loginId, code: issued.code },
   );
-  const newCode = "24ACE-GJMPZ";
+  const newPin = "4826";
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
     await assert.rejects(
       () => auth.rotateVisitTeacherCode(
         context.db,
         request("203.0.113.70", loggedIn.token),
-        { requestId: commandId(), currentCode: wrongCode(issued.code), newCode },
+        { requestId: commandId(), currentCode: wrongCode(issued.code), newPin },
       ),
       (error) => error.code === "invalid_current_code",
     );
@@ -601,7 +627,7 @@ test("teacher code rotation honors failed-attempt limits and an atomic credentia
     () => auth.rotateVisitTeacherCode(
       context.db,
       request("203.0.113.70", loggedIn.token),
-      { requestId: commandId(), currentCode: issued.code, newCode },
+      { requestId: commandId(), currentCode: issued.code, newPin },
     ),
     (error) => error.code === "rate_limited" && error.status === 429,
   );
@@ -622,7 +648,7 @@ test("teacher code rotation honors failed-attempt limits and an atomic credentia
     () => auth.rotateVisitTeacherCode(
       context.db,
       request("203.0.113.71", loggedIn.token),
-      { requestId: racedRequestId, currentCode: issued.code, newCode },
+      { requestId: racedRequestId, currentCode: issued.code, newPin },
     ),
     (error) => error.code === "rate_limited" && error.status === 429,
   );
@@ -635,6 +661,39 @@ test("teacher code rotation honors failed-attempt limits and an atomic credentia
   assert.equal(context.sqlite.prepare(
     "SELECT revoked_at FROM visit_teacher_sessions WHERE token_hash=?",
   ).get(loggedIn.identity.tokenHash).revoked_at, null);
+});
+
+test("librarian reset revokes a forgotten PIN and restores one-time setup", async () => {
+  const context = await database();
+  const issued = await issuedCredential(context);
+  const loginId = context.sqlite.prepare("SELECT login_id FROM visit_teacher_credentials").get().login_id;
+  const firstSession = await auth.createVisitTeacherSession(
+    context.db, request("203.0.113.80"), { loginId, code: issued.code },
+  );
+  const pin = "4826";
+  const rotated = await auth.rotateVisitTeacherCode(
+    context.db,
+    request("203.0.113.80", firstSession.token),
+    { requestId: commandId(), currentCode: issued.code, newPin: pin },
+  );
+  const reset = await auth.issueVisitTeacherCode(context.db, context.actor, "USR-T1", {
+    requestId: commandId(),
+    expectedVersion: rotated.result.credentialVersion,
+  });
+  assert.equal(reset.credential.mustChangePin, true);
+  assert.equal(reset.credential.version, 3);
+  assert.equal(context.sqlite.prepare(`SELECT must_change_pin FROM visit_teacher_credentials
+    WHERE teacher_user_id='USR-T1'`).get().must_change_pin, 1);
+  assert.equal(context.sqlite.prepare(`SELECT COUNT(*) AS n FROM visit_teacher_sessions
+    WHERE teacher_user_id='USR-T1' AND revoked_at IS NULL`).get().n, 0);
+  await assert.rejects(
+    () => auth.createVisitTeacherSession(context.db, request("203.0.113.81"), { loginId, code: pin }),
+    (error) => error.code === "invalid_teacher_credentials",
+  );
+  const recovered = await auth.createVisitTeacherSession(
+    context.db, request("203.0.113.82"), { loginId, code: reset.code },
+  );
+  assert.equal(recovered.identity.mustChangePin, true);
 });
 
 test("same-millisecond reset and access-action losers roll back by exact command marker", async () => {

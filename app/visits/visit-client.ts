@@ -23,6 +23,7 @@ export type VisitTeacherSessionEnvelope = {
   teacher: VisitTeacherIdentity;
   pendingScope: string;
   expiresAt?: string;
+  mustChangePin: boolean;
 };
 
 export type VisitGuestSessionEnvelope = {
@@ -148,36 +149,46 @@ export type PortalPendingIntent = {
 
 const STORAGE_PREFIX = "library.visit.pending.v1";
 
-export const PERSONAL_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+export const TEMPORARY_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 
-export type PersonalCodeStrength = {
+export type TeacherPinStrength = {
   complete: boolean;
-  diverse: boolean;
-  noLongRun: boolean;
+  notRepeated: boolean;
   notObvious: boolean;
   strong: boolean;
 };
 
-export function normalizedPersonalCode(value: string): string {
-  return value.normalize("NFKC").toUpperCase().replace(/[^23456789ABCDEFGHJKMNPQRSTUVWXYZ]/gu, "").slice(0, 10);
+export function normalizedTeacherAccessCode(value: string): string {
+  const compact = value.normalize("NFKC").toUpperCase().replace(/[\s-]+/gu, "");
+  return compact.replace(/[^0-9ABCDEFGHJKMNPQRSTUVWXYZ]/gu, "").slice(0, 10);
 }
 
-export function formatPersonalCode(value: string): string {
-  const normalized = normalizedPersonalCode(value);
+export function formatTeacherAccessCode(value: string): string {
+  const normalized = normalizedTeacherAccessCode(value);
+  if (/^\d{4}$/u.test(normalized)) return normalized;
   return normalized.length > 5 ? `${normalized.slice(0, 5)}-${normalized.slice(5)}` : normalized;
 }
 
-export function personalCodeStrength(value: string): PersonalCodeStrength {
-  const normalized = normalizedPersonalCode(value);
-  const complete = normalized.length === 10;
-  const diverse = new Set(normalized).size >= 4;
-  const noLongRun = !/(.)\1{3}/u.test(normalized);
-  const reversedAlphabet = Array.from(PERSONAL_CODE_ALPHABET).reverse().join("");
-  const notObvious = normalized !== Array.from(normalized).reverse().join("")
-    && !/^(.{1,5})\1+$/u.test(normalized)
-    && !PERSONAL_CODE_ALPHABET.includes(normalized)
-    && !reversedAlphabet.includes(normalized);
-  return { complete, diverse, noLongRun, notObvious, strong: complete && diverse && noLongRun && notObvious };
+export function teacherAccessCodeComplete(value: string): boolean {
+  const normalized = normalizedTeacherAccessCode(value);
+  return /^\d{4}$/u.test(normalized)
+    || new RegExp(`^[${TEMPORARY_CODE_ALPHABET}]{10}$`, "u").test(normalized);
+}
+
+export function normalizedTeacherPin(value: string): string {
+  return value.normalize("NFKC").replace(/\D+/gu, "").slice(0, 4);
+}
+
+export function teacherPinStrength(value: string): TeacherPinStrength {
+  const pin = normalizedTeacherPin(value);
+  const complete = /^\d{4}$/u.test(pin);
+  const notRepeated = !/^(\d)\1{3}$/u.test(pin) && !/^(\d{2})\1$/u.test(pin);
+  const obvious = new Set([
+    "0123", "1234", "2345", "3456", "4567", "5678", "6789",
+    "9876", "8765", "7654", "6543", "5432", "4321", "3210", "2580",
+  ]);
+  const notObvious = !obvious.has(pin);
+  return { complete, notRepeated, notObvious, strong: complete && notRepeated && notObvious };
 }
 
 export class VisitApiError extends Error {

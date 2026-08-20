@@ -17,13 +17,18 @@ export async function GET(request: Request): Promise<Response> {
   const gate = featureGate();
   if (gate) return gate;
   try {
-    const identity = await requireVisitTeacherSession(env.DB as unknown as VisitD1Database, request);
+    const identity = await requireVisitTeacherSession(
+      env.DB as unknown as VisitD1Database,
+      request,
+      { allowPinSetup: true },
+    );
     return visitJson({
       schemaVersion: 2,
       success: true,
       teacher: { fullName: identity.fullName },
       pendingScope: identity.pendingScope,
       expiresAt: identity.expiresAt,
+      mustChangePin: identity.mustChangePin,
     });
   } catch (error) {
     return visitStoreError(error, "teacher_session_unavailable");
@@ -55,6 +60,7 @@ export async function POST(request: Request): Promise<Response> {
       teacher: { fullName: result.identity.fullName },
       pendingScope: result.identity.pendingScope,
       expiresAt: result.identity.expiresAt,
+      mustChangePin: result.identity.mustChangePin,
     }, { headers: { "Set-Cookie": teacherSessionCookie(result.token) } });
   } catch (error) {
     return visitStoreError(error, "teacher_session_unavailable");

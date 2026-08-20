@@ -92,6 +92,13 @@
       "when": 1787245200000,
       "tag": "0012_elite_victor_mancha",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1787254969686,
+      "tag": "0013_strange_dark_beast",
+      "breakpoints": true
     }
   ]
 }

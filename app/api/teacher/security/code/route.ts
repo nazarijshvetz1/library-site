@@ -12,16 +12,16 @@ export async function POST(request: Request): Promise<Response> {
   if (!isSameOriginRequest(request)) return visitError(403, "cross_origin_request", "Запит має надійти з цього самого сайту.");
   const body = await readVisitJson(request); if (!body.ok) return body.response;
   const keys = Object.keys(body.value);
-  if (keys.length !== 3 || !keys.includes("requestId") || !keys.includes("currentCode") || !keys.includes("newCode")
+  if (keys.length !== 3 || !keys.includes("requestId") || !keys.includes("currentCode") || !keys.includes("newPin")
     || typeof body.value.requestId !== "string" || typeof body.value.currentCode !== "string"
-    || typeof body.value.newCode !== "string") {
-    return visitError(400, "validation_failed", "Перевірте поточний і новий коди.");
+    || typeof body.value.newPin !== "string") {
+    return visitError(400, "validation_failed", "Перевірте поточний код і новий PIN.");
   }
   try {
     const rotated = await rotateVisitTeacherCode(env.DB as unknown as VisitD1Database, request, {
       requestId: body.value.requestId,
       currentCode: body.value.currentCode,
-      newCode: body.value.newCode,
+      newPin: body.value.newPin,
     });
     const headers = rotated.token ? { "Set-Cookie": teacherSessionCookie(rotated.token) } : undefined;
     return visitJson({ schemaVersion: 1, success: true, ...rotated.result }, { headers });

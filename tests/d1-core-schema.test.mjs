@@ -17,6 +17,7 @@ const migrationFiles = [
   "drizzle/0010_shocking_cobalt_man.sql",
   "drizzle/0011_normalize_holding_conditions.sql",
   "drizzle/0012_elite_victor_mancha.sql",
+  "drizzle/0013_strange_dark_beast.sql",
 ];
 
 async function migratedDatabase() {
@@ -31,7 +32,7 @@ async function migratedDatabase() {
 async function databaseBeforeConditionNormalization() {
   const database = new DatabaseSync(":memory:");
   database.exec("PRAGMA foreign_keys = ON;");
-  for (const file of migrationFiles.slice(0, -2)) {
+  for (const file of migrationFiles.slice(0, -3)) {
     database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
   }
   return database;
@@ -450,5 +451,35 @@ test("loans, immutable inventory lines, commands and audit enforce invariants", 
       id, actor_email, action, entity_type, entity_id, after_json, created_at
     ) VALUES ('AUDIT-BAD', 'system', 'bad', 'material', 'CAT-0001', '{', 'now')
   `), /constraint/i);
+  database.close();
+});
+
+test("0013 preserves existing teacher credentials and requires first-login PIN setup", async () => {
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON;");
+  for (const file of migrationFiles.slice(0, -1)) {
+    database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
+  }
+  const now = "2026-08-20T10:00:00.000Z";
+  database.prepare(`INSERT INTO users (
+    id,full_name,sort_name,email,auth_user_id,role,status,created_at,updated_at
+  ) VALUES ('USR-LIB-PIN','Бібліотекар','Бібліотекар','lib-pin@example.test',NULL,
+    'librarian','active',?,?),('USR-TEA-PIN','Учитель','Учитель',NULL,NULL,
+    'teacher','active',?,?)`).run(now, now, now, now);
+  database.prepare(`INSERT INTO visit_teacher_credentials (
+    teacher_user_id,login_id,code_hmac,status,version,failed_attempts,
+    code_rotated_at,created_by_user_id,updated_by_user_id,created_at,updated_at
+  ) VALUES ('USR-TEA-PIN','pin-migration-login-id-001',?,'active',1,0,?,
+    'USR-LIB-PIN','USR-LIB-PIN',?,?)`).run("a".repeat(64), now, now, now);
+
+  database.exec(await readFile(
+    new URL("../drizzle/0013_strange_dark_beast.sql", import.meta.url),
+    "utf8",
+  ));
+  assert.equal(database.prepare(`SELECT must_change_pin FROM visit_teacher_credentials
+    WHERE teacher_user_id='USR-TEA-PIN'`).get().must_change_pin, 1);
+  assert.throws(() => database.prepare(`UPDATE visit_teacher_credentials SET must_change_pin=2
+    WHERE teacher_user_id='USR-TEA-PIN'`).run(), /constraint/i);
+  assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
   database.close();
 });

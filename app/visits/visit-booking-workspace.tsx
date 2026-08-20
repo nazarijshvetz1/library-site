@@ -17,18 +17,19 @@ import {
   busyPeriodParts,
   clearPortalPendingIntent,
   clearVisitPendingIntent,
-  formatPersonalCode,
+  formatTeacherAccessCode,
   formatVisitDateTime,
   isUncertainVisitFailure,
   mergePortalPageById,
-  normalizedPersonalCode,
-  PERSONAL_CODE_ALPHABET,
-  personalCodeStrength,
+  normalizedTeacherAccessCode,
+  normalizedTeacherPin,
   readPortalPendingIntent,
   readVisitPendingIntent,
   publicVisitsUrl,
   teacherSearchUrl,
   teacherSessionUrl,
+  teacherAccessCodeComplete,
+  teacherPinStrength,
   teacherVisitsUrl,
   type PublicVisitsEnvelope,
   type GuestVisitsEnvelope,
@@ -93,6 +94,7 @@ export default function VisitBookingWorkspace({
   const [checkingSession, setCheckingSession] = useState(true);
   const [authNotice, setAuthNotice] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const [firstLoginCode, setFirstLoginCode] = useState("");
 
   const checkSession = useCallback(async () => {
     setCheckingSession(true);
@@ -122,6 +124,7 @@ export default function VisitBookingWorkspace({
         method: "POST",
         body: JSON.stringify({ loginId, code }),
       });
+      setFirstLoginCode(authenticated.mustChangePin ? normalizedTeacherAccessCode(code) : "");
       setSession(authenticated);
     } catch (error) {
       // This deliberately does not reveal whether the name or personal code was wrong.
@@ -146,6 +149,7 @@ export default function VisitBookingWorkspace({
         clearTeacherPortalPendingStorage(window.sessionStorage, session.pendingScope);
       }
       setSession(null);
+      setFirstLoginCode("");
     } catch {
       setAuthNotice("Не вдалося вийти. Спробуйте ще раз.");
     } finally {
@@ -179,6 +183,30 @@ export default function VisitBookingWorkspace({
                 <TeacherSignIn onSignIn={signIn} busy={authBusy} notice={authNotice} />
               </>}
           </div>
+        </section>
+      </VisitShell>
+    );
+  }
+
+  if (session.mustChangePin) {
+    return (
+      <VisitShell>
+        <section className={styles.page}>
+          <div className={styles.intro}>
+            <p className={styles.eyebrow}>Перший вхід</p>
+            <h1>Створіть власний PIN</h1>
+            <p>Тимчасовий код бібліотекаря прийнято. Тепер оберіть 4 цифри, які надалі використовуватимете для входу.</p>
+          </div>
+          <TeacherSecurityPanel
+            pendingScope={session.pendingScope}
+            required
+            initialCurrentCode={firstLoginCode}
+            onClose={() => undefined}
+            onSessionRotated={(rotated) => {
+              setFirstLoginCode("");
+              setSession((current) => current ? { ...current, ...rotated } : current);
+            }}
+          />
         </section>
       </VisitShell>
     );
@@ -707,12 +735,18 @@ function TeacherSignIn({
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selected || code.length !== 11) return;
-    void onSignIn(selected.loginId, code);
+    const chosen = selected ?? (results.length === 1 ? results[0] : null);
+    if (!chosen) {
+      setSearchNotice("Оберіть своє ім’я у списку під полем.");
+      searchRef.current?.focus();
+      return;
+    }
+    if (!teacherAccessCodeComplete(code)) return;
+    void onSignIn(chosen.loginId, normalizedTeacherAccessCode(code));
   }
 
   function changeCode(value: string) {
-    setCode(formatPersonalCode(value));
+    setCode(formatTeacherAccessCode(value));
   }
 
   return (
@@ -789,28 +823,27 @@ function TeacherSignIn({
             </div>
           ) : null}
 
-          <label className={styles.wide}>Особистий код *
+          <label className={styles.wide}>Тимчасовий код або PIN *
             <input
               required
               type="password"
               inputMode="text"
               autoComplete="one-time-code"
               autoCapitalize="characters"
-              minLength={11}
               maxLength={11}
-              pattern="[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}"
+              pattern="(?:[0-9]{4}|[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5})"
               value={code}
               onChange={(event) => changeCode(event.currentTarget.value)}
-              disabled={!selected || busy}
-              placeholder="XXXXX-XXXXX"
+              disabled={busy}
+              placeholder="4 цифри або XXXXX-XXXXX"
             />
-            <small>Код знаєте лише ви. Не повідомляйте його іншим.</small>
+            <small>Під час першого входу введіть код бібліотекаря. Після цього сайт запропонує створити власний 4-значний PIN.</small>
           </label>
         </div>
-        <button className={styles.primary} type="submit" disabled={!selected || code.length !== 11 || busy}>
-          {busy ? "Перевіряємо…" : "Увійти до графіка"}
+        <button className={styles.primary} type="submit" disabled={!teacherAccessCodeComplete(code) || busy}>
+          {busy ? "Перевіряємо…" : "Увійти до кабінету"}
         </button>
-        <p className={styles.authHelp}>Немає коду або вас немає у списку? Зверніться до бібліотекаря.</p>
+        <p className={styles.authHelp}>Забули PIN або вас немає у списку? Бібліотекар може видати новий тимчасовий код.</p>
       </form>
     </section>
   );
@@ -833,7 +866,7 @@ function VisitBookingPanel({
   signingOut: boolean;
   signOutNotice: string;
   onSignOut: () => Promise<void>;
-  onSessionRotated: (session: Pick<VisitTeacherSessionEnvelope, "pendingScope" | "expiresAt">) => void;
+  onSessionRotated: (session: Pick<VisitTeacherSessionEnvelope, "pendingScope" | "expiresAt" | "mustChangePin">) => void;
   initialDate: string;
   initialStartTime: string;
   initialEndTime: string;
@@ -1649,44 +1682,48 @@ type CodeRotationEnvelope = {
   credentialVersion: number;
   expiresAt: string;
   pendingScope: string;
+  mustChangePin: false;
 };
 
 type CodeRotationIntent = {
   requestId: string;
-  payload: { requestId: string; currentCode: string; newCode: string };
+  payload: { requestId: string; currentCode: string; newPin: string };
 };
 
 function TeacherSecurityPanel({
   pendingScope,
   onClose,
   onSessionRotated,
+  required = false,
+  initialCurrentCode = "",
 }: {
   pendingScope: string;
   onClose: () => void;
-  onSessionRotated: (session: Pick<VisitTeacherSessionEnvelope, "pendingScope" | "expiresAt">) => void;
+  onSessionRotated: (session: Pick<VisitTeacherSessionEnvelope, "pendingScope" | "expiresAt" | "mustChangePin">) => void;
+  required?: boolean;
+  initialCurrentCode?: string;
 }) {
-  const [currentCode, setCurrentCode] = useState("");
-  const [newCode, setNewCode] = useState("");
-  const [confirmNewCode, setConfirmNewCode] = useState("");
-  const [showNewCode, setShowNewCode] = useState(false);
-  const [confirmed, setConfirmed] = useState(false);
+  const [currentCode, setCurrentCode] = useState(initialCurrentCode);
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [showPin, setShowPin] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"success" | "error" | "info">("info");
   const [pendingRotation, setPendingRotation] = useState<CodeRotationIntent | null>(null);
   const [rotated, setRotated] = useState(false);
-  const strength = personalCodeStrength(newCode);
-  const confirmationComplete = normalizedPersonalCode(confirmNewCode).length === 10;
-  const codesMatch = confirmationComplete
-    && normalizedPersonalCode(confirmNewCode) === normalizedPersonalCode(newCode);
+  const strength = teacherPinStrength(newPin);
+  const confirmationComplete = normalizedTeacherPin(confirmPin).length === 4;
+  const pinsMatch = confirmationComplete
+    && normalizedTeacherPin(confirmPin) === normalizedTeacherPin(newPin);
 
   useEffect(() => {
     function escape(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape" && !submitting) onClose();
+      if (event.key === "Escape" && !submitting && !required) onClose();
     }
     window.addEventListener("keydown", escape);
     return () => window.removeEventListener("keydown", escape);
-  }, [onClose, submitting]);
+  }, [onClose, required, submitting]);
 
   async function sendRotation(intent: CodeRotationIntent) {
     setPendingRotation(intent);
@@ -1700,14 +1737,13 @@ function TeacherSecurityPanel({
       setPendingRotation(null);
       setRotated(true);
       setCurrentCode("");
-      setConfirmed(false);
-      setNotice("Новий код активний. Збережіть його зараз: після закриття вікна сайт його не покаже.");
+      setNotice("Новий PIN активний. Надалі входьте за своїм ім’ям і цими 4 цифрами.");
       setNoticeTone("success");
       clearTeacherPortalPendingStorage(window.sessionStorage, pendingScope);
-      onSessionRotated({ pendingScope: response.pendingScope, expiresAt: response.expiresAt });
+      onSessionRotated({ pendingScope: response.pendingScope, expiresAt: response.expiresAt, mustChangePin: false });
     } catch (error) {
       setNotice(isUncertainVisitFailure(error)
-        ? "Результат зміни коду не підтверджено. Не закривайте вікно: повторіть той самий запит. Секретні коди не зберігаються у браузерному сховищі."
+        ? "Результат зміни PIN не підтверджено. Не закривайте вікно: повторіть той самий запит. PIN не зберігається у браузерному сховищі."
         : errorMessage(error));
       setNoticeTone("error");
       if (!isUncertainVisitFailure(error)) setPendingRotation(null);
@@ -1718,47 +1754,41 @@ function TeacherSecurityPanel({
 
   function submitRotation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!confirmed || normalizedPersonalCode(currentCode).length !== 10 || !strength.strong || !codesMatch) return;
+    if (!teacherAccessCodeComplete(currentCode) || !strength.strong || !pinsMatch) return;
     const requestId = crypto.randomUUID();
-    void sendRotation({ requestId, payload: { requestId, currentCode: normalizedPersonalCode(currentCode), newCode: normalizedPersonalCode(newCode) } });
-  }
-
-  async function copyNewCode() {
-    try {
-      await navigator.clipboard.writeText(newCode);
-      setNotice("Новий код скопійовано.");
-      setNoticeTone("info");
-    } catch {
-      setNotice("Не вдалося скопіювати код. Перепишіть його вручну.");
-      setNoticeTone("error");
-    }
+    void sendRotation({
+      requestId,
+      payload: {
+        requestId,
+        currentCode: normalizedTeacherAccessCode(currentCode),
+        newPin: normalizedTeacherPin(newPin),
+      },
+    });
   }
 
   return (
     <div className={styles.modalBackdrop} role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose();
+      if (!required && event.target === event.currentTarget) onClose();
     }}>
       <section className={`${styles.card} ${styles.securityDialog}`} role="dialog" aria-modal="true" aria-labelledby="security-title">
-        <div className={styles.cardHeading}><div><span>Профіль</span><h2 id="security-title">Змінити персональний код</h2></div><button className={styles.quiet} type="button" onClick={onClose} aria-label="Закрити" disabled={submitting}>×</button></div>
-        <p className={styles.empty}>Після зміни старий код і попередні сеанси перестануть працювати. Новий код не зберігається у відкритому вигляді.</p>
+        <div className={styles.cardHeading}><div><span>{required ? "Перший вхід" : "Безпека"}</span><h2 id="security-title">{required ? "Створіть власний PIN" : "Змінити PIN"}</h2></div>{!required ? <button className={styles.quiet} type="button" onClick={onClose} aria-label="Закрити" disabled={submitting}>×</button> : null}</div>
+        <p className={styles.empty}>PIN складається з 4 цифр. Після зміни попередній код і старі сеанси перестануть працювати.</p>
         {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
         <form onSubmit={submitRotation}>
           <div className={styles.fields}>
-            <label className={styles.wide}>Поточний код *<input required type="password" inputMode="text" autoComplete="one-time-code" value={currentCode} onChange={(event) => setCurrentCode(formatPersonalCode(event.currentTarget.value))} placeholder="XXXXX-XXXXX" pattern="[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}" disabled={submitting || rotated || Boolean(pendingRotation)} /></label>
-            <label className={styles.wide}>Новий код *
-              <span className={styles.generatedCode}><input required type={showNewCode ? "text" : "password"} inputMode="text" autoComplete="one-time-code" maxLength={11} value={newCode} onChange={(event) => { setNewCode(formatPersonalCode(event.currentTarget.value)); setConfirmed(false); setRotated(false); }} placeholder="XXXXX-XXXXX" pattern="[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}" aria-invalid={newCode.length > 0 && !strength.strong} aria-describedby="new-code-help new-code-rules" disabled={submitting || rotated || Boolean(pendingRotation)} /><button className={styles.quiet} type="button" onClick={() => setShowNewCode((value) => !value)} disabled={!newCode || submitting}>{showNewCode ? "Сховати" : "Показати"}</button><button className={styles.quiet} type="button" onClick={() => { setNewCode(generatePersonalCode()); setConfirmNewCode(""); setShowNewCode(true); setConfirmed(false); setRotated(false); setNotice(""); }} disabled={submitting || rotated || Boolean(pendingRotation)}>Створити надійний код</button>{newCode ? <button className={styles.quiet} type="button" onClick={() => void copyNewCode()} disabled={submitting}>Копіювати</button> : null}</span>
-              <small id="new-code-help">Можна ввести власний код або створити випадковий. Дозволені лише символи 2–9 та великі латинські літери без I, L, O.</small>
-              <ul id="new-code-rules" className={styles.codeRules} aria-live="polite">
-                <li data-ok={strength.complete}>10 дозволених символів</li>
-                <li data-ok={strength.diverse}>Щонайменше 4 різні символи</li>
-                <li data-ok={strength.noLongRun}>Без 4 однакових символів поспіль</li>
-                <li data-ok={strength.notObvious}>Без паліндромів, повторюваних блоків і очевидних послідовностей</li>
+            {initialCurrentCode && required ? <div className={`${styles.wide} ${styles.success}`} role="status">Тимчасовий код бібліотекаря підтверджено.</div> : <label className={styles.wide}>Поточний код або PIN *<input required type="password" inputMode="text" autoComplete="current-password" maxLength={11} value={currentCode} onChange={(event) => setCurrentCode(formatTeacherAccessCode(event.currentTarget.value))} placeholder="4 цифри або XXXXX-XXXXX" pattern="(?:[0-9]{4}|[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5})" disabled={submitting || rotated || Boolean(pendingRotation)} /></label>}
+            <label className={styles.wide}>Новий PIN *
+              <span className={styles.generatedCode}><input required type={showPin ? "text" : "password"} inputMode="numeric" autoComplete="new-password" maxLength={4} value={newPin} onChange={(event) => { setNewPin(normalizedTeacherPin(event.currentTarget.value)); setRotated(false); }} placeholder="••••" pattern="[0-9]{4}" aria-invalid={newPin.length > 0 && !strength.strong} aria-describedby="new-pin-help new-pin-rules" disabled={submitting || rotated || Boolean(pendingRotation)} /><button className={styles.quiet} type="button" onClick={() => setShowPin((value) => !value)} disabled={!newPin || submitting}>{showPin ? "Сховати" : "Показати"}</button></span>
+              <small id="new-pin-help">Оберіть 4 цифри, які легко запам’ятати вам, але важко вгадати іншим.</small>
+              <ul id="new-pin-rules" className={styles.codeRules} aria-live="polite">
+                <li data-ok={strength.complete}>Рівно 4 цифри</li>
+                <li data-ok={strength.notRepeated}>Не чотири однакові цифри й не повтор однієї пари</li>
+                <li data-ok={strength.notObvious}>Не проста послідовність на зразок 1234</li>
               </ul>
             </label>
-            <label className={styles.wide}>Повторіть новий код *<input required type="password" inputMode="text" autoComplete="one-time-code" maxLength={11} value={confirmNewCode} onChange={(event) => setConfirmNewCode(formatPersonalCode(event.currentTarget.value))} placeholder="XXXXX-XXXXX" pattern="[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}" aria-invalid={confirmationComplete && !codesMatch} aria-describedby="confirm-new-code-help" disabled={submitting || rotated || Boolean(pendingRotation)} /><small id="confirm-new-code-help" className={confirmationComplete && !codesMatch ? styles.fieldError : undefined}>{confirmationComplete && !codesMatch ? "Коди не збігаються." : "Введіть новий код ще раз, щоб уникнути помилки."}</small></label>
-            <label className={`${styles.wide} ${styles.confirmCode}`}><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.currentTarget.checked)} disabled={!strength.strong || !codesMatch || submitting || rotated || Boolean(pendingRotation)} /><span>Я зберіг(ла) новий код і розумію, що старий перестане працювати.</span></label>
+            <label className={styles.wide}>Повторіть PIN *<input required type="password" inputMode="numeric" autoComplete="new-password" maxLength={4} value={confirmPin} onChange={(event) => setConfirmPin(normalizedTeacherPin(event.currentTarget.value))} placeholder="••••" pattern="[0-9]{4}" aria-invalid={confirmationComplete && !pinsMatch} aria-describedby="confirm-pin-help" disabled={submitting || rotated || Boolean(pendingRotation)} /><small id="confirm-pin-help" className={confirmationComplete && !pinsMatch ? styles.fieldError : undefined}>{confirmationComplete && !pinsMatch ? "PIN-коди не збігаються." : "Введіть ті самі 4 цифри ще раз."}</small></label>
           </div>
-          {pendingRotation ? <button className={styles.primary} type="button" onClick={() => void sendRotation(pendingRotation)} disabled={submitting}>{submitting ? "Перевіряємо…" : "Повторити той самий запит"}</button> : <button className={styles.primary} type="submit" disabled={!confirmed || normalizedPersonalCode(currentCode).length !== 10 || !strength.strong || !codesMatch || submitting || rotated}>{submitting ? "Змінюємо…" : rotated ? "Код змінено" : "Активувати новий код"}</button>}
+          {pendingRotation ? <button className={styles.primary} type="button" onClick={() => void sendRotation(pendingRotation)} disabled={submitting}>{submitting ? "Перевіряємо…" : "Повторити той самий запит"}</button> : <button className={styles.primary} type="submit" disabled={!teacherAccessCodeComplete(currentCode) || !strength.strong || !pinsMatch || submitting || rotated}>{submitting ? "Змінюємо…" : rotated ? "PIN змінено" : "Активувати PIN"}</button>}
         </form>
       </section>
     </div>
@@ -1882,27 +1912,6 @@ function timeMinutes(value: string): number {
 
 function minutesTime(value: number): string {
   return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
-}
-
-function strongPersonalCode(value: string): boolean {
-  return personalCodeStrength(value).strong;
-}
-
-function generatePersonalCode(): string {
-  while (true) {
-    const result: string[] = [];
-    while (result.length < 10) {
-      const bytes = crypto.getRandomValues(new Uint8Array(16));
-      for (const byte of bytes) {
-        const usableRange = Math.floor(256 / PERSONAL_CODE_ALPHABET.length) * PERSONAL_CODE_ALPHABET.length;
-        if (byte >= usableRange) continue;
-        result.push(PERSONAL_CODE_ALPHABET[byte % PERSONAL_CODE_ALPHABET.length]);
-        if (result.length === 10) break;
-      }
-    }
-    const candidate = result.join("");
-    if (strongPersonalCode(candidate)) return formatPersonalCode(candidate);
-  }
 }
 
 function materialRequestStatusLabel(status: MaterialRequestStatus): string {

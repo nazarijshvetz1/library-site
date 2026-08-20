@@ -15,6 +15,7 @@ type TeacherCredential = {
   lastLoginAt: string | null;
   lockedUntil: string | null;
   activeSessions: number;
+  mustChangePin: boolean;
 };
 
 type TeacherAccessRow = {
@@ -114,7 +115,7 @@ export default function TeacherAccessAdmin({ writesEnabled }: { writesEnabled: b
   async function issueCode(teacher: TeacherAccessRow) {
     const existing = teacher.credential !== null;
     if (existing && !window.confirm(
-      `Створити новий код для ${teacher.fullName}? Попередній код одразу перестане працювати, а всі відкриті сеанси буде завершено.`,
+      `Скинути PIN для ${teacher.fullName} і видати новий тимчасовий код? Попередній PIN одразу перестане працювати, а всі відкриті сеанси буде завершено.`,
     )) return;
 
     setBusyAction(`code:${teacher.id}`);
@@ -132,7 +133,7 @@ export default function TeacherAccessAdmin({ writesEnabled }: { writesEnabled: b
         },
       );
       setOneTimeCodes([{ teacherId: result.teacher.id, fullName: result.teacher.fullName, code: result.code }]);
-      setNotice(existing ? "Новий код створено. Передайте його вчителю зараз." : "Код доступу створено. Передайте його вчителю зараз.");
+      setNotice(existing ? "PIN скинуто. Передайте вчителю новий тимчасовий код." : "Тимчасовий код створено. Після першого входу вчитель встановить власний PIN.");
       setNoticeTone("success");
       await load(true);
     } catch (error) {
@@ -240,8 +241,8 @@ export default function TeacherAccessAdmin({ writesEnabled }: { writesEnabled: b
       <div className={styles.heading}>
         <div>
           <span>Вхід без email</span>
-          <h2 id="teacher-access-title">Коди доступу вчителів</h2>
-          <p>Ім’я береться з бази даних. Особистий код підтверджує, хто саме створює або скасовує запис.</p>
+          <h2 id="teacher-access-title">PIN-коди та відновлення доступу</h2>
+          <p>Бібліотекар видає тимчасовий код. Після першого входу вчитель створює власний 4-значний PIN. Забутий PIN тут можна лише скинути, але не переглянути.</p>
         </div>
         <button className={styles.secondaryButton} type="button" onClick={() => void load()} disabled={loading || Boolean(busyAction)}>
           ↻ Оновити
@@ -258,12 +259,12 @@ export default function TeacherAccessAdmin({ writesEnabled }: { writesEnabled: b
           <div className={styles.codeRevealHeading}>
             <div>
               <span>Показується лише зараз</span>
-              <h3 id="one-time-code-title">Одноразово видані коди</h3>
+              <h3 id="one-time-code-title">Тимчасові коди для першого входу</h3>
             </div>
             <button className={styles.forgetButton} type="button" onClick={forgetCodes}>Закрити й забути</button>
           </div>
           <p className={styles.codeWarning} id="one-time-code-warning">
-            Сайт не зберігає ці коди у відкритому вигляді. Після закриття їх неможливо буде переглянути знову — лише створити нові.
+            Сайт не зберігає ці коди у відкритому вигляді. Передайте код відповідному вчителю: після входу він створить власний PIN із 4 цифр.
           </p>
           <div className={styles.codeList} aria-describedby="one-time-code-warning">
             {oneTimeCodes.map((item) => (
@@ -318,10 +319,10 @@ export default function TeacherAccessAdmin({ writesEnabled }: { writesEnabled: b
           onClick={() => void bulkIssue()}
           disabled={!canWrite || missingCount === 0}
         >
-          {busyAction === "bulk-issue" ? "Створюємо…" : `Видати коди без доступу (${missingCount})`}
+          {busyAction === "bulk-issue" ? "Створюємо…" : `Видати тимчасові коди (${missingCount})`}
         </button>
       </div>
-      <p className={styles.bulkHint}>Масова видача створює коди лише для вчителів без доступу. Жоден чинний код не змінюється.</p>
+      <p className={styles.bulkHint}>Масова видача створює тимчасові коди лише для вчителів без доступу. Чинні PIN-коди не змінюються.</p>
 
       {loading ? <p className={styles.empty}>Оновлюємо список учителів…</p> : filteredTeachers.length ? (
         <div className={styles.tableRegion} role="region" aria-label="Коди доступу вчителів">
@@ -342,7 +343,7 @@ export default function TeacherAccessAdmin({ writesEnabled }: { writesEnabled: b
                       onClick={() => void issueCode(teacher)}
                       disabled={!canWrite}
                     >
-                      {busyAction === `code:${teacher.id}` ? "Створюємо…" : teacher.credential ? "Новий код" : "Створити код"}
+                      {busyAction === `code:${teacher.id}` ? "Створюємо…" : teacher.credential ? "Забув PIN — скинути" : "Створити тимчасовий код"}
                     </button>
                     {teacher.credential?.status === "disabled" ? (
                       <button type="button" onClick={() => void updateCredential(teacher, "enable")} disabled={!canWrite}>Увімкнути</button>
@@ -368,7 +369,9 @@ export default function TeacherAccessAdmin({ writesEnabled }: { writesEnabled: b
 
 function CredentialBadge({ credential }: { credential: TeacherCredential | null }) {
   if (!credential) return <span className={`${styles.badge} ${styles.missingBadge}`}>Без коду</span>;
-  const label = credential.status === "active"
+  const label = credential.mustChangePin && credential.status === "active"
+    ? "Очікує створення PIN"
+    : credential.status === "active"
     ? "Активний"
     : credential.status === "disabled"
       ? "Вимкнений"

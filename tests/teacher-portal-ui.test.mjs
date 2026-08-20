@@ -4,12 +4,14 @@ import test from "node:test";
 
 import {
   clearPortalPendingIntent,
-  formatPersonalCode,
+  formatTeacherAccessCode,
   mergePortalPageById,
-  normalizedPersonalCode,
-  personalCodeStrength,
+  normalizedTeacherAccessCode,
+  normalizedTeacherPin,
   publicVisitsUrl,
   readPortalPendingIntent,
+  teacherAccessCodeComplete,
+  teacherPinStrength,
   visitHorizonEnd,
   writePortalPendingIntent,
 } from "../app/visits/visit-client.ts";
@@ -114,23 +116,29 @@ test("authenticated teacher workflows use frozen routes and exact request fields
   assert.match(workspace, /\/api\/teacher\/notifications/u);
   assert.match(workspace, /expectedVersion: notification\.version, read: true/u);
   assert.match(workspace, /\/api\/teacher\/security\/code/u);
-  assert.match(workspace, /currentCode: normalizedPersonalCode\(currentCode\), newCode: normalizedPersonalCode\(newCode\)/u);
-  assert.match(workspace, /strongPersonalCode/u);
-  assert.match(workspace, /setNewCode\(formatPersonalCode\(event\.currentTarget\.value\)\)/u);
-  assert.match(workspace, /setConfirmNewCode\(formatPersonalCode\(event\.currentTarget\.value\)\)/u);
-  assert.match(workspace, /!strength\.strong \|\| !codesMatch/u);
-  assert.doesNotMatch(workspace, /<input required readOnly type="text" value=\{newCode\}/u);
-  assert.match(workspace, /clearTeacherPortalPendingStorage\(window\.sessionStorage, pendingScope\)/u);
+  assert.match(workspace, /currentCode: normalizedTeacherAccessCode\(currentCode\),[\s\S]*newPin: normalizedTeacherPin\(newPin\)/u);
+  assert.match(workspace, /teacherPinStrength\(newPin\)/u);
+  assert.match(workspace, /setNewPin\(normalizedTeacherPin\(event\.currentTarget\.value\)\)/u);
+  assert.match(workspace, /setConfirmPin\(normalizedTeacherPin\(event\.currentTarget\.value\)\)/u);
+  assert.match(workspace, /!teacherAccessCodeComplete\(currentCode\) \|\| !strength\.strong \|\| !pinsMatch/u);
   assert.doesNotMatch(workspace, /localStorage/u);
+  assert.match(workspace, /mustChangePin/u);
+  assert.match(workspace, /firstLoginCode/u);
+  assert.match(workspace, /results\.length === 1/u);
+  assert.match(workspace, /Оберіть своє ім’я у списку під полем/u);
+  assert.match(workspace, /clearTeacherPortalPendingStorage\(window\.sessionStorage, pendingScope\)/u);
 });
 
-test("teacher can enter and submit a custom strong personal code", () => {
-  const custom = "2A3B4-C5D6E";
-  assert.equal(formatPersonalCode("2a3b4c5d6e"), custom);
-  assert.equal(normalizedPersonalCode(custom), "2A3B4C5D6E");
-  assert.equal(personalCodeStrength(custom).strong, true);
-  assert.equal(personalCodeStrength("AAAAA-AAAAA").strong, false);
-  assert.equal(personalCodeStrength("23456-789AB").strong, false);
+test("teacher can use a temporary code and choose a non-obvious four-digit PIN", () => {
+  assert.equal(formatTeacherAccessCode("2a3b4c5d6e"), "2A3B4-C5D6E");
+  assert.equal(normalizedTeacherAccessCode("2A3B4-C5D6E"), "2A3B4C5D6E");
+  assert.equal(teacherAccessCodeComplete("2A3B4-C5D6E"), true);
+  assert.equal(teacherAccessCodeComplete("4826"), true);
+  assert.equal(normalizedTeacherAccessCode("10 29"), "1029");
+  assert.equal(normalizedTeacherPin("48-26"), "4826");
+  assert.equal(teacherPinStrength("4826").strong, true);
+  assert.equal(teacherPinStrength("1111").strong, false);
+  assert.equal(teacherPinStrength("1234").strong, false);
 });
 
 test("authoritative Sites suite includes teacher portal UI coverage", async () => {
