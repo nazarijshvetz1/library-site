@@ -22,6 +22,7 @@ const migrationFiles = [
   "0003_odd_the_order.sql", "0004_staging_import_runs.sql", "0005_young_night_nurse.sql",
   "0006_pale_sauron.sql", "0007_cold_whiplash.sql", "0008_sudden_thunderbird.sql",
   "0009_happy_silver_samurai.sql", "0010_shocking_cobalt_man.sql",
+  "0011_normalize_holding_conditions.sql",
 ];
 
 class PreparedStatement {
@@ -94,7 +95,7 @@ function updateInput(expectedVersion, action, changes = {}) {
 test("0010 migrates seeded parent/children with foreign keys enabled and backfills every teacher", async () => {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec("PRAGMA foreign_keys=ON");
-  for (const file of migrationFiles.slice(0, -1)) {
+  for (const file of migrationFiles.slice(0, -2)) {
     sqlite.exec((await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8")).replaceAll("--> statement-breakpoint", ""));
   }
   const now = "2026-08-13T09:00:00.000Z";

@@ -15,6 +15,7 @@ const migrationFiles = [
   "drizzle/0008_sudden_thunderbird.sql",
   "drizzle/0009_happy_silver_samurai.sql",
   "drizzle/0010_shocking_cobalt_man.sql",
+  "drizzle/0011_normalize_holding_conditions.sql",
 ];
 
 async function migratedDatabase() {
@@ -24,6 +25,30 @@ async function migratedDatabase() {
     database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
   }
   return database;
+}
+
+async function databaseBeforeConditionNormalization() {
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON;");
+  for (const file of migrationFiles.slice(0, -1)) {
+    database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
+  }
+  return database;
+}
+
+async function applyConditionNormalization(database) {
+  const sql = await readFile(
+    new URL("../drizzle/0011_normalize_holding_conditions.sql", import.meta.url),
+    "utf8",
+  );
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    database.exec(sql);
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 function seedDirectories(database) {
@@ -52,6 +77,137 @@ function seedDirectories(database) {
     );
   `);
 }
+
+test("condition normalization moves every current holding to good with balanced history", async () => {
+  const database = await databaseBeforeConditionNormalization();
+  const now = "2026-08-20T10:00:00.000Z";
+  database.exec(`
+    INSERT INTO users (
+      id, full_name, sort_name, email, auth_user_id, role, status, created_at, updated_at
+    ) VALUES (
+      'USR-001', 'Бібліотекар', 'Бібліотекар', 'library@example.test',
+      'auth-library', 'librarian', 'active', '${now}', '${now}'
+    );
+    INSERT INTO locations (
+      id, name, type, status, is_public, sort_order, created_at, updated_at
+    ) VALUES ('LOC-001', 'Бібліотека', 'library', 'active', 1, 1, '${now}', '${now}');
+  `);
+
+  const insertMaterial = database.prepare(`
+    INSERT INTO materials (
+      id, catalog_number, title, sort_title, search_text, rubric,
+      publication_type, subject, class_from, class_to, author,
+      status, version, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, '', '', '', '', NULL, NULL, '', 'active', 1, ?, ?)
+  `);
+  const insertHolding = database.prepare(`
+    INSERT INTO holdings (material_id, location_id, condition, quantity, version, updated_at)
+    VALUES (?, 'LOC-001', ?, ?, 1, ?)
+  `);
+  const insertStockTotal = database.prepare(`
+    INSERT INTO material_stock_totals (
+      material_id, total_quantity, library_quantity, other_location_quantity,
+      loaned_quantity, reserved_quantity, updated_at
+    ) VALUES (?, ?, ?, 0, 0, 0, ?)
+  `);
+
+  for (let index = 0; index < 1109; index += 1) {
+    const materialId = `CAT-${String(index + 1).padStart(4, "0")}`;
+    const title = `Матеріал ${index + 1}`;
+    const target = index < 1088;
+    const quantity = target
+      ? (index === 0 ? 18054 : 1)
+      : (index === 1088 ? 618 : 1);
+    insertMaterial.run(materialId, index + 1, title, title.toLocaleLowerCase("uk-UA"), now, now);
+    insertHolding.run(materialId, target ? "unspecified" : "good", quantity, now);
+    insertStockTotal.run(materialId, quantity, quantity, now);
+  }
+
+  await applyConditionNormalization(database);
+
+  assert.deepEqual(
+    { ...database.prepare(`
+      SELECT count(*) AS rows, sum(quantity) AS copies
+      FROM holdings WHERE condition = 'good'
+    `).get() },
+    { rows: 1109, copies: 19779 },
+  );
+  assert.equal(
+    database.prepare("SELECT count(*) AS count FROM holdings WHERE condition <> 'good'").get().count,
+    0,
+  );
+  assert.equal(
+    database.prepare("SELECT count(*) AS count FROM holdings WHERE version = 2").get().count,
+    1088,
+  );
+  assert.deepEqual(
+    { ...database.prepare(`
+      SELECT
+        count(*) AS rows,
+        -sum(quantity_delta) AS copies
+      FROM inventory_transaction_lines
+      WHERE transaction_id = 'ITX-CONDITION-GOOD-20260820' AND quantity_delta < 0
+    `).get() },
+    { rows: 1088, copies: 19141 },
+  );
+  assert.deepEqual(
+    database.prepare(`
+      SELECT material_id, location_id, sum(quantity_delta) AS delta
+      FROM inventory_transaction_lines
+      WHERE transaction_id = 'ITX-CONDITION-GOOD-20260820'
+      GROUP BY material_id, location_id
+      HAVING sum(quantity_delta) <> 0
+    `).all(),
+    [],
+  );
+  const audit = database.prepare(`
+    SELECT action, before_json, after_json
+    FROM audit_events WHERE id = 'AUDIT-CONDITION-GOOD-20260820'
+  `).get();
+  assert.equal(audit.action, "holdings.condition_normalized");
+  assert.deepEqual(JSON.parse(audit.before_json), {
+    condition: "mixed",
+    changedRows: 1088,
+    changedCopies: 19141,
+    totalRows: 1109,
+    totalCopies: 19779,
+  });
+  assert.equal(JSON.parse(audit.after_json).condition, "good");
+  assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+  assert.deepEqual(
+    database.prepare(`
+      SELECT name FROM sqlite_schema
+      WHERE name IN ('__condition_normalization_targets', '__condition_normalization_guard')
+    `).all(),
+    [],
+  );
+  database.close();
+});
+
+test("condition normalization fails closed when the audited production scope drifts", async () => {
+  const database = await databaseBeforeConditionNormalization();
+  seedDirectories(database);
+  database.exec(`
+    INSERT INTO holdings (material_id, location_id, condition, quantity, version, updated_at)
+    VALUES ('CAT-0001', 'LOC-001', 'unspecified', 1, 1, '2026-08-20T10:00:00.000Z')
+  `);
+
+  await assert.rejects(() => applyConditionNormalization(database), /constraint/i);
+  assert.deepEqual(
+    { ...database.prepare("SELECT condition, quantity, version FROM holdings").get() },
+    { condition: "unspecified", quantity: 1, version: 1 },
+  );
+  assert.equal(database.prepare("SELECT count(*) AS count FROM inventory_transactions").get().count, 0);
+  assert.equal(database.prepare("SELECT count(*) AS count FROM audit_events").get().count, 0);
+  assert.deepEqual(
+    database.prepare(`
+      SELECT name FROM sqlite_schema
+      WHERE name IN ('__condition_normalization_targets', '__condition_normalization_guard')
+    `).all(),
+    [],
+  );
+  database.close();
+});
 
 test("core migration extends the existing draft database without recreating it", async () => {
   const database = await migratedDatabase();

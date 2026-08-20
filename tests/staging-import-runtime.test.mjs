@@ -39,6 +39,7 @@ const migrationUrls = [
     "0006_pale_sauron.sql", "0007_cold_whiplash.sql", "0008_sudden_thunderbird.sql",
     "0009_happy_silver_samurai.sql",
     "0010_shocking_cobalt_man.sql",
+    "0011_normalize_holding_conditions.sql",
   ].map((file) => new URL(`../drizzle/${file}`, import.meta.url));
 
 async function fixturePlan() {

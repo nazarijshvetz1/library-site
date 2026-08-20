@@ -78,6 +78,13 @@
       "when": 1786613648343,
       "tag": "0010_shocking_cobalt_man",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1787241600000,
+      "tag": "0011_normalize_holding_conditions",
+      "breakpoints": true
     }
   ]
 }
