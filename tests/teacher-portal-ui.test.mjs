@@ -208,6 +208,24 @@ test("teacher orders and notifications page with the frozen opaque cursor", asyn
   assert.match(notifications, /Завантажити ще/u);
 });
 
+test("teacher cabinet shows personal and responsible-class loans from the signed-in identity", async () => {
+  const [page, workspace, route] = await Promise.all([
+    read("app/teacher/page.tsx"),
+    read("app/visits/visit-booking-workspace.tsx"),
+    read("app/api/teacher/loans/route.ts"),
+  ]);
+  assert.match(page, /value === "loans"/u);
+  assert.match(workspace, /id: "loans", label: "Мої посібники"/u);
+  assert.match(workspace, /function TeacherLoansPanel/u);
+  assert.match(workspace, /"\/api\/teacher\/loans"/u);
+  assert.match(workspace, /Особисто на вас/u);
+  assert.match(workspace, /На класах/u);
+  assert.match(route, /requireVisitTeacherSession\(db, request\)/u);
+  assert.match(route, /teacherUserId: teacher\.teacherUserId/u);
+  assert.match(route, /listOpenClassLoans/u);
+  assert.doesNotMatch(route, /searchParams|get\("teacherUserId"\)/u);
+});
+
 test("librarian request inbox uses frozen ready fields and public active pickup locations", async () => {
   const [workspace, inbox] = await Promise.all([
     read("app/librarian/visits/visit-admin-workspace.tsx"),
@@ -234,6 +252,7 @@ test("public catalog navigation names the cabinet while preserving explicit sche
     read("source/styles.css"),
   ]);
   assert.match(html, />Кабінет учителя<\/a>/u);
+  assert.match(html, /class="teacher-nav-link"[\s\S]*data-primary-section="teacher"/u);
   assert.match(html, /href="#visit-schedule"[^>]*>Графік<\/a>/u);
   assert.match(config, /\/teacher"/u);
   assert.match(css, /a:not\(\.teacher-nav-link\)\{display:none\}/u);

@@ -424,6 +424,15 @@ test("new librarian route renders D1 workspace and keeps legacy workspace intact
   assert.match(workspace, /retryPending \? "Перевірити результат"/u);
   assert.match(workspace, /role=\{tone === "error" \? "alert" : "status"\}/u);
   assert.match(workspace, /\/api\/librarian\/isbn-lookup\?isbn=/u);
+  assert.match(workspace, /<LoanReturnPanel[\s\S]*?locations=\{locations\}/u);
+  assert.match(workspace, /\/api\/librarian\/locations/u);
+  assert.match(workspace, /function LocationManagementPanel/u);
+  assert.match(workspace, /function IsbnCameraScanner/u);
+  assert.match(workspace, /\/api\/librarian\/cover-photo\/remote\?url=/u);
+  assert.match(workspace, /candidate\.coverUrl\) onCover\(candidate\)/u);
+  assert.match(workspace, /Шукати на Pidruchnyk\.com\.ua/u);
+  assert.match(workspace, /Шукати на Yakaboo/u);
+  assert.match(workspace, /tool === "create" \? styles\.workGridCreate/u);
   assert.match(workspace, /mergeBookLookupDraft/u);
   assert.match(workspace, /mergeBookLookupLink/u);
   assert.match(workspace, /current\.title\.trim\(\) \|\| candidate\.title/u);
@@ -501,6 +510,8 @@ test("new librarian route renders D1 workspace and keeps legacy workspace intact
   assert.match(academic, /\/api\/librarian\/class-years"/u);
   assert.match(academic, /\/close/u);
   assert.match(academic, /\/academic-years\/rollover/u);
+  assert.match(academic, /reference\.curators/u);
+  assert.match(academic, /curatorRoleLabel/u);
   assert.match(academic, /expectedVersion: selected\.version/u);
   assert.match(academic, /sourceYearVersion: sourceYear\.version/u);
   assert.match(academic, /targetYearVersion: targetYear\.version/u);

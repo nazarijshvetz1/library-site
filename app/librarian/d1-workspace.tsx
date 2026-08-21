@@ -30,6 +30,7 @@ import {
   writePendingClassCirculationIntent as writeStoredClassCirculationIntent,
 } from "@/lib/librarian-d1-client";
 import { normalizeCoverPhotoForUpload } from "@/lib/cover-client";
+import { normalizeIsbn } from "@/lib/isbn";
 import {
   clearPendingInventoryIntent as clearStoredInventoryIntent,
   type PendingInventoryIntent,
@@ -54,6 +55,7 @@ type Tool =
   | "return"
   | "class-issue"
   | "class-return"
+  | "locations"
   | AcademicTool;
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -166,6 +168,28 @@ type LibraryLocation = {
   type: string;
   isPublic: boolean;
   status?: string;
+};
+
+type ManagedLocation = {
+  id: string;
+  name: string;
+  type: string;
+  status: "active" | "inactive";
+  isPublic: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  dependencies: {
+    stockQuantity: number;
+    activeReservations: number;
+    activeClasses: number;
+    activeTeachers: number;
+    readyRequests: number;
+    totalReferences: number;
+  };
+  canDelete: boolean;
+  canDeactivate: boolean;
+  blockers: string[];
 };
 
 type ReferenceEnvelope = {
@@ -402,6 +426,7 @@ const TOOLS: Array<{ id: Tool; icon: string; label: string; hint: string }> = [
   { id: "return", icon: "↩", label: "Повернення", hint: "Прийняти книги" },
   { id: "class-issue", icon: "⇥", label: "Видача класу", hint: "Кілька матеріалів класу" },
   { id: "class-return", icon: "⇤", label: "Повернення класу", hint: "Частково або повністю" },
+  { id: "locations", icon: "⌂", label: "Кабінети", hint: "Додати, змінити або закрити" },
   { id: "academic-year", icon: "▣", label: "Новий навчальний рік", hint: "Створити період" },
   { id: "class-create", icon: "+", label: "Відкрити клас", hint: "Додати до року" },
   { id: "class-update", icon: "↻", label: "Змінити клас", hint: "Керівник і кабінет" },
@@ -588,7 +613,7 @@ export default function D1LibrarianWorkspace({
     window.queueMicrotask(() => workspaceTitleRef.current?.focus());
   }
 
-  const showCatalogSearch = !isAcademicTool(tool) && tool !== "class-return";
+  const showCatalogSearch = !isAcademicTool(tool) && tool !== "return" && tool !== "class-return" && tool !== "locations";
 
   return (
     <main className={styles.shell}>
@@ -713,8 +738,8 @@ export default function D1LibrarianWorkspace({
             </div>
           ) : null}
 
-          <div className={showCatalogSearch ? styles.workGrid : styles.workGridWide}>
-            {showCatalogSearch ? (
+          <div className={tool === "create" ? styles.workGridCreate : showCatalogSearch ? styles.workGrid : styles.workGridWide}>
+            {showCatalogSearch && tool !== "create" ? (
               <CatalogSearch
                 filters={filters}
                 onFilters={setFilters}
@@ -842,6 +867,7 @@ export default function D1LibrarianWorkspace({
                 <LoanReturnPanel
                   writesEnabled={writesEnabled}
                   teachers={teachers}
+                  locations={locations}
                   referenceState={referenceState}
                   referenceError={referenceError}
                   onSaved={refreshSelected}
@@ -869,15 +895,36 @@ export default function D1LibrarianWorkspace({
                   onSaved={refreshSelected}
                 />
               ) : null}
+              {tool === "locations" ? (
+                <LocationManagementPanel writesEnabled={writesEnabled} />
+              ) : null}
               {isAcademicTool(tool) ? (
                 <AcademicWorkspace
                   tool={tool}
                   writesEnabled={writesEnabled}
-                  teachers={teachers}
                   locations={locations}
                 />
               ) : null}
             </section>
+            {tool === "create" ? (
+              <CatalogSearch
+                filters={filters}
+                onFilters={setFilters}
+                items={items}
+                state={searchState}
+                error={searchError}
+                rubrics={rubrics}
+                subjects={subjects}
+                publicationTypes={publicationTypes}
+                facetsState={facetsState}
+                suggestionsReady={resolvedSearchScope === catalogFiltersKey(filters)}
+                selectedId={selectedId}
+                onSelect={selectMaterial}
+                nextCursor={nextCursor}
+                loadingMore={loadingMore}
+                onLoadMore={() => void loadMore()}
+              />
+            ) : null}
           </div>
         </section>
       </div>
@@ -1414,6 +1461,7 @@ type CoverUploadController = {
   normalizing: boolean;
   error: string;
   choose: (file: File | null) => Promise<void>;
+  chooseFromUrl: (url: string) => Promise<void>;
   clear: () => void;
   promote: (materialId: string, expectedVersion: number) => Promise<void>;
 };
@@ -1458,6 +1506,30 @@ function useDirectCoverUpload(): CoverUploadController {
         photoKey: "",
         retainForRetry: false,
       });
+    } catch (selectionError) {
+      setError(errorMessage(selectionError));
+    } finally {
+      setNormalizing(false);
+    }
+  }
+
+  async function chooseFromUrl(url: string) {
+    const value = url.trim();
+    if (!value) return;
+    setNormalizing(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/librarian/cover-photo/remote?url=${encodeURIComponent(value)}`, {
+        headers: { accept: "image/jpeg,image/png,image/webp" },
+        credentials: "same-origin",
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error || "Не вдалося завантажити обкладинку.");
+      }
+      const blob = await response.blob();
+      const extension = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg";
+      await choose(new File([blob], `isbn-cover.${extension}`, { type: blob.type }));
     } catch (selectionError) {
       setError(errorMessage(selectionError));
     } finally {
@@ -1531,6 +1603,7 @@ function useDirectCoverUpload(): CoverUploadController {
     normalizing,
     error,
     choose,
+    chooseFromUrl,
     clear,
     promote,
   };
@@ -1545,6 +1618,7 @@ function CoverPhotoField({
   currentUrl: string;
   disabled: boolean;
 }) {
+  const [remoteUrl, setRemoteUrl] = useState("");
   const previewUrl = upload.previewUrl || currentUrl;
   return (
     <section className={styles.directCoverField} aria-busy={upload.normalizing}>
@@ -1577,6 +1651,20 @@ function CoverPhotoField({
           </label>
           {upload.file ? <button type="button" className={styles.secondaryButton} disabled={disabled} onClick={upload.clear}>Прибрати нове фото</button> : null}
         </div>
+        <div className={styles.remoteCoverActions}>
+          <input
+            type="url"
+            value={remoteUrl}
+            disabled={disabled || upload.normalizing}
+            onChange={(event) => setRemoteUrl(event.target.value)}
+            placeholder="Посилання на фото з Google Books або Open Library"
+            aria-label="Посилання на обкладинку"
+          />
+          <button type="button" className={styles.secondaryButton} disabled={disabled || upload.normalizing || !remoteUrl.trim()} onClick={() => void upload.chooseFromUrl(remoteUrl)}>
+            Завантажити із сайту
+          </button>
+        </div>
+        <small className={styles.remoteCoverHint}>Для інших сайтів збережіть дозволене фото на пристрій і скористайтеся «Обрати фото».</small>
       </div>
     </section>
   );
@@ -1780,7 +1868,13 @@ function MaterialEditForm({
           <input value={draft.publisher} onChange={(event) => update("publisher", event.target.value)} />
         </EditField>
         <div className={styles.fieldWide}>
-          <IsbnLookupAssist isbn={draft.isbn} onApply={applyBookCandidate} disabled={saving || archiving} />
+          <IsbnLookupAssist
+            isbn={draft.isbn}
+            onIsbn={(value) => update("isbn", value)}
+            onApply={applyBookCandidate}
+            onCover={(candidate) => void coverUpload.chooseFromUrl(candidate.coverUrl)}
+            disabled={saving || archiving}
+          />
         </div>
         <EditField label="Примітка" error={fieldError(fieldErrors, "notes")} wide>
           <textarea rows={4} value={draft.notes} onChange={(event) => update("notes", event.target.value)} />
@@ -2280,7 +2374,13 @@ function MaterialCreatePanel({
           <input value={draft.publisher} onChange={(event) => update("publisher", event.target.value)} />
         </EditField>
         <div className={styles.fieldWide}>
-          <IsbnLookupAssist isbn={draft.isbn} onApply={applyBookCandidate} disabled={saving || Boolean(createdId)} />
+          <IsbnLookupAssist
+            isbn={draft.isbn}
+            onIsbn={(value) => update("isbn", value)}
+            onApply={applyBookCandidate}
+            onCover={(candidate) => void coverUpload.chooseFromUrl(candidate.coverUrl)}
+            disabled={saving || Boolean(createdId)}
+          />
         </div>
         <EditField label="Примітка" error={fieldError(fieldErrors, "notes")} wide>
           <textarea rows={3} value={draft.notes} onChange={(event) => update("notes", event.target.value)} />
@@ -4977,19 +5077,23 @@ function LinkEditor({
 
 function IsbnLookupAssist({
   isbn,
+  onIsbn,
   onApply,
+  onCover,
   disabled,
 }: {
   isbn: string;
+  onIsbn: (value: string) => void;
   onApply: (candidate: BookLookupCandidate) => void;
+  onCover: (candidate: BookLookupCandidate) => void;
   disabled: boolean;
 }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [candidates, setCandidates] = useState<BookLookupCandidate[]>([]);
 
-  async function lookup() {
-    const query = isbn.trim();
+  async function lookup(scannedValue?: string) {
+    const query = (scannedValue ?? isbn).trim();
     if (!query || loading) return;
     setLoading(true);
     setMessage("");
@@ -5013,6 +5117,7 @@ function IsbnLookupAssist({
 
   function apply(candidate: BookLookupCandidate) {
     onApply(candidate);
+    if (candidate.coverUrl) onCover(candidate);
     setCandidates([]);
     setMessage("Дані видання додано до порожніх полів; перевірте їх перед збереженням.");
   }
@@ -5021,16 +5126,25 @@ function IsbnLookupAssist({
     <section className={styles.isbnLookup} aria-live="polite">
       <div>
         <strong>Автозаповнення за ISBN</strong>
-        <small>Назва, автор, рік, видавництво та інформаційне посилання.</small>
+        <small>Назва, автор, рік, видавництво, інформаційне посилання та обкладинка.</small>
       </div>
-      <button
-        className={styles.secondaryButton}
-        type="button"
-        disabled={disabled || loading || !isbn.trim()}
-        onClick={() => void lookup()}
-      >
-        {loading ? "Шукаємо…" : "Знайти опис"}
-      </button>
+      <div className={styles.isbnLookupActions}>
+        <IsbnCameraScanner
+          disabled={disabled || loading}
+          onDetected={(value) => {
+            onIsbn(value);
+            void lookup(value);
+          }}
+        />
+        <button
+          className={styles.secondaryButton}
+          type="button"
+          disabled={disabled || loading || !isbn.trim()}
+          onClick={() => void lookup()}
+        >
+          {loading ? "Шукаємо…" : "Знайти опис"}
+        </button>
+      </div>
       {message ? <p>{message}</p> : null}
       {candidates.length ? (
         <div className={styles.isbnCandidates}>
@@ -5040,18 +5154,293 @@ function IsbnLookupAssist({
               type="button"
               onClick={() => apply(candidate)}
             >
+              {candidate.coverUrl ? <img src={candidate.coverUrl} alt="" /> : <span className={styles.isbnCoverFallback} aria-hidden="true">Б</span>}
               <strong>{candidate.title}</strong>
               <small>
                 {[candidate.authors.join(", "), candidate.publishedYear, candidate.publisher]
                   .filter(Boolean)
                   .join(" · ")}
               </small>
-              <span>{candidate.provider === "google_books" ? "Google Books" : "Open Library"}</span>
+              <span className={styles.isbnProvider}>{candidate.provider === "google_books" ? "Google Books" : "Open Library"}</span>
             </button>
           ))}
         </div>
       ) : null}
+      <div className={styles.externalBookSearch}>
+        <a href={pidruchnykSearchUrl(isbn)} target="_blank" rel="noopener noreferrer">Шукати на Pidruchnyk.com.ua ↗</a>
+        <a href={yakabooSearchUrl(isbn)} target="_blank" rel="noopener noreferrer">Шукати на Yakaboo ↗</a>
+      </div>
     </section>
+  );
+}
+
+type NativeBarcodeDetector = { detect(source: HTMLVideoElement): Promise<Array<{ rawValue: string }>> };
+type NativeBarcodeDetectorConstructor = new (options?: { formats?: string[] }) => NativeBarcodeDetector;
+
+function IsbnCameraScanner({ disabled, onDetected }: { disabled: boolean; onDetected: (value: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [message, setMessage] = useState("");
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const frameRef = useRef<number | null>(null);
+  const scanningRef = useRef(false);
+
+  const stop = useCallback(() => {
+    scanningRef.current = false;
+    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+    frameRef.current = null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setOpen(false);
+  }, []);
+
+  useEffect(() => () => stop(), [stop]);
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") stop();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open, stop]);
+
+  async function start() {
+    const detectorConstructor = (window as Window & { BarcodeDetector?: NativeBarcodeDetectorConstructor }).BarcodeDetector;
+    if (!detectorConstructor || !navigator.mediaDevices?.getUserMedia) {
+      setMessage("Цей браузер не підтримує сканування. Введіть ISBN вручну.");
+      return;
+    }
+    setStarting(true);
+    setMessage("");
+    setOpen(true);
+    scanningRef.current = true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+      if (!scanningRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      streamRef.current = stream;
+      const video = videoRef.current;
+      if (!video) throw new Error("camera_not_ready");
+      video.srcObject = stream;
+      await video.play();
+      const detector = new detectorConstructor({ formats: ["ean_13"] });
+      const scan = async () => {
+        if (!scanningRef.current || !videoRef.current) return;
+        try {
+          const results = await detector.detect(videoRef.current);
+          const normalized = results.map((result) => normalizeIsbn(result.rawValue)).find((value) => value?.length === 13) ?? null;
+          if (normalized) {
+            onDetected(normalized);
+            stop();
+            return;
+          }
+        } catch {
+          // The camera can miss frames while it focuses; continue scanning.
+        }
+        frameRef.current = requestAnimationFrame(scan);
+      };
+      frameRef.current = requestAnimationFrame(scan);
+    } catch {
+      setMessage("Камера недоступна. Дозвольте доступ або введіть ISBN вручну.");
+      stop();
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  return (
+    <>
+      <button className={styles.secondaryButton} type="button" onClick={() => void start()} disabled={disabled || starting || open}>
+        <span aria-hidden="true">▣</span> {starting ? "Відкриваємо…" : "Сканувати ISBN"}
+      </button>
+      {message ? <small className={styles.scannerMessage} role="status">{message}</small> : null}
+      {open ? (
+        <div className={styles.scannerOverlay} role="dialog" aria-modal="true" aria-labelledby="isbn-scanner-title">
+          <div className={styles.scannerDialog}>
+            <header><div><p>Сканування ISBN</p><h2 id="isbn-scanner-title">Наведіть камеру на штрихкод книги</h2></div><button type="button" onClick={stop} aria-label="Закрити сканер">×</button></header>
+            <div className={styles.scannerVideo}><video ref={videoRef} muted playsInline /><span aria-hidden="true" /></div>
+            <p>Тримайте код EAN-13 у рамці. Після розпізнавання опис буде знайдено автоматично.</p>
+            <button className={styles.secondaryButton} type="button" onClick={stop}>Ввести ISBN вручну</button>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function pidruchnykSearchUrl(isbn: string): string {
+  const query = normalizeIsbn(isbn) || isbn.trim();
+  return `https://pidruchnyk.com.ua/index.php?do=search&subaction=search&story=${encodeURIComponent(query)}`;
+}
+
+function yakabooSearchUrl(isbn: string): string {
+  const query = normalizeIsbn(isbn) || isbn.trim();
+  return `https://www.yakaboo.ua/ua/search/?q=${encodeURIComponent(query)}`;
+}
+
+function LocationManagementPanel({ writesEnabled }: { writesEnabled: boolean }) {
+  const [locations, setLocations] = useState<ManagedLocation[]>([]);
+  const [state, setState] = useState<LoadState>("loading");
+  const [message, setMessage] = useState("");
+  const [success, setSuccess] = useState(false);
+  const [busyId, setBusyId] = useState("");
+  const [createName, setCreateName] = useState("");
+  const [createPublic, setCreatePublic] = useState(true);
+  const [createSortOrder, setCreateSortOrder] = useState("100");
+  const [editingId, setEditingId] = useState("");
+  const [editName, setEditName] = useState("");
+  const [editPublic, setEditPublic] = useState(true);
+  const [editSortOrder, setEditSortOrder] = useState("0");
+
+  const load = useCallback(async () => {
+    setState("loading");
+    try {
+      const response = await apiJson<{ success: true; locations: ManagedLocation[] }>("/api/librarian/locations");
+      setLocations(response.locations);
+      setState("ready");
+    } catch (error) {
+      setState("error");
+      setMessage(errorMessage(error));
+      setSuccess(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  async function create(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!writesEnabled || !createName.trim()) return;
+    setBusyId("create");
+    setMessage("");
+    try {
+      await apiJson("/api/librarian/locations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          requestId: crypto.randomUUID(),
+          name: createName.trim(),
+          isPublic: createPublic,
+          sortOrder: Number(createSortOrder),
+        }),
+      });
+      setCreateName("");
+      setMessage("Кабінет додано.");
+      setSuccess(true);
+      await load();
+    } catch (error) {
+      setMessage(errorMessage(error));
+      setSuccess(false);
+    } finally {
+      setBusyId("");
+    }
+  }
+
+  function startEdit(location: ManagedLocation) {
+    setEditingId(location.id);
+    setEditName(location.name);
+    setEditPublic(location.isPublic);
+    setEditSortOrder(String(location.sortOrder));
+    setMessage("");
+  }
+
+  async function update(location: ManagedLocation, changes: Record<string, unknown>, successMessage: string) {
+    if (!writesEnabled) return;
+    setBusyId(location.id);
+    setMessage("");
+    try {
+      await apiJson(`/api/librarian/locations/${encodeURIComponent(location.id)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ requestId: crypto.randomUUID(), expectedUpdatedAt: location.updatedAt, changes }),
+      });
+      setEditingId("");
+      setMessage(successMessage);
+      setSuccess(true);
+      await load();
+    } catch (error) {
+      setMessage(errorMessage(error));
+      setSuccess(false);
+    } finally {
+      setBusyId("");
+    }
+  }
+
+  async function saveEdit(event: FormEvent<HTMLFormElement>, location: ManagedLocation) {
+    event.preventDefault();
+    await update(location, { name: editName.trim(), isPublic: editPublic, sortOrder: Number(editSortOrder) }, "Кабінет оновлено.");
+  }
+
+  async function remove(location: ManagedLocation) {
+    if (!location.canDelete || !writesEnabled) return;
+    const confirmation = window.prompt(`Безповоротно видаляється лише порожній кабінет. Для підтвердження введіть точну назву:\n${location.name}`)?.trim();
+    if (confirmation !== location.name) return;
+    setBusyId(location.id);
+    setMessage("");
+    try {
+      await apiJson(`/api/librarian/locations/${encodeURIComponent(location.id)}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ requestId: crypto.randomUUID(), expectedUpdatedAt: location.updatedAt, confirmation }),
+      });
+      setMessage("Порожній кабінет видалено.");
+      setSuccess(true);
+      await load();
+    } catch (error) {
+      setMessage(errorMessage(error));
+      setSuccess(false);
+    } finally {
+      setBusyId("");
+    }
+  }
+
+  return (
+    <div className={styles.locationManager}>
+      <form className={styles.locationCreate} onSubmit={create}>
+        <div className={styles.formHeading}><div><p>Новий запис</p><h2>Додати кабінет</h2><small>Нові місця створюються як навчальні кабінети.</small></div></div>
+        <div className={styles.formGrid}>
+          <EditField label="Назва кабінету" required><input value={createName} maxLength={160} onChange={(event) => setCreateName(event.target.value)} placeholder="Наприклад, Кабінет № 206" required /></EditField>
+          <EditField label="Порядок у списку"><input type="number" min="0" max="9999" value={createSortOrder} onChange={(event) => setCreateSortOrder(event.target.value)} /></EditField>
+          <label className={styles.receiptToggle}><input type="checkbox" aria-label="Показувати кабінет у відкритих списках" checked={createPublic} onChange={(event) => setCreatePublic(event.target.checked)} /><span><strong>Показувати у відкритих списках</strong><small>Назва може використовуватися у публічних формах.</small></span></label>
+        </div>
+        <div className={styles.formActions}><span>Видалити можна лише порожній кабінет без історії.</span><button className={styles.primaryButton} type="submit" disabled={!writesEnabled || busyId === "create" || !createName.trim()}>{busyId === "create" ? "Додаємо…" : "Додати кабінет"}</button></div>
+      </form>
+      {message ? <InlineMessage tone={success ? "success" : "error"}>{message}</InlineMessage> : null}
+      <section className={styles.locationDirectory} aria-labelledby="location-directory-title">
+        <div className={styles.formHeading}><div><p>{locations.length} місць</p><h2 id="location-directory-title">Усі кабінети й місця</h2><small>Закриті місця залишаються в історії, але зникають із робочих списків.</small></div><button type="button" title="Оновити" onClick={() => void load()} disabled={state === "loading"}>↻</button></div>
+        {state === "loading" ? <PanelLoading /> : null}
+        {state === "error" ? <InlineMessage tone="error">{message}</InlineMessage> : null}
+        {state === "ready" ? <div className={styles.locationList}>{locations.map((location) => (
+          <article key={location.id} data-status={location.status}>
+            {editingId === location.id ? (
+              <form onSubmit={(event) => void saveEdit(event, location)}>
+                <EditField label="Назва" required><input value={editName} maxLength={160} onChange={(event) => setEditName(event.target.value)} required /></EditField>
+                <EditField label="Порядок"><input type="number" min="0" max="9999" value={editSortOrder} onChange={(event) => setEditSortOrder(event.target.value)} /></EditField>
+                <label><input type="checkbox" aria-label="Показувати кабінет у відкритих списках" checked={editPublic} onChange={(event) => setEditPublic(event.target.checked)} /> Публічний список</label>
+                <div><button className={styles.primaryButton} type="submit" disabled={busyId === location.id}>Зберегти</button><button className={styles.secondaryButton} type="button" onClick={() => setEditingId("")}>Скасувати</button></div>
+              </form>
+            ) : (
+              <>
+                <header><div><span>{location.type === "library" ? "Бібліотека" : location.type === "classroom" ? "Кабінет" : "Інше місце"}</span><h3>{location.name}</h3><small>{location.status === "active" ? "Активний" : "Закритий"} · порядок {location.sortOrder} · {location.isPublic ? "видимий у публічних списках" : "лише для працівників"}</small></div><strong>{location.dependencies.stockQuantity} прим.</strong></header>
+                <p>{location.dependencies.activeClasses ? `Класів: ${location.dependencies.activeClasses}. ` : ""}{location.dependencies.activeTeachers ? `Учителів: ${location.dependencies.activeTeachers}. ` : ""}{location.dependencies.activeReservations ? `Резервів: ${location.dependencies.activeReservations}.` : ""}</p>
+                <div className={styles.locationActions}>
+                  <button className={styles.secondaryButton} type="button" onClick={() => startEdit(location)} disabled={!writesEnabled || busyId === location.id}>Редагувати</button>
+                  {location.status === "active" ? <button className={styles.secondaryButton} type="button" onClick={() => void update(location, { status: "inactive" }, "Кабінет закрито без втрати історії.")} disabled={!writesEnabled || busyId === location.id || !location.canDeactivate} title={location.blockers.join(", ") || "Закрити кабінет"}>Закрити</button> : <button className={styles.secondaryButton} type="button" onClick={() => void update(location, { status: "active" }, "Кабінет поновлено.")} disabled={!writesEnabled || busyId === location.id}>Поновити</button>}
+                  <button className={styles.dangerButton} type="button" onClick={() => void remove(location)} disabled={!writesEnabled || busyId === location.id || !location.canDelete} title={location.canDelete ? "Видалити порожній кабінет" : "Є пов’язані дані — доступне лише закриття"}>Видалити</button>
+                </div>
+                {location.blockers.length ? <small className={styles.locationGuard}>Закриття зараз недоступне: {location.blockers.join(", ")}.</small> : null}
+              </>
+            )}
+          </article>
+        ))}</div> : null}
+      </section>
+    </div>
   );
 }
 
@@ -5300,6 +5689,7 @@ function toolTitle(tool: Tool): string {
   if (tool === "return") return "Повернення";
   if (tool === "class-issue") return "Видача підручників класу";
   if (tool === "class-return") return "Повернення підручників класу";
+  if (tool === "locations") return "Кабінети";
   if (tool === "academic-year") return "Новий навчальний рік";
   if (tool === "class-create") return "Відкрити клас";
   if (tool === "class-update") return "Змінити клас";
@@ -5318,6 +5708,7 @@ function toolDescription(tool: Tool): string {
   if (tool === "return") return "Знайдіть відкриту видачу та прийміть повернення.";
   if (tool === "class-issue") return "Зберіть кілька матеріалів і видайте їх активному класу однією операцією.";
   if (tool === "class-return") return "Прийміть повне або часткове повернення комплектів від класу.";
+  if (tool === "locations") return "Додавайте, перейменовуйте, закривайте або безпечно видаляйте порожні кабінети.";
   if (tool === "academic-year") return "Підготуйте наступний навчальний період напряму в D1.";
   if (tool === "class-create") return "Створіть клас у навчальному році та призначте керівника й кабінет.";
   if (tool === "class-update") return "Оновіть назву, керівника, кабінет або примітку без чернетки.";

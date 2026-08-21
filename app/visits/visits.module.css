@@ -23,6 +23,24 @@
 .teacherTabs button { min-height: 44px; padding: 0 15px; display: inline-flex; flex: 0 0 auto; align-items: center; gap: 8px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer; font-weight: 800; }
 .teacherTabs button[aria-current="page"] { background: var(--green-900); color: #fff; }
 .overviewGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.teacherLoans { display: grid; gap: 20px; }
+.loanCounters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.loanCounters article { padding: 18px; display: grid; gap: 4px; border: 1px solid var(--line); border-radius: 16px; background: rgba(255,255,255,.78); }
+.loanCounters span, .loanCounters small { color: var(--muted); font-size: 10px; }
+.loanCounters strong { color: var(--green-950); font: 650 30px/1 Georgia, serif; }
+.loanSections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.teacherLoanList { display: grid; gap: 12px; }
+.teacherLoanList > article { padding: 14px; display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 13px; background: #fbfcf9; }
+.teacherLoanList header { display: flex; justify-content: space-between; gap: 12px; color: var(--green-950); font-size: 11px; font-weight: 800; }
+.teacherLoanList header small, .loanMeta, .teacherLoanList > article > p { color: var(--muted); font-size: 9px; line-height: 1.45; }
+.teacherLoanList > article > p { margin: 0; }
+.teacherLoanItem { padding-top: 9px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; border-top: 1px solid var(--line); }
+.teacherLoanItem > div, .teacherLoanItem > span { display: grid; gap: 2px; }
+.teacherLoanItem > div { min-width: 0; }
+.teacherLoanItem > div strong { overflow: hidden; color: var(--green-950); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.teacherLoanItem small { color: var(--muted); font-size: 9px; }
+.teacherLoanItem > span { min-width: 62px; align-content: center; text-align: right; }
+.teacherLoanItem > span strong { color: var(--green-950); font: 650 22px/1 Georgia, serif; }
 .welcomeCard { color: #e9f0e9; background: var(--green-900); }
 .welcomeCard > span { color: var(--green-100); font-size: 10px; font-weight: 850; letter-spacing: .1em; text-transform: uppercase; }
 .welcomeCard h2 { margin: 12px 0 9px; color: #fff; font: 650 28px/1.1 Georgia, serif; }
@@ -224,8 +242,8 @@
 .readyRows label { display: grid; gap: 4px; color: var(--muted); font-size: 9px; font-weight: 800; }
 .readyRows select, .readyRows input { width: 100%; min-height: 40px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 @media (max-width: 980px) { .accessModes { grid-template-columns: 1fr; } .accessModes .authPage { display: block; } .accessModes .authCard { width: 100%; } }
-@media (max-width: 900px) { .overviewGrid { grid-template-columns: 1fr 1fr; } .welcomeCard { grid-column: 1 / -1; } .orderLayout { grid-template-columns: 1fr; } .requestList { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .overviewGrid { grid-template-columns: 1fr 1fr; } .welcomeCard { grid-column: 1 / -1; } .orderLayout, .loanSections { grid-template-columns: 1fr; } .requestList { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .teacherGrid { display: block; } .teacherGrid > * + * { margin-top: 16px; } .bookingTopbar { display: block; } .bookingTopbar .account { margin: -10px 0 24px; justify-content: space-between; } .bookingTopbar .account > span { display: grid; } .teacherTabs { margin-inline: -13px; border-right: 0; border-left: 0; border-radius: 0; } .page { width: min(100% - 26px, 1180px); padding-top: 34px; } .authPage { padding-top: 38px; } .publicSchedule .cardHeading { display: grid; } .weekControls { width: 100%; grid-template-columns: 40px 1fr 40px; } .publicDays { margin-inline: -20px; padding-inline: 20px; scroll-snap-type: x proximity; } .publicDays article { scroll-snap-align: start; } .fields { grid-template-columns: 1fr; } .fields .wide { grid-column: auto; } .bookingList article { align-items: flex-start; flex-direction: column; } .danger { width: 100%; } .adminTable, .adminTable tbody, .adminTable tr, .adminTable td { display: block; } .adminTable thead { display: none; } .adminTable tr { margin-bottom: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; } .adminTable td { border: 0; padding: 6px; } }
-@media (max-width: 580px) { .overviewGrid { grid-template-columns: 1fr; } .welcomeCard { grid-column: auto; } .guestActions { display: grid; } .sharedDeviceNote { align-items: stretch; flex-direction: column; } .sharedDeviceNote button { width: 100%; } .guestBookings article { align-items: flex-start; flex-direction: column; } .guestBookings article > div:last-child { width: 100%; } .guestBookings article > div:last-child button { flex: 1; } .catalogCards article { grid-template-columns: 46px minmax(0, 1fr); } .catalogCards button { grid-column: 1 / -1; } .orderCover, .orderCoverFallback { width: 46px; height: 67px; } .notificationList article { grid-template-columns: 8px minmax(0, 1fr); } .notificationList article > button, .notificationList article > small { grid-column: 2; justify-self: start; } .generatedCode { align-items: stretch; flex-direction: column; } .generatedCode button { width: 100%; } }
+@media (max-width: 580px) { .overviewGrid, .loanCounters { grid-template-columns: 1fr; } .welcomeCard { grid-column: auto; } .guestActions { display: grid; } .sharedDeviceNote { align-items: stretch; flex-direction: column; } .sharedDeviceNote button { width: 100%; } .guestBookings article { align-items: flex-start; flex-direction: column; } .guestBookings article > div:last-child { width: 100%; } .guestBookings article > div:last-child button { flex: 1; } .catalogCards article { grid-template-columns: 46px minmax(0, 1fr); } .catalogCards button { grid-column: 1 / -1; } .orderCover, .orderCoverFallback { width: 46px; height: 67px; } .notificationList article { grid-template-columns: 8px minmax(0, 1fr); } .notificationList article > button, .notificationList article > small { grid-column: 2; justify-self: start; } .generatedCode { align-items: stretch; flex-direction: column; } .generatedCode button { width: 100%; } }
 @media (max-width: 620px) { .inboxList li { align-items: flex-start; flex-direction: column; } .inboxActions > button, .inboxActions > form { width: 100%; } .inboxActions > button { min-height: 44px; } .readyRows fieldset { grid-template-columns: 1fr; } }
 @media (max-width: 480px) { .header { padding-inline: 13px; } .brand strong { font-size: 16px; } .brand img { width: 42px; height: 42px; } .catalogLink { padding-inline: 10px; font-size: 10px; } .authCard { padding: 20px 16px; } .selectedTeacher { grid-template-columns: minmax(0, 1fr) auto; } .selectedTeacher strong { overflow-wrap: anywhere; } }

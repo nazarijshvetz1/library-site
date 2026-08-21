@@ -16,6 +16,7 @@ export type OpenLoanItem = {
   loanItemId: string;
   materialId: string;
   materialTitle: string;
+  materialAuthor: string;
   materialYear: number | null;
   sourceLocationId: string;
   sourceLocationName: string;
@@ -40,6 +41,7 @@ export type OpenClassLoanItem = {
   classLoanItemId: string;
   materialId: string;
   materialTitle: string;
+  materialAuthor: string;
   materialYear: number | null;
   sourceLocationId: string;
   sourceLocationName: string;
@@ -56,6 +58,7 @@ export type OpenClassLoan = {
   academicYearId: string;
   academicYearLabel: string;
   cohortId: string;
+  curatorUserId: string | null;
   responsibleTeacherUserId: string;
   responsibleTeacherName: string;
   status: "open";
@@ -123,6 +126,7 @@ export async function listOpenLoans(
       li.id AS loan_item_id,
       li.material_id,
       m.title AS material_title,
+      m.author AS material_author,
       m.publication_year AS material_year,
       li.source_location_id,
       loc.name AS source_location_name,
@@ -174,6 +178,7 @@ export async function listOpenLoans(
       loanItemId,
       materialId,
       materialTitle: boundedText(row.material_title, 500),
+      materialAuthor: boundedText(row.material_author, 500),
       materialYear: nullableYear(row.material_year),
       sourceLocationId: boundedText(row.source_location_id, 64),
       sourceLocationName: boundedText(row.source_location_name, 240),
@@ -188,13 +193,18 @@ export async function listOpenLoans(
 
 export async function listOpenClassLoans(
   db: CatalogD1Database,
-  options: { classYearId?: string; limit?: number } = {},
+  options: { classYearId?: string; teacherUserId?: string; limit?: number } = {},
 ): Promise<OpenClassLoan[]> {
   const classYearId = boundedText(options.classYearId, 128);
+  const teacherUserId = boundedText(options.teacherUserId, 64);
   const limit = Math.min(200, Math.max(1, Math.trunc(options.limit ?? 100)));
   const bindings: Array<string | number> = [];
   const classFilter = classYearId ? "AND class_year_id = ?" : "";
+  const teacherFilter = teacherUserId
+    ? "AND (responsible_teacher_user_id = ? OR EXISTS (SELECT 1 FROM class_years curator WHERE curator.id = class_year_id AND curator.teacher_user_id = ?))"
+    : "";
   if (classYearId) bindings.push(classYearId);
+  if (teacherUserId) bindings.push(teacherUserId, teacherUserId);
   bindings.push(limit);
   const result = await db.prepare(`
     SELECT
@@ -204,6 +214,7 @@ export async function listOpenClassLoans(
       cy.academic_year_id,
       ay.label AS academic_year_label,
       cy.cohort_id,
+      cy.teacher_user_id AS curator_user_id,
       cl.responsible_teacher_user_id,
       teacher.full_name AS responsible_teacher_name,
       cl.status,
@@ -214,6 +225,7 @@ export async function listOpenClassLoans(
       cli.id AS class_loan_item_id,
       cli.material_id,
       m.title AS material_title,
+      m.author AS material_author,
       m.publication_year AS material_year,
       cli.source_location_id,
       loc.name AS source_location_name,
@@ -225,6 +237,7 @@ export async function listOpenClassLoans(
       FROM class_loans
       WHERE status = 'open'
       ${classFilter}
+      ${teacherFilter}
       ORDER BY COALESCE(due_at, '9999-12-31') ASC, issued_at ASC, id ASC
       LIMIT ?
     ) selected
@@ -256,6 +269,7 @@ export async function listOpenClassLoans(
         academicYearId: boundedText(row.academic_year_id, 128),
         academicYearLabel: boundedText(row.academic_year_label, 64),
         cohortId: boundedText(row.cohort_id, 128),
+        curatorUserId: boundedText(row.curator_user_id, 64) || null,
         responsibleTeacherUserId: boundedText(row.responsible_teacher_user_id, 128),
         responsibleTeacherName: boundedText(row.responsible_teacher_name, 300),
         status: "open",
@@ -273,6 +287,7 @@ export async function listOpenClassLoans(
       classLoanItemId,
       materialId,
       materialTitle: boundedText(row.material_title, 500),
+      materialAuthor: boundedText(row.material_author, 500),
       materialYear: nullableYear(row.material_year),
       sourceLocationId: boundedText(row.source_location_id, 64),
       sourceLocationName: boundedText(row.source_location_name, 240),

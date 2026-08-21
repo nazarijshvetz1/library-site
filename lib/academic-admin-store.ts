@@ -108,6 +108,11 @@ type BulkAuditEvent = {
 };
 
 export type AcademicReferenceData = {
+  curators: Array<{
+    id: string;
+    fullName: string;
+    role: "teacher" | "admin" | "librarian";
+  }>;
   academicYears: Array<{
     id: string;
     label: string;
@@ -200,7 +205,7 @@ export async function readAcademicReferenceData(
   providedDb?: AcademicD1Database,
 ): Promise<AcademicReferenceData> {
   const db = database(providedDb);
-  const [yearResult, cohortResult, classResult] = await Promise.all([
+  const [yearResult, cohortResult, classResult, curatorResult] = await Promise.all([
     db.prepare(`
       SELECT id, label, start_date, end_date, status, notes, version
       FROM academic_years
@@ -228,8 +233,23 @@ export async function readAcademicReferenceData(
       ORDER BY ay.start_date DESC, cy.grade ASC, cy.code ASC, cy.id ASC
       LIMIT 5000
     `).all(),
+    db.prepare(`
+      SELECT id, full_name, role
+      FROM users
+      WHERE status = 'active' AND role IN ('teacher', 'admin', 'librarian')
+      ORDER BY sort_name ASC, id ASC
+      LIMIT 2000
+    `).all(),
   ]);
   return {
+    curators: (curatorResult.results ?? []).map((raw) => {
+      const row = raw as Record<string, unknown>;
+      return {
+        id: text(row.id),
+        fullName: text(row.full_name),
+        role: text(row.role) as "teacher" | "admin" | "librarian",
+      };
+    }).filter((row) => row.id && row.fullName),
     academicYears: (yearResult.results ?? []).map((raw) => {
       const row = raw as Record<string, unknown>;
       return {
@@ -391,7 +411,7 @@ export async function createClassYearDirect(
       "Новий клас можна відкрити лише в активному навчальному році.",
     );
   }
-  await assertTeacher(db, input.teacherUserId);
+  await assertClassCurator(db, input.teacherUserId);
   await assertClassLocation(db, input.locationId);
   if (input.cohortMode === "existing" && input.cohortId) {
     await requireActiveCohort(db, input.cohortId);
@@ -495,7 +515,7 @@ export async function createClassYearDirect(
         JOIN cohorts c ON c.id = ? AND c.status = 'active'
         WHERE ay.id = ? AND ay.version = ? AND ay.status = 'active'
           AND (? IS NULL OR EXISTS (
-            SELECT 1 FROM users WHERE id = ? AND role = 'teacher' AND status = 'active'
+            SELECT 1 FROM users WHERE id = ? AND role IN ('teacher', 'admin', 'librarian') AND status = 'active'
           ))
           AND (? IS NULL OR EXISTS (
             SELECT 1 FROM locations WHERE id = ? AND status = 'active' AND type != 'service'
@@ -588,7 +608,7 @@ export async function updateClassYearDirect(
   const locationId = Object.hasOwn(input.changes, "locationId")
     ? input.changes.locationId ?? null
     : beforeRow.location_id;
-  await assertTeacher(db, teacherUserId);
+  await assertClassCurator(db, teacherUserId);
   await assertClassLocation(db, locationId);
   const grade = input.changes.grade ?? beforeRow.grade;
   const code = input.changes.code ?? beforeRow.code;
@@ -636,7 +656,7 @@ export async function updateClassYearDirect(
           location_id = ?, notes = ?, version = version + 1, updated_at = ?
       WHERE id = ? AND version = ? AND status != 'closed'
         AND (? IS NULL OR EXISTS (
-          SELECT 1 FROM users WHERE id = ? AND role = 'teacher' AND status = 'active'
+          SELECT 1 FROM users WHERE id = ? AND role IN ('teacher', 'admin', 'librarian') AND status = 'active'
         ))
         AND (? IS NULL OR EXISTS (
           SELECT 1 FROM locations WHERE id = ? AND status = 'active' AND type != 'service'
@@ -1217,10 +1237,10 @@ async function requireActiveCohort(db: AcademicD1Database, id: string): Promise<
   return row;
 }
 
-async function assertTeacher(db: AcademicD1Database, id: string | null): Promise<void> {
+async function assertClassCurator(db: AcademicD1Database, id: string | null): Promise<void> {
   if (!id) return;
   const row = await db.prepare(`
-    SELECT id FROM users WHERE id = ? AND role = 'teacher' AND status = 'active' LIMIT 1
+    SELECT id FROM users WHERE id = ? AND role IN ('teacher', 'admin', 'librarian') AND status = 'active' LIMIT 1
   `).bind(id).first<{ id: string }>();
   if (!row) throw new AcademicAdminError("teacher_not_found", 404, "Активного вчителя не знайдено.");
 }
@@ -1263,7 +1283,7 @@ async function loadAndValidateRolloverReferences(
       SELECT u.id
       FROM users u
       JOIN json_each(?) requested ON requested.value = u.id
-      WHERE u.role = 'teacher' AND u.status = 'active'
+      WHERE u.role IN ('teacher', 'admin', 'librarian') AND u.status = 'active'
     `).bind(JSON.stringify(teacherIds)).all<{ id: string }>();
     const found = new Set((teacherResponse.results ?? []).map((row) => row.id));
     const missing = teacherIds.find((id) => !found.has(id));
@@ -1469,7 +1489,7 @@ function bulkCreateTargetClassesStatement(
     JOIN cohorts ON cohorts.id = items.cohort_id AND cohorts.status = 'active'
     WHERE (items.teacher_user_id IS NULL OR EXISTS (
         SELECT 1 FROM users
-        WHERE id = items.teacher_user_id AND role = 'teacher' AND status = 'active'
+        WHERE id = items.teacher_user_id AND role IN ('teacher', 'admin', 'librarian') AND status = 'active'
       ))
       AND (items.location_id IS NULL OR EXISTS (
         SELECT 1 FROM locations

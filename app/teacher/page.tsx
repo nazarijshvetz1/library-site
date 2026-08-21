@@ -44,8 +44,8 @@ function boundedMaterialId(value: string | string[] | undefined): string {
   return /^CAT-\d{4,}$/u.test(candidate) ? candidate : "";
 }
 
-function boundedTab(value: string | string[] | undefined): "overview" | "visits" | "orders" | "notifications" {
-  return value === "visits" || value === "orders" || value === "notifications"
+function boundedTab(value: string | string[] | undefined): "overview" | "visits" | "orders" | "loans" | "notifications" {
+  return value === "visits" || value === "orders" || value === "loans" || value === "notifications"
     ? value
     : "overview";
 }

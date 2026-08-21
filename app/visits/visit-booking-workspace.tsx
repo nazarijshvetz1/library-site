@@ -66,7 +66,7 @@ type Props = {
   initialDate: string;
   initialStartTime: string;
   initialEndTime: string;
-  initialTab?: "overview" | "visits" | "orders" | "notifications";
+  initialTab?: "overview" | "visits" | "orders" | "loans" | "notifications";
   initialOrderMaterialId?: string;
 };
 
@@ -76,6 +76,7 @@ const TEACHER_TABS: Array<{ id: TeacherTab; label: string; icon: string }> = [
   { id: "overview", label: "Огляд", icon: "⌂" },
   { id: "visits", label: "Відвідування", icon: "◷" },
   { id: "orders", label: "Замовлення", icon: "▤" },
+  { id: "loans", label: "Мої посібники", icon: "▥" },
   { id: "notifications", label: "Повідомлення", icon: "●" },
 ];
 
@@ -874,7 +875,7 @@ function VisitBookingPanel({
   initialDate: string;
   initialStartTime: string;
   initialEndTime: string;
-  initialTab: "overview" | "visits" | "orders" | "notifications";
+  initialTab: "overview" | "visits" | "orders" | "loans" | "notifications";
   initialOrderMaterialId: string;
 }) {
   const storageKey = visitPendingKey("teacher", pendingScope);
@@ -1158,6 +1159,7 @@ function VisitBookingPanel({
             loading={loading}
             onOpenVisits={() => setActiveTab("visits")}
             onOpenOrders={() => setActiveTab("orders")}
+            onOpenLoans={() => setActiveTab("loans")}
           />
         ) : null}
 
@@ -1234,6 +1236,7 @@ function VisitBookingPanel({
         </> : null}
 
         {activeTab === "orders" ? <TeacherOrdersPanel pendingScope={pendingScope} initialMaterialId={initialOrderMaterialId} /> : null}
+        {activeTab === "loans" ? <TeacherLoansPanel /> : null}
         {activeTab === "notifications" ? <TeacherNotificationsPanel pendingScope={pendingScope} /> : null}
         {securityOpen ? <TeacherSecurityPanel pendingScope={pendingScope} onClose={() => setSecurityOpen(false)} onSessionRotated={onSessionRotated} /> : null}
       </section>
@@ -1320,6 +1323,7 @@ type NotificationsEnvelope = {
 function teacherTabTitle(tab: TeacherTab): string {
   if (tab === "visits") return "Мої відвідування";
   if (tab === "orders") return "Замовлення матеріалів";
+  if (tab === "loans") return "Мої посібники";
   if (tab === "notifications") return "Мої повідомлення";
   return "Вітаємо у вашому кабінеті";
 }
@@ -1330,12 +1334,14 @@ function TeacherOverview({
   loading,
   onOpenVisits,
   onOpenOrders,
+  onOpenLoans,
 }: {
   teacherName: string;
   bookings: VisitBooking[];
   loading: boolean;
   onOpenVisits: () => void;
   onOpenOrders: () => void;
+  onOpenLoans: () => void;
 }) {
   const nextBooking = bookings[0] ?? null;
   return (
@@ -1357,8 +1363,140 @@ function TeacherOverview({
         <p className={styles.empty}>Знайдіть підручники або інші матеріали й надішліть одне замовлення бібліотекарю.</p>
         <button className={styles.quiet} type="button" onClick={onOpenOrders}>Створити замовлення</button>
       </article>
+      <article className={styles.card}>
+        <div className={styles.cardHeading}><div><span>Облік</span><h2>Видані посібники</h2></div></div>
+        <p className={styles.empty}>Перегляньте все, що записано особисто на вас і на класи, за які ви відповідаєте.</p>
+        <button className={styles.quiet} type="button" onClick={onOpenLoans}>Переглянути посібники</button>
+      </article>
     </section>
   );
+}
+
+type TeacherLoanItem = {
+  materialId: string;
+  materialTitle: string;
+  materialAuthor: string;
+  materialYear: number | null;
+  sourceLocationName: string;
+  quantityOutstanding: number;
+};
+
+type TeacherPersonalLoan = {
+  loanId: string;
+  issuedAt: string;
+  dueAt: string | null;
+  notes: string;
+  items: TeacherLoanItem[];
+};
+
+type TeacherClassLoan = {
+  classLoanId: string;
+  className: string;
+  academicYearLabel: string;
+  responsibleTeacherName: string;
+  issuedAt: string;
+  dueAt: string | null;
+  notes: string;
+  relationship: { curator: boolean; responsible: boolean };
+  items: TeacherLoanItem[];
+};
+
+type TeacherLoansEnvelope = {
+  success: true;
+  summary: {
+    personalCopies: number;
+    classCopies: number;
+    totalCopies: number;
+    classCount: number;
+  };
+  personalLoans: TeacherPersonalLoan[];
+  classLoans: TeacherClassLoan[];
+};
+
+function TeacherLoansPanel() {
+  const [data, setData] = useState<TeacherLoansEnvelope | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      setData(await visitApi<TeacherLoansEnvelope>("/api/teacher/loans"));
+    } catch (loadError) {
+      setError(errorMessage(loadError));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  return (
+    <section className={styles.teacherLoans} aria-labelledby="teacher-loans-title">
+      <div className={styles.cardHeading}>
+        <div><span>Лише для вас</span><h2 id="teacher-loans-title">Що записано на вас</h2></div>
+        <button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading}>↻ Оновити</button>
+      </div>
+      {error ? <div className={styles.error} role="alert">{error}</div> : null}
+      <div className={styles.loanCounters} aria-label="Підсумок виданих посібників">
+        <article><span>Усього</span><strong>{data?.summary.totalCopies ?? 0}</strong><small>примірників</small></article>
+        <article><span>Особисто на вас</span><strong>{data?.summary.personalCopies ?? 0}</strong><small>примірників</small></article>
+        <article><span>На класах</span><strong>{data?.summary.classCopies ?? 0}</strong><small>{data?.summary.classCount ?? 0} класів</small></article>
+      </div>
+      {loading ? <p className={styles.empty}>Оновлюємо список посібників…</p> : null}
+      {!loading && data ? (
+        <div className={styles.loanSections}>
+          <section className={styles.card} aria-labelledby="personal-loans-title">
+            <div className={styles.cardHeading}><div><span>{data.summary.personalCopies} прим.</span><h2 id="personal-loans-title">Особисто на вас</h2></div></div>
+            {data.personalLoans.length ? (
+              <div className={styles.teacherLoanList}>{data.personalLoans.map((loan) => (
+                <article key={loan.loanId}>
+                  <header><span>Видано {formatPortalDay(loan.issuedAt)}</span><small>{loan.dueAt ? `Повернути до ${formatPortalDay(loan.dueAt)}` : "Без строку"}</small></header>
+                  {loan.items.map((item) => <TeacherLoanItemRow key={`${loan.loanId}-${item.materialId}`} item={item} />)}
+                  {loan.notes ? <p>{loan.notes}</p> : null}
+                </article>
+              ))}</div>
+            ) : <p className={styles.empty}>Особистих неповернених видач немає.</p>}
+          </section>
+          <section className={styles.card} aria-labelledby="class-loans-title">
+            <div className={styles.cardHeading}><div><span>{data.summary.classCopies} прим.</span><h2 id="class-loans-title">На класах</h2></div></div>
+            {data.classLoans.length ? (
+              <div className={styles.teacherLoanList}>{data.classLoans.map((loan) => (
+                <article key={loan.classLoanId}>
+                  <header>
+                    <span>{loan.className} · {loan.academicYearLabel}</span>
+                    <small>{classLoanRoleLabel(loan.relationship)}</small>
+                  </header>
+                  <div className={styles.loanMeta}>Видано {formatPortalDay(loan.issuedAt)}{loan.dueAt ? ` · повернути до ${formatPortalDay(loan.dueAt)}` : " · без строку"} · відповідальний: {loan.responsibleTeacherName}</div>
+                  {loan.items.map((item) => <TeacherLoanItemRow key={`${loan.classLoanId}-${item.materialId}`} item={item} />)}
+                  {loan.notes ? <p>{loan.notes}</p> : null}
+                </article>
+              ))}</div>
+            ) : <p className={styles.empty}>Неповернених комплектів відповідальних класів немає.</p>}
+          </section>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function TeacherLoanItemRow({ item }: { item: TeacherLoanItem }) {
+  return (
+    <div className={styles.teacherLoanItem}>
+      <div><strong>{item.materialTitle}</strong><small>{[item.materialAuthor, item.materialYear, item.materialId].filter(Boolean).join(" · ")}</small><small>{item.sourceLocationName}</small></div>
+      <span><strong>{item.quantityOutstanding}</strong><small>залишилось</small></span>
+    </div>
+  );
+}
+
+function classLoanRoleLabel(relationship: TeacherClassLoan["relationship"]): string {
+  if (relationship.curator && relationship.responsible) return "Ви куратор і відповідальний за видачу";
+  if (relationship.curator) return "Ви куратор класу";
+  return "Ви відповідальний за видачу";
 }
 
 function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope: string; initialMaterialId: string }) {
@@ -1968,6 +2106,15 @@ function formatPortalDate(value: string): string {
   return new Intl.DateTimeFormat("uk-UA", {
     dateStyle: "medium",
     timeStyle: "short",
+    timeZone: "Europe/Kyiv",
+  }).format(date);
+}
+
+function formatPortalDay(value: string): string {
+  const date = new Date(value.length === 10 ? `${value}T12:00:00Z` : value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("uk-UA", {
+    dateStyle: "medium",
     timeZone: "Europe/Kyiv",
   }).format(date);
 }

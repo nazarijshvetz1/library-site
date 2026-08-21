@@ -1025,7 +1025,11 @@ test("class issue and partial/full return are idempotent, chronological and bala
   const open = await directory.listOpenClassLoans(d1, { classYearId: "CY-2026-001" });
   assert.equal(open.length, 1);
   assert.equal(open[0].responsibleTeacherUserId, "USR-TCH");
+  assert.equal(open[0].curatorUserId, "USR-TCH");
+  assert.equal(open[0].items[0].materialAuthor, "Автор");
   assert.equal(open[0].items[0].quantityOutstanding, 2);
+  assert.equal((await directory.listOpenClassLoans(d1, { teacherUserId: "USR-TCH" })).length, 1);
+  assert.equal((await directory.listOpenClassLoans(d1, { teacherUserId: "USR-OTHER" })).length, 0);
 
   const classLoanItemId = issued.items[0].classLoanItemId;
   const partial = await mutation.returnClassLoanItems(actor, {
