@@ -125,9 +125,8 @@ export function validateClassYearCreateInput(
   if (cohortMode === "new" && cohortId) errors.cohortId = "ID нової групи призначає система.";
   const grade = readInteger(input.grade, "grade", 1, 11, errors);
   const code = readClassCode(input.code, "code", errors);
-  const teacherUserId = readNullablePattern(
+  const teacherUserId = readNullableUserId(
     input.teacherUserId ?? null,
-    USER_ID_RE,
     "teacherUserId",
     "Некоректний ID класного керівника.",
     errors,
@@ -173,9 +172,8 @@ export function validateClassYearUpdateInput(
     }
     if ("code" in input.changes) changes.code = readClassCode(input.changes.code, "changes.code", errors);
     if ("teacherUserId" in input.changes) {
-      changes.teacherUserId = readNullablePattern(
+      changes.teacherUserId = readNullableUserId(
         input.changes.teacherUserId,
-        USER_ID_RE,
         "changes.teacherUserId",
         "Некоректний ID класного керівника.",
         errors,
@@ -320,9 +318,8 @@ export function validateAcademicYearRolloverInput(
         if (targetNames.has(targetName)) errors[`${prefix}targetCode`] = "Цільова назва класу повторюється.";
         targetNames.add(targetName);
         if ("teacherUserId" in value) {
-          row.teacherUserId = readNullablePattern(
+          row.teacherUserId = readNullableUserId(
             value.teacherUserId,
-            USER_ID_RE,
             `${prefix}teacherUserId`,
             "Некоректний ID класного керівника.",
             errors,
@@ -453,6 +450,16 @@ function readNullablePattern(
 ): string | null {
   if (value === null || value === undefined || value === "") return null;
   return readPatternText(value, pattern, key, message, errors).toUpperCase();
+}
+
+function readNullableUserId(
+  value: unknown,
+  key: string,
+  message: string,
+  errors: Record<string, string>,
+): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  return readPatternText(value, USER_ID_RE, key, message, errors);
 }
 
 function readInteger(

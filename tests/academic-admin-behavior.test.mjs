@@ -243,6 +243,54 @@ test("academic validation is exact, optimistic and rollover-complete", () => {
   assert.equal(rollover.value.classes[0].cohortId, "COH-001");
 });
 
+test("academic validation preserves case-sensitive generated teacher IDs", () => {
+  const teacherUserId = "USR-TEA-d9b373f4-56c7-4942-8cd0-e13095ee8d8d";
+  const created = validation.validateClassYearCreateInput({
+    requestId: request(4),
+    academicYearId: "YR-2026-2027",
+    cohortMode: "new",
+    cohortId: null,
+    grade: 5,
+    code: "ITES",
+    teacherUserId,
+    locationId: null,
+    notes: "",
+  });
+  assert.equal(created.ok, true);
+  assert.equal(created.value.teacherUserId, teacherUserId);
+
+  const updated = validation.validateClassYearUpdateInput({
+    requestId: request(5),
+    expectedVersion: 1,
+    reason: "Імпорт класів",
+    changes: { teacherUserId },
+  });
+  assert.equal(updated.ok, true);
+  assert.equal(updated.value.changes.teacherUserId, teacherUserId);
+
+  const rollover = validation.validateAcademicYearRolloverInput({
+    requestId: request(6),
+    sourceYearId: "YR-2026-2027",
+    sourceYearVersion: 1,
+    targetYearId: "YR-2027-2028",
+    targetYearVersion: 1,
+    effectiveDate: "2027-09-01",
+    notes: "",
+    classes: [{
+      sourceClassYearId: "CY-2026-001",
+      expectedVersion: 1,
+      cohortId: "COH-001",
+      sourceGrade: 10,
+      action: "promote",
+      targetGrade: 11,
+      targetCode: "А",
+      teacherUserId,
+    }],
+  });
+  assert.equal(rollover.ok, true);
+  assert.equal(rollover.value.classes[0].teacherUserId, teacherUserId);
+});
+
 test("year and class mutations write directly, replay once and preserve audit", async () => {
   const { sqlite, d1 } = openDatabase();
   const yearInput = {
