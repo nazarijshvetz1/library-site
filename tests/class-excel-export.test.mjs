@@ -113,6 +113,8 @@ test("each class workbook has two compact, printable sheets with class details",
   assert.match(textbookSheet, /Кабінет: Кабінет № 12/u);
   assert.match(textbookSheet, /Куратор класу: Класний Керівник/u);
   assert.match(textbookSheet, /Навчальний рік: 2026\/2027/u);
+  assert.match(textbookSheet, /Очікуємо повернути: 8 примірників/u);
+  assert.doesNotMatch(methodicalSheet, /Очікуємо повернути/u);
   assert.doesNotMatch(textbookSheet, /Відповідальний учитель/u);
   assert.match(textbookSheet, /Математика 5 клас — Автор П. · 2026/u);
   assert.doesNotMatch(textbookSheet, /Робочий зошит/u);

@@ -151,7 +151,7 @@ function AcademicYearCreate({ reference, writesEnabled, onSaved }: CommonProps) 
   );
   const [label, setLabel] = useState(`${suggestedStart}/${suggestedStart + 1}`);
   const [startDate, setStartDate] = useState(`${suggestedStart}-09-01`);
-  const [endDate, setEndDate] = useState(`${suggestedStart + 1}-08-31`);
+  const [endDate, setEndDate] = useState(`${suggestedStart + 1}-05-31`);
   const [notes, setNotes] = useState("");
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
   const startDateInputRef = useRef<HTMLInputElement>(null);
@@ -203,7 +203,7 @@ function AcademicYearCreate({ reference, writesEnabled, onSaved }: CommonProps) 
       <div className={styles.formGrid}>
         <AcademicField label="Назва" required><input value={label} onChange={(event) => { setLabel(event.target.value); setRequestId(crypto.randomUUID()); }} placeholder="2027/2028" required /></AcademicField>
         <AcademicField label="Початок" required><input ref={startDateInputRef} name="startDate" type="date" value={startDate} onInput={updateStartDate} required /></AcademicField>
-        <AcademicField label="Завершення" required><input ref={endDateInputRef} name="endDate" type="date" value={endDate} min={startDate} onInput={updateEndDate} required /></AcademicField>
+        <AcademicField label="Завершення (31 травня)" required><input ref={endDateInputRef} name="endDate" type="date" value={endDate} min={startDate} onInput={updateEndDate} required /></AcademicField>
         <AcademicField label="Примітка" wide><textarea rows={3} value={notes} onChange={(event) => { setNotes(event.target.value); setRequestId(crypto.randomUUID()); }} /></AcademicField>
       </div>
       <MutationFooter form={form} writesEnabled={writesEnabled} label="Створити навчальний рік" pending="Створюємо…" />

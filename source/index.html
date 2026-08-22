@@ -15,7 +15,7 @@
     <meta name="twitter:image" content="{{SITE_ORIGIN}}/og.png" />
     <title>Бібліотека Міжнародного ліцею МАУП</title>
     <link rel="icon" type="image/png" href="/library-logo.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260822-1" />
+    <link rel="stylesheet" href="/styles.css?v=20260822-2" />
     <link rel="stylesheet" href="/brand.css" />
   </head>
   <body>
@@ -35,7 +35,7 @@
         >Кабінет учителя</a>
         <a class="nav-secondary" href="#visit-schedule" data-primary-section="visit-schedule">Графік</a>
         <a class="nav-secondary" href="#collections">Добірки</a>
-        <a class="nav-secondary" href="#how-it-works">Як користуватися</a>
+        <a class="nav-secondary" href="#how-it-works" data-primary-section="how-it-works">Як користуватися</a>
       </nav>
       <a
         class="librarian-button"
@@ -214,11 +214,18 @@
       </section>
 
       <section class="how-it-works" id="how-it-works" aria-labelledby="how-title">
-        <div><p class="eyebrow light"><span></span> Простий пошук</p><h2 id="how-title">Від запиту до потрібної полиці</h2></div>
+        <div>
+          <p class="eyebrow light"><span></span> Як користуватися</p>
+          <h2 id="how-title">Усі можливості бібліотеки — крок за кроком</h2>
+          <p class="how-intro">Каталог і графік відкриті для всіх. Особистий кабінет потрібен учителю для замовлень, власних записів, виданих матеріалів і сповіщень.</p>
+        </div>
         <ol>
-          <li><span>01</span><strong>Знайдіть</strong><p>Введіть назву, автора, предмет або CAT-ID.</p></li>
-          <li><span>02</span><strong>Уточніть</strong><p>Оберіть клас, рубрику та тип видання.</p></li>
-          <li><span>03</span><strong>Перевірте</strong><p>Відкрийте картку й перегляньте кількість та розміщення.</p></li>
+          <li><span>01</span><strong>Знайдіть матеріал</strong><p>Введіть назву, автора, предмет або CAT-ID. За потреби уточніть клас, рубрику й тип видання.</p><a href="#catalog">Відкрити каталог <span aria-hidden="true">→</span></a></li>
+          <li><span>02</span><strong>Перевірте наявність</strong><p>Відкрийте картку матеріалу: у ній видно загальну та доступну кількість примірників, а також місця їх зберігання.</p><a href="#catalog">Перейти до матеріалів <span aria-hidden="true">→</span></a></li>
+          <li><span>03</span><strong>Замовте</strong><p>У картці натисніть «Замовити», увійдіть до кабінету вчителя, укажіть кількість і надішліть замовлення бібліотекарю.</p><a href="https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/teacher?tab=orders">Відкрити замовлення <span aria-hidden="true">→</span></a></li>
+          <li><span>04</span><strong>Запишіться до бібліотеки</strong><p>Перегляньте відкритий графік, оберіть вільні дату й час. Запис доступний із кабінету або в гостьовому режимі без коду.</p><a href="#visit-schedule">Переглянути графік <span aria-hidden="true">→</span></a></li>
+          <li><span>05</span><strong>Користуйтеся кабінетом</strong><p>Після першого входу за тимчасовим кодом створіть PIN. Тут видно замовлення, відвідування, видані вам і закріплені за класом матеріали.</p><a href="https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/teacher">Увійти до кабінету <span aria-hidden="true">→</span></a></li>
+          <li><span>06</span><strong>Підключіть Telegram</strong><p>Під’єднайте бот у кабінеті вчителя, щоб отримувати статуси замовлень і важливі бібліотечні сповіщення.</p><a href="https://t.me/MAUP_Library_Bot" target="_blank" rel="noopener noreferrer">Відкрити Telegram-бот <span aria-hidden="true">↗</span></a></li>
         </ol>
       </section>
     </main>
@@ -236,6 +243,6 @@
     <script src="/config.js"></script>
     <script src="/catalog-data.js"></script>
     <script src="/balance-data.js"></script>
-    <script type="module" src="/app.js?v=20260822-1"></script>
+    <script type="module" src="/app.js?v=20260822-2"></script>
   </body>
 </html>

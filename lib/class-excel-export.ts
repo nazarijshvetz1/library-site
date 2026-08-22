@@ -100,6 +100,7 @@ function classSheet(
   generatedAt: string,
   emptyMessage: string,
 ): ExcelSheet {
+  const expectedReturn = lines.reduce((total, line) => total + line.remainingQuantity, 0);
   return {
     name,
     columns: COLUMNS,
@@ -109,6 +110,9 @@ function classSheet(
       ["Кабінет", document.locationName],
       ["Куратор класу", document.teacherName],
       ["Навчальний рік", document.academicYear],
+      ...(name === "Підручники"
+        ? [["Очікуємо повернути", `${expectedReturn} примірників`] as [string, string]]
+        : []),
       ["Сформовано", kyivDisplayDate(generatedAt)],
     ],
     rows: lines.map((line, index) => [

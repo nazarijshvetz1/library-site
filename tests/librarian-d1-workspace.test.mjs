@@ -584,6 +584,8 @@ test("new librarian route renders D1 workspace and keeps legacy workspace intact
   assert.match(academic, /sourceYearVersion: sourceYear\.version/u);
   assert.match(academic, /targetYearVersion: targetYear\.version/u);
   assert.match(academic, /suggestNextAcademicYearStart\(\s*reference\.academicYears/u);
+  assert.match(academic, /suggestedStart \+ 1\}-05-31/u);
+  assert.match(academic, /Завершення \(31 травня\)/u);
   assert.match(academic, /ref=\{startDateInputRef\} name="startDate"/u);
   assert.match(academic, /ref=\{endDateInputRef\} name="endDate"/u);
   assert.match(academic, /ref=\{actualClosedDateInputRef\} name="actualClosedDate"/u);

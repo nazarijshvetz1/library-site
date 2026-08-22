@@ -33,7 +33,11 @@ export type WorkbookPreview = {
   generatedAt: string;
 };
 
-type SheetData = { name: string; rows: string[][] };
+export type WorkbookSheetData = {
+  name: string;
+  rows: string[][];
+  hasFormulas: boolean;
+};
 
 const STANDARD_SHEETS = new Map([
   [key("Матеріали"), { label: "Матеріали", required: ["cat-id", "назва", "рубрика", "предмет", "тип видання"] }],
@@ -45,18 +49,28 @@ const STANDARD_SHEETS = new Map([
 ]);
 
 export async function analyzeExcelWorkbook(file: File): Promise<WorkbookPreview> {
-  if (!/\.xlsx$/iu.test(file.name)) throw new Error("Оберіть файл Excel у форматі .xlsx.");
-  if (file.size <= 0 || file.size > MAX_EXCEL_BYTES) {
-    throw new Error("Excel-файл має бути непорожнім і не перевищувати 10 МіБ.");
-  }
-  const entries = await unzipXlsx(new Uint8Array(await file.arrayBuffer()));
-  const sheets = readWorkbook(entries);
+  const sheets = await readExcelWorkbookSheets(file);
   if (sheets.length === 0) throw new Error("У книзі не знайдено аркушів із таблицями.");
 
   return summarizeWorkbookSheets(file.name, file.size, sheets);
 }
 
-export function summarizeWorkbookSheets(fileName: string, fileBytes: number, sheets: SheetData[]): WorkbookPreview {
+export async function readExcelWorkbookSheets(
+  file: File,
+  maxBytes = MAX_EXCEL_BYTES,
+): Promise<WorkbookSheetData[]> {
+  if (!/\.xlsx$/iu.test(file.name)) throw new Error("Оберіть файл Excel у форматі .xlsx.");
+  if (file.size <= 0 || file.size > maxBytes) {
+    const limit = maxBytes >= 1024 * 1024 && maxBytes % (1024 * 1024) === 0
+      ? `${maxBytes / (1024 * 1024)} МіБ`
+      : `${Math.ceil(maxBytes / 1024)} КіБ`;
+    throw new Error(`Excel-файл має бути непорожнім і не перевищувати ${limit}.`);
+  }
+  const entries = await unzipXlsx(new Uint8Array(await file.arrayBuffer()));
+  return readWorkbook(entries);
+}
+
+export function summarizeWorkbookSheets(fileName: string, fileBytes: number, sheets: WorkbookSheetData[]): WorkbookPreview {
 
   const issues: WorkbookIssue[] = [];
   const summaries: WorkbookSheetSummary[] = [];
@@ -128,7 +142,8 @@ async function unzipXlsx(bytes: Uint8Array): Promise<Map<string, Uint8Array>> {
   let offset = view.getUint32(eocd + 16, true);
   if (entryCount <= 0 || entryCount > MAX_ARCHIVE_FILES) throw new Error("Excel-файл містить забагато внутрішніх частин.");
   const entries = new Map<string, Uint8Array>();
-  let total = 0;
+  let declaredTotal = 0;
+  let actualInflatedTotal = 0;
   for (let index = 0; index < entryCount; index += 1) {
     if (view.getUint32(offset, true) !== 0x02014b50) throw new Error("Пошкоджена структура Excel-файла.");
     const method = view.getUint16(offset + 10, true);
@@ -140,16 +155,24 @@ async function unzipXlsx(bytes: Uint8Array): Promise<Map<string, Uint8Array>> {
     const localOffset = view.getUint32(offset + 42, true);
     const name = new TextDecoder().decode(bytes.subarray(offset + 46, offset + 46 + nameLength)).replace(/\\/gu, "/");
     if (name.includes("../") || name.startsWith("/") || uncompressed > MAX_XML_BYTES) throw new Error("Excel-файл містить небезпечний або надмірний внутрішній запис.");
-    total += uncompressed;
-    if (total > MAX_ARCHIVE_BYTES) throw new Error("Розпакований Excel-файл перевищує безпечний ліміт.");
+    if (/^xl\/externalLinks\//iu.test(name)) throw new Error("Excel-файл містить зовнішні зв’язки, які не підтримуються.");
+    declaredTotal += uncompressed;
+    if (declaredTotal > MAX_ARCHIVE_BYTES) throw new Error("Розпакований Excel-файл перевищує безпечний ліміт.");
     if (wantedEntry(name)) {
       if (view.getUint32(localOffset, true) !== 0x04034b50) throw new Error("Пошкоджена локальна структура Excel-файла.");
       const localName = view.getUint16(localOffset + 26, true);
       const localExtra = view.getUint16(localOffset + 28, true);
       const start = localOffset + 30 + localName + localExtra;
       const payload = bytes.slice(start, start + compressed);
-      const value = method === 0 ? payload : method === 8 ? await inflateRaw(payload) : null;
+      const remaining = MAX_ARCHIVE_BYTES - actualInflatedTotal;
+      const value = method === 0 ? payload : method === 8
+        ? await inflateRaw(payload, Math.min(MAX_XML_BYTES, remaining))
+        : null;
       if (!value || value.byteLength !== uncompressed) throw new Error("Excel-файл використовує непідтримуваний спосіб стиснення.");
+      actualInflatedTotal += value.byteLength;
+      if (actualInflatedTotal > MAX_ARCHIVE_BYTES) {
+        throw new Error("Розпакований Excel-файл перевищує безпечний ліміт.");
+      }
       entries.set(name, value);
     }
     offset += 46 + nameLength + extraLength + commentLength;
@@ -157,9 +180,34 @@ async function unzipXlsx(bytes: Uint8Array): Promise<Map<string, Uint8Array>> {
   return entries;
 }
 
-async function inflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+async function inflateRaw(bytes: Uint8Array, maxBytes: number): Promise<Uint8Array> {
+  if (maxBytes <= 0) throw new Error("Розпакований Excel-файл перевищує безпечний ліміт.");
+  const source = new Uint8Array(bytes.byteLength);
+  source.set(bytes);
+  const reader = new Blob([source.buffer]).stream()
+    .pipeThrough(new DecompressionStream("deflate-raw"))
+    .getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new Error("Розпакований внутрішній запис Excel перевищує безпечний ліміт.");
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    try { await reader.cancel(); } catch { /* Stream is already closed. */ }
+    throw error;
+  }
+  const output = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { output.set(chunk, offset); offset += chunk.byteLength; }
+  return output;
 }
 
 function wantedEntry(name: string): boolean {
@@ -167,7 +215,7 @@ function wantedEntry(name: string): boolean {
     || name === "xl/_rels/workbook.xml.rels" || /^xl\/worksheets\/sheet\d+\.xml$/u.test(name);
 }
 
-function readWorkbook(entries: Map<string, Uint8Array>): SheetData[] {
+function readWorkbook(entries: Map<string, Uint8Array>): WorkbookSheetData[] {
   const xml = (name: string) => {
     const bytes = entries.get(name);
     if (!bytes) return null;
@@ -185,7 +233,11 @@ function readWorkbook(entries: Map<string, Uint8Array>): SheetData[] {
     const target = targets.get(id) ?? "";
     const path = target.startsWith("/") ? target.slice(1) : `xl/${target.replace(/^\.\//u, "")}`;
     const doc = xml(path.replace(/\/+/gu, "/"));
-    return { name: sheet.getAttribute("name") ?? "Аркуш", rows: doc ? readRows(doc, shared) : [] };
+    return {
+      name: sheet.getAttribute("name") ?? "Аркуш",
+      rows: doc ? readRows(doc, shared) : [],
+      hasFormulas: Boolean(doc?.querySelector("sheetData f")),
+    };
   });
 }
 

@@ -86,6 +86,10 @@ function openDatabase() {
       if (statement.trim()) sqlite.exec(statement);
     }
   }
+  sqlite.exec(`CREATE TABLE teacher_profiles (
+    teacher_user_id TEXT PRIMARY KEY,
+    closed_at TEXT
+  )`);
   seedDirectory(sqlite);
   return { sqlite, d1: new TestD1(sqlite) };
 }
@@ -102,6 +106,8 @@ function seedDirectory(sqlite) {
       id, full_name, sort_name, email, auth_user_id, role, status, created_at, updated_at
     ) VALUES (?, ?, ?, NULL, NULL, 'teacher', 'active', ?, ?)
   `).run("USR-TCH", "Ірина Вчитель", "вчитель ірина", now, now);
+  sqlite.prepare(`INSERT INTO teacher_profiles(teacher_user_id,closed_at) VALUES(?,NULL)`)
+    .run("USR-TCH");
   sqlite.prepare(`
     INSERT INTO locations (
       id, name, type, status, is_public, sort_order, created_at, updated_at
@@ -204,7 +210,7 @@ test("academic validation is exact, optimistic and rollover-complete", () => {
     requestId: request(1),
     label: "2027/2028",
     startDate: "2027-09-01",
-    endDate: "2028-08-31",
+    endDate: "2028-05-31",
     notes: "",
   });
   assert.equal(year.ok, true);
@@ -212,13 +218,22 @@ test("academic validation is exact, optimistic and rollover-complete", () => {
     requestId: request(2),
     label: "2027/2029",
     startDate: "2027-09-01",
-    endDate: "2029-08-31",
+    endDate: "2029-05-31",
     notes: "",
     unsafe: true,
   });
   assert.equal(invalidYear.ok, false);
   assert.ok(invalidYear.fieldErrors.label);
   assert.ok(invalidYear.fieldErrors.unsafe);
+  const invalidEndDate = validation.validateAcademicYearCreateInput({
+    requestId: request(4),
+    label: "2027/2028",
+    startDate: "2027-09-01",
+    endDate: "2028-08-31",
+    notes: "",
+  });
+  assert.equal(invalidEndDate.ok, false);
+  assert.match(invalidEndDate.fieldErrors.endDate, /31 травня/u);
 
   const rollover = validation.validateAcademicYearRolloverInput({
     requestId: request(3),
@@ -297,7 +312,7 @@ test("year and class mutations write directly, replay once and preserve audit", 
     requestId: request(10),
     label: "2026/2027",
     startDate: "2026-09-01",
-    endDate: "2027-08-31",
+    endDate: "2027-05-31",
     notes: "Перший рік",
   };
   const year = await academic.createAcademicYearDirect(actor, yearInput, d1);
@@ -307,7 +322,7 @@ test("year and class mutations write directly, replay once and preserve audit", 
     requestId: request(8),
     label: "2027/2028",
     startDate: "2027-09-01",
-    endDate: "2028-08-31",
+    endDate: "2028-05-31",
     notes: "Наступний рік",
   }, d1);
   assert.equal(nextYear.status, "draft");
@@ -391,7 +406,7 @@ test("first-year activation is atomic when another first year wins the race", as
       requestId: request(14),
       label: "2026/2027",
       startDate: "2026-09-01",
-      endDate: "2027-08-31",
+      endDate: "2027-05-31",
       notes: "",
     }, d1),
     (error) => error instanceof academic.AcademicAdminError

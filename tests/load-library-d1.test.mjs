@@ -26,11 +26,16 @@ async function fixtureBundle() {
   return bundle;
 }
 
-async function academicFixtureBundle() {
+async function academicFixtureBundle({ dualRole = false } = {}) {
   const canonical = JSON.parse(await readFile(fixturePath, "utf8"));
+  if (dualRole) {
+    canonical.sheets.users.values.push([
+      "USR-006", "Галака Наталія Григорівна", "Адміністрація", "", "", "Активний",
+    ]);
+  }
   canonical.sheets.academicYears = { rows: [
-    { academic_year_id: "YR-2026-2027", label: "2026/2027", start_date: "01.09.2026", end_date: "30.06.2027", status: "closed", notes: "" },
-    { academic_year_id: "YR-2027-2028", label: "2027/2028", start_date: "01.09.2027", end_date: "30.06.2028", status: "draft", notes: "" },
+    { academic_year_id: "YR-2026-2027", label: "2026/2027", start_date: "01.09.2026", end_date: "31.05.2027", status: "closed", notes: "" },
+    { academic_year_id: "YR-2027-2028", label: "2027/2028", start_date: "01.09.2027", end_date: "31.05.2028", status: "draft", notes: "" },
   ] };
   canonical.sheets.cohorts = { rows: [
     { cohort_id: "COH-001", status: "active", notes: "fixture cohort" },
@@ -38,13 +43,13 @@ async function academicFixtureBundle() {
   canonical.sheets.classYears = { rows: [
     {
       class_year_id: "CY-2026-001", academic_year_id: "YR-2026-2027", cohort_id: "COH-001",
-      class_name: "9-А", grade: 9, code: "А", teacher_user_id: "USR-002", location_id: "LOC-001",
-      start_date: "01.09.2026", end_date: "30.06.2027", status: "closed", actual_closed_date: "30.06.2027", notes: "",
+      class_name: "9-А", grade: 9, code: "А", teacher_user_id: dualRole ? "USR-006" : "USR-002", location_id: "LOC-001",
+      start_date: "01.09.2026", end_date: "31.05.2027", status: "closed", actual_closed_date: "31.05.2027", notes: "",
     },
     {
       class_year_id: "CY-2027-001", academic_year_id: "YR-2027-2028", cohort_id: "COH-001",
-      class_name: "10-А", grade: 10, code: "А", teacher_user_id: "USR-002", location_id: "LOC-001",
-      start_date: "01.09.2027", end_date: "30.06.2028", status: "planned", actual_closed_date: "", notes: "",
+      class_name: "10-А", grade: 10, code: "А", teacher_user_id: dualRole ? "USR-006" : "USR-002", location_id: "LOC-001",
+      start_date: "01.09.2027", end_date: "31.05.2028", status: "planned", actual_closed_date: "", notes: "",
     },
   ] };
   const { bundle, report } = importCanonicalExport(canonical);
@@ -111,6 +116,13 @@ test("maps and atomically loads optional academic history into existing schema 0
   );
 });
 
+test("loader accepts the named administrator teacher capability and keeps the admin role", async () => {
+  const { plan, report } = buildD1LoadPlan(await academicFixtureBundle({ dualRole: true }));
+  assert.equal(report.ok, true, JSON.stringify(report.diagnostics));
+  assert.equal(plan.tables.users.find((row) => row.id === "USR-006")?.role, "admin");
+  assert.equal(plan.tables.class_years.every((row) => row.teacher_user_id === "USR-006"), true);
+});
+
 test("rejects inconsistent academic lifecycle in plan construction and direct local loading", async () => {
   const bundle = await academicFixtureBundle();
   bundle.tables.academic_years.forEach((row) => { row.status = "active"; });
@@ -143,6 +155,14 @@ test("rejects inconsistent academic lifecycle in plan construction and direct lo
   invalidDates.tables.academic_years[0].start_date = "2030-09-01";
   await assert.rejects(
     loadD1Plan({}, invalidDates, { dryRun: true }),
+    (error) => error?.code === "D1_PLAN_INVALID"
+      && error.report.diagnostics.some((item) => item.code === "target_academic_year_invalid"),
+  );
+
+  const invalidEndDate = buildD1LoadPlan(await academicFixtureBundle(), { throwOnError: true }).plan;
+  invalidEndDate.tables.academic_years[0].end_date = "2027-08-31";
+  await assert.rejects(
+    loadD1Plan({}, invalidEndDate, { dryRun: true }),
     (error) => error?.code === "D1_PLAN_INVALID"
       && error.report.diagnostics.some((item) => item.code === "target_academic_year_invalid"),
   );

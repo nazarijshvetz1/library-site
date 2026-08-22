@@ -319,9 +319,10 @@ export async function createVisitBooking(
       AND (? > ?)
       AND EXISTS (
         SELECT 1 FROM users u
+        JOIN teacher_profiles p ON p.teacher_user_id = u.id AND p.closed_at IS NULL
         JOIN visit_teacher_credentials c ON c.teacher_user_id = u.id
         JOIN visit_teacher_sessions s ON s.teacher_user_id = u.id
-        WHERE u.id = ? AND u.status = 'active' AND u.role = 'teacher'
+        WHERE u.id = ? AND u.status = 'active'
           AND u.full_name = ? AND c.status = 'active' AND c.version = ?
           AND s.token_hash = ? AND s.credential_version = c.version
           AND s.revoked_at IS NULL AND s.expires_at > ?
@@ -454,9 +455,10 @@ export async function updateOwnVisitBooking(
   const fallback = defaultBusinessInterval();
   const accessGuard = `EXISTS (
     SELECT 1 FROM users u
+    JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
     JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id
     JOIN visit_teacher_sessions s ON s.teacher_user_id=u.id
-    WHERE u.id=? AND u.full_name=? AND u.status='active' AND u.role='teacher'
+    WHERE u.id=? AND u.full_name=? AND u.status='active'
       AND c.status='active' AND c.version=?
       AND s.token_hash=? AND s.credential_version=c.version
       AND s.revoked_at IS NULL AND s.expires_at>?
@@ -594,9 +596,10 @@ async function cancelBooking(
     ? "AND EXISTS (SELECT 1 FROM users WHERE id=? AND status='active' AND role IN ('admin','librarian'))"
     : `AND EXISTS (
          SELECT 1 FROM users u
+         JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
          JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id
          JOIN visit_teacher_sessions s ON s.teacher_user_id=u.id
-         WHERE u.id=? AND u.status='active' AND u.role='teacher'
+         WHERE u.id=? AND u.status='active'
            AND u.full_name=? AND c.status='active' AND c.version=?
            AND s.token_hash=? AND s.credential_version=c.version
            AND s.revoked_at IS NULL AND s.expires_at>?
@@ -932,9 +935,10 @@ async function requireActiveTeacherPrincipal(
 ): Promise<void> {
   const active = await db.prepare(`
     SELECT u.id FROM users u
+    JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
     JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id
     JOIN visit_teacher_sessions s ON s.teacher_user_id=u.id
-    WHERE u.id=? AND u.full_name=? AND u.status='active' AND u.role='teacher'
+    WHERE u.id=? AND u.full_name=? AND u.status='active'
       AND c.status='active' AND c.version=?
       AND s.token_hash=? AND s.credential_version=c.version
       AND s.revoked_at IS NULL AND s.expires_at>? LIMIT 1

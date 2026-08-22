@@ -44,6 +44,7 @@ const migrationUrls = [
     "0013_strange_dark_beast.sql",
     "0014_rich_lionheart.sql",
     "0015_glamorous_namora.sql",
+    "0016_busy_jane_foster.sql",
   ].map((file) => new URL(`../drizzle/${file}`, import.meta.url));
 
 async function fixturePlan() {
@@ -56,7 +57,7 @@ async function fixturePlan() {
 function withAcademicRows(plan) {
   const timestamp = plan.imported_at;
   plan.tables.academic_years = [{
-    id: "YR-2026-2027", label: "2026/2027", start_date: "2026-09-01", end_date: "2027-08-31",
+    id: "YR-2026-2027", label: "2026/2027", start_date: "2026-09-01", end_date: "2027-05-31",
     status: "active", notes: "", version: 1, created_at: timestamp, updated_at: timestamp,
   }];
   plan.tables.cohorts = [{
@@ -65,7 +66,7 @@ function withAcademicRows(plan) {
   plan.tables.class_years = [{
     id: "CY-2026-001", academic_year_id: "YR-2026-2027", cohort_id: "COH-001",
     class_name: "9-А", grade: 9, code: "А", teacher_user_id: "USR-002", location_id: "LOC-001",
-    start_date: "2026-09-01", end_date: "2027-08-31", status: "active", actual_closed_date: null,
+    start_date: "2026-09-01", end_date: "2027-05-31", status: "active", actual_closed_date: null,
     notes: "", version: 1, created_at: timestamp, updated_at: timestamp,
   }];
   plan.reconciliation.target_counts.academic_years = 1;
@@ -163,12 +164,48 @@ test("hosted academic rows revalidate identities, directory roles and lifecycle 
   const duplicateActiveYear = structuredClone(plan);
   duplicateActiveYear.tables.academic_years.push({
     ...duplicateActiveYear.tables.academic_years[0],
-    id: "YR-2027-2028", label: "2027/2028", start_date: "2027-09-01", end_date: "2028-08-31",
+    id: "YR-2027-2028", label: "2027/2028", start_date: "2027-09-01", end_date: "2028-05-31",
   });
   duplicateActiveYear.reconciliation.target_counts.academic_years = 2;
   assert.throws(
     () => validateHostedImportPlan(duplicateActiveYear),
     (error) => error?.code === "plan_academic_state_invalid",
+  );
+});
+
+test("hosted import preserves the four named administrator teacher profiles", async (t) => {
+  const plan = withAcademicRows(structuredClone(await fixturePlan()));
+  const template = plan.tables.users.find((row) => row.id === "USR-003");
+  plan.tables.users.push({
+    ...template,
+    id: "USR-006",
+    full_name: "Галака Наталія Григорівна",
+    sort_name: "галака наталія григорівна",
+    email: null,
+    auth_user_id: null,
+    role: "admin",
+    status: "active",
+  });
+  plan.reconciliation.target_counts.users += 1;
+  plan.tables.class_years[0].teacher_user_id = "USR-006";
+
+  assert.equal(validateHostedImportPlan(plan), plan);
+  const database = await migratedDatabase(t);
+  const db = d1Adapter(database);
+  await db.batch(buildHostedImportInsertSql(plan).map((sql) => db.prepare(sql)));
+  const dualRole = database.prepare(`
+    SELECT u.role, p.closed_at
+    FROM users u JOIN teacher_profiles p ON p.teacher_user_id=u.id
+    WHERE u.id='USR-006'
+  `).get();
+  assert.equal(dualRole.role, "admin");
+  assert.equal(dualRole.closed_at, null);
+
+  const impersonator = structuredClone(plan);
+  impersonator.tables.users.find((row) => row.id === "USR-006").full_name = "Інша Особа";
+  assert.throws(
+    () => validateHostedImportPlan(impersonator),
+    (error) => error?.code === "plan_class_teacher_invalid",
   );
 });
 

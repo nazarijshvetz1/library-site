@@ -27,6 +27,7 @@ const migrationFiles = [
   "0013_strange_dark_beast.sql",
   "0014_rich_lionheart.sql",
   "0015_glamorous_namora.sql",
+  "0016_busy_jane_foster.sql",
 ];
 
 class PreparedStatement {
@@ -228,6 +229,56 @@ test("close blocks active work, preserves loans, then disables code and revokes 
   assert.equal(ctx.sqlite.prepare("SELECT status FROM visit_teacher_credentials WHERE teacher_user_id=?").get(created.teacherId).status, "disabled");
   assert.ok(ctx.sqlite.prepare("SELECT revoked_at FROM visit_teacher_sessions WHERE teacher_user_id=?").get(created.teacherId).revoked_at);
   assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM material_requests WHERE teacher_user_id=?").get(created.teacherId).n, 1);
+});
+
+test("staff accounts can hold a closable teacher card without losing their primary role or login", async () => {
+  const ctx = await context();
+  const now = "2026-08-13T09:00:00.000Z";
+  insertUser(ctx.sqlite, "USR-ADMIN", "Галака Наталія Григорівна", "admin@example.test", "auth-admin", "admin", now);
+  ctx.sqlite.prepare(`INSERT INTO teacher_profiles(
+    teacher_user_id,subject_position,primary_location_id,service_contact,librarian_note,version,
+    last_mutation_request_id,closed_at,closed_by_user_id,created_by_user_id,updated_by_user_id,created_at,updated_at
+  ) VALUES(?, '', NULL, '', '', 1, NULL, NULL, NULL, 'USR-LIB', 'USR-LIB', ?, ?)`)
+    .run("USR-ADMIN", now, now);
+
+  const listed = await store.listTeacherRegistry(ctx.db, {
+    status: "active", attention: "all", query: "Галака", limit: 30, cursor: null,
+  });
+  assert.equal(listed.teachers.length, 1);
+  assert.equal(listed.teachers[0].accountRole, "admin");
+
+  const detail = await store.getTeacherRegistryDetail(ctx.db, "USR-ADMIN");
+  const closed = await store.updateTeacherRegistryCard(
+    ctx.db,
+    ctx.user,
+    "USR-ADMIN",
+    updateInput(detail.teacher.version, "close"),
+  );
+  assert.equal(closed.status, "inactive");
+  assert.equal(ctx.sqlite.prepare("SELECT role,status FROM users WHERE id='USR-ADMIN'").get().role, "admin");
+  assert.equal(ctx.sqlite.prepare("SELECT role,status FROM users WHERE id='USR-ADMIN'").get().status, "active");
+  assert.ok(ctx.sqlite.prepare("SELECT closed_at FROM teacher_profiles WHERE teacher_user_id='USR-ADMIN'").get().closed_at);
+
+  const closedDetail = await store.getTeacherRegistryDetail(ctx.db, "USR-ADMIN");
+  assert.equal(closedDetail.teacher.status, "inactive");
+  await store.updateTeacherRegistryCard(
+    ctx.db,
+    ctx.user,
+    "USR-ADMIN",
+    updateInput(closedDetail.teacher.version, "restore"),
+  );
+  assert.equal(ctx.sqlite.prepare("SELECT status FROM users WHERE id='USR-ADMIN'").get().status, "active");
+  assert.equal(ctx.sqlite.prepare("SELECT closed_at FROM teacher_profiles WHERE teacher_user_id='USR-ADMIN'").get().closed_at, null);
+
+  const restored = await store.getTeacherRegistryDetail(ctx.db, "USR-ADMIN");
+  await assert.rejects(
+    () => store.deleteEmptyTeacherRegistryCard(ctx.db, ctx.user, "USR-ADMIN", {
+      requestId: crypto.randomUUID(),
+      expectedVersion: restored.teacher.version,
+      confirmation: "DELETE_EMPTY_TEACHER",
+    }),
+    (error) => error.code === "teacher_delete_staff_role" && error.details.accountRole === "admin",
+  );
 });
 
 test("mutation zero-row race rolls back command, audit and partial profile changes", async () => {

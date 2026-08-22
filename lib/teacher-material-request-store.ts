@@ -390,7 +390,8 @@ export async function createTeacherMaterialRequest(
       SELECT ?, u.id, 'submitted', ?, '', '', NULL, NULL, NULL, NULL, 1,
              ?, NULL, NULL, NULL, NULL, ?, ?
       FROM users u
-      WHERE u.id = ? AND u.full_name=? AND u.role = 'teacher' AND u.status = 'active'
+      JOIN teacher_profiles profile ON profile.teacher_user_id=u.id AND profile.closed_at IS NULL
+      WHERE u.id = ? AND u.full_name=? AND u.status = 'active'
         AND EXISTS (
           SELECT 1
           FROM visit_teacher_credentials credential
@@ -593,7 +594,8 @@ export async function cancelTeacherMaterialRequest(
         SELECT mr.id
         FROM material_requests mr
         JOIN users teacher ON teacher.id=mr.teacher_user_id
-          AND teacher.full_name=? AND teacher.role='teacher' AND teacher.status='active'
+          AND teacher.full_name=? AND teacher.status='active'
+        JOIN teacher_profiles profile ON profile.teacher_user_id=teacher.id AND profile.closed_at IS NULL
         JOIN visit_teacher_credentials credential
           ON credential.teacher_user_id=teacher.id AND credential.status='active'
           AND credential.version=?
@@ -1008,7 +1010,8 @@ export async function markTeacherNotificationRead(
           SELECT notification.id
           FROM portal_notifications notification
           JOIN users teacher ON teacher.id=notification.teacher_user_id
-            AND teacher.full_name=? AND teacher.role='teacher' AND teacher.status='active'
+            AND teacher.full_name=? AND teacher.status='active'
+          JOIN teacher_profiles profile ON profile.teacher_user_id=teacher.id AND profile.closed_at IS NULL
           JOIN visit_teacher_credentials credential
             ON credential.teacher_user_id=teacher.id AND credential.status='active'
             AND credential.version=?
@@ -2881,13 +2884,15 @@ async function requireActiveTeacherPrincipal(
   const active = await db.prepare(`
     SELECT teacher_user.id
     FROM users teacher_user
+    JOIN teacher_profiles profile
+      ON profile.teacher_user_id=teacher_user.id AND profile.closed_at IS NULL
     JOIN visit_teacher_credentials credential
       ON credential.teacher_user_id=teacher_user.id
     JOIN visit_teacher_sessions session
       ON session.teacher_user_id=teacher_user.id
       AND session.credential_version=credential.version
     WHERE teacher_user.id=? AND teacher_user.full_name=?
-      AND teacher_user.role='teacher' AND teacher_user.status='active'
+      AND teacher_user.status='active'
       AND credential.status='active' AND credential.version=?
       AND session.token_hash=? AND session.revoked_at IS NULL
       AND session.expires_at>? LIMIT 1

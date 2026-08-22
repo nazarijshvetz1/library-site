@@ -1119,7 +1119,12 @@ function selectVisitWeek(amount) {
 }
 
 function updatePrimaryNavigation() {
-  const activeId = window.location.hash === "#visit-schedule" ? "visit-schedule" : "catalog";
+  const hash = window.location.hash;
+  const activeId = hash === "#visit-schedule"
+    ? "visit-schedule"
+    : hash === "#how-it-works"
+      ? "how-it-works"
+      : "catalog";
   document.querySelectorAll("[data-primary-section]").forEach((link) => {
     const active = link.dataset.primarySection === activeId;
     link.classList.toggle("nav-active", active);

@@ -73,6 +73,13 @@ const COHORT_ID_RE = /^COH-\d{3,}$/u;
 const CLASS_YEAR_ID_RE = /^CY-(20\d{2})-\d{3,}$/u;
 const CLASS_CODE_RE = /^[\p{L}\p{N}().'_-]{1,16}$/u;
 
+const DUAL_ROLE_TEACHER_IDENTITIES = new Map<string, string>([
+  ["USR-006", "Галака Наталія Григорівна"],
+  ["USR-007", "Плахотнюк Володимир Віталійович"],
+  ["USR-008", "Єгорова Альона Ігорівна"],
+  ["USR-009", "Орел Галина Миколаївна"],
+]);
+
 type ScalarKind = "string" | "integer" | "nullable-string" | "nullable-integer";
 
 type TableSpec = {
@@ -702,6 +709,9 @@ function validateAcademicTables(tables: HostedImportPlan["tables"]): void {
     if (String(row.start_date).slice(0, 4) !== idMatch[1] || String(row.end_date).slice(0, 4) !== idMatch[2]) {
       fail("plan_academic_year_invalid", `${path} містить дати, що не відповідають ID навчального року.`);
     }
+    if (String(row.end_date) !== `${idMatch[2]}-05-31`) {
+      fail("plan_academic_year_invalid", `${path}.end_date має бути 31 травня.`);
+    }
     if (!(["draft", "active", "closed"] as unknown[]).includes(row.status)) {
       fail("plan_academic_year_invalid", `${path}.status має бути draft, active або closed.`);
     }
@@ -774,7 +784,7 @@ function validateAcademicTables(tables: HostedImportPlan["tables"]): void {
     }
     if (row.teacher_user_id !== null) {
       const teacher = users.get(String(row.teacher_user_id));
-      if (!teacher || teacher.role !== "teacher" || teacher.status !== "active") {
+      if (!teacher || !isTeacherProfileSourceUser(teacher) || teacher.status !== "active") {
         fail("plan_class_teacher_invalid", `${path}.teacher_user_id має посилатися на активного вчителя.`);
       }
     }
@@ -799,6 +809,13 @@ function validateAcademicTables(tables: HostedImportPlan["tables"]): void {
       fail("plan_academic_state_invalid", `${path}: статус класу не узгоджений зі статусом навчального року.`);
     }
   }
+}
+
+function isTeacherProfileSourceUser(row: Record<string, string | number | null>): boolean {
+  if (row.role === "teacher") return true;
+  return row.role === "admin"
+    && row.status === "active"
+    && DUAL_ROLE_TEACHER_IDENTITIES.get(String(row.id)) === row.full_name;
 }
 
 function isCalendarDate(value: unknown): value is string {
@@ -1082,13 +1099,16 @@ export function buildHostedImportInsertSql(plan: HostedImportPlan): string[] {
   for (const spec of HOSTED_IMPORT_TABLE_SPECS) {
     statements.push(...buildInsertStatements(spec, plan.tables[spec.name]));
   }
-  if (plan.tables.users.some((row) => row.role === "teacher")) {
+  const teacherProfileUserIds = plan.tables.users
+    .filter(isTeacherProfileSourceUser)
+    .map((row) => String(row.id));
+  if (teacherProfileUserIds.length > 0) {
     statements.push(`INSERT INTO teacher_profiles (
       teacher_user_id, subject_position, primary_location_id, service_contact,
       librarian_note, version, last_mutation_request_id, closed_at,
       closed_by_user_id, created_by_user_id, updated_by_user_id, created_at, updated_at
     ) SELECT id, '', NULL, '', '', 1, NULL, NULL, NULL, NULL, NULL, created_at, updated_at
-      FROM users WHERE role = 'teacher'`);
+      FROM users WHERE id IN (${teacherProfileUserIds.map(sqlLiteral).join(", ")})`);
   }
   if (statements.length + 3 > HOSTED_IMPORT_MAX_BATCH_STATEMENTS) {
     throw new HostedImportError(

@@ -103,6 +103,9 @@ export function validateAcademicYearCreateInput(
   if (labelMatch && endDate && !endDate.startsWith(labelMatch[2])) {
     errors.endDate = "Дата завершення має належати другому року в назві.";
   }
+  if (labelMatch && endDate && endDate !== `${labelMatch[2]}-05-31`) {
+    errors.endDate = "Навчальний рік має завершуватися 31 травня другого року.";
+  }
   return finish(errors, { requestId, label, startDate, endDate, notes });
 }
 

@@ -82,6 +82,7 @@ async function database() {
     "0013_strange_dark_beast.sql",
     "0014_rich_lionheart.sql",
     "0015_glamorous_namora.sql",
+    "0016_busy_jane_foster.sql",
   ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
   const now = new Date().toISOString();
   insertUser(sqlite, "USR-LIB", "Бібліотекар", "library@example.test", "auth-library", "librarian", now);
@@ -94,6 +95,13 @@ function insertUser(sqlite, id, fullName, email, authUserId, role, now = new Dat
     (id,full_name,sort_name,email,auth_user_id,role,status,created_at,updated_at)
     VALUES (?,?,?,?,?,?,'active',?,?)`)
     .run(id, fullName, fullName, email, authUserId, role, now, now);
+  if (role === "teacher") {
+    sqlite.prepare(`INSERT INTO teacher_profiles (
+      teacher_user_id,subject_position,primary_location_id,service_contact,librarian_note,
+      version,last_mutation_request_id,closed_at,closed_by_user_id,created_by_user_id,
+      updated_by_user_id,created_at,updated_at
+    ) VALUES (?,'',NULL,'','',1,NULL,NULL,NULL,NULL,NULL,?,?)`).run(id, now, now);
+  }
 }
 
 function request(ip = "203.0.113.10", cookie = null) {
@@ -159,6 +167,92 @@ function wrongCode(code) {
   const last = raw.at(-1) === "2" ? "3" : "2";
   return `${raw.slice(0, 5)}-${raw.slice(5, -1)}${last}`;
 }
+
+test("Excel code import is atomic, idempotent and never stores plaintext", async () => {
+  const context = await database();
+  const now = new Date().toISOString();
+  insertUser(context.sqlite, "USR-T2", "Коваль Марія", null, null, "teacher", now);
+  const input = auth.validateVisitTeacherCodeImportInput({
+    requestId: commandId(),
+    confirmation: "IMPORT_MISSING_TEACHER_CODES",
+    rows: [
+      { teacherUserId: "USR-T1", fullName: "Шевченко Олена", code: "23456-789AB" },
+      { teacherUserId: "USR-T2", fullName: "Коваль Марія", code: "CDEFG-HJKMN" },
+    ],
+  });
+  const imported = await auth.importVisitTeacherCodes(context.db, context.actor, input);
+  assert.equal(imported.count, 2);
+  assert.deepEqual(imported.teacherUserIds, ["USR-T1", "USR-T2"]);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM visit_teacher_credentials").get().n, 2);
+  assert.equal(context.sqlite.prepare("SELECT SUM(must_change_pin) AS n FROM visit_teacher_credentials").get().n, 2);
+  const persisted = JSON.stringify({
+    command: context.sqlite.prepare("SELECT * FROM visit_teacher_access_commands WHERE id=?").get(input.requestId),
+    audits: context.sqlite.prepare("SELECT * FROM audit_events WHERE request_id=?").all(input.requestId),
+  });
+  assert.doesNotMatch(persisted, /23456-789AB|23456789AB|CDEFG-HJKMN|CDEFGHJKMN/u);
+  const plainRequestHashInput = JSON.stringify({
+    kind: "code.import",
+    actor: context.actor.id,
+    requestId: input.requestId,
+    confirmation: input.confirmation,
+    rows: input.rows,
+  });
+  const plainDigest = Buffer.from(await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(plainRequestHashInput),
+  )).toString("hex");
+  assert.notEqual(
+    context.sqlite.prepare("SELECT request_hash FROM visit_teacher_access_commands WHERE id=?").get(input.requestId).request_hash,
+    plainDigest,
+    "idempotency proof must be keyed by the server pepper, not a plain digest of teacher codes",
+  );
+
+  const replay = await auth.importVisitTeacherCodes(context.db, context.actor, input);
+  assert.equal(replay.count, 2);
+  assert.equal(replay.statementCount, 0);
+
+  const directory = await auth.listVisitTeacherDirectory(context.db, "коваль", request());
+  const loggedIn = await auth.createVisitTeacherSession(context.db, request(), {
+    loginId: directory[0].loginId,
+    code: "CDEFG-HJKMN",
+  });
+  assert.equal(loggedIn.identity.mustChangePin, true);
+  context.sqlite.close();
+});
+
+test("Excel code import rejects malformed, duplicate and stale rows without partial writes", async () => {
+  assert.throws(() => auth.validateVisitTeacherCodeImportInput({
+    requestId: commandId(), confirmation: "IMPORT_MISSING_TEACHER_CODES",
+    rows: [{ teacherUserId: "USR-T1", fullName: "Шевченко Олена", code: "1234" }],
+  }), (error) => error.code === "validation_failed");
+  assert.throws(() => auth.validateVisitTeacherCodeImportInput({
+    requestId: commandId(), confirmation: "IMPORT_MISSING_TEACHER_CODES",
+    rows: [
+      { teacherUserId: "USR-T1", fullName: "Шевченко Олена", code: "23456789AB" },
+      { teacherUserId: "USR-T1", fullName: "Шевченко Олена", code: "CDEFGHJKMN" },
+    ],
+  }), (error) => error.code === "validation_failed");
+
+  const context = await database();
+  const now = new Date().toISOString();
+  insertUser(context.sqlite, "USR-T2", "Коваль Марія", null, null, "teacher", now);
+  await auth.issueVisitTeacherCode(context.db, context.actor, "USR-T2", {
+    requestId: commandId(), expectedVersion: 0,
+  });
+  const input = auth.validateVisitTeacherCodeImportInput({
+    requestId: commandId(), confirmation: "IMPORT_MISSING_TEACHER_CODES",
+    rows: [
+      { teacherUserId: "USR-T1", fullName: "Шевченко Олена", code: "23456789AB" },
+      { teacherUserId: "USR-T2", fullName: "Коваль Марія", code: "CDEFGHJKMN" },
+    ],
+  });
+  await assert.rejects(
+    auth.importVisitTeacherCodes(context.db, context.actor, input),
+    (error) => error.code === "teacher_code_import_mismatch",
+  );
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM visit_teacher_credentials WHERE teacher_user_id='USR-T1'").get().n, 0);
+  context.sqlite.close();
+});
 
 test("one-time code, Ukrainian directory and opaque cookie session work without email", async () => {
   const context = await database();
@@ -1050,6 +1144,14 @@ test("admin routes enforce same-origin, exact keys, UUID request IDs and private
     "../app/api/librarian/visits/teacher-access/[teacherId]/route.ts",
     "../app/api/librarian/visits/teacher-access/bulk-issue/route.ts",
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8")));
+  const importRoute = await readFile(new URL(
+    "../app/api/librarian/visits/teacher-access/import/route.ts",
+    import.meta.url,
+  ), "utf8");
+  const templateRoute = await readFile(new URL(
+    "../app/api/librarian/visits/teacher-access/import-template/route.ts",
+    import.meta.url,
+  ), "utf8");
   assert.match(api, /isSameOriginRequest\(request\)/u);
   assert.match(api, /expected\.every\(\(key\) => keys\.includes\(key\)\)/u);
   assert.match(api, /\^\[0-9a-f\]\{8\}/u);
@@ -1057,6 +1159,12 @@ test("admin routes enforce same-origin, exact keys, UUID request IDs and private
     assert.match(route, /exactBodyKeys/u);
     assert.match(route, /validRequestId/u);
   }
+  assert.match(importRoute, /authorizeVisitTeacherAccessApi\(request\)/u);
+  assert.match(importRoute, /visitTeacherCodeImportBody/u);
+  assert.match(importRoute, /validateVisitTeacherCodeImportInput/u);
+  assert.doesNotMatch(importRoute, /code:\s*row\.code/u);
+  assert.match(templateRoute, /private, no-store/u);
+  assert.match(templateRoute, /application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet/u);
   const scheduleApi = await readFile(new URL("../lib/visit-schedule-api.ts", import.meta.url), "utf8");
   assert.match(scheduleApi, /"Cache-Control": "private, no-store"/u);
 });

@@ -57,6 +57,18 @@ export type VisitTeacherAccessRow = {
   credential: VisitTeacherCredentialProjection | null;
 };
 
+export type VisitTeacherCodeImportRow = {
+  teacherUserId: string;
+  fullName: string;
+  code: string;
+};
+
+export type VisitTeacherCodeImportInput = {
+  requestId: string;
+  confirmation: "IMPORT_MISSING_TEACHER_CODES";
+  rows: VisitTeacherCodeImportRow[];
+};
+
 export type TeacherCodeRotationResult = {
   credentialVersion: number;
   pendingScope: string;
@@ -101,7 +113,8 @@ export async function listVisitTeacherDirectory(
     SELECT c.login_id, u.full_name
     FROM visit_teacher_credentials c
     JOIN users u ON u.id = c.teacher_user_id
-    WHERE c.status = 'active' AND u.status = 'active' AND u.role = 'teacher'
+    WHERE c.status = 'active' AND u.status = 'active'
+      AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL)
     ORDER BY u.sort_name, u.id LIMIT 101
   `).all<{ login_id: string; full_name: string }>();
   if ((rows.results ?? []).length > 100) {
@@ -167,7 +180,8 @@ export async function createVisitTeacherSession(
                c.failure_window_started_at, c.locked_until
         FROM visit_teacher_credentials c
         JOIN users u ON u.id = c.teacher_user_id
-        WHERE c.login_id = ? AND u.status = 'active' AND u.role = 'teacher' LIMIT 1
+        WHERE c.login_id = ? AND u.status = 'active'
+          AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL) LIMIT 1
       `).bind(loginId).first<CredentialRow>()
     : null;
   const codeShapeValid = credential
@@ -216,7 +230,8 @@ export async function createVisitTeacherSession(
       WHERE c.teacher_user_id = ? AND c.login_id = ? AND c.code_hmac = ?
         AND c.status = 'active' AND c.version = ?
         AND (c.locked_until IS NULL OR c.locked_until <= ?)
-        AND u.status = 'active' AND u.role = 'teacher'
+        AND u.status = 'active'
+        AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL)
     `).bind(
       tokenHash, pendingScope, sessionIpScopeHash, expiresAt, now, now,
       credential.teacher_user_id, loginId, presented, credential.version, now,
@@ -240,7 +255,8 @@ export async function createVisitTeacherSession(
           AND s.pending_scope=? AND s.revoked_at IS NULL AND s.expires_at=?
           AND c.login_id=? AND c.code_hmac=? AND c.status='active' AND c.version=?
           AND (c.locked_until IS NULL OR c.locked_until<=?)
-          AND u.status='active' AND u.role='teacher'
+          AND u.status='active'
+          AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL)
       ) THEN ? ELSE NULL END,
       ?, NULL, NULL, NULL, ?)`)
       .bind(
@@ -290,7 +306,8 @@ export async function createVisitTeacherTelegramSession(
     JOIN users u ON u.id=c.user_id
     JOIN visit_teacher_credentials v ON v.teacher_user_id=u.id
     WHERE c.telegram_user_id=? AND c.status='active'
-      AND u.status='active' AND u.role='teacher'
+      AND u.status='active'
+      AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL)
       AND v.status='active'
     LIMIT 1
   `).bind(input.telegramUserId).first<{
@@ -357,7 +374,8 @@ export async function createVisitTeacherTelegramSession(
       JOIN users u ON u.id=c.user_id
       JOIN visit_teacher_credentials v ON v.teacher_user_id=u.id
       WHERE c.telegram_user_id=? AND c.status='active'
-        AND u.id=? AND u.status='active' AND u.role='teacher'
+        AND u.id=? AND u.status='active'
+        AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL)
         AND v.status='active' AND v.version=? AND v.must_change_pin=0
         AND (v.locked_until IS NULL OR v.locked_until<=?)
         AND NOT EXISTS (SELECT 1 FROM telegram_mini_app_auth_receipts WHERE init_data_hash=?)
@@ -386,7 +404,8 @@ export async function createVisitTeacherTelegramSession(
       JOIN visit_teacher_credentials v ON v.teacher_user_id=r.teacher_user_id
       WHERE r.init_data_hash=? AND r.session_token_hash=? AND r.consumed_at=?
         AND r.teacher_user_id=? AND r.expires_at>=?
-        AND c.status='active' AND u.status='active' AND u.role='teacher'
+        AND c.status='active' AND u.status='active'
+        AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL)
         AND v.status='active' AND v.version=? AND v.must_change_pin=0
         AND (v.locked_until IS NULL OR v.locked_until<=?)
     `).bind(
@@ -522,7 +541,8 @@ export async function rotateVisitTeacherCode(
       s.pending_scope,s.expires_at,s.revoked_at,u.full_name,c.must_change_pin
     FROM visit_teacher_sessions s JOIN users u ON u.id=s.teacher_user_id
     JOIN visit_teacher_credentials c ON c.teacher_user_id=s.teacher_user_id
-    WHERE s.token_hash=? AND s.expires_at>? AND u.role='teacher' AND u.status='active' LIMIT 1`)
+    WHERE s.token_hash=? AND s.expires_at>? AND u.status='active'
+      AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL) LIMIT 1`)
     .bind(presentedTokenHash, initialNow).first<{
       token_hash: string; teacher_user_id: string; credential_version: number;
       pending_scope: string; expires_at: string; revoked_at: string | null; full_name: string;
@@ -599,7 +619,8 @@ export async function rotateVisitTeacherCode(
   const credential = await db.prepare(`SELECT c.teacher_user_id,u.full_name,c.login_id,c.code_hmac,c.status,
       c.must_change_pin,c.version,c.failed_attempts,c.failure_window_started_at,c.locked_until
     FROM visit_teacher_credentials c JOIN users u ON u.id=c.teacher_user_id
-    WHERE c.teacher_user_id=? AND u.role='teacher' AND u.status='active' LIMIT 1`)
+    WHERE c.teacher_user_id=? AND u.status='active'
+      AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL) LIMIT 1`)
     .bind(teacher.teacherUserId).first<CredentialRow>();
   const nowDate = new Date();
   const now = nowDate.toISOString();
@@ -657,7 +678,8 @@ export async function rotateVisitTeacherCode(
         AND (locked_until IS NULL OR locked_until<=?)
         AND NOT EXISTS (SELECT 1 FROM visit_teacher_login_limits
           WHERE scope_hash IN (?,?) AND blocked_until IS NOT NULL AND blocked_until>?)
-        AND EXISTS (SELECT 1 FROM users WHERE id=? AND role='teacher' AND status='active')
+        AND EXISTS (SELECT 1 FROM users active_user WHERE active_user.id=? AND active_user.status='active'
+          AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=active_user.id AND cap.closed_at IS NULL))
         AND EXISTS (SELECT 1 FROM visit_teacher_sessions WHERE token_hash=? AND teacher_user_id=?
           AND credential_version=? AND revoked_at IS NULL AND expires_at>?)`)
       .bind(newHmac, now, now, input.requestId, teacher.teacherUserId, now,
@@ -671,7 +693,8 @@ export async function rotateVisitTeacherCode(
       FROM visit_teacher_credentials c JOIN users u ON u.id=c.teacher_user_id
       WHERE c.teacher_user_id=? AND c.status='active' AND c.version=? AND c.code_hmac=?
         AND c.must_change_pin=0
-        AND c.last_access_command_id=? AND u.role='teacher' AND u.status='active'
+        AND c.last_access_command_id=? AND u.status='active'
+        AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL)
         AND EXISTS (SELECT 1 FROM visit_teacher_sessions s WHERE s.token_hash=?
           AND s.teacher_user_id=c.teacher_user_id AND s.credential_version=?
           AND s.revoked_at IS NULL AND s.expires_at>?)`)
@@ -685,7 +708,8 @@ export async function rotateVisitTeacherCode(
       CASE WHEN EXISTS (SELECT 1 FROM visit_teacher_credentials c JOIN users u ON u.id=c.teacher_user_id
         WHERE c.teacher_user_id=? AND c.status='active' AND c.version=? AND c.code_hmac=?
           AND c.must_change_pin=0
-          AND c.last_access_command_id=? AND u.role='teacher' AND u.status='active')
+          AND c.last_access_command_id=? AND u.status='active'
+          AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL))
       AND EXISTS (SELECT 1 FROM visit_teacher_sessions WHERE token_hash=? AND teacher_user_id=?
         AND credential_version=? AND pending_scope=? AND revoked_at IS NULL AND expires_at=?)
       THEN ? ELSE NULL END,?,NULL,json_object('version',?),NULL,?)`)
@@ -784,7 +808,8 @@ async function recoverRotatedTeacherSession(
         FROM visit_teacher_credentials c JOIN users u ON u.id=c.teacher_user_id
         WHERE c.teacher_user_id=? AND c.version=? AND c.code_hmac=? AND c.status='active'
           AND c.must_change_pin=0
-          AND c.last_access_command_id=? AND u.role='teacher' AND u.status='active'`)
+          AND c.last_access_command_id=? AND u.status='active'
+          AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL)`)
         .bind(tokenHash, pendingScope, ipScopeHash, expiresAt, now, now,
           presented.teacherUserId, result.credentialVersion, expectedNewHmac, requestId),
       db.prepare(`UPDATE visit_mutation_commands SET result_json=?,updated_at=?
@@ -858,7 +883,8 @@ export async function listVisitTeacherAccess(db: VisitD1Database): Promise<Visit
              WHERE s.teacher_user_id = u.id AND s.revoked_at IS NULL AND s.expires_at > ?) AS active_sessions
     FROM users u
     LEFT JOIN visit_teacher_credentials c ON c.teacher_user_id = u.id
-    WHERE u.role = 'teacher' AND u.status = 'active'
+    WHERE u.status = 'active'
+      AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL)
     ORDER BY u.status DESC, u.sort_name, u.id LIMIT 101
   `).bind(now).all<{
     id: string; full_name: string; user_status: "active" | "inactive";
@@ -882,6 +908,24 @@ export async function listVisitTeacherAccess(db: VisitD1Database): Promise<Visit
   }));
 }
 
+export async function listMissingVisitTeacherCodeRows(
+  db: VisitD1Database,
+): Promise<Array<{ teacherUserId: string; fullName: string }>> {
+  const rows = await db.prepare(`
+    SELECT u.id, u.full_name
+    FROM users u
+    LEFT JOIN teacher_profiles p ON p.teacher_user_id=u.id
+    LEFT JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id
+    WHERE u.status='active' AND p.closed_at IS NULL AND p.teacher_user_id IS NOT NULL
+      AND c.teacher_user_id IS NULL
+    ORDER BY u.sort_name,u.id LIMIT ?
+  `).bind(VISIT_TEACHER_BULK_LIMIT + 1).all<{ id: string; full_name: string }>();
+  if ((rows.results ?? []).length > VISIT_TEACHER_BULK_LIMIT) {
+    throw new VisitScheduleError("teacher_bulk_limit", 409, "За один раз можна підготувати не більше 100 кодів.");
+  }
+  return (rows.results ?? []).map((row) => ({ teacherUserId: row.id, fullName: row.full_name }));
+}
+
 export async function issueVisitTeacherCode(
   db: VisitD1Database,
   actor: { id: string; email: string },
@@ -897,7 +941,8 @@ export async function issueVisitTeacherCode(
   const teacher = await db.prepare(`
     SELECT u.id, u.full_name, c.login_id, c.version
     FROM users u LEFT JOIN visit_teacher_credentials c ON c.teacher_user_id = u.id
-    WHERE u.id = ? AND u.role = 'teacher' AND u.status = 'active' LIMIT 1
+    WHERE u.id = ? AND u.status = 'active'
+      AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL) LIMIT 1
   `).bind(teacherUserId).first<{ id: string; full_name: string; login_id: string | null; version: number | null }>();
   if (!teacher) throw new VisitScheduleError("teacher_not_found", 404, "Активного вчителя не знайдено.");
   const currentVersion = teacher.version === null ? 0 : Number(teacher.version);
@@ -924,7 +969,8 @@ export async function issueVisitTeacherCode(
         updated_by_user_id, created_at, updated_at
       )
       SELECT u.id, ?, ?, 1, 'active', 1, 0, NULL, NULL, ?, ?, ?, ?, ?, ?
-      FROM users u WHERE u.id = ? AND u.role = 'teacher' AND u.status = 'active'
+      FROM users u WHERE u.id = ? AND u.status = 'active'
+        AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL)
       ON CONFLICT(teacher_user_id) DO UPDATE SET
         code_hmac = excluded.code_hmac, must_change_pin = 1, status = 'active', version = visit_teacher_credentials.version + 1,
         failed_attempts = 0, locked_until = NULL, last_login_at = NULL,
@@ -971,7 +1017,8 @@ export async function bulkIssueVisitTeacherCodes(
   const rows = await db.prepare(`
     SELECT u.id, u.full_name FROM users u
     LEFT JOIN visit_teacher_credentials c ON c.teacher_user_id = u.id
-    WHERE u.role = 'teacher' AND u.status = 'active' AND c.teacher_user_id IS NULL
+    WHERE u.status = 'active' AND c.teacher_user_id IS NULL
+      AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL)
     ORDER BY u.sort_name, u.id LIMIT 101
   `).all<{ id: string; full_name: string }>();
   const teachers = rows.results ?? [];
@@ -1007,7 +1054,8 @@ export async function bulkIssueVisitTeacherCodes(
              json_extract(value,'$.codeHmac'), 1, 'active', 1, 0, NULL, NULL, ?, ?, ?, ?, ?, ?
       FROM json_each(?) j
       WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = json_extract(j.value,'$.teacherUserId')
-        AND u.role='teacher' AND u.status='active')
+        AND u.status='active' AND EXISTS (SELECT 1 FROM teacher_profiles cap
+          WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL))
         AND NOT EXISTS (SELECT 1 FROM visit_teacher_credentials c
           WHERE c.teacher_user_id = json_extract(j.value,'$.teacherUserId'))
     `).bind(now, input.requestId, actor.id, actor.id, now, now, JSON.stringify(credentialRows)),
@@ -1059,6 +1107,184 @@ export async function bulkIssueVisitTeacherCodes(
   };
 }
 
+export function validateVisitTeacherCodeImportInput(input: unknown): VisitTeacherCodeImportInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new VisitScheduleError("validation_failed", 400, "Очікуються дані імпорту кодів.");
+  }
+  const value = input as Record<string, unknown>;
+  const keys = Object.keys(value);
+  if (keys.length !== 3 || !["requestId", "confirmation", "rows"].every((key) => keys.includes(key))) {
+    throw new VisitScheduleError("validation_failed", 400, "Формат імпорту кодів не підтримується.");
+  }
+  if (typeof value.requestId !== "string"
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value.requestId)
+    || value.confirmation !== "IMPORT_MISSING_TEACHER_CODES"
+    || !Array.isArray(value.rows)
+    || value.rows.length < 1
+    || value.rows.length > VISIT_TEACHER_BULK_LIMIT) {
+    throw new VisitScheduleError("validation_failed", 400, "Перевірте підтвердження та кількість рядків імпорту.");
+  }
+  const ids = new Set<string>();
+  const codes = new Set<string>();
+  const rows = value.rows.map((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      throw new VisitScheduleError("validation_failed", 400, "Некоректний рядок імпорту кодів.");
+    }
+    const row = candidate as Record<string, unknown>;
+    const rowKeys = Object.keys(row);
+    if (rowKeys.length !== 3 || !["teacherUserId", "fullName", "code"].every((key) => rowKeys.includes(key))) {
+      throw new VisitScheduleError("validation_failed", 400, "Рядок імпорту має містити лише USR-ID, ім’я та тимчасовий код.");
+    }
+    const teacherUserId = typeof row.teacherUserId === "string" ? row.teacherUserId.trim() : "";
+    const fullName = typeof row.fullName === "string"
+      ? row.fullName.normalize("NFKC").trim().replace(/\s+/gu, " ")
+      : "";
+    const code = typeof row.code === "string" ? normalizeCode(row.code) : "";
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(teacherUserId)
+      || fullName.length < 3 || fullName.length > 160 || !temporaryCodeShape(code)) {
+      throw new VisitScheduleError("validation_failed", 400, "Один або кілька рядків містять некоректні дані.");
+    }
+    if (ids.has(teacherUserId) || codes.has(code)) {
+      throw new VisitScheduleError("validation_failed", 400, "USR-ID і тимчасові коди не можуть повторюватися.");
+    }
+    ids.add(teacherUserId);
+    codes.add(code);
+    return { teacherUserId, fullName, code };
+  });
+  return {
+    requestId: value.requestId,
+    confirmation: "IMPORT_MISSING_TEACHER_CODES",
+    rows,
+  };
+}
+
+export async function importVisitTeacherCodes(
+  db: VisitD1Database,
+  actor: { id: string; email: string },
+  input: VisitTeacherCodeImportInput,
+): Promise<{ teacherUserIds: string[]; count: number; statementCount: number }> {
+  const pepper = teacherAuthPepper();
+  const canonical = input.rows.map((row) => ({
+    teacherUserId: row.teacherUserId,
+    fullName: row.fullName,
+    code: normalizeCode(row.code),
+  }));
+  const requestHash = await hmacHex(pepper, `code-import:${JSON.stringify({
+    kind: "code.import",
+    actor: actor.id,
+    requestId: input.requestId,
+    confirmation: input.confirmation,
+    rows: canonical,
+  })}`);
+  const existingCommand = await accessCommand(db, input.requestId);
+  if (existingCommand) {
+    if (existingCommand.request_hash !== requestHash) {
+      throw new VisitScheduleError("request_id_conflict", 409, "requestId уже використано.");
+    }
+    if (existingCommand.status === "completed" && existingCommand.result_json) {
+      const replay = JSON.parse(existingCommand.result_json) as { teacherUserIds: string[]; count: number };
+      return { ...replay, statementCount: 0 };
+    }
+    throw new VisitScheduleError("mutation_in_progress", 409, "Імпорт ще виконується. Оновіть сторінку.");
+  }
+
+  const requestedRows = JSON.stringify(canonical.map(({ teacherUserId, fullName }) => ({ teacherUserId, fullName })));
+  const matches = await db.prepare(`
+    SELECT u.id,u.full_name,u.status,u.role,p.teacher_user_id AS profile_id,p.closed_at,
+      c.teacher_user_id AS credential_id
+    FROM json_each(?) j
+    LEFT JOIN users u ON u.id=json_extract(j.value,'$.teacherUserId')
+    LEFT JOIN teacher_profiles p ON p.teacher_user_id=u.id
+    LEFT JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id
+    ORDER BY CAST(j.key AS INTEGER)
+  `).bind(requestedRows).all<{
+    id: string | null; full_name: string | null; status: string | null; role: string | null;
+    profile_id: string | null; closed_at: string | null; credential_id: string | null;
+  }>();
+  const checked = matches.results ?? [];
+  if (checked.length !== canonical.length || checked.some((row, index) => !row.id
+    || row.status !== "active" || row.profile_id === null || row.closed_at !== null
+    || row.credential_id !== null
+    || normalizeTeacherImportName(row.full_name ?? "") !== canonical[index].fullName)) {
+    throw new VisitScheduleError(
+      "teacher_code_import_mismatch",
+      409,
+      "Файл не збігається з актуальними картками вчителів або для когось код уже створено. Завантажте новий шаблон.",
+    );
+  }
+
+  const now = new Date().toISOString();
+  const prepared = await Promise.all(canonical.map(async (row) => ({
+    teacherUserId: row.teacherUserId,
+    fullName: row.fullName,
+    loginId: randomOpaque(18),
+    codeHmac: await hmacHex(pepper, `code:${row.teacherUserId}:${row.code}`),
+    auditId: `AUD-${crypto.randomUUID()}`,
+  })));
+  const safeResult = { teacherUserIds: prepared.map((row) => row.teacherUserId), count: prepared.length };
+  const rowsJson = JSON.stringify(prepared);
+  const statements = [
+    insertAccessCommand(db, input.requestId, actor.id, "code.import", null, requestHash, now),
+    db.prepare(`
+      INSERT INTO visit_teacher_credentials (
+        teacher_user_id,login_id,code_hmac,must_change_pin,status,version,failed_attempts,
+        locked_until,last_login_at,code_rotated_at,last_access_command_id,created_by_user_id,
+        updated_by_user_id,created_at,updated_at
+      )
+      SELECT json_extract(j.value,'$.teacherUserId'),json_extract(j.value,'$.loginId'),
+        json_extract(j.value,'$.codeHmac'),1,'active',1,0,NULL,NULL,?,?,?,?,?,?
+      FROM json_each(?) j
+      JOIN users u ON u.id=json_extract(j.value,'$.teacherUserId')
+      LEFT JOIN teacher_profiles p ON p.teacher_user_id=u.id
+      WHERE u.status='active' AND u.full_name=json_extract(j.value,'$.fullName')
+        AND p.teacher_user_id IS NOT NULL AND p.closed_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM visit_teacher_credentials c WHERE c.teacher_user_id=u.id)
+    `).bind(now, input.requestId, actor.id, actor.id, now, now, rowsJson),
+    db.prepare(`
+      INSERT INTO audit_events (
+        id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,
+        before_json,after_json,metadata_json,created_at
+      )
+      SELECT json_extract(j.value,'$.auditId'),?,?,'visit.teacher_code.import',
+        'visit_teacher_credential',json_extract(j.value,'$.teacherUserId'),?,NULL,
+        json_object('version',1,'status','active'),json_object('source','excel'),?
+      FROM json_each(?) j
+      JOIN visit_teacher_credentials c ON c.teacher_user_id=json_extract(j.value,'$.teacherUserId')
+      WHERE c.login_id=json_extract(j.value,'$.loginId')
+        AND c.code_hmac=json_extract(j.value,'$.codeHmac') AND c.version=1
+        AND c.must_change_pin=1 AND c.last_access_command_id=?
+    `).bind(actor.id, actor.email.toLowerCase(), input.requestId, now, rowsJson, input.requestId),
+    db.prepare(`UPDATE visit_teacher_access_commands SET status='completed',result_json=?,
+      updated_at=?,completed_at=? WHERE id=? AND status='processing'
+      AND (SELECT COUNT(*) FROM visit_teacher_credentials c JOIN json_each(?) j
+        ON c.teacher_user_id=json_extract(j.value,'$.teacherUserId')
+        AND c.login_id=json_extract(j.value,'$.loginId')
+        AND c.code_hmac=json_extract(j.value,'$.codeHmac') AND c.version=1
+        AND c.must_change_pin=1 AND c.last_access_command_id=?)=?`)
+      .bind(JSON.stringify(safeResult), now, now, input.requestId, rowsJson, input.requestId, prepared.length),
+    db.prepare(`INSERT INTO audit_events (
+      id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,
+      before_json,after_json,metadata_json,created_at
+    ) VALUES (?,?,?,'visit.teacher_code.import_guard','visit_teacher_code_import',
+      CASE WHEN EXISTS (SELECT 1 FROM visit_teacher_access_commands
+        WHERE id=? AND status='completed') THEN ? ELSE NULL END,
+      ?,NULL,json_object('count',?),NULL,?)`)
+      .bind(`AUD-${crypto.randomUUID()}`, actor.id, actor.email.toLowerCase(), input.requestId,
+        input.requestId, input.requestId, prepared.length, now),
+    activeActorGuardAudit(db, actor, input.requestId, now),
+  ];
+  try {
+    await db.batch(statements);
+  } catch {
+    throw new VisitScheduleError(
+      "teacher_code_import_conflict",
+      409,
+      "Картки або коди змінилися під час імпорту. Дані не змінено; завантажте новий шаблон.",
+    );
+  }
+  return { ...safeResult, statementCount: statements.length };
+}
+
 export async function updateVisitTeacherAccess(
   db: VisitD1Database,
   actor: { id: string; email: string },
@@ -1076,7 +1302,8 @@ export async function updateVisitTeacherAccess(
     SELECT u.id, u.full_name, c.status, c.version, c.last_login_at, c.locked_until,
            c.must_change_pin
     FROM users u JOIN visit_teacher_credentials c ON c.teacher_user_id = u.id
-    WHERE u.id = ? AND u.role='teacher' AND u.status='active' LIMIT 1
+    WHERE u.id = ? AND u.status='active'
+      AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL) LIMIT 1
   `).bind(teacherUserId).first<{
     id: string; full_name: string; status: "active" | "disabled"; version: number;
     last_login_at: string | null; locked_until: string | null; must_change_pin: number;
@@ -1109,7 +1336,8 @@ export async function updateVisitTeacherAccess(
         version = version + 1, updated_by_user_id = ?, updated_at = ?,
         last_access_command_id = ?
       WHERE teacher_user_id = ? AND version = ?
-        AND EXISTS (SELECT 1 FROM users WHERE id=? AND status='active' AND role='teacher')
+        AND EXISTS (SELECT 1 FROM users active_user WHERE active_user.id=? AND active_user.status='active'
+          AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=active_user.id AND cap.closed_at IS NULL))
     `).bind(
       nextStatus, input.action, input.action, input.action, actor.id, now,
       input.requestId, teacherUserId, input.expectedVersion, teacherUserId,
@@ -1222,7 +1450,8 @@ async function readVisitTeacherSessionByHash(
     JOIN users u ON u.id = s.teacher_user_id
     WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > ?
       AND c.status = 'active' AND c.version = s.credential_version
-      AND u.status = 'active' AND u.role = 'teacher' LIMIT 1
+      AND u.status = 'active'
+      AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL) LIMIT 1
   `).bind(tokenHash, now).first<{
     token_hash: string; teacher_user_id: string; credential_version: number;
     pending_scope: string; expires_at: string; full_name: string; must_change_pin: number;
@@ -1371,6 +1600,10 @@ function trustedClientIp(request: Request): string {
 
 function normalizeCode(value: string): string {
   return value.normalize("NFKC").toUpperCase().replace(/[\s-]+/gu, "");
+}
+
+function normalizeTeacherImportName(value: string): string {
+  return value.normalize("NFKC").trim().replace(/\s+/gu, " ");
 }
 
 function normalizePin(value: string): string {

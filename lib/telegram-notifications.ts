@@ -153,7 +153,10 @@ export async function readTelegramConnectionStatus(
     SELECT c.status,c.notify_orders,c.notify_visits,c.version,c.linked_at,
            c.last_success_at,c.last_failure_at,c.last_error_code
     FROM users u LEFT JOIN telegram_connections c ON c.user_id=u.id
-    WHERE u.id=? AND u.status='active' AND u.role IN ('admin','librarian','teacher')
+    WHERE u.id=? AND u.status='active'
+      AND (u.role IN ('admin','librarian') OR EXISTS (
+        SELECT 1 FROM teacher_profiles p WHERE p.teacher_user_id=u.id AND p.closed_at IS NULL
+      ))
     LIMIT 1
   `).bind(userId).first<ConnectionRow>();
   if (!row) {
@@ -200,7 +203,9 @@ export async function createTelegramLinkToken(
       )
       SELECT ?,u.id,?,?,NULL,NULL,NULL,?
       FROM users u WHERE u.id=? AND u.status='active'
-        AND u.role IN ('admin','librarian','teacher')
+        AND (u.role IN ('admin','librarian') OR EXISTS (
+          SELECT 1 FROM teacher_profiles p WHERE p.teacher_user_id=u.id AND p.closed_at IS NULL
+        ))
     `).bind(tokenId, tokenHash, expiresAt, now, userId),
   ]);
   const inserted = await db.prepare(`SELECT id FROM telegram_link_tokens WHERE id=? AND user_id=? LIMIT 1`)
@@ -459,6 +464,7 @@ export function queueTelegramFromPortalNotificationStatement(
            'pending',0,?,NULL,NULL,NULL,NULL,NULL,NULL,?,?
     FROM portal_notifications pn
     JOIN users u ON u.id=pn.teacher_user_id AND u.status='active'
+    JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
     JOIN telegram_connections c ON c.user_id=pn.teacher_user_id AND c.status='active'
     WHERE pn.id=?
       AND CASE ? WHEN 'orders' THEN c.notify_orders=1 WHEN 'visits' THEN c.notify_visits=1 ELSE 1 END
@@ -595,12 +601,19 @@ export async function processTelegramWebhookUpdate(
     const tokenHash = await sha256Hex(command.token);
     const now = new Date().toISOString();
     const token = await db.prepare(`
-      SELECT t.user_id,u.full_name,u.role
+      SELECT t.user_id,u.full_name,u.role,
+        EXISTS (SELECT 1 FROM teacher_profiles p
+          WHERE p.teacher_user_id=u.id AND p.closed_at IS NULL) AS teacher_capability
       FROM telegram_link_tokens t JOIN users u ON u.id=t.user_id
       WHERE t.token_hash=? AND t.consumed_at IS NULL AND t.revoked_at IS NULL
-        AND t.expires_at>? AND u.status='active' AND u.role IN ('admin','librarian','teacher')
+        AND t.expires_at>? AND u.status='active'
+        AND (u.role IN ('admin','librarian') OR EXISTS (
+          SELECT 1 FROM teacher_profiles p WHERE p.teacher_user_id=u.id AND p.closed_at IS NULL
+        ))
       LIMIT 1
-    `).bind(tokenHash, now).first<{ user_id: string; full_name: string; role: "admin" | "librarian" | "teacher" }>();
+    `).bind(tokenHash, now).first<{
+      user_id: string; full_name: string; role: "admin" | "librarian" | "teacher"; teacher_capability: number;
+    }>();
     if (!token) {
       const inserted = await insertWebhookReceipt(db, update.updateId, payloadHash, "link_invalid");
       if (inserted) await bestEffortBotReply(configuration.botToken, update.message.chatId,
@@ -653,7 +666,9 @@ export async function processTelegramWebhookUpdate(
           SELECT t.user_id
           FROM telegram_link_tokens t JOIN users u ON u.id=t.user_id AND u.status='active'
           WHERE t.token_hash=? AND t.consumed_update_id=? AND t.user_id=?
-            AND u.role IN ('admin','librarian','teacher')
+            AND (u.role IN ('admin','librarian') OR EXISTS (
+              SELECT 1 FROM teacher_profiles p WHERE p.teacher_user_id=u.id AND p.closed_at IS NULL
+            ))
         ),?,?,?,'active',1,1,1,?,NULL,NULL,NULL,NULL,?,?)
         ON CONFLICT(user_id) DO UPDATE SET
           telegram_user_id=excluded.telegram_user_id,chat_id=excluded.chat_id,username=excluded.username,
@@ -678,6 +693,7 @@ export async function processTelegramWebhookUpdate(
       configuration.botToken,
       update.message.chatId,
       token.role,
+      Boolean(token.teacher_capability),
       token.full_name,
       siteOrigin,
       true,
@@ -719,6 +735,7 @@ export async function processTelegramWebhookUpdate(
           configuration.botToken,
           update.message.chatId,
           profile.role,
+          Boolean(profile.teacher_capability),
           profile.full_name,
           siteOrigin,
           false,
@@ -1006,20 +1023,28 @@ async function connectedTelegramProfile(
   db: TelegramDatabase,
   chatId: string,
   telegramUserId: string,
-): Promise<{ full_name: string; role: ConnectedTelegramRole } | null> {
+): Promise<{ full_name: string; role: ConnectedTelegramRole; teacher_capability: number } | null> {
   return db.prepare(`
-    SELECT u.full_name,u.role
+    SELECT u.full_name,u.role,
+      EXISTS (SELECT 1 FROM teacher_profiles p
+        WHERE p.teacher_user_id=u.id AND p.closed_at IS NULL) AS teacher_capability
     FROM telegram_connections c JOIN users u ON u.id=c.user_id
     WHERE c.chat_id=? AND c.telegram_user_id=? AND c.status='active'
-      AND u.status='active' AND u.role IN ('admin','librarian','teacher')
+      AND u.status='active'
+      AND (u.role IN ('admin','librarian') OR EXISTS (
+        SELECT 1 FROM teacher_profiles p WHERE p.teacher_user_id=u.id AND p.closed_at IS NULL
+      ))
     LIMIT 1
-  `).bind(chatId, telegramUserId).first<{ full_name: string; role: ConnectedTelegramRole }>();
+  `).bind(chatId, telegramUserId).first<{
+    full_name: string; role: ConnectedTelegramRole; teacher_capability: number;
+  }>();
 }
 
 async function bestEffortConnectedMenu(
   botToken: string,
   chatId: string,
   role: ConnectedTelegramRole,
+  teacherCapability: boolean,
   fullName: string,
   siteOrigin: string | undefined,
   linked: boolean,
@@ -1028,7 +1053,7 @@ async function bestEffortConnectedMenu(
   try {
     const origin = siteOrigin ? trustedSiteOrigin(siteOrigin) : null;
     const configuration = telegramConfiguration();
-    const keyboard = origin ? telegramRoleKeyboard(role, origin, configuration.miniAppEnabled) : null;
+    const keyboard = origin ? telegramRoleKeyboard(role, teacherCapability, origin, configuration.miniAppEnabled) : null;
     const greeting = linked
       ? `Telegram підключено до профілю «${safePlainText(fullName, 120)}».`
       : `Профіль: «${safePlainText(fullName, 120)}».`;
@@ -1039,7 +1064,7 @@ async function bestEffortConnectedMenu(
       link_preview_options: { is_disabled: true },
       ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
     }, fetcher);
-    if (role === "teacher" && origin && configuration.miniAppEnabled) {
+    if (teacherCapability && origin && configuration.miniAppEnabled) {
       await bestEffortChatMenuButton(
         botToken,
         chatId,
@@ -1056,28 +1081,33 @@ async function bestEffortConnectedMenu(
 
 function telegramRoleKeyboard(
   role: ConnectedTelegramRole,
+  teacherCapability: boolean,
   siteOrigin: string,
   miniAppEnabled: boolean,
 ): Array<Array<Record<string, unknown>>> {
-  if (role === "teacher") {
+  const keyboard: Array<Array<Record<string, unknown>>> = [];
+  if (teacherCapability) {
     const buttons = [
       ["📚 Каталог і замовлення", "/teacher/telegram?tab=orders"],
       ["📅 Записатися / мої відвідування", "/teacher/telegram?tab=visits"],
       ["📖 Мої посібники", "/teacher/telegram?tab=loans"],
       ["🔔 Мої повідомлення", "/teacher/telegram?tab=notifications"],
     ] as const;
-    return buttons.map(([text, miniPath]) => {
+    keyboard.push(...buttons.map(([text, miniPath]) => {
       const path = miniAppEnabled ? miniPath : miniPath.replace("/teacher/telegram", "/teacher");
       const url = new URL(path, siteOrigin).toString();
       return [{ text, ...(miniAppEnabled ? { web_app: { url } } : { url }) }];
-    });
+    }));
   }
-  return [
-    [{ text: "🆕 Замовлення вчителів", url: new URL("/librarian/visits#request-inbox-title", siteOrigin).toString() }],
-    [{ text: "📅 Відвідування", url: new URL("/librarian/visits", siteOrigin).toString() }],
-    [{ text: "👩‍🏫 Вчителі", url: new URL("/librarian/teachers", siteOrigin).toString() }],
-    [{ text: "🏠 Кабінет бібліотекаря", url: new URL("/librarian", siteOrigin).toString() }],
-  ];
+  if (role === "admin" || role === "librarian") {
+    keyboard.push(
+      [{ text: "🆕 Замовлення вчителів", url: new URL("/librarian/visits#request-inbox-title", siteOrigin).toString() }],
+      [{ text: "📅 Відвідування", url: new URL("/librarian/visits", siteOrigin).toString() }],
+      [{ text: "👩‍🏫 Вчителі", url: new URL("/librarian/teachers", siteOrigin).toString() }],
+      [{ text: "🏠 Кабінет бібліотекаря", url: new URL("/librarian", siteOrigin).toString() }],
+    );
+  }
+  return keyboard;
 }
 
 async function bestEffortChatMenuButton(

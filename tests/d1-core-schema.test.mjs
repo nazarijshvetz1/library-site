@@ -20,6 +20,7 @@ const migrationFiles = [
   "drizzle/0013_strange_dark_beast.sql",
   "drizzle/0014_rich_lionheart.sql",
   "drizzle/0015_glamorous_namora.sql",
+  "drizzle/0016_busy_jane_foster.sql",
 ];
 
 async function migratedDatabase() {
@@ -38,6 +39,53 @@ async function databaseBeforeConditionNormalization() {
     database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
   }
   return database;
+}
+
+async function databaseBeforeVersion35() {
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON;");
+  for (const file of migrationFiles.slice(0, -1)) {
+    database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
+  }
+  return database;
+}
+
+function seedVersion35ProductionShape(database, { driftName = false } = {}) {
+  const now = "2026-08-22T10:00:00.000Z";
+  database.exec(`
+    INSERT INTO users (id, full_name, sort_name, email, auth_user_id, role, status, created_at, updated_at) VALUES
+      ('USR-006', 'Галака Наталія Григорівна', 'галака наталія григорівна', NULL, NULL, 'admin', 'active', '${now}', '${now}'),
+      ('USR-007', 'Плахотнюк Володимир Віталійович', 'плахотнюк володимир віталійович', NULL, NULL, 'admin', 'active', '${now}', '${now}'),
+      ('USR-008', 'Єгорова Олена Ігорівна', 'єгорова олена ігорівна', NULL, NULL, 'admin', 'active', '${now}', '${now}'),
+      ('USR-009', '${driftName ? "Інша Особа" : "Орел Галина Миколаївна"}', 'орел галина миколаївна', NULL, NULL, 'admin', 'active', '${now}', '${now}');
+    INSERT INTO academic_years (id, label, start_date, end_date, status, notes, version, created_at, updated_at) VALUES
+      ('YR-2026-2027', '2026/2027', '2026-09-01', '2027-08-31', 'active', '', 1, '${now}', '${now}'),
+      ('YR-2027-2028', '2027/2028', '2027-09-01', '2028-08-31', 'draft', '', 1, '${now}', '${now}');
+    INSERT INTO cohorts (id, status, notes, created_at, updated_at) VALUES
+      ('COH-035', 'active', '', '${now}', '${now}'),
+      ('COH-036', 'active', '', '${now}', '${now}');
+    INSERT INTO class_years (
+      id, academic_year_id, cohort_id, class_name, grade, code, teacher_user_id,
+      location_id, start_date, end_date, status, actual_closed_date, notes,
+      version, created_at, updated_at
+    ) VALUES
+      ('CY-2026-035', 'YR-2026-2027', 'COH-035', '10-U(1)', 10, 'U(1)', 'USR-008', NULL,
+       '2026-09-01', '2027-08-31', 'active', NULL, 'Куратор: Єгорова Олена Ігорівна', 1, '${now}', '${now}'),
+      ('CY-2027-036', 'YR-2027-2028', 'COH-036', '11-U(1)', 11, 'U(1)', 'USR-008', NULL,
+       '2027-09-01', '2028-08-31', 'planned', NULL, '', 1, '${now}', '${now}');
+  `);
+}
+
+async function applyVersion35(database) {
+  const sql = await readFile(new URL("../drizzle/0016_busy_jane_foster.sql", import.meta.url), "utf8");
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    database.exec(sql);
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 async function applyConditionNormalization(database) {
@@ -81,6 +129,41 @@ function seedDirectories(database) {
     );
   `);
 }
+
+test("version 35 adds teacher capability without removing administrator access and closes the year on May 31", async () => {
+  const database = await databaseBeforeVersion35();
+  seedVersion35ProductionShape(database);
+  await applyVersion35(database);
+
+  assert.deepEqual(
+    database.prepare("SELECT id, role, full_name FROM users ORDER BY id").all().map((row) => ({ ...row })),
+    [
+      { id: "USR-006", role: "admin", full_name: "Галака Наталія Григорівна" },
+      { id: "USR-007", role: "admin", full_name: "Плахотнюк Володимир Віталійович" },
+      { id: "USR-008", role: "admin", full_name: "Єгорова Альона Ігорівна" },
+      { id: "USR-009", role: "admin", full_name: "Орел Галина Миколаївна" },
+    ],
+  );
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM teacher_profiles WHERE closed_at IS NULL").get().count, 4);
+  assert.deepEqual(
+    database.prepare("SELECT id, end_date FROM academic_years ORDER BY id").all().map((row) => ({ ...row })),
+    [
+      { id: "YR-2026-2027", end_date: "2027-05-31" },
+      { id: "YR-2027-2028", end_date: "2028-05-31" },
+    ],
+  );
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM class_years WHERE end_date LIKE '%-05-31'").get().count, 2);
+  assert.equal(database.prepare("SELECT notes FROM class_years WHERE id='CY-2026-035'").get().notes, "Куратор: Єгорова Альона Ігорівна");
+});
+
+test("version 35 preflight rolls back every change when the audited administrator identities drift", async () => {
+  const database = await databaseBeforeVersion35();
+  seedVersion35ProductionShape(database, { driftName: true });
+  await assert.rejects(() => applyVersion35(database));
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM teacher_profiles").get().count, 0);
+  assert.equal(database.prepare("SELECT end_date FROM academic_years WHERE id='YR-2026-2027'").get().end_date, "2027-08-31");
+  assert.equal(database.prepare("SELECT full_name FROM users WHERE id='USR-008'").get().full_name, "Єгорова Олена Ігорівна");
+});
 
 test("condition normalization moves every current holding to good with balanced history", async () => {
   const database = await databaseBeforeConditionNormalization();

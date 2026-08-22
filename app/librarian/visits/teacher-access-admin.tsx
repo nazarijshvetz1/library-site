@@ -61,7 +61,13 @@ type NoticeTone = "success" | "error" | "info";
 const DIRECTORY_URL = "/api/librarian/visits/teacher-access";
 const BULK_CONFIRMATION = "ISSUE_MISSING_ONLY";
 
-export default function TeacherAccessAdmin({ writesEnabled }: { writesEnabled: boolean }) {
+export default function TeacherAccessAdmin({
+  writesEnabled,
+  refreshKey = 0,
+}: {
+  writesEnabled: boolean;
+  refreshKey?: number;
+}) {
   const [data, setData] = useState<TeacherAccessEnvelope | null>(null);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -88,7 +94,7 @@ export default function TeacherAccessAdmin({ writesEnabled }: { writesEnabled: b
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
-  }, [load]);
+  }, [load, refreshKey]);
 
   const teachers = useMemo(
     () => (data?.teachers ?? []).filter((teacher) => teacher.status === "active"),

@@ -76,10 +76,11 @@ export async function readLibraryReferenceData(
 ): Promise<{ teachers: LibraryTeacher[]; locations: LibraryLocation[] }> {
   const [teacherResult, locationResult] = await Promise.all([
     db.prepare(`
-      SELECT id, full_name
-      FROM users
-      WHERE role = 'teacher' AND status = 'active'
-      ORDER BY sort_name ASC, id ASC
+      SELECT u.id, u.full_name
+      FROM users u
+      JOIN teacher_profiles tp ON tp.teacher_user_id = u.id AND tp.closed_at IS NULL
+      WHERE u.status = 'active'
+      ORDER BY u.sort_name ASC, u.id ASC
       LIMIT 1000
     `).all(),
     db.prepare(`

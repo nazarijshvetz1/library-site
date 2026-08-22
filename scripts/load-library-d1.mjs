@@ -13,6 +13,12 @@ const STAGING_FORMAT = "library-d1-staging";
 const STAGING_VERSION = 1;
 const TARGET_SCHEMA = "0003";
 const MAX_INSERT_SQL_BYTES = 72_000;
+const DUAL_ROLE_TEACHER_IDENTITIES = new Map([
+  ["USR-006", "Галака Наталія Григорівна"],
+  ["USR-007", "Плахотнюк Володимир Віталійович"],
+  ["USR-008", "Єгорова Альона Ігорівна"],
+  ["USR-009", "Орел Галина Миколаївна"],
+]);
 
 const REQUIRED_STAGING_TABLES = Object.freeze([
   "materials",
@@ -428,7 +434,10 @@ function mapUser(row, index, importedAt, diagnostics) {
   const location = `bundle.tables.users[${index}]`;
   const id = uppercase(row?.user_id);
   if (!/^USR-\d{3,}$/u.test(id)) diagnostics.error("user_id_invalid", `${location}.user_id`, "Некоректний USR-ID.", id);
-  const fullName = cleanText(row?.name);
+  const sourceFullName = cleanText(row?.name);
+  const fullName = id === "USR-008" && sourceFullName === "Єгорова Олена Ігорівна"
+    ? "Єгорова Альона Ігорівна"
+    : sourceFullName;
   if (!fullName) diagnostics.error("user_name_missing", `${location}.name`, "Користувач не має ПІБ.", id);
   const role = mapUserRole(row?.role);
   if (!role) diagnostics.error("user_role_invalid", `${location}.role`, "Роль користувача не вдалося надійно зіставити.", row?.role ?? null);
@@ -473,6 +482,9 @@ function mapAcademicYear(row, index, importedAt, diagnostics) {
   }
   if (idMatch && endDate.slice(0, 4) !== idMatch[2]) {
     diagnostics.error("academic_year_end_mismatch", `${location}.end_date`, "Рік дати завершення не відповідає навчальному року.");
+  }
+  if (idMatch && endDate !== `${idMatch[2]}-05-31`) {
+    diagnostics.error("academic_year_end_date_invalid", `${location}.end_date`, "Навчальний рік має завершуватися 31 травня.");
   }
   const status = cleanText(row?.status);
   if (!["draft", "active", "closed"].includes(status)) {
@@ -538,7 +550,8 @@ function mapClassYear(row, index, importedAt, refs, diagnostics) {
   const locationId = stringOrNull(row?.location_id)?.toLocaleUpperCase("en-US") ?? null;
   if (teacherUserId) {
     validateReference(teacherUserId, refs.userById, "class_year_teacher_missing", `${location}.teacher_user_id`, diagnostics);
-    if (refs.userById.get(teacherUserId)?.role !== "teacher" || refs.userById.get(teacherUserId)?.status !== "active") {
+    const teacher = refs.userById.get(teacherUserId);
+    if (!isTeacherProfileSourceUser(teacher) || teacher?.status !== "active") {
       diagnostics.error("class_year_teacher_invalid", `${location}.teacher_user_id`, "Класний керівник має бути активним учителем.", teacherUserId);
     }
   }
@@ -660,6 +673,9 @@ function academicTargetShapeIssues(tables) {
     } else if (idMatch && (row.start_date.slice(0, 4) !== idMatch[1] || row.end_date.slice(0, 4) !== idMatch[2])) {
       add("target_academic_year_invalid", location, "Дати не відповідають ID навчального року.");
     }
+    if (idMatch && row?.end_date !== `${idMatch[2]}-05-31`) {
+      add("target_academic_year_invalid", `${location}.end_date`, "Навчальний рік має завершуватися 31 травня.");
+    }
     if (!["draft", "active", "closed"].includes(row?.status)) {
       add("target_academic_year_invalid", `${location}.status`, "Некоректний статус навчального року.");
     }
@@ -719,7 +735,7 @@ function academicTargetShapeIssues(tables) {
     }
     if (row?.teacher_user_id !== null) {
       const teacher = usersById.get(row.teacher_user_id);
-      if (!teacher || teacher.role !== "teacher" || teacher.status !== "active") {
+      if (!isTeacherProfileSourceUser(teacher) || teacher?.status !== "active") {
         add("target_class_teacher_invalid", `${location}.teacher_user_id`, "Класний керівник має бути активним учителем.");
       }
     }
@@ -733,6 +749,14 @@ function academicTargetShapeIssues(tables) {
     classIds.add(id);
   });
   return issues;
+}
+
+function isTeacherProfileSourceUser(user) {
+  if (!user) return false;
+  if (user.role === "teacher") return true;
+  return user.role === "admin"
+    && user.status === "active"
+    && DUAL_ROLE_TEACHER_IDENTITIES.get(user.id) === user.full_name;
 }
 
 function chooseMigrationActor(users, stagingUsers, diagnostics) {

@@ -153,6 +153,7 @@ const visitTeacherCredentialStatuses = ["active", "disabled"] as const;
 const visitTeacherAccessCommandKinds = [
   "code.issue",
   "code.bulk_issue",
+  "code.import",
   "credential.enable",
   "credential.disable",
   "credential.unlock",
@@ -617,7 +618,7 @@ export const visitTeacherAccessCommands = sqliteTable(
   },
   (table) => [
     index("idx_visit_teacher_access_commands_actor_created").on(table.actorUserId, table.createdAt),
-    check("visit_teacher_access_commands_kind_valid", sql`${table.kind} in ('code.issue','code.bulk_issue','credential.enable','credential.disable','credential.unlock','sessions.revoke')`),
+    check("visit_teacher_access_commands_kind_valid", sql`${table.kind} in ('code.issue','code.bulk_issue','code.import','credential.enable','credential.disable','credential.unlock','sessions.revoke')`),
     check("visit_teacher_access_commands_hash_valid", sql`length(${table.requestHash}) = 64 and lower(${table.requestHash}) not glob '*[^0-9a-f]*'`),
     check("visit_teacher_access_commands_status_valid", sql`${table.status} in ('processing', 'completed', 'failed')`),
     check("visit_teacher_access_commands_result_valid", sql`${table.resultJson} is null or json_valid(${table.resultJson})`),

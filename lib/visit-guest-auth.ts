@@ -169,8 +169,9 @@ export async function listGuestTeacherDirectory(
   if (normalized.length < 3 || normalized.length > 80) {
     throw new VisitScheduleError("validation_failed", 400, "Введіть від 3 до 80 символів імені.");
   }
-  const rows = await db.prepare(`SELECT id, full_name FROM users
-    WHERE role='teacher' AND status='active' ORDER BY sort_name,id LIMIT 101`)
+  const rows = await db.prepare(`SELECT u.id, u.full_name FROM users u
+    JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+    WHERE u.status='active' ORDER BY u.sort_name,u.id LIMIT 101`)
     .all<{ id: string; full_name: string }>();
   if ((rows.results ?? []).length > 100) {
     throw new VisitScheduleError("teacher_result_limit", 409, "У довіднику понад 100 активних учителів.");
@@ -191,8 +192,9 @@ export async function resolveGuestTeacherRef(
   db: VisitD1Database,
   teacherRef: string,
 ): Promise<{ id: string; fullName: string } | null> {
-  const rows = await db.prepare(`SELECT id, full_name FROM users
-    WHERE role='teacher' AND status='active' ORDER BY id LIMIT 101`)
+  const rows = await db.prepare(`SELECT u.id, u.full_name FROM users u
+    JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+    WHERE u.status='active' ORDER BY u.id LIMIT 101`)
     .all<{ id: string; full_name: string }>();
   if ((rows.results ?? []).length > 100) {
     throw new VisitScheduleError("teacher_result_limit", 409, "У довіднику понад 100 активних учителів.");

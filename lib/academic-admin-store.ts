@@ -234,10 +234,11 @@ export async function readAcademicReferenceData(
       LIMIT 5000
     `).all(),
     db.prepare(`
-      SELECT id, full_name, role
-      FROM users
-      WHERE status = 'active' AND role IN ('teacher', 'admin', 'librarian')
-      ORDER BY sort_name ASC, id ASC
+      SELECT u.id, u.full_name, u.role
+      FROM users u
+      JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+      WHERE u.status = 'active'
+      ORDER BY u.sort_name ASC, u.id ASC
       LIMIT 2000
     `).all(),
   ]);
@@ -515,7 +516,9 @@ export async function createClassYearDirect(
         JOIN cohorts c ON c.id = ? AND c.status = 'active'
         WHERE ay.id = ? AND ay.version = ? AND ay.status = 'active'
           AND (? IS NULL OR EXISTS (
-            SELECT 1 FROM users WHERE id = ? AND role IN ('teacher', 'admin', 'librarian') AND status = 'active'
+            SELECT 1 FROM users u JOIN teacher_profiles p
+              ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+            WHERE u.id = ? AND u.status = 'active'
           ))
           AND (? IS NULL OR EXISTS (
             SELECT 1 FROM locations WHERE id = ? AND status = 'active' AND type != 'service'
@@ -656,7 +659,9 @@ export async function updateClassYearDirect(
           location_id = ?, notes = ?, version = version + 1, updated_at = ?
       WHERE id = ? AND version = ? AND status != 'closed'
         AND (? IS NULL OR EXISTS (
-          SELECT 1 FROM users WHERE id = ? AND role IN ('teacher', 'admin', 'librarian') AND status = 'active'
+          SELECT 1 FROM users u JOIN teacher_profiles p
+            ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+          WHERE u.id = ? AND u.status = 'active'
         ))
         AND (? IS NULL OR EXISTS (
           SELECT 1 FROM locations WHERE id = ? AND status = 'active' AND type != 'service'
@@ -1240,7 +1245,9 @@ async function requireActiveCohort(db: AcademicD1Database, id: string): Promise<
 async function assertClassCurator(db: AcademicD1Database, id: string | null): Promise<void> {
   if (!id) return;
   const row = await db.prepare(`
-    SELECT id FROM users WHERE id = ? AND role IN ('teacher', 'admin', 'librarian') AND status = 'active' LIMIT 1
+    SELECT u.id FROM users u
+    JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+    WHERE u.id = ? AND u.status = 'active' LIMIT 1
   `).bind(id).first<{ id: string }>();
   if (!row) throw new AcademicAdminError("teacher_not_found", 404, "Активного вчителя не знайдено.");
 }
@@ -1283,7 +1290,8 @@ async function loadAndValidateRolloverReferences(
       SELECT u.id
       FROM users u
       JOIN json_each(?) requested ON requested.value = u.id
-      WHERE u.role IN ('teacher', 'admin', 'librarian') AND u.status = 'active'
+      JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+      WHERE u.status = 'active'
     `).bind(JSON.stringify(teacherIds)).all<{ id: string }>();
     const found = new Set((teacherResponse.results ?? []).map((row) => row.id));
     const missing = teacherIds.find((id) => !found.has(id));
@@ -1488,8 +1496,9 @@ function bulkCreateTargetClassesStatement(
     JOIN academic_years ay ON ay.id = ? AND ay.version = ? AND ay.status = 'draft'
     JOIN cohorts ON cohorts.id = items.cohort_id AND cohorts.status = 'active'
     WHERE (items.teacher_user_id IS NULL OR EXISTS (
-        SELECT 1 FROM users
-        WHERE id = items.teacher_user_id AND role IN ('teacher', 'admin', 'librarian') AND status = 'active'
+        SELECT 1 FROM users u JOIN teacher_profiles p
+          ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+        WHERE u.id = items.teacher_user_id AND u.status = 'active'
       ))
       AND (items.location_id IS NULL OR EXISTS (
         SELECT 1 FROM locations

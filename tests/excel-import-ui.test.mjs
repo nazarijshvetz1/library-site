@@ -63,4 +63,30 @@ test("protected page and librarian navigation expose Excel import and template",
   assert.match(parser, /MAX_ARCHIVE_BYTES/u);
   assert.match(parser, /\.\.\//u);
   assert.match(parser, /DecompressionStream\("deflate-raw"\)/u);
+  assert.match(parser, /while \(true\)[\s\S]*reader\.read\(\)[\s\S]*total > maxBytes/u);
+});
+
+test("teacher cards expose a preview-first bounded Excel code import", async () => {
+  const [ui, parser, route, template] = await Promise.all([
+    readFile(new URL("../app/librarian/teachers/teacher-code-import.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/librarian/teachers/teacher-code-import-parser.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/librarian/visits/teacher-access/import/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/teacher-code-import-excel.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(ui, /Імпорт тимчасових кодів/u);
+  assert.match(ui, /import-template/u);
+  assert.match(ui, /IMPORT_MISSING_TEACHER_CODES/u);
+  assert.match(ui, /preview\.rows\.map/u);
+  assert.match(ui, /const \[requestId, setRequestId\]/u);
+  assert.match(ui, /body: JSON\.stringify\(\{[\s\S]*requestId,/u);
+  assert.doesNotMatch(ui, /requestId:\s*crypto\.randomUUID\(\)/u);
+  assert.doesNotMatch(ui, /localStorage|sessionStorage/u);
+  assert.match(parser, /TEACHER_CODE_IMPORT_MAX_BYTES = 1024 \* 1024/u);
+  assert.match(parser, /TEACHER_CODE_IMPORT_MAX_ROWS = 100/u);
+  assert.match(parser, /sheet\.hasFormulas/u);
+  assert.match(parser, /candidateRows\.filter[\s\S]*normalizeTemporaryCode/u);
+  assert.match(parser, /USR-ID/u);
+  assert.match(parser, /Тимчасовий код/u);
+  assert.match(route, /visitTeacherCodeImportBody/u);
+  assert.match(template, /Чинні PIN-коди не переглядаються і не змінюються/u);
 });

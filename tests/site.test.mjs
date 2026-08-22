@@ -221,8 +221,8 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(html, /id="collectionGrid"/);
   assert.match(html, /id="titleSuggestions" role="listbox"/);
   assert.match(html, /<option value="">Усі<\/option>/);
-  assert.match(html, /href="\/styles\.css\?v=20260822-1"/);
-  assert.match(html, /type="module" src="\/app\.js\?v=20260822-1"/);
+  assert.match(html, /href="\/styles\.css\?v=20260822-2"/);
+  assert.match(html, /type="module" src="\/app\.js\?v=20260822-2"/);
   assert.match(html, /href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/librarian"/);
   assert.match(html, /rel="noopener noreferrer"/);
   assert.doesNotMatch(app, /librarianButton|Режим бібліотекаря підключимо/);
@@ -267,6 +267,11 @@ test("ships an accessible responsive public visit schedule and protected handoff
   assert.match(html, /href="#visit-schedule"[^>]*>Графік<\/a>/);
   assert.match(html, /href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/teacher"[\s\S]*>Кабінет учителя<\/a>/);
   assert.match(html, /class="teacher-nav-link"[\s\S]*data-primary-section="teacher"[\s\S]*>Кабінет учителя<\/a>/);
+  assert.match(html, /href="#how-it-works"[^>]*data-primary-section="how-it-works"[^>]*>Як користуватися<\/a>/);
+  assert.match(html, /Перевірте наявність/);
+  assert.match(html, /Запишіться до бібліотеки/);
+  assert.match(html, /Підключіть Telegram/);
+  assert.match(html, /https:\/\/t\.me\/MAUP_Library_Bot/);
   assert.match(html, /id="visit-schedule" aria-labelledby="visit-schedule-title"/);
   assert.match(html, /Графік доступний усім без входу/);
   assert.match(html, /видно ім’я вчителя й точний час/);
@@ -288,6 +293,8 @@ test("ships an accessible responsive public visit schedule and protected handoff
   assert.match(config, /visitsApiUrl:\s*"https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/api\/visits\/public"/);
   assert.match(config, /visitsBookingUrl:\s*"https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/teacher"/);
   assert.match(css, /\.site-header \.site-nav a\[data-primary-section\]\{display:flex\}/);
+  assert.match(css, /\.how-it-works ol\{display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(app, /hash === "#how-it-works"/);
   assert.match(css, /\.visit-slot>a,[^{]+\{display:flex;min-height:54px/);
   assert.match(css, /@media\(max-width:560px\)[\s\S]*\.visit-days[^}]*grid-template-columns:1fr/);
   assert.match(css, /@media\(min-width:821px\) and \(max-width:1180px\)[\s\S]*grid-template-areas:"brand librarian" "nav nav"/);

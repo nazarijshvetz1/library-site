@@ -66,6 +66,7 @@ const migrations = [
   "0009_happy_silver_samurai.sql", "0010_shocking_cobalt_man.sql",
   "0011_normalize_holding_conditions.sql", "0012_elite_victor_mancha.sql",
   "0013_strange_dark_beast.sql", "0014_rich_lionheart.sql", "0015_glamorous_namora.sql",
+  "0016_busy_jane_foster.sql",
 ];
 
 async function database() {
@@ -81,6 +82,8 @@ async function database() {
     (id,full_name,sort_name,email,auth_user_id,role,status,created_at,updated_at)
     VALUES (?,?,?,?,?,?,'active',?,?)`)
     .run("USR-TEACHER", "Шевченко Олена", "Шевченко Олена", null, null, "teacher", now, now);
+  sqlite.prepare(`INSERT INTO teacher_profiles (teacher_user_id,created_at,updated_at) VALUES (?,?,?)`)
+    .run("USR-TEACHER", now, now);
   return { sqlite, db: new TestD1(sqlite), now };
 }
 
@@ -238,8 +241,42 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
   assert.equal(librarianMessage.reply_markup.inline_keyboard[0][0].url,
     "https://library.example.test/librarian/visits#request-inbox-title");
   assert.equal(librarianMessage.reply_markup.inline_keyboard.some((row) => row[0].web_app), false);
+
+  const dualRole = await database();
+  dualRole.sqlite.prepare(`INSERT INTO users
+    (id,full_name,sort_name,email,auth_user_id,role,status,created_at,updated_at)
+    VALUES ('USR-006','Галака Наталія Григорівна','галака наталія григорівна',NULL,NULL,'admin','active',?,?)`)
+    .run(dualRole.now, dualRole.now);
+  dualRole.sqlite.prepare(`INSERT INTO teacher_profiles (teacher_user_id,created_at,updated_at) VALUES ('USR-006',?,?)`)
+    .run(dualRole.now, dualRole.now);
+  dualRole.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-006','9001','9001',NULL,'active',1,1,1,?,NULL,?,?)`)
+    .run(dualRole.now, dualRole.now, dualRole.now);
+  const dualPayload = {
+    update_id: 97,
+    message: { text: "/menu", chat: { id: 9001, type: "private" }, from: { id: 9001 } },
+  };
+  const dualBodies = [];
+  assert.deepEqual(await telegram.processTelegramWebhookUpdate(
+    dualRole.db,
+    JSON.stringify(dualPayload),
+    dualPayload,
+    async (_url, init) => { dualBodies.push(JSON.parse(init.body)); return telegramOk(56); },
+    "https://library.example.test",
+  ), { outcome: "menu", duplicate: false });
+  const dualMessage = dualBodies.find((body) => body.text);
+  const dualMenuButton = dualBodies.find((body) => body.menu_button);
+  assert.equal(dualMessage.reply_markup.inline_keyboard.length, 8);
+  assert.equal(dualMessage.reply_markup.inline_keyboard[0][0].web_app.url,
+    "https://library.example.test/teacher/telegram?tab=orders");
+  assert.equal(dualMessage.reply_markup.inline_keyboard[7][0].url,
+    "https://library.example.test/librarian");
+  assert.equal(dualMenuButton.menu_button.type, "web_app");
   teacher.sqlite.close();
   librarian.sqlite.close();
+  dualRole.sqlite.close();
 });
 
 test("webhook registration pins the canonical origin and publishes fallback plus Ukrainian commands", async () => {

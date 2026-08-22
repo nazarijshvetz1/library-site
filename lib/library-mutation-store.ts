@@ -2044,8 +2044,9 @@ export async function issueLoanToTeacher(
   if (replay) return replay;
 
   const teacher = await db.prepare(`
-    SELECT id FROM users
-    WHERE id = ? AND role = 'teacher' AND status = 'active'
+    SELECT u.id FROM users u
+    JOIN teacher_profiles tp ON tp.teacher_user_id = u.id AND tp.closed_at IS NULL
+    WHERE u.id = ? AND u.status = 'active'
     LIMIT 1
   `).bind(input.teacherUserId).first<{ id: string }>();
   if (!teacher) {
@@ -2143,8 +2144,9 @@ export async function issueLoanToTeacher(
         issued_by_user_id, closed_by_user_id, version, created_at, updated_at
       ) VALUES (
         ?, (
-          SELECT id FROM users
-          WHERE id = ? AND role = 'teacher' AND status = 'active'
+          SELECT u.id FROM users u
+          JOIN teacher_profiles tp ON tp.teacher_user_id = u.id AND tp.closed_at IS NULL
+          WHERE u.id = ? AND u.status = 'active'
         ), 'open', ?, ?, NULL, ?, ?, NULL, 1, ?, ?
       )
     `).bind(
@@ -2758,9 +2760,10 @@ export async function issueLoanToClass(
   }
 
   const responsibleTeacher = await db.prepare(`
-    SELECT id, full_name
-    FROM users
-    WHERE id = ? AND role = 'teacher' AND status = 'active'
+    SELECT u.id, u.full_name
+    FROM users u
+    JOIN teacher_profiles tp ON tp.teacher_user_id = u.id AND tp.closed_at IS NULL
+    WHERE u.id = ? AND u.status = 'active'
     LIMIT 1
   `).bind(input.responsibleTeacherUserId).first<{ id: string; full_name: string }>();
   if (!responsibleTeacher) {
@@ -2915,8 +2918,9 @@ export async function issueLoanToClass(
             AND ? BETWEEN cy.start_date AND cy.end_date
             AND (? IS NULL OR ? <= cy.end_date)
         ), (
-          SELECT id FROM users
-          WHERE id = ? AND role = 'teacher' AND status = 'active'
+          SELECT u.id FROM users u
+          JOIN teacher_profiles tp ON tp.teacher_user_id = u.id AND tp.closed_at IS NULL
+          WHERE u.id = ? AND u.status = 'active'
         ), 'open', ?, ?, NULL, ?, ?, NULL, 1, ?, ?
       )
     `).bind(

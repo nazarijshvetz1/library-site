@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 const root = process.cwd();
 const generator = await import(pathToFileURL(path.join(root, "lib/library-excel-export.ts")).href);
 const store = await import(pathToFileURL(path.join(root, "lib/library-export-store.ts")).href);
+const codeTemplate = await import(pathToFileURL(path.join(root, "lib/teacher-code-import-excel.ts")).href);
 
 class PreparedStatement {
   constructor(database, sql, bindings = []) { this.database = database; this.sql = sql; this.bindings = bindings; }
@@ -127,6 +128,27 @@ test("generated XLSX has the full workbook structure, subject sheets and safe in
   assert.match(decode("xl/worksheets/sheet1.xml"), /<f>SUM\(&apos;Залишки&apos;!/u);
   assert.match(workbook.fileName, /^Єдина бібліотека — повний експорт — 2026-08-21 /u);
   sqlite.close();
+});
+
+test("teacher-code Excel template is styled, bounded and contains no secret codes", () => {
+  const workbook = codeTemplate.createTeacherCodeImportTemplate([
+    { teacherUserId: "USR-T1", fullName: "Шевченко Олена" },
+    { teacherUserId: "USR-T2", fullName: "Коваль Марія" },
+  ], "2026-08-22T09:15:00.000Z");
+  const entries = unzipStored(workbook.bytes);
+  const decode = (name) => new TextDecoder().decode(entries.get(name));
+  const workbookXml = decode("xl/workbook.xml");
+  const sheet = decode("xl/worksheets/sheet1.xml");
+  const styles = decode("xl/styles.xml");
+  assert.match(workbookXml, /name="Коди вчителів"/u);
+  for (const header of ["USR-ID", "Прізвище та ім’я", "Тимчасовий код"]) assert.match(sheet, new RegExp(`>${header}<`, "u"));
+  assert.match(sheet, /USR-T1/u);
+  assert.match(sheet, /Шевченко Олена/u);
+  assert.match(sheet, /Лише для вчителів без чинного коду/u);
+  assert.doesNotMatch(sheet, /23456-789AB|code_hmac|PIN-код: \d/u);
+  assert.match(styles, /<name val="Times New Roman"\/>/u);
+  assert.equal(workbook.rowCount, 2);
+  assert.match(workbook.fileName, /^Шаблон кодів учителів — 2026-08-22\.xlsx$/u);
 });
 
 test("protected export page and navigation expose one-click full Excel download", async () => {

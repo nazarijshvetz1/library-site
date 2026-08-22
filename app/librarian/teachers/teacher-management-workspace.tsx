@@ -7,6 +7,7 @@ import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { visitApi, VisitApiError } from "@/app/visits/visit-client";
 import MaterialRequestInbox from "@/app/librarian/visits/material-request-inbox";
 import TeacherAccessAdmin from "@/app/librarian/visits/teacher-access-admin";
+import TeacherCodeImport from "./teacher-code-import";
 import {
   changeTeacherStatus,
   createTeacherProfile,
@@ -379,6 +380,7 @@ function TeacherDirectoryPanel({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<TeacherDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [accessRefreshKey, setAccessRefreshKey] = useState(0);
 
   const load = useCallback(async (cursor: string | null = null) => {
     if (cursor) setLoadingMore(true);
@@ -455,6 +457,14 @@ function TeacherDirectoryPanel({
           />
         ) : null}
 
+        <TeacherCodeImport
+          writesEnabled={writesEnabled}
+          onImported={async () => {
+            await load();
+            setAccessRefreshKey((value) => value + 1);
+          }}
+        />
+
         <form className={styles.filters} role="search" onSubmit={search}>
           <label className={styles.searchField}>Пошук
             <span><input type="search" autoComplete="off" maxLength={100} value={queryInput} onChange={(event) => setQueryInput(event.currentTarget.value)} placeholder="Прізвище або ім’я" /><button type="submit">Знайти</button></span>
@@ -472,7 +482,7 @@ function TeacherDirectoryPanel({
               {data.teachers.map((teacher) => (
                 <button type="button" key={teacher.id} data-selected={selectedId === teacher.id} onClick={() => void selectTeacher(teacher.id)}>
                   <span className={styles.avatar} aria-hidden="true">{teacherInitials(teacher.fullName)}</span>
-                  <span className={styles.teacherIdentity}><strong>{teacher.fullName}</strong><small>{[teacher.subjectPosition, teacher.primaryLocation?.name].filter(Boolean).join(" · ") || "Дані ще не заповнено"}</small></span>
+                  <span className={styles.teacherIdentity}><strong>{teacher.fullName}</strong><small>{[teacher.subjectPosition, teacher.primaryLocation?.name, accountRoleLabel(teacher.accountRole)].filter(Boolean).join(" · ") || "Дані ще не заповнено"}</small></span>
                   <span className={styles.badges}><StatusBadge teacher={teacher} />{teacher.attention.overdueLoans ? <em>{teacher.attention.overdueLoans} простроч.</em> : null}{teacher.attention.openRequests ? <em>{teacher.attention.openRequests} заяв.</em> : null}</span>
                 </button>
               ))}
@@ -487,7 +497,7 @@ function TeacherDirectoryPanel({
         ) : <p className={styles.empty}>За цими фільтрами карток не знайдено.</p>}
       </section>
 
-      <TeacherAccessAdmin writesEnabled={writesEnabled} />
+      <TeacherAccessAdmin writesEnabled={writesEnabled} refreshKey={accessRefreshKey} />
     </div>
   );
 }
@@ -511,7 +521,7 @@ function TeacherDetailCard({
   const [actionError, setActionError] = useState("");
   const teacher = detail.teacher;
   const closeBlockers = teacher.status === "active" ? teacherCloseBlockers(detail) : [];
-  const deletionAllowed = detail.dependencySummary.totalDependencies === 0;
+  const deletionAllowed = detail.dependencySummary.totalDependencies === 0 && teacher.accountRole === "teacher";
   const deletionBlockers = teacherDeletionBlockers(detail);
 
   async function changeStatus() {
@@ -556,7 +566,7 @@ function TeacherDetailCard({
     <article className={styles.detailCard}>
       <header>
         <span className={styles.largeAvatar} aria-hidden="true">{teacherInitials(teacher.fullName)}</span>
-        <div><p>{teacher.status === "active" ? "Активна картка" : "Картка закрита"}</p><h3>{teacher.fullName}</h3><small>{teacher.subjectPosition || "Посаду або предмет не вказано"}</small></div>
+        <div><p>{teacher.status === "active" ? "Активна картка" : "Картка закрита"}</p><h3>{teacher.fullName}</h3><small>{[teacher.subjectPosition || "Посаду або предмет не вказано", accountRoleLabel(teacher.accountRole)].join(" · ")}</small></div>
       </header>
       <nav className={styles.detailTabs} aria-label="Дані вчителя">
         {(["profile", "orders", "issued", "visits"] as const).map((item) => <button key={item} type="button" aria-pressed={tab === item} onClick={() => setTab(item)}>{detailTabLabel(item)}<span>{detailTabCount(item, detail)}</span></button>)}
@@ -566,8 +576,8 @@ function TeacherDetailCard({
         <TeacherProfileForm mode="edit" teacher={teacher} locations={locations} disabled={!writesEnabled || busy} onCancel={() => setEditing(false)} onSaved={async (next) => { setEditing(false); await onSaved(next, "Інформацію про вчителя оновлено."); }} />
       ) : (
         <div className={styles.profilePane}>
-          <dl><div><dt>Предмет / посада</dt><dd>{teacher.subjectPosition || "—"}</dd></div><div><dt>Основний кабінет</dt><dd>{teacher.primaryLocation?.name || "—"}</dd></div><div><dt>Службовий контакт</dt><dd>{teacher.serviceContact || "—"}</dd></div><div><dt>Внутрішня примітка</dt><dd>{teacher.librarianNote || "—"}</dd></div></dl>
-          <div className={styles.profileActions}><button type="button" onClick={() => setEditing(true)} disabled={!writesEnabled || busy}>Редагувати</button><a href="#teacher-access-title" title={`У блоці кодів нижче знайдіть ${teacher.fullName}`}>Код і доступ</a><button type="button" onClick={() => void changeStatus()} disabled={!writesEnabled || busy || (teacher.status === "active" && closeBlockers.length > 0)}>{teacher.status === "active" ? "Закрити картку" : "Поновити картку"}</button><button className={styles.dangerButton} type="button" onClick={() => void remove()} disabled={!writesEnabled || busy || !deletionAllowed} title={deletionAllowed ? "Безповоротно видалити порожню помилкову картку" : "Картка має пов’язані дані, тому її можна лише закрити"}>Видалити картку</button></div>
+          <dl><div><dt>Предмет / посада</dt><dd>{teacher.subjectPosition || "—"}</dd></div><div><dt>Обліковий рівень</dt><dd>{accountRoleLabel(teacher.accountRole)}</dd></div><div><dt>Основний кабінет</dt><dd>{teacher.primaryLocation?.name || "—"}</dd></div><div><dt>Службовий контакт</dt><dd>{teacher.serviceContact || "—"}</dd></div><div><dt>Внутрішня примітка</dt><dd>{teacher.librarianNote || "—"}</dd></div></dl>
+          <div className={styles.profileActions}><button type="button" onClick={() => setEditing(true)} disabled={!writesEnabled || busy}>Редагувати</button><a href="#teacher-access-title" title={`У блоці кодів нижче знайдіть ${teacher.fullName}`}>Код і доступ</a><button type="button" onClick={() => void changeStatus()} disabled={!writesEnabled || busy || (teacher.status === "active" && closeBlockers.length > 0)}>{teacher.status === "active" ? "Закрити картку" : "Поновити картку"}</button><button className={styles.dangerButton} type="button" onClick={() => void remove()} disabled={!writesEnabled || busy || !deletionAllowed} title={teacher.accountRole !== "teacher" ? "Обліковий запис адміністратора або бібліотекаря не видаляється; картку учителя можна лише закрити" : deletionAllowed ? "Безповоротно видалити порожню помилкову картку" : "Картка має пов’язані дані, тому її можна лише закрити"}>Видалити картку</button></div>
           <p className={styles.accessHint}>Для керування кодом перейдіть до блоку нижче та знайдіть ПІБ: <strong>{teacher.fullName}</strong>.</p>
           {closeBlockers.length ? <p className={styles.closeGuard}>Щоб закрити картку, спочатку: {closeBlockers.join("; ")}.</p> : null}
           {!deletionAllowed && deletionBlockers.length ? <p className={styles.deleteGuard}>Картку не можна видалити: {deletionBlockers.join(", ")}. Її можна лише закрити.</p> : null}
@@ -772,6 +782,10 @@ function teacherDeletionBlockers(detail: TeacherDetail): string[] {
 
 function statusLabel(value: string) {
   return ({ submitted: "Нове", in_review: "Опрацьовується", reserved: "Підготовлено", ready: "Готове", partially_ready: "Частково", completed: "Виконано", rejected: "Відхилено", cancelled: "Скасовано", active: "Активне", open: "Відкрита", closed: "Закрита" } as Record<string, string>)[value] ?? value;
+}
+
+function accountRoleLabel(role: TeacherDirectoryRow["accountRole"]) {
+  return ({ teacher: "Учитель", admin: "Адміністратор", librarian: "Бібліотекар" } as const)[role];
 }
 
 function attentionHint(label: string) {

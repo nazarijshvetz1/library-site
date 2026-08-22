@@ -29,6 +29,45 @@ export async function visitTeacherAccessBody(request: Request) {
   return readVisitJson(request);
 }
 
+export async function visitTeacherCodeImportBody(request: Request) {
+  if (!isSameOriginRequest(request)) {
+    return { ok: false as const, response: visitError(403, "cross_origin_request", "Запит має надійти з цього самого сайту.") };
+  }
+  if ((request.headers.get("Content-Encoding") ?? "identity").toLowerCase() !== "identity") {
+    return { ok: false as const, response: visitError(415, "unsupported_content_encoding", "Стиснене тіло запиту не підтримується.") };
+  }
+  if (!(request.headers.get("Content-Type") ?? "").toLowerCase().startsWith("application/json")) {
+    return { ok: false as const, response: visitError(415, "unsupported_media_type", "Надішліть JSON.") };
+  }
+  const limit = 64 * 1024;
+  const declared = Number(request.headers.get("Content-Length") ?? 0);
+  if (declared > limit) return { ok: false as const, response: visitError(413, "body_too_large", "Тіло імпорту завелике.") };
+  if (!request.body) return { ok: false as const, response: visitError(400, "invalid_json", "Порожнє тіло запиту.") };
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) {
+        await reader.cancel();
+        return { ok: false as const, response: visitError(413, "body_too_large", "Тіло імпорту завелике.") };
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("object expected");
+    return { ok: true as const, value: parsed };
+  } catch {
+    return { ok: false as const, response: visitError(400, "invalid_json", "Некоректне тіло JSON.") };
+  }
+}
+
 export async function resolveVisitLibrarianActor(db: VisitD1Database, user: ChatGPTUser) {
   const rows = await db.prepare(`SELECT id FROM users WHERE status='active'
     AND role IN ('admin','librarian') AND (auth_user_id=? OR lower(email)=lower(?))

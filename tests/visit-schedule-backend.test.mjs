@@ -45,6 +45,7 @@ async function visitDatabase() {
     "0013_strange_dark_beast.sql",
     "0014_rich_lionheart.sql",
     "0015_glamorous_namora.sql",
+    "0016_busy_jane_foster.sql",
   ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
   const now = new Date().toISOString();
   sqlite.prepare(`INSERT INTO users
@@ -55,6 +56,11 @@ async function visitDatabase() {
     (id, full_name, sort_name, email, auth_user_id, role, status, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)`)
     .run("USR-LIB", "Бібліотекар", "Бібліотекар", "library@example.test", "auth-library", "librarian", now, now);
+  sqlite.prepare(`INSERT INTO teacher_profiles(
+    teacher_user_id,subject_position,primary_location_id,service_contact,librarian_note,version,
+    last_mutation_request_id,closed_at,closed_by_user_id,created_by_user_id,updated_by_user_id,created_at,updated_at
+  ) VALUES(?, '', NULL, '', '', 1, NULL, NULL, NULL, 'USR-LIB', 'USR-LIB', ?, ?)`)
+    .run("USR-TEACHER", now, now);
   sqlite.prepare(`INSERT INTO visit_teacher_credentials (
     teacher_user_id, login_id, code_hmac, status, version, failed_attempts,
     locked_until, last_login_at, code_rotated_at, created_by_user_id,

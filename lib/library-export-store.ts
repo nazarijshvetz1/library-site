@@ -363,16 +363,16 @@ const HOLDINGS_SQL = `
   LIMIT ?`;
 
 const TEACHERS_SQL = `
-  SELECT u.id AS id, u.full_name AS fullName, u.status AS status,
+  SELECT u.id AS id, u.full_name AS fullName,
+    CASE WHEN u.status='active' AND tp.closed_at IS NULL THEN 'active' ELSE 'inactive' END AS status,
     COALESCE(tp.subject_position, '') AS subjectPosition,
     COALESCE(l.name, '') AS primaryLocation,
     COALESCE(tp.service_contact, '') AS serviceContact,
     COALESCE(tp.librarian_note, '') AS librarianNote,
     COALESCE(tp.updated_at, u.updated_at) AS updatedAt
   FROM users u
-  LEFT JOIN teacher_profiles tp ON tp.teacher_user_id = u.id
+  JOIN teacher_profiles tp ON tp.teacher_user_id = u.id
   LEFT JOIN locations l ON l.id = tp.primary_location_id
-  WHERE u.role = 'teacher'
   ORDER BY u.sort_name, u.id
   LIMIT ?`;
 

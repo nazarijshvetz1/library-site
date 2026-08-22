@@ -23,6 +23,7 @@ export type TeacherAttention = {
 export type TeacherDirectoryRow = {
   id: string;
   fullName: string;
+  accountRole: "teacher" | "admin" | "librarian";
   status: TeacherDirectoryStatus;
   subjectPosition: string;
   primaryLocation: { id: string; name: string } | null;

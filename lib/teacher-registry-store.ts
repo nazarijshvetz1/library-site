@@ -49,6 +49,7 @@ export class TeacherRegistryError extends Error {
 type TeacherBaseRow = {
   id: string;
   full_name: string;
+  account_role: "teacher" | "admin" | "librarian";
   user_status: TeacherStatus;
   subject_position: string | null;
   primary_location_id: string | null;
@@ -77,11 +78,11 @@ export async function listTeacherRegistry(
 ) {
   const now = new Date().toISOString();
   const cursor = decodeCursor(options.cursor);
-  const where: string[] = ["u.role='teacher'"];
+  const where: string[] = ["1=1"];
   const today = kyivDate(now);
   const values: D1Value[] = [now, now, today];
   if (options.status !== "all") {
-    where.push("u.status=?");
+    where.push("CASE WHEN u.status='active' AND p.closed_at IS NULL THEN 'active' ELSE 'inactive' END=?");
     values.push(options.status);
   }
   const query = options.query.normalize("NFKC").trim().replace(/\s+/gu, " ");
@@ -103,7 +104,7 @@ export async function listTeacherRegistry(
     values.push(today);
   }
   if (options.attention === "access") {
-    where.push(`u.status='active' AND (c.teacher_user_id IS NULL OR c.status='disabled'
+    where.push(`u.status='active' AND p.closed_at IS NULL AND (c.teacher_user_id IS NULL OR c.status='disabled'
       OR (c.status='active' AND c.locked_until>?))`);
     values.push(now);
   }
@@ -140,7 +141,7 @@ export async function listTeacherRegistry(
 
 export async function getTeacherRegistryDetail(db: TeacherRegistryDatabase, teacherId: string) {
   const now = new Date().toISOString();
-  const row = await db.prepare(`${teacherSelectSql()} WHERE u.id=? AND u.role='teacher' LIMIT 1`)
+  const row = await db.prepare(`${teacherSelectSql()} WHERE u.id=? LIMIT 1`)
     .bind(now, now, kyivDate(now), teacherId).first<TeacherBaseRow>();
   if (!row) throw new TeacherRegistryError("teacher_not_found", 404, "Картку вчителя не знайдено.");
 
@@ -290,6 +291,14 @@ export async function deleteEmptyTeacherRegistryCard(
   if (replay) return replay;
   const current = await getMutableTeacher(db, teacherId);
   if (current.version !== input.expectedVersion) throw versionConflict(current.version);
+  if (current.accountRole !== "teacher") {
+    throw new TeacherRegistryError(
+      "teacher_delete_staff_role",
+      409,
+      "Картку працівника з правами адміністратора або бібліотекаря не можна видалити. Її можна лише закрити.",
+      { accountRole: current.accountRole },
+    );
+  }
   const dependencies = await dependencySummary(db, teacherId, new Date().toISOString());
   if (dependencies.totalDependencies > 0) {
     throw new TeacherRegistryError("teacher_delete_blocked", 409, "Картка має пов’язані дані й не може бути видалена.", { dependencies });
@@ -323,7 +332,7 @@ export async function deleteEmptyTeacherRegistryCard(
       throw new TeacherRegistryError("teacher_delete_blocked", 409, "Картка має пов’язані дані й не може бути видалена.", { dependencies: freshDependencies });
     }
     const fresh = await db.prepare(`SELECT p.version FROM users u JOIN teacher_profiles p ON p.teacher_user_id=u.id
-      WHERE u.id=? AND u.role='teacher' LIMIT 1`).bind(teacherId).first<{ version: number }>();
+      WHERE u.id=? LIMIT 1`).bind(teacherId).first<{ version: number }>();
     if (fresh && Number(fresh.version) !== input.expectedVersion) throw versionConflict(Number(fresh.version));
     throw error;
   }
@@ -331,7 +340,9 @@ export async function deleteEmptyTeacherRegistryCard(
 }
 
 function teacherSelectSql() {
-  return `SELECT u.id,u.full_name,u.status AS user_status,p.subject_position,p.primary_location_id,
+  return `SELECT u.id,u.full_name,u.role AS account_role,
+    CASE WHEN u.status='active' AND p.closed_at IS NULL THEN 'active' ELSE 'inactive' END AS user_status,
+    p.subject_position,p.primary_location_id,
     loc.name AS location_name,p.service_contact,p.librarian_note,p.version,p.closed_at,
     u.created_at,COALESCE(p.updated_at,u.updated_at) AS updated_at,
     c.status AS credential_status,c.version AS credential_version,c.last_login_at,c.locked_until,
@@ -342,7 +353,7 @@ function teacherSelectSql() {
     (SELECT COUNT(*) FROM material_requests mr WHERE mr.teacher_user_id=u.id AND mr.status IN ('ready','partially_ready')) AS ready_uncollected
     ,(SELECT COUNT(*) FROM visit_bookings vb WHERE (vb.owner_user_id=u.id OR vb.selected_teacher_user_id=u.id)
       AND vb.status='active' AND vb.visit_date>=?) AS upcoming_visits
-    FROM users u LEFT JOIN teacher_profiles p ON p.teacher_user_id=u.id
+    FROM users u JOIN teacher_profiles p ON p.teacher_user_id=u.id
     LEFT JOIN locations loc ON loc.id=p.primary_location_id
     LEFT JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id`;
 }
@@ -355,6 +366,7 @@ function projectTeacher(row: TeacherBaseRow, now: string, includePrivate: boolea
   return {
     id: row.id,
     fullName: row.full_name,
+    accountRole: row.account_role,
     status: row.user_status,
     subjectPosition: row.subject_position ?? "",
     primaryLocation: row.primary_location_id && row.location_name
@@ -386,11 +398,11 @@ function projectTeacher(row: TeacherBaseRow, now: string, includePrivate: boolea
 
 async function registryCounters(db: TeacherRegistryDatabase, now: string) {
   const row = await db.prepare(`SELECT COUNT(*) AS total,
-    SUM(CASE WHEN u.status='active' THEN 1 ELSE 0 END) AS active,
-    SUM(CASE WHEN u.status='inactive' THEN 1 ELSE 0 END) AS inactive,
-    SUM(CASE WHEN u.status='active' AND c.teacher_user_id IS NOT NULL THEN 1 ELSE 0 END) AS with_code,
-    SUM(CASE WHEN u.status='active' AND c.teacher_user_id IS NULL THEN 1 ELSE 0 END) AS without_code,
-    SUM(CASE WHEN u.status='active' AND c.status='active' AND c.locked_until>? THEN 1 ELSE 0 END) AS locked,
+    SUM(CASE WHEN u.status='active' AND p.closed_at IS NULL THEN 1 ELSE 0 END) AS active,
+    SUM(CASE WHEN u.status<>'active' OR p.closed_at IS NOT NULL THEN 1 ELSE 0 END) AS inactive,
+    SUM(CASE WHEN u.status='active' AND p.closed_at IS NULL AND c.teacher_user_id IS NOT NULL THEN 1 ELSE 0 END) AS with_code,
+    SUM(CASE WHEN u.status='active' AND p.closed_at IS NULL AND c.teacher_user_id IS NULL THEN 1 ELSE 0 END) AS without_code,
+    SUM(CASE WHEN u.status='active' AND p.closed_at IS NULL AND c.status='active' AND c.locked_until>? THEN 1 ELSE 0 END) AS locked,
     SUM(CASE WHEN EXISTS(SELECT 1 FROM loans l WHERE l.teacher_user_id=u.id AND l.status='open') THEN 1 ELSE 0 END) AS with_open_loans,
     SUM(CASE WHEN EXISTS(SELECT 1 FROM loans l WHERE l.teacher_user_id=u.id AND l.status='open' AND l.due_at IS NOT NULL AND l.due_at<?) THEN 1 ELSE 0 END) AS with_overdue_loans,
     SUM(CASE WHEN EXISTS(SELECT 1 FROM material_requests mr WHERE mr.teacher_user_id=u.id AND mr.status IN ('submitted','in_review','ready','partially_ready')) THEN 1 ELSE 0 END) AS with_open_requests
@@ -398,7 +410,8 @@ async function registryCounters(db: TeacherRegistryDatabase, now: string) {
     ,(SELECT COUNT(*) FROM material_requests WHERE status IN ('ready','partially_ready')) AS ready_for_pickup
     ,(SELECT COUNT(*) FROM loans WHERE status='open' AND due_at IS NOT NULL AND due_at<?) AS overdue_loans
     ,(SELECT COUNT(*) FROM visit_bookings WHERE status='active' AND visit_date>=?) AS upcoming_visits
-    FROM users u LEFT JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id WHERE u.role='teacher'`)
+    FROM users u JOIN teacher_profiles p ON p.teacher_user_id=u.id
+    LEFT JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id`)
     .bind(now, now, now, kyivDate(now)).first<Record<string, number | null>>();
   const value = row ?? {};
   return {
@@ -459,17 +472,20 @@ async function dependencySummary(
 }
 
 async function getMutableTeacher(db: TeacherRegistryDatabase, teacherId: string) {
-  const row = await db.prepare(`SELECT u.id,u.full_name,u.sort_name,u.status,p.subject_position,p.primary_location_id,
+  const row = await db.prepare(`SELECT u.id,u.full_name,u.sort_name,u.role AS account_role,
+    CASE WHEN u.status='active' AND p.closed_at IS NULL THEN 'active' ELSE 'inactive' END AS status,
+    p.subject_position,p.primary_location_id,
     p.service_contact,p.librarian_note,p.version,p.closed_at,p.last_mutation_request_id
-    FROM users u JOIN teacher_profiles p ON p.teacher_user_id=u.id WHERE u.id=? AND u.role='teacher' LIMIT 1`)
+    FROM users u JOIN teacher_profiles p ON p.teacher_user_id=u.id WHERE u.id=? LIMIT 1`)
     .bind(teacherId).first<{
-      id: string; full_name: string; sort_name: string; status: TeacherStatus; subject_position: string;
+      id: string; full_name: string; sort_name: string; account_role: "teacher" | "admin" | "librarian";
+      status: TeacherStatus; subject_position: string;
       primary_location_id: string | null; service_contact: string; librarian_note: string; version: number;
       closed_at: string | null; last_mutation_request_id: string | null;
     }>();
   if (!row) throw new TeacherRegistryError("teacher_not_found", 404, "Картку вчителя не знайдено.");
   return {
-    id: row.id, fullName: row.full_name, sortName: row.sort_name, status: row.status,
+    id: row.id, fullName: row.full_name, sortName: row.sort_name, accountRole: row.account_role, status: row.status,
     subjectPosition: row.subject_position, primaryLocationId: row.primary_location_id,
     serviceContact: row.service_contact, librarianNote: row.librarian_note, version: Number(row.version),
     closedAt: row.closed_at, lastMutationRequestId: row.last_mutation_request_id,
@@ -499,7 +515,7 @@ async function updateProfile(
   try {
     await db.batch([
       commandStart(db, input.requestId, "teacher.update", actor.id, requestHash, current.id, now),
-      db.prepare(`UPDATE users SET full_name=?,sort_name=?,updated_at=? WHERE id=? AND role='teacher'
+      db.prepare(`UPDATE users SET full_name=?,sort_name=?,updated_at=? WHERE id=?
         AND EXISTS(SELECT 1 FROM teacher_profiles WHERE teacher_user_id=users.id AND version=?)
         AND EXISTS(SELECT 1 FROM mutation_commands WHERE id=? AND request_hash=? AND status='processing')`)
         .bind(fullName, teacherSortName(fullName), now, current.id, input.expectedVersion, input.requestId, requestHash),
@@ -511,7 +527,8 @@ async function updateProfile(
           input.requestId, actor.id, now, current.id, input.expectedVersion, input.requestId, requestHash),
       guardedAuditInsert(db, actor, "teacher.updated", current.id, input.requestId, current, next, now,
         `EXISTS(SELECT 1 FROM users u JOIN teacher_profiles p ON p.teacher_user_id=u.id
-          WHERE u.id=? AND u.role='teacher' AND u.full_name=? AND u.sort_name=? AND u.status=?
+          WHERE u.id=? AND u.full_name=? AND u.sort_name=?
+            AND CASE WHEN u.status='active' AND p.closed_at IS NULL THEN 'active' ELSE 'inactive' END=?
             AND p.version=? AND p.last_mutation_request_id=? AND p.subject_position=?
             AND p.primary_location_id IS ? AND p.service_contact=? AND p.librarian_note=?)`,
         [current.id, next.fullName, teacherSortName(next.fullName), next.status, next.version, input.requestId,
@@ -551,14 +568,16 @@ async function closeTeacher(
   try {
     await db.batch([
       commandStart(db, input.requestId, "teacher.close", actor.id, requestHash, current.id, now),
-      db.prepare(`UPDATE users SET status='inactive',updated_at=? WHERE id=? AND role='teacher' AND status='active'
+      db.prepare(`UPDATE users SET status=CASE WHEN role='teacher' THEN 'inactive' ELSE status END,updated_at=?
+        WHERE id=? AND role IN ('teacher','admin','librarian') AND status='active'
         AND EXISTS(SELECT 1 FROM teacher_profiles WHERE teacher_user_id=users.id AND version=?)
         AND EXISTS(SELECT 1 FROM mutation_commands WHERE id=? AND request_hash=? AND status='processing')
         AND ${noCloseBlockersSql("users.id")}`)
         .bind(now, current.id, input.expectedVersion, input.requestId, requestHash, currentKyivDate),
       db.prepare(`UPDATE teacher_profiles SET version=version+1,last_mutation_request_id=?,closed_at=?,closed_by_user_id=?,
         updated_by_user_id=?,updated_at=? WHERE teacher_user_id=? AND version=?
-        AND EXISTS(SELECT 1 FROM users WHERE id=teacher_profiles.teacher_user_id AND status='inactive')
+        AND EXISTS(SELECT 1 FROM users WHERE id=teacher_profiles.teacher_user_id
+          AND ((role='teacher' AND status='inactive') OR (role IN ('admin','librarian') AND status='active')))
         AND EXISTS(SELECT 1 FROM mutation_commands WHERE id=? AND request_hash=? AND status='processing')`)
         .bind(input.requestId, now, actor.id, actor.id, now, current.id, input.expectedVersion, input.requestId, requestHash),
       db.prepare(`UPDATE visit_teacher_credentials SET status='disabled',version=version+1,failed_attempts=0,
@@ -571,7 +590,9 @@ async function closeTeacher(
       guardedAuditInsert(db, actor, "teacher.closed", current.id, input.requestId, current,
         { ...result, reason: input.reason }, now,
         `EXISTS(SELECT 1 FROM users u JOIN teacher_profiles p ON p.teacher_user_id=u.id
-          WHERE u.id=? AND u.status='inactive' AND p.version=? AND p.last_mutation_request_id=?
+          WHERE u.id=? AND ((u.role='teacher' AND u.status='inactive')
+              OR (u.role IN ('admin','librarian') AND u.status='active'))
+            AND p.version=? AND p.last_mutation_request_id=?
             AND p.closed_at=? AND p.closed_by_user_id=?
             AND NOT EXISTS(SELECT 1 FROM visit_teacher_credentials c WHERE c.teacher_user_id=u.id AND c.status<>'disabled')
             AND NOT EXISTS(SELECT 1 FROM visit_teacher_sessions s WHERE s.teacher_user_id=u.id AND s.revoked_at IS NULL)
@@ -611,7 +632,9 @@ async function restoreTeacher(
   try {
     await db.batch([
       commandStart(db, input.requestId, "teacher.restore", actor.id, requestHash, current.id, now),
-      db.prepare(`UPDATE users SET status='active',updated_at=? WHERE id=? AND role='teacher' AND status='inactive'
+      db.prepare(`UPDATE users SET status=CASE WHEN role='teacher' THEN 'active' ELSE status END,updated_at=?
+        WHERE id=? AND role IN ('teacher','admin','librarian')
+          AND ((role='teacher' AND status='inactive') OR (role IN ('admin','librarian') AND status='active'))
         AND EXISTS(SELECT 1 FROM teacher_profiles WHERE teacher_user_id=users.id AND version=?)
         AND EXISTS(SELECT 1 FROM mutation_commands WHERE id=? AND request_hash=? AND status='processing')`)
         .bind(now, current.id, input.expectedVersion, input.requestId, requestHash),
@@ -639,8 +662,10 @@ async function restoreTeacher(
 }
 
 async function ensureNoDuplicate(db: TeacherRegistryDatabase, fullName: string, excludeId: string | null, forced: boolean) {
-  const rows = await db.prepare(`SELECT id,full_name,status FROM users WHERE role='teacher' AND sort_name=?
-    AND (? IS NULL OR id<>?) ORDER BY status DESC,id LIMIT 10`).bind(teacherSortName(fullName), excludeId, excludeId)
+  const rows = await db.prepare(`SELECT u.id,u.full_name,
+    CASE WHEN u.status='active' AND p.closed_at IS NULL THEN 'active' ELSE 'inactive' END AS status
+    FROM users u JOIN teacher_profiles p ON p.teacher_user_id=u.id WHERE u.sort_name=?
+    AND (? IS NULL OR u.id<>?) ORDER BY status DESC,u.id LIMIT 10`).bind(teacherSortName(fullName), excludeId, excludeId)
     .all<{ id: string; full_name: string; status: TeacherStatus }>();
   const duplicates = (rows.results ?? []).map((row) => ({ id: row.id, fullName: row.full_name, status: row.status }));
   if (duplicates.length && !forced) throw new TeacherRegistryError("teacher_duplicate_warning", 409, "Вже існує картка зі схожим ПІБ.", { duplicates });

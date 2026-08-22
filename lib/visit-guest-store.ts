@@ -132,7 +132,9 @@ export async function createGuestVisitBooking(
       ?,?,?,?,?,?,?,?,'active','',NULL,NULL,NULL,?,1,?,?,NULL
       WHERE EXISTS (SELECT 1 FROM visit_guest_sessions
         WHERE id=? AND token_hash=? AND revoked_at IS NULL AND expires_at>?)
-      AND EXISTS (SELECT 1 FROM users WHERE id=? AND role='teacher' AND status='active' AND full_name=?)
+      AND EXISTS (SELECT 1 FROM users u JOIN teacher_profiles p
+        ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+        WHERE u.id=? AND u.status='active' AND u.full_name=?)
       AND (? IS NULL OR EXISTS (SELECT 1 FROM class_years WHERE id=? AND status='active'))
       AND (SELECT COUNT(*) FROM visit_bookings WHERE owner_kind='guest' AND guest_owner_id=?
         AND status='active' AND visit_date>=?)<?
@@ -238,7 +240,9 @@ export async function updateGuestVisitBooking(
         public_display_consent=?,purpose=?,last_mutation_request_id=?,version=version+1,updated_at=?
       WHERE id=? AND owner_kind='guest' AND guest_owner_id=? AND status='active' AND version=?
         AND ${sessionGuard}
-        AND EXISTS (SELECT 1 FROM users WHERE id=selected_teacher_user_id AND role='teacher' AND status='active')
+        AND EXISTS (SELECT 1 FROM users u JOIN teacher_profiles p
+          ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+          WHERE u.id=selected_teacher_user_id AND u.status='active')
         AND (? IS NULL OR EXISTS (SELECT 1 FROM class_years WHERE id=? AND status='active'))
         AND ?>?
         AND (EXISTS (SELECT 1 FROM visit_schedule_hours WHERE weekday=? AND status='active'
@@ -422,7 +426,9 @@ async function diagnoseGuestCreate(
     WHERE id=? AND token_hash=? AND revoked_at IS NULL AND expires_at>? LIMIT 1`)
     .bind(guest.guestOwnerId, guest.tokenHash, now).first();
   if (!session) throw new VisitScheduleError("guest_session_expired", 401, "Гостьова сесія завершилася.");
-  const teacher = await db.prepare(`SELECT id FROM users WHERE id=? AND role='teacher' AND status='active' LIMIT 1`)
+  const teacher = await db.prepare(`SELECT u.id FROM users u JOIN teacher_profiles p
+    ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+    WHERE u.id=? AND u.status='active' LIMIT 1`)
     .bind(teacherUserId).first();
   if (!teacher) throw new VisitScheduleError("teacher_not_found", 404, "Учитель уже неактивний.");
   await activeClassYear(db, input.classYearId);

@@ -94,6 +94,7 @@ function openDatabase() {
     "0013_strange_dark_beast.sql",
     "0014_rich_lionheart.sql",
     "0015_glamorous_namora.sql",
+    "0016_busy_jane_foster.sql",
   ]) {
     const sql = fs.readFileSync(path.join(root, "drizzle", file), "utf8");
     for (const statement of sql.split(/-->\s*statement-breakpoint/gu)) {
@@ -120,6 +121,11 @@ function seed(sqlite) {
       id, full_name, sort_name, email, auth_user_id, role, status, created_at, updated_at
     ) VALUES (?, ?, ?, NULL, NULL, 'teacher', 'active', ?, ?)
   `).run("USR-TCH", "Ірина Вчитель", "вчитель ірина", now, now);
+  sqlite.prepare(`INSERT INTO teacher_profiles(
+    teacher_user_id,subject_position,primary_location_id,service_contact,librarian_note,version,
+    last_mutation_request_id,closed_at,closed_by_user_id,created_by_user_id,updated_by_user_id,created_at,updated_at
+  ) VALUES(?, '', NULL, '', '', 1, NULL, NULL, NULL, 'USR-LIB', 'USR-LIB', ?, ?)`)
+    .run("USR-TCH", now, now);
   sqlite.prepare(`
     INSERT INTO materials (
       id, catalog_number, title, sort_title, search_text, rubric,

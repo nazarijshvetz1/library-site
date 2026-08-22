@@ -33,6 +33,7 @@ test("teacher directory uses frozen server paging, search and status contract", 
     "/api/librarian/teachers?q=%D0%9A%D0%BE%D0%B2%D0%B0%D0%BB%D1%8C&status=inactive&cursor=opaque&limit=30",
   );
   assert.match(client, /counters: TeacherDirectoryCounters/u);
+  assert.match(client, /accountRole: "teacher" \| "admin" \| "librarian"/u);
   assert.match(client, /nextCursor: string \| null/u);
   assert.match(workspace, /load\(data\.page\.nextCursor\)/u);
   assert.match(workspace, /Прізвище або ім’я/u);
@@ -74,6 +75,8 @@ test("teacher mutations match the exact backend contract and protect history", a
   assert.match(workspace, /Усе одно створити або зберегти окрему картку/u);
   assert.match(workspace, /teacherCloseBlockers/u);
   assert.match(workspace, /dependencySummary\.totalDependencies === 0/u);
+  assert.match(workspace, /teacher\.accountRole === "teacher"/u);
+  assert.match(workspace, /Обліковий рівень/u);
   assert.match(workspace, />Видалити картку<\/button>/u);
   assert.match(workspace, /disabled=\{!writesEnabled \|\| busy \|\| !deletionAllowed\}/u);
   assert.match(workspace, /confirmation !== teacher\.fullName/u);
@@ -88,7 +91,9 @@ test("selected teacher exposes profile, material history, visits and access anch
   assert.match(workspace, /item\.title_snapshot/u);
   assert.match(workspace, /item\.outstanding_quantity/u);
   assert.match(workspace, /href="#teacher-access-title"/u);
-  assert.match(workspace, /<TeacherAccessAdmin writesEnabled=\{writesEnabled\} \/>/u);
+  assert.match(workspace, /<TeacherCodeImport/u);
+  assert.match(workspace, /setAccessRefreshKey/u);
+  assert.match(workspace, /<TeacherAccessAdmin writesEnabled=\{writesEnabled\} refreshKey=\{accessRefreshKey\} \/>/u);
 });
 
 test("material request inbox separates reservation, physical issue and uncollected release", async () => {
