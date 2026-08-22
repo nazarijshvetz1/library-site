@@ -221,7 +221,8 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(html, /id="collectionGrid"/);
   assert.match(html, /id="titleSuggestions" role="listbox"/);
   assert.match(html, /<option value="">Усі<\/option>/);
-  assert.match(html, /type="module" src="\/app\.js\?v=20260821-2"/);
+  assert.match(html, /href="\/styles\.css\?v=20260822-1"/);
+  assert.match(html, /type="module" src="\/app\.js\?v=20260822-1"/);
   assert.match(html, /href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/librarian"/);
   assert.match(html, /rel="noopener noreferrer"/);
   assert.doesNotMatch(app, /librarianButton|Режим бібліотекаря підключимо/);
@@ -238,6 +239,9 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(app, /data-report-error/);
   assert.match(app, /class="material-links"/);
   assert.match(app, /class="cover-wrap cover-button"[^>]*data-details=/u);
+  assert.match(app, /class="card-stock"/u);
+  assert.match(app, /class="quantity available-quantity\$\{available \? "" : " none"\}"/u);
+  assert.match(app, /<strong>\$\{escapeHtml\(item\.availableQuantity\)\}<\/strong><span>Доступно<\/span>/u);
   assert.match(app, /class="order-material-button"/u);
   assert.match(app, />Замовити <span aria-hidden="true">→<\/span>/u);
   assert.match(app, /target="_blank" rel="noopener noreferrer"/);
@@ -248,6 +252,8 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(css, /min-height:44px/);
   assert.match(css, /\.title-suggestions/);
   assert.match(css, /\.cover-button/);
+  assert.match(css, /\.card-stock\{display:flex;align-items:flex-end;gap:18px\}/u);
+  assert.match(css, /\.available-quantity\.none strong\{color:#a05744\}/u);
   assert.match(css, /\.dialog-order/);
 });
 
