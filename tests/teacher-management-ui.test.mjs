@@ -74,6 +74,8 @@ test("teacher mutations match the exact backend contract and protect history", a
   assert.match(workspace, /Усе одно створити або зберегти окрему картку/u);
   assert.match(workspace, /teacherCloseBlockers/u);
   assert.match(workspace, /dependencySummary\.totalDependencies === 0/u);
+  assert.match(workspace, />Видалити картку<\/button>/u);
+  assert.match(workspace, /disabled=\{!writesEnabled \|\| busy \|\| !deletionAllowed\}/u);
   assert.match(workspace, /confirmation !== teacher\.fullName/u);
   assert.match(workspace, /Картку закрито без втрати історії/u);
 });

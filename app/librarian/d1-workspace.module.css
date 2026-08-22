@@ -324,6 +324,17 @@
   display: block;
 }
 
+.workGridCreate {
+  display: grid;
+  gap: 16px;
+}
+
+.workGridCreate .actionPane,
+.workGridCreate .searchPane {
+  width: 100%;
+  max-width: 1180px;
+}
+
 .workGridWide .actionPane {
   max-width: 1180px;
 }
@@ -1394,6 +1405,13 @@
   gap: 3px;
 }
 
+.isbnLookupActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
 .isbnLookup strong {
   color: var(--green-950);
   font-size: 9px;
@@ -1407,7 +1425,8 @@
 }
 
 .isbnLookup > p,
-.isbnCandidates {
+.isbnCandidates,
+.externalBookSearch {
   grid-column: 1 / -1;
 }
 
@@ -1423,7 +1442,7 @@
 .isbnCandidates > button {
   padding: 9px 10px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
   gap: 3px 10px;
   border: 1px solid #d9e3d6;
   border-radius: 9px;
@@ -1431,6 +1450,24 @@
   color: var(--ink);
   cursor: pointer;
   text-align: left;
+}
+
+.isbnCandidates > button img,
+.isbnCoverFallback {
+  width: 42px;
+  height: 60px;
+  grid-row: 1 / 3;
+  object-fit: contain;
+  border-radius: 4px;
+  background: #f0f3eb;
+}
+
+.isbnCoverFallback {
+  display: grid;
+  place-items: center;
+  color: var(--green-100);
+  background: var(--green-900);
+  font: 650 17px/1 Georgia, serif;
 }
 
 .isbnCandidates > button:hover,
@@ -1446,13 +1483,108 @@
   white-space: nowrap;
 }
 
-.isbnCandidates > button span {
-  grid-column: 2;
+.isbnCandidates > button .isbnProvider {
+  grid-column: 3;
   grid-row: 1 / 3;
   align-self: center;
   color: var(--green-700);
   font-size: 7px;
   font-weight: 800;
+}
+
+.externalBookSearch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.externalBookSearch a {
+  color: var(--green-700);
+  font-size: 8px;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.scannerMessage {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.scannerOverlay {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  padding: 20px;
+  display: grid;
+  place-items: center;
+  background: rgba(10, 31, 20, 0.76);
+}
+
+.scannerDialog {
+  width: min(560px, 100%);
+  padding: 20px;
+  display: grid;
+  gap: 14px;
+  border-radius: 18px;
+  background: var(--paper);
+  box-shadow: 0 24px 80px rgba(0,0,0,.28);
+}
+
+.scannerDialog header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.scannerDialog header p,
+.scannerDialog > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.scannerDialog h2 {
+  margin: 4px 0 0;
+  color: var(--green-950);
+  font: 650 25px/1.08 Georgia, serif;
+}
+
+.scannerDialog header > button {
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  cursor: pointer;
+}
+
+.scannerVideo {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border-radius: 13px;
+  background: #07130d;
+}
+
+.scannerVideo video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.scannerVideo span {
+  position: absolute;
+  top: 34%;
+  right: 8%;
+  bottom: 34%;
+  left: 8%;
+  border: 3px solid #e0ad35;
+  border-radius: 10px;
+  box-shadow: 0 0 0 999px rgba(0,0,0,.24);
 }
 
 .directCoverField {
@@ -1510,9 +1642,15 @@
 }
 
 .directCoverActions label {
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.directCoverActions label[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .directCoverActions input[type="file"] {
@@ -1528,6 +1666,131 @@
 .directCoverActions label:focus-within {
   outline: 3px solid rgba(224, 173, 53, 0.55);
   outline-offset: 2px;
+}
+
+.remoteCoverActions {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+}
+
+.remoteCoverActions input {
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid #d5ded4;
+  border-radius: 9px;
+  background: white;
+  color: var(--ink);
+  font-size: 9px;
+}
+
+.remoteCoverHint {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 7px;
+  line-height: 1.4;
+}
+
+.locationManager {
+  display: grid;
+  gap: 18px;
+}
+
+.locationCreate,
+.locationDirectory {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fbfcf9;
+}
+
+.locationList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.locationList > article {
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  border: 1px solid #d8e1d6;
+  border-radius: 12px;
+  background: white;
+}
+
+.locationList > article[data-status="inactive"] {
+  opacity: 0.76;
+  background: #f3f3ef;
+}
+
+.locationList header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.locationList header > div {
+  min-width: 0;
+}
+
+.locationList header span,
+.locationList header small,
+.locationList > article > p,
+.locationGuard {
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.locationList h3 {
+  margin: 3px 0;
+  overflow: hidden;
+  color: var(--green-950);
+  font: 650 18px/1.1 Georgia, serif;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.locationList header > strong {
+  flex: 0 0 auto;
+  color: var(--green-700);
+  font-size: 10px;
+}
+
+.locationList > article > p {
+  min-height: 12px;
+  margin: 0;
+}
+
+.locationActions,
+.locationList form > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.locationList form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px;
+  gap: 10px;
+}
+
+.locationList form > label {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.locationList form > div:last-child {
+  grid-column: 1 / -1;
+}
+
+.locationGuard {
+  color: #8b5f53;
 }
 
 .receiptToggle {
@@ -2161,6 +2424,7 @@
 }
 
 @media (max-width: 720px) {
+  .locationList { grid-template-columns: 1fr; }
   .header { min-height: 66px; padding: 0 13px; }
   .brand img { width: 42px; height: 42px; }
   .brand small, .account > span { display: none; }
@@ -2235,9 +2499,10 @@
   .returnSelectionActions .secondaryButton { width: 100%; }
   .linkEditor article { grid-template-columns: 1fr; }
   .linkNumber, .linkUrlField, .publicLinkToggle { grid-column: auto; }
-  .directCoverField { grid-template-columns: 66px minmax(0, 1fr); }
-  .directCoverPreview { width: 66px; }
-  .directCoverActions .secondaryButton { width: auto; }
+  .directCoverField { grid-template-columns: 1fr; align-items: start; }
+  .directCoverPreview { width: 82px; }
+  .directCoverActions { display: grid; grid-template-columns: 1fr; }
+  .directCoverActions .secondaryButton { width: 100%; min-height: 44px; }
   .duplicateWarning { grid-template-columns: 26px minmax(0, 1fr); }
   .duplicateWarning button { grid-column: 1 / -1; width: 100%; }
   .academicRows article { grid-template-columns: 1fr; }

@@ -17,7 +17,7 @@ export type AcademicTool =
   | "class-close"
   | "rollover";
 
-type Teacher = { id: string; fullName: string };
+type Curator = { id: string; fullName: string; role: "teacher" | "admin" | "librarian" };
 type Location = { id: string; name: string; type: string; isPublic: boolean };
 type AcademicYear = {
   id: string;
@@ -49,6 +49,7 @@ type ClassYear = {
   version: number;
 };
 type AcademicReference = {
+  curators: Curator[];
   academicYears: AcademicYear[];
   cohorts: Cohort[];
   classYears: ClassYear[];
@@ -79,12 +80,10 @@ export function isAcademicTool(tool: string): tool is AcademicTool {
 export default function AcademicWorkspace({
   tool,
   writesEnabled,
-  teachers,
   locations,
 }: {
   tool: AcademicTool;
   writesEnabled: boolean;
-  teachers: Teacher[];
   locations: Location[];
 }) {
   const [reference, setReference] = useState<AcademicReference | null>(null);
@@ -122,7 +121,6 @@ export default function AcademicWorkspace({
   const common = {
     reference,
     writesEnabled,
-    teachers,
     locations: locations.filter((location) => location.type !== "service"),
     onSaved: load,
   };
@@ -142,7 +140,6 @@ export default function AcademicWorkspace({
 type CommonProps = {
   reference: AcademicReference;
   writesEnabled: boolean;
-  teachers: Teacher[];
   locations: Location[];
   onSaved: () => Promise<void>;
 };
@@ -214,7 +211,7 @@ function AcademicYearCreate({ reference, writesEnabled, onSaved }: CommonProps) 
   );
 }
 
-function ClassCreate({ reference, writesEnabled, teachers, locations, onSaved }: CommonProps) {
+function ClassCreate({ reference, writesEnabled, locations, onSaved }: CommonProps) {
   const years = reference.academicYears.filter((year) => year.status === "active");
   const cohorts = reference.cohorts.filter((cohort) => cohort.status === "active");
   const [academicYearId, setAcademicYearId] = useState(years[0]?.id || "");
@@ -261,7 +258,7 @@ function ClassCreate({ reference, writesEnabled, teachers, locations, onSaved }:
           {cohortMode === "existing" ? <AcademicField label="ID групи" required><select value={cohortId} onChange={(event) => { setCohortId(event.target.value); renew(); }} required>{cohorts.map((cohort) => <option key={cohort.id} value={cohort.id}>{cohort.id}</option>)}</select></AcademicField> : null}
           <AcademicField label="Паралель" required><input type="number" min="1" max="11" value={grade} onChange={(event) => { setGrade(event.target.value); renew(); }} required /></AcademicField>
           <AcademicField label="Літера / код" required><input value={code} maxLength={24} onChange={(event) => { setCode(event.target.value); renew(); }} required /></AcademicField>
-          <AcademicField label="Класний керівник"><select value={teacherUserId} onChange={(event) => { setTeacherUserId(event.target.value); renew(); }}><option value="">Не призначено</option>{teachers.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.fullName}</option>)}</select></AcademicField>
+          <AcademicField label="Класний керівник"><select value={teacherUserId} onChange={(event) => { setTeacherUserId(event.target.value); renew(); }}><option value="">Не призначено</option>{(reference.curators ?? []).map((curator) => <option key={curator.id} value={curator.id}>{curator.fullName}{curator.role === "teacher" ? "" : ` · ${curatorRoleLabel(curator.role)}`}</option>)}</select></AcademicField>
           <AcademicField label="Кабінет"><select value={locationId} onChange={(event) => { setLocationId(event.target.value); renew(); }}><option value="">Не призначено</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></AcademicField>
           <AcademicField label="Примітка" wide><textarea rows={3} value={notes} onChange={(event) => { setNotes(event.target.value); renew(); }} /></AcademicField>
         </div>
@@ -271,7 +268,7 @@ function ClassCreate({ reference, writesEnabled, teachers, locations, onSaved }:
   );
 }
 
-function ClassUpdate({ reference, writesEnabled, teachers, locations, onSaved }: CommonProps) {
+function ClassUpdate({ reference, writesEnabled, locations, onSaved }: CommonProps) {
   const classes = reference.classYears.filter((item) => item.status !== "closed");
   const [classId, setClassId] = useState(classes[0]?.id || "");
   const initial = classes.find((item) => item.id === classId) ?? null;
@@ -327,7 +324,7 @@ function ClassUpdate({ reference, writesEnabled, teachers, locations, onSaved }:
           <AcademicField label="Клас" required wide><select value={classId} onChange={(event) => chooseClass(event.target.value)}>{classes.map((item) => <option key={item.id} value={item.id}>{item.academicYearLabel} · {item.className}</option>)}</select></AcademicField>
           <AcademicField label="Паралель" required><input type="number" min="1" max="11" value={grade} onChange={(event) => { setGrade(event.target.value); renew(); }} required /></AcademicField>
           <AcademicField label="Літера / код" required><input value={code} onChange={(event) => { setCode(event.target.value); renew(); }} required /></AcademicField>
-          <AcademicField label="Класний керівник"><select value={teacherUserId} onChange={(event) => { setTeacherUserId(event.target.value); renew(); }}><option value="">Не призначено</option>{teachers.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.fullName}</option>)}</select></AcademicField>
+          <AcademicField label="Класний керівник"><select value={teacherUserId} onChange={(event) => { setTeacherUserId(event.target.value); renew(); }}><option value="">Не призначено</option>{(reference.curators ?? []).map((curator) => <option key={curator.id} value={curator.id}>{curator.fullName}{curator.role === "teacher" ? "" : ` · ${curatorRoleLabel(curator.role)}`}</option>)}</select></AcademicField>
           <AcademicField label="Кабінет"><select value={locationId} onChange={(event) => { setLocationId(event.target.value); renew(); }}><option value="">Не призначено</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></AcademicField>
           <AcademicField label="Примітка" wide><textarea rows={3} value={notes} onChange={(event) => { setNotes(event.target.value); renew(); }} /></AcademicField>
         </div>
@@ -416,7 +413,7 @@ type RolloverRow = {
   notes: string;
 };
 
-function Rollover({ reference, writesEnabled, teachers, locations, onSaved }: CommonProps) {
+function Rollover({ reference, writesEnabled, locations, onSaved }: CommonProps) {
   const sourceYears = reference.academicYears.filter((year) => year.status === "active");
   const initialSource = sourceYears[0] ?? null;
   const initialTargets = nextDraftAcademicYears(reference, initialSource);
@@ -515,7 +512,7 @@ function Rollover({ reference, writesEnabled, teachers, locations, onSaved }: Co
                   <>
                     <AcademicField label="Новий клас"><input type="number" min="1" max="11" value={row.targetGrade} onChange={(event) => updateRow(row.sourceClassYearId, { targetGrade: Number(event.target.value) })} /></AcademicField>
                     <AcademicField label="Літера"><input value={row.targetCode} onChange={(event) => updateRow(row.sourceClassYearId, { targetCode: event.target.value })} /></AcademicField>
-                    <AcademicField label="Керівник"><select value={row.teacherUserId || ""} onChange={(event) => updateRow(row.sourceClassYearId, { teacherUserId: event.target.value || null })}><option value="">Не призначено</option>{teachers.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.fullName}</option>)}</select></AcademicField>
+                    <AcademicField label="Керівник"><select value={row.teacherUserId || ""} onChange={(event) => updateRow(row.sourceClassYearId, { teacherUserId: event.target.value || null })}><option value="">Не призначено</option>{(reference.curators ?? []).map((curator) => <option key={curator.id} value={curator.id}>{curator.fullName}{curator.role === "teacher" ? "" : ` · ${curatorRoleLabel(curator.role)}`}</option>)}</select></AcademicField>
                     <AcademicField label="Кабінет"><select value={row.locationId || ""} onChange={(event) => updateRow(row.sourceClassYearId, { locationId: event.target.value || null })}><option value="">Не призначено</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></AcademicField>
                     {row.targetGrade !== row.sourceGrade + 1 ? <AcademicField label="Причина нестандартного переходу" wide><input value={row.overrideReason} onChange={(event) => updateRow(row.sourceClassYearId, { overrideReason: event.target.value })} required /></AcademicField> : null}
                   </>
@@ -689,6 +686,12 @@ function yearStatusLabel(status: AcademicYear["status"]): string {
   if (status === "active") return "активний";
   if (status === "closed") return "завершений";
   return "чернетка";
+}
+
+function curatorRoleLabel(role: Curator["role"]): string {
+  if (role === "admin") return "адміністратор";
+  if (role === "librarian") return "бібліотекар";
+  return "вчитель";
 }
 
 function errorMessage(error: unknown): string {

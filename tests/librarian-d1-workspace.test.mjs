@@ -338,6 +338,74 @@ test("new material form suggests catalog facets and similar titles without submi
   assert.match(styles, /\.duplicateWarning/u);
 });
 
+test("shared cover field offers separate accessible camera and gallery controls on mobile", async () => {
+  const [workspace, styles] = await Promise.all([
+    read("app/librarian/d1-workspace.tsx"),
+    read("app/librarian/d1-workspace.module.css"),
+  ]);
+  const coverField = workspace.match(
+    /function CoverPhotoField[\s\S]*?(?=async function deleteTemporaryCover)/u,
+  )?.[0] ?? "";
+
+  assert.match(coverField, /Зробити фото[\s\S]*?accept="image\/\*"[\s\S]*?capture="environment"/u);
+  assert.match(coverField, /aria-label="Зробити фото обкладинки камерою"/u);
+  assert.match(coverField, /Обрати з галереї[\s\S]*?accept="image\/jpeg,image\/png,image\/webp"/u);
+  assert.match(coverField, /aria-label="Обрати фото обкладинки з галереї"/u);
+  assert.equal(coverField.match(/type="file"/gu)?.length, 2);
+  assert.equal(coverField.match(/capture="environment"/gu)?.length, 1);
+  assert.equal(coverField.match(/onChange=\{\(event\) => choosePhoto\(event\.currentTarget\)\}/gu)?.length, 2);
+  assert.match(coverField, /function choosePhoto\(input: HTMLInputElement\)[\s\S]*?upload\.choose\(file\)/u);
+  assert.equal(workspace.match(/<CoverPhotoField/gu)?.length, 2);
+
+  assert.match(styles, /\.directCoverActions label \{[\s\S]*?min-height: 44px/u);
+  assert.match(styles, /@media \(max-width: 500px\)[\s\S]*?\.directCoverField \{ grid-template-columns: 1fr;/u);
+  assert.match(styles, /@media \(max-width: 500px\)[\s\S]*?\.directCoverActions \{ display: grid; grid-template-columns: 1fr; \}/u);
+  assert.match(styles, /\.directCoverActions label:focus-within/u);
+});
+
+test("active D1 ISBN scanner keeps mobile camera access independent from native detection", async () => {
+  const workspace = await read("app/librarian/d1-workspace.tsx");
+  const scanner = workspace.match(
+    /function isbnCameraErrorMessage[\s\S]*?(?=function pidruchnykSearchUrl)/u,
+  )?.[0] ?? "";
+
+  assert.ok(scanner, "active D1 ISBN scanner source should be present");
+
+  const mediaRequest = scanner.indexOf("navigator.mediaDevices.getUserMedia");
+  const nativeDetectorProbe = scanner.indexOf("const detectorConstructor");
+  assert.ok(mediaRequest >= 0, "scanner should request the camera");
+  assert.ok(nativeDetectorProbe > mediaRequest, "camera request must precede the native BarcodeDetector probe");
+  assert.doesNotMatch(scanner, /!detectorConstructor\s*\|\|\s*!navigator\.mediaDevices\?\.getUserMedia/u);
+
+  assert.match(scanner, /detectorConstructor\.getSupportedFormats/u);
+  assert.match(scanner, /supportedFormats\.includes\("ean_13"\)/u);
+  assert.match(scanner, /new detectorConstructor\(\{ formats: \["ean_13"\] \}\)/u);
+
+  assert.match(scanner, /import\("@zxing\/browser"\)[\s\S]*?import\("@zxing\/library"\)/u);
+  assert.match(scanner, /DecodeHintType\.POSSIBLE_FORMATS, \[BarcodeFormat\.EAN_13\]/u);
+  assert.match(scanner, /new BrowserMultiFormatOneDReader\(hints\)/u);
+  assert.match(scanner, /reader\.decodeFromStream\(stream, video,/u);
+
+  assert.match(scanner, /const startingRef = useRef\(false\)/u);
+  assert.match(scanner, /if \(startingRef\.current \|\| scanningRef\.current\) return/u);
+  assert.match(scanner, /startingRef\.current = true/u);
+  assert.match(scanner, /finally \{[\s\S]*?startingRef\.current = false/u);
+
+  assert.match(scanner, /<video ref=\{videoRef\} autoPlay muted playsInline \/>/u);
+  assert.match(scanner, /window\.addEventListener\("pagehide", handlePageHide\)/u);
+  assert.match(scanner, /window\.removeEventListener\("pagehide", handlePageHide\)/u);
+  assert.match(scanner, /controlsRef\.current\?\.stop\(\)/u);
+  assert.match(scanner, /streamRef\.current\?\.getTracks\(\)\.forEach\(\(track\) => track\.stop\(\)\)/u);
+  assert.match(scanner, /videoRef\.current\.srcObject = null/u);
+  assert.match(scanner, /return \(\) => \{[\s\S]*?releaseCamera\(\)/u);
+
+  assert.match(scanner, /name === "NotAllowedError" \|\| name === "SecurityError"[\s\S]*?Доступ до камери заборонено/u);
+  assert.match(scanner, /name === "NotFoundError" \|\| name === "DevicesNotFoundError"[\s\S]*?Камеру не знайдено/u);
+  assert.match(scanner, /name === "NotReadableError" \|\| name === "TrackStartError"[\s\S]*?її використовує інша програма/u);
+  assert.match(scanner, /Цей браузер не надає доступу до камери/u);
+  assert.match(scanner, /Не вдалося запустити сканування/u);
+});
+
 test("new librarian route renders D1 workspace and keeps legacy workspace intact", async () => {
   const [page, workspace, client, styles] = await Promise.all([
     read("app/librarian/page.tsx"),
@@ -424,6 +492,15 @@ test("new librarian route renders D1 workspace and keeps legacy workspace intact
   assert.match(workspace, /retryPending \? "Перевірити результат"/u);
   assert.match(workspace, /role=\{tone === "error" \? "alert" : "status"\}/u);
   assert.match(workspace, /\/api\/librarian\/isbn-lookup\?isbn=/u);
+  assert.match(workspace, /<LoanReturnPanel[\s\S]*?locations=\{locations\}/u);
+  assert.match(workspace, /\/api\/librarian\/locations/u);
+  assert.match(workspace, /function LocationManagementPanel/u);
+  assert.match(workspace, /function IsbnCameraScanner/u);
+  assert.match(workspace, /\/api\/librarian\/cover-photo\/remote\?url=/u);
+  assert.match(workspace, /candidate\.coverUrl\) onCover\(candidate\)/u);
+  assert.match(workspace, /Шукати на Pidruchnyk\.com\.ua/u);
+  assert.match(workspace, /Шукати на Yakaboo/u);
+  assert.match(workspace, /tool === "create" \? styles\.workGridCreate/u);
   assert.match(workspace, /mergeBookLookupDraft/u);
   assert.match(workspace, /mergeBookLookupLink/u);
   assert.match(workspace, /current\.title\.trim\(\) \|\| candidate\.title/u);
@@ -501,6 +578,8 @@ test("new librarian route renders D1 workspace and keeps legacy workspace intact
   assert.match(academic, /\/api\/librarian\/class-years"/u);
   assert.match(academic, /\/close/u);
   assert.match(academic, /\/academic-years\/rollover/u);
+  assert.match(academic, /reference\.curators/u);
+  assert.match(academic, /curatorRoleLabel/u);
   assert.match(academic, /expectedVersion: selected\.version/u);
   assert.match(academic, /sourceYearVersion: sourceYear\.version/u);
   assert.match(academic, /targetYearVersion: targetYear\.version/u);

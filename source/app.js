@@ -713,7 +713,7 @@ function cardMarkup(item) {
   return `<article class="material-card"><button class="cover-wrap cover-button" type="button" data-details="${escapeHtml(item.id)}" aria-label="Відкрити інформацію про ${escapeHtml(item.title)}"><span class="class-badge">${escapeHtml(classLabel(item))}</span>${coverMarkup(item)}</button><div class="card-body">
     <div class="card-kicker"><span>${escapeHtml(item.subject)}</span><span class="availability ${available ? "" : "none"}">${available ? "У наявності" : "Немає"}</span></div>
     <h3>${escapeHtml(item.title)}</h3><p class="author-line">${escapeHtml(item.author)}${item.year ? ` · ${escapeHtml(item.year)}` : ""}</p>
-    <div class="card-footer"><span class="quantity"><strong>${escapeHtml(item.quantity)}</strong><span>примірників</span></span><button class="details-button" type="button" data-details="${escapeHtml(item.id)}">Детальніше →</button></div>
+    <div class="card-footer"><div class="card-stock"><span class="quantity"><strong>${escapeHtml(item.quantity)}</strong><span>примірників</span></span><span class="quantity available-quantity${available ? "" : " none"}"><strong>${escapeHtml(item.availableQuantity)}</strong><span>Доступно</span></span></div><button class="details-button" type="button" data-details="${escapeHtml(item.id)}">Детальніше →</button></div>
   </div></article>`;
 }
 

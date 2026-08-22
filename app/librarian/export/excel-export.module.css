@@ -1,0 +1,108 @@
+.shell {
+  min-height: 100vh;
+  background: #f3f5f0;
+  color: #163420;
+}
+
+.header {
+  min-height: 82px;
+  padding: 0 28px;
+  display: grid;
+  grid-template-columns: minmax(250px, 1fr) auto minmax(250px, 1fr);
+  gap: 24px;
+  align-items: center;
+  border-bottom: 1px solid #dce4d8;
+  background: #fffefb;
+}
+
+.brand { display: flex; gap: 12px; align-items: center; color: inherit; text-decoration: none; }
+.brand img { border-radius: 50%; }
+.brand span, .account span { display: grid; gap: 2px; }
+.brand strong { font: 650 23px/1 Georgia, serif; }
+.brand small, .account small { color: #6b7b70; font-size: 11px; }
+
+.headerNav { display: flex; gap: 22px; align-items: center; }
+.headerNav a, .account a { color: #234c2f; font-size: 13px; font-weight: 800; text-decoration: none; }
+.headerNav a:hover, .headerNav a:focus-visible, .account a:hover, .account a:focus-visible { text-decoration: underline; text-underline-offset: 5px; }
+.account { display: flex; justify-content: flex-end; gap: 16px; align-items: center; text-align: right; }
+.account strong { font-size: 13px; }
+
+.page { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 54px 0 70px; }
+.intro { max-width: 780px; }
+.intro p, .cardHeading p { margin: 0 0 8px; color: #2f7441; font-size: 12px; font-weight: 850; letter-spacing: 0.09em; text-transform: uppercase; }
+.intro h1 { margin: 0; font: 650 48px/1.05 Georgia, serif; }
+.intro > span { margin-top: 12px; display: block; color: #607167; font-size: 15px; line-height: 1.6; }
+
+.layout { margin-top: 32px; display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr); gap: 22px; align-items: start; }
+.primaryCard, .sideCard { border: 1px solid #d7e0d3; border-radius: 22px; background: #fffefb; box-shadow: 0 18px 48px rgba(22, 52, 32, 0.08); }
+.primaryCard { padding: 30px; }
+.sideCard { padding: 26px; }
+.classExportCard { margin-top: 22px; padding: 30px; border: 1px solid #d7e0d3; border-radius: 22px; background: #fffefb; box-shadow: 0 18px 48px rgba(22, 52, 32, 0.08); }
+.cardHeading { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
+.cardHeading h2, .sideCard h2 { margin: 0; font: 650 30px/1.15 Georgia, serif; }
+.cardHeading > span { min-width: 58px; min-height: 42px; display: grid; place-items: center; border-radius: 10px; background: #e7f0df; color: #29653a; font-size: 12px; font-weight: 900; }
+.description { margin: 18px 0 0; color: #596b60; font-size: 14px; line-height: 1.6; }
+
+.checkList { margin: 22px 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px; list-style: none; }
+.checkList li { position: relative; padding-left: 25px; color: #254c30; font-size: 13px; line-height: 1.45; }
+.checkList li::before { content: "✓"; position: absolute; left: 0; top: 0; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; background: #dfeeda; color: #246037; font-size: 11px; font-weight: 900; }
+
+.safetyNote { padding: 15px; display: grid; gap: 4px; border: 1px solid #d7e1cf; border-radius: 13px; background: #f5f8ed; }
+.safetyNote strong { font-size: 13px; }
+.safetyNote span { color: #607167; font-size: 12px; line-height: 1.5; }
+.downloadButton { width: 100%; min-height: 54px; margin-top: 20px; border: 0; border-radius: 13px; background: #215732; color: white; cursor: pointer; font-size: 15px; font-weight: 900; }
+.downloadButton:hover:not(:disabled) { background: #194728; }
+.downloadButton:disabled { cursor: wait; opacity: 0.68; }
+.downloadButton:focus-visible { outline: 3px solid rgba(224, 173, 53, 0.6); outline-offset: 3px; }
+
+.classExportGrid { margin-top: 22px; display: grid; grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.1fr); gap: 18px; align-items: end; }
+.classSelect { display: grid; gap: 8px; }
+.classSelect > span { color: #35563f; font-size: 12px; font-weight: 850; }
+.classSelect select { width: 100%; min-height: 48px; padding: 0 42px 0 14px; border: 1px solid #cfdacd; border-radius: 12px; background: #fff; color: #163420; font: inherit; font-size: 14px; }
+.classSelect select:focus-visible { outline: 3px solid rgba(47, 116, 65, 0.24); outline-offset: 2px; }
+.classDetails { min-height: 48px; padding: 11px 14px; display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; border-radius: 12px; background: #f2f6ee; color: #50655a; font-size: 12px; line-height: 1.45; }
+.classDetails strong { color: #234c2f; }
+.inlineError { color: #8d2f27; }
+.classActions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.classActions .downloadButton { margin-top: 0; }
+.secondaryButton { width: 100%; min-height: 54px; border: 1px solid #b8cbb8; border-radius: 13px; background: #eef4e9; color: #204d2d; cursor: pointer; font-size: 15px; font-weight: 900; }
+.secondaryButton:hover:not(:disabled) { background: #e2eddd; }
+.secondaryButton:disabled { cursor: wait; opacity: 0.62; }
+.secondaryButton:focus-visible { outline: 3px solid rgba(224, 173, 53, 0.6); outline-offset: 3px; }
+
+.error, .success { margin: 14px 0 0; padding: 14px; border-radius: 12px; font-size: 13px; line-height: 1.5; }
+.error { background: #fff0ed; color: #8d2f27; }
+.success { display: grid; gap: 3px; background: #eaf5e5; color: #235b34; }
+.success span { overflow-wrap: anywhere; }
+.success small { color: #50715a; }
+
+.sideCard ol { margin: 20px 0 0; padding: 0; display: grid; gap: 12px; list-style: none; counter-reset: sections; }
+.sideCard li { padding: 12px 0 12px 42px; position: relative; display: grid; gap: 3px; border-bottom: 1px solid #e6ebe3; counter-increment: sections; }
+.sideCard li::before { content: counter(sections); position: absolute; left: 0; top: 10px; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: #eaf1e6; color: #2c6740; font-size: 11px; font-weight: 900; }
+.sideCard li strong { font-size: 13px; }
+.sideCard li span { color: #6b7b70; font-size: 11px; line-height: 1.45; }
+.importLink { margin-top: 20px; padding: 15px; display: grid; gap: 5px; border-radius: 13px; background: #f2f3ee; }
+.importLink strong { font-size: 12px; }
+.importLink span { color: #68786e; font-size: 11px; line-height: 1.45; }
+.importLink a { margin-top: 5px; color: #2f7441; font-size: 12px; font-weight: 850; }
+
+@media (max-width: 900px) {
+  .header { grid-template-columns: 1fr auto; }
+  .headerNav { grid-column: 1 / -1; grid-row: 2; padding-bottom: 14px; overflow-x: auto; }
+  .layout { grid-template-columns: 1fr; }
+  .classExportGrid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 620px) {
+  .header { padding: 12px 14px; gap: 12px; }
+  .brand img { width: 44px; height: 44px; }
+  .brand strong { font-size: 19px; }
+  .brand small, .account span { display: none; }
+  .headerNav { gap: 16px; }
+  .page { width: min(100% - 26px, 1180px); padding-top: 34px; }
+  .intro h1 { font-size: 38px; }
+  .primaryCard, .sideCard, .classExportCard { padding: 20px; border-radius: 17px; }
+  .cardHeading h2, .sideCard h2 { font-size: 25px; }
+  .checkList { grid-template-columns: 1fr; }
+  .classActions { grid-template-columns: 1fr; }
+}
