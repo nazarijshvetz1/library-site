@@ -85,6 +85,7 @@ async function database() {
     "0016_busy_jane_foster.sql",
     "0017_fresh_robbie_robertson.sql",
     "0018_yielding_skaar.sql",
+    "0019_kindly_wolfsbane.sql",
   ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
   const now = new Date().toISOString();
   insertUser(sqlite, "USR-LIB", "Бібліотекар", "library@example.test", "auth-library", "librarian", now);

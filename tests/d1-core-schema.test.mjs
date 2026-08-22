@@ -23,6 +23,7 @@ const migrationFiles = [
   "drizzle/0016_busy_jane_foster.sql",
   "drizzle/0017_fresh_robbie_robertson.sql",
   "drizzle/0018_yielding_skaar.sql",
+  "drizzle/0019_kindly_wolfsbane.sql",
 ];
 
 async function migratedDatabase() {
@@ -80,6 +81,58 @@ function seedVersion35ProductionShape(database, { driftName = false } = {}) {
 
 async function applyVersion35(database) {
   const sql = await readFile(new URL("../drizzle/0016_busy_jane_foster.sql", import.meta.url), "utf8");
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    database.exec(sql);
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+async function databaseBeforeVersion38Data() {
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON;");
+  for (const file of migrationFiles.slice(0, migrationFiles.indexOf("drizzle/0019_kindly_wolfsbane.sql"))) {
+    database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
+  }
+  return database;
+}
+
+function seedVersion38ProductionShape(database, { driftClassVersion = false } = {}) {
+  const now = "2026-08-22T21:00:00.000Z";
+  database.exec(`
+    INSERT INTO users (id,full_name,sort_name,email,auth_user_id,role,status,created_at,updated_at) VALUES
+      ('USR-001','Швець Назарій Миколайович','швець назарій миколайович','nazarijshvetz1@gmail.com',NULL,'admin','active','${now}','${now}'),
+      ('USR-006','Орел Галина Миколаївна','орел галина миколаївна',NULL,NULL,'admin','active','${now}','${now}'),
+      ('USR-007','Галака Наталія Григорівна','галака наталія григорівна',NULL,NULL,'admin','active','${now}','${now}'),
+      ('USR-008','Єгорова Альона Ігорівна','єгорова альона ігорівна',NULL,NULL,'admin','active','${now}','${now}'),
+      ('USR-009','Плахотнюк Володимир Віталійович','плахотнюк володимир віталійович','w.plah@ukr.net',NULL,'admin','active','${now}','${now}');
+    INSERT INTO teacher_profiles (teacher_user_id,created_at,updated_at) VALUES
+      ('USR-006','${now}','${now}'),('USR-007','${now}','${now}'),
+      ('USR-008','${now}','${now}'),('USR-009','${now}','${now}');
+    INSERT INTO academic_years (id,label,start_date,end_date,status,notes,version,created_at,updated_at)
+      VALUES ('YR-2026-2027','2026/2027','2026-09-01','2027-05-31','active','Поточний навчальний рік',2,'${now}','${now}');
+    INSERT INTO cohorts (id,status,notes,created_at,updated_at)
+      VALUES ('COH-001','closed','2026/2027: 1-А','${now}','${now}');
+    INSERT INTO class_years (id,academic_year_id,cohort_id,class_name,grade,code,teacher_user_id,
+      location_id,start_date,end_date,status,actual_closed_date,notes,version,created_at,updated_at)
+      VALUES ('CY-2026-001','YR-2026-2027','COH-001','1-А',1,'А',NULL,NULL,
+        '2026-09-01','2027-05-31','closed','2026-09-01','',${driftClassVersion ? 4 : 3},'${now}','${now}');
+    INSERT INTO telegram_librarian_sessions (token_hash,init_data_hash,user_id,telegram_user_id,
+      auth_date,expires_at,last_seen_at,revoked_at,created_at)
+      VALUES ('${"a".repeat(64)}','${"b".repeat(64)}','USR-006','7001',1787432400,
+        '2026-08-23T09:00:00.000Z','${now}',NULL,'${now}');
+    INSERT INTO telegram_delivery_outbox (id,recipient_user_id,dedupe_key,category,type,title,message,
+      target_path,entity_type,entity_id,status,attempts,next_attempt_at,created_at,updated_at)
+      VALUES ('TGO-V38-STAFF','USR-006','version38:staff','system','test','Службове','Службове',
+        '/librarian','user','USR-006','pending',0,'${now}','${now}','${now}');
+  `);
+}
+
+async function applyVersion38Data(database) {
+  const sql = await readFile(new URL("../drizzle/0019_kindly_wolfsbane.sql", import.meta.url), "utf8");
   database.exec("BEGIN IMMEDIATE");
   try {
     database.exec(sql);
@@ -165,6 +218,51 @@ test("version 35 preflight rolls back every change when the audited administrato
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM teacher_profiles").get().count, 0);
   assert.equal(database.prepare("SELECT end_date FROM academic_years WHERE id='YR-2026-2027'").get().end_date, "2027-08-31");
   assert.equal(database.prepare("SELECT full_name FROM users WHERE id='USR-008'").get().full_name, "Єгорова Олена Ігорівна");
+});
+
+test("version 38 demotes the four audited staff profiles and reopens 1-А", async () => {
+  const database = await databaseBeforeVersion38Data();
+  seedVersion38ProductionShape(database);
+  await applyVersion38Data(database);
+
+  assert.deepEqual(
+    database.prepare(`SELECT id,role,status FROM users
+      WHERE id IN ('USR-006','USR-007','USR-008','USR-009') ORDER BY id`).all().map((row) => ({ ...row })),
+    ["USR-006", "USR-007", "USR-008", "USR-009"].map((id) => ({ id, role: "teacher", status: "active" })),
+  );
+  assert.equal(database.prepare("SELECT role FROM users WHERE id='USR-001'").get().role, "admin");
+  assert.equal(database.prepare("SELECT count(*) AS count FROM teacher_profiles WHERE closed_at IS NULL").get().count, 4);
+  assert.deepEqual(
+    { ...database.prepare("SELECT status,actual_closed_date,version FROM class_years WHERE id='CY-2026-001'").get() },
+    { status: "active", actual_closed_date: null, version: 4 },
+  );
+  assert.equal(database.prepare("SELECT status FROM cohorts WHERE id='COH-001'").get().status, "active");
+  assert.notEqual(database.prepare("SELECT revoked_at FROM telegram_librarian_sessions WHERE user_id='USR-006'").get().revoked_at, null);
+  assert.deepEqual(
+    { ...database.prepare("SELECT status,last_error_code FROM telegram_delivery_outbox WHERE id='TGO-V38-STAFF'").get() },
+    { status: "dead", last_error_code: "recipient_role_changed" },
+  );
+  assert.equal(database.prepare("SELECT count(*) AS count FROM audit_events WHERE request_id LIKE 'VERSION-38-%'").get().count, 5);
+  assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+  assert.equal(database.prepare("SELECT count(*) AS count FROM sqlite_schema WHERE name='__version38_production_guard'").get().count, 0);
+  database.close();
+});
+
+test("version 38 preflight rolls back roles, class and Telegram state when live data drifts", async () => {
+  const database = await databaseBeforeVersion38Data();
+  seedVersion38ProductionShape(database, { driftClassVersion: true });
+  await assert.rejects(() => applyVersion38Data(database), /constraint/i);
+
+  assert.equal(database.prepare("SELECT count(*) AS count FROM users WHERE role='admin'").get().count, 5);
+  assert.deepEqual(
+    { ...database.prepare("SELECT status,actual_closed_date,version FROM class_years WHERE id='CY-2026-001'").get() },
+    { status: "closed", actual_closed_date: "2026-09-01", version: 4 },
+  );
+  assert.equal(database.prepare("SELECT status FROM cohorts WHERE id='COH-001'").get().status, "closed");
+  assert.equal(database.prepare("SELECT revoked_at FROM telegram_librarian_sessions WHERE user_id='USR-006'").get().revoked_at, null);
+  assert.equal(database.prepare("SELECT status FROM telegram_delivery_outbox WHERE id='TGO-V38-STAFF'").get().status, "pending");
+  assert.equal(database.prepare("SELECT count(*) AS count FROM audit_events WHERE request_id LIKE 'VERSION-38-%'").get().count, 0);
+  database.close();
 });
 
 test("condition normalization moves every current holding to good with balanced history", async () => {

@@ -69,6 +69,7 @@ const migrations = [
   "0016_busy_jane_foster.sql",
   "0017_fresh_robbie_robertson.sql",
   "0018_yielding_skaar.sql",
+  "0019_kindly_wolfsbane.sql",
 ];
 
 async function database() {
