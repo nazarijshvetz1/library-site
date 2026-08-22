@@ -28,27 +28,31 @@ export type ClassExcelArchive = {
 const MAX_ARCHIVE_BYTES = 48 * 1024 * 1024;
 
 const COLUMNS: ExcelColumn[] = [
-  { header: "№", width: 7, kind: "number" },
-  { header: "Предмет", width: 25 },
-  { header: "Назва, автор і рік", width: 60 },
-  { header: "Залишилося у класу", width: 22, kind: "number" },
-  { header: "Рубрика", width: 32 },
-  { header: "Дата видачі", width: 18, kind: "date" },
+  { header: "№", width: 5, kind: "number" },
+  { header: "Предмет", width: 18 },
+  { header: "Назва, автор і рік", width: 46 },
+  { header: "Залишилося у класу", width: 16, kind: "number" },
+  { header: "Рубрика", width: 22 },
+  { header: "Дата видачі", width: 13, kind: "date" },
 ];
 
 export function createClassExcelWorkbook(
   document: ClassExportDocument,
   generatedAt: string,
 ): ClassExcelWorkbook {
-  const textbooks = document.lines.filter((line) => !isMethodicalOrWorkbook(line));
-  const methodical = document.lines.filter(isMethodicalOrWorkbook);
+  const textbooks = document.lines.filter(isTextbook);
+  const methodical = document.lines.filter((line) => !isTextbook(line));
   const sheets: ExcelSheet[] = [
     classSheet("Підручники", document, textbooks, generatedAt,
       "У цього класу немає виданих підручників."),
     classSheet("Методична література, зошити", document, methodical, generatedAt,
       "У цього класу немає виданої методичної літератури або зошитів."),
   ];
-  const bytes = createExcelWorkbookBytes(sheets, generatedAt);
+  const bytes = createExcelWorkbookBytes(
+    sheets,
+    generatedAt,
+    `Видані матеріали — ${document.className}`,
+  );
   if (bytes.byteLength > MAX_ARCHIVE_BYTES) {
     throw new Error("Excel-документ класу перевищує безпечний ліміт 48 МіБ.");
   }
@@ -99,10 +103,11 @@ function classSheet(
   return {
     name,
     columns: COLUMNS,
+    reportTitle: `${name} — ${document.className}`,
     metadata: [
-      ["Назва класу", document.className],
-      ["Кабінет класу", document.locationName],
-      ["Відповідальний учитель", document.teacherName],
+      ["Клас", document.className],
+      ["Кабінет", document.locationName],
+      ["Куратор класу", document.teacherName],
       ["Навчальний рік", document.academicYear],
       ["Сформовано", kyivDisplayDate(generatedAt)],
     ],
@@ -116,12 +121,15 @@ function classSheet(
     ]),
     emptyMessage,
     printLandscape: true,
+    printFitToHeight: 1,
+    compactRows: true,
+    printFooter: `Сформовано ${kyivDisplayDate(generatedAt)}`,
   };
 }
 
-function isMethodicalOrWorkbook(line: ClassExportLine): boolean {
+function isTextbook(line: ClassExportLine): boolean {
   const source = `${line.rubric} ${line.publicationType}`.normalize("NFKC").toLocaleLowerCase("uk-UA");
-  return source.includes("методич") || source.includes("зошит");
+  return source.includes("підруч");
 }
 
 function materialLabel(line: ClassExportLine): string {

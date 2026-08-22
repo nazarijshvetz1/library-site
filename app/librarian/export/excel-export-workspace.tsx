@@ -246,7 +246,7 @@ export default function ExcelExportWorkspace({
               {!classesLoading && !classesError && selectedClassId ? (() => {
                 const selected = classes.find((item) => item.id === selectedClassId);
                 return selected ? (
-                  <><span><strong>Кабінет:</strong> {selected.locationName}</span><span><strong>Учитель:</strong> {selected.teacherName}</span></>
+                  <><span><strong>Кабінет:</strong> {selected.locationName}</span><span><strong>Куратор класу:</strong> {selected.teacherName}</span></>
                 ) : null;
               })() : null}
             </div>

@@ -94,11 +94,12 @@ function downloadResponse(
   extraHeaders: Record<string, string>,
 ): Response {
   const encodedName = encodeURIComponent(fileName);
+  const fallbackName = contentType === "application/zip" ? "class-export.zip" : "class-export.xlsx";
   return new Response(bytes, {
     status: 200,
     headers: {
       "Cache-Control": "private, no-store",
-      "Content-Disposition": `attachment; filename="class-export"; filename*=UTF-8''${encodedName}`,
+      "Content-Disposition": `attachment; filename="${fallbackName}"; filename*=UTF-8''${encodedName}`,
       "Content-Type": contentType,
       "X-Content-Type-Options": "nosniff",
       "X-Export-Filename": encodedName,
