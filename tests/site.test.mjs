@@ -260,6 +260,7 @@ test("ships an accessible responsive public visit schedule and protected handoff
   ]);
   assert.match(html, /href="#visit-schedule"[^>]*>Графік<\/a>/);
   assert.match(html, /href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/teacher"[\s\S]*>Кабінет учителя<\/a>/);
+  assert.match(html, /class="teacher-nav-link"[\s\S]*data-primary-section="teacher"[\s\S]*>Кабінет учителя<\/a>/);
   assert.match(html, /id="visit-schedule" aria-labelledby="visit-schedule-title"/);
   assert.match(html, /Графік доступний усім без входу/);
   assert.match(html, /видно ім’я вчителя й точний час/);
