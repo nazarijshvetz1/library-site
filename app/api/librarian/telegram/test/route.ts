@@ -3,8 +3,8 @@ import { env } from "cloudflare:workers";
 import { authorizeLibrarianApi, isSameOriginRequest } from "@/lib/librarian-api";
 import { telegramError, telegramJson, telegramStoreError } from "@/lib/telegram-api";
 import {
+  repairTelegramWebhookAndSendTestMessage,
   resolveLibrarianTelegramUserId,
-  sendTelegramTestMessage,
   type TelegramDatabase,
 } from "@/lib/telegram-notifications";
 
@@ -17,7 +17,7 @@ export async function POST(request: Request): Promise<Response> {
   const db = env.DB as unknown as TelegramDatabase;
   try {
     const userId = await resolveLibrarianTelegramUserId(db, authorization.value.user);
-    await sendTelegramTestMessage(db, userId, new URL(request.url).origin, "/librarian/teachers");
+    await repairTelegramWebhookAndSendTestMessage(db, userId, new URL(request.url).origin);
     return telegramJson({ schemaVersion: 1, success: true, writesEnabled: true });
   } catch (error) {
     return telegramStoreError(error);

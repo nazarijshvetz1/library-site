@@ -298,7 +298,7 @@ function LibrarianTelegramPanel({ writesEnabled }: { writesEnabled: boolean }) {
     setBusy("test"); setNotice("");
     try {
       await visitApi("/api/librarian/telegram/test", { method: "POST" });
-      setNotice("Тестове повідомлення надіслано в Telegram."); setNoticeTone("success");
+      setNotice("Тестове повідомлення надіслано. Вебхук і меню Telegram оновлено."); setNoticeTone("success");
       await load();
     } catch (error) {
       setNotice(errorMessage(error)); setNoticeTone("error");

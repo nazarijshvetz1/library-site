@@ -251,9 +251,124 @@ test("webhook registration pins the canonical origin and publishes fallback plus
   assert.equal(requests.length, 3);
   assert.match(requests[0].url, /\/setWebhook$/u);
   assert.equal(requests[0].body.url, "https://library.example.test/api/telegram/webhook");
+  assert.equal(requests[0].body.secret_token, "test_webhook_secret_123456789");
+  assert.deepEqual(requests[0].body.allowed_updates, ["message"]);
+  assert.match(requests[1].url, /\/setMyCommands$/u);
+  assert.equal(requests[1].body.language_code, undefined);
+  assert.deepEqual(requests[1].body.commands.map(({ command }) => command), ["start", "menu", "stop"]);
+  assert.equal(requests[2].body.language_code, "uk");
+});
+
+test("ordinary webhook registration keeps command hints best-effort", async () => {
+  const requests = [];
+  await telegram.registerTelegramWebhook(
+    "https://preview.example.test",
+    async (url, init) => {
+      requests.push({ url: String(url), body: JSON.parse(init.body) });
+      if (String(url).endsWith("/setMyCommands")) {
+        return new Response(JSON.stringify({ ok: false, error_code: 429, description: "Retry later" }), {
+          status: 429,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return telegramOk(63);
+    },
+  );
+  assert.equal(requests.length, 3);
+  assert.match(requests[0].url, /\/setWebhook$/u);
+  assert.match(requests[1].url, /\/setMyCommands$/u);
+  assert.match(requests[2].url, /\/setMyCommands$/u);
+});
+
+test("test message refreshes webhook and commands before outbound delivery", async () => {
+  const context = await database();
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-LIB','8001','8001',NULL,'active',1,1,1,?,NULL,?,?)`)
+    .run(context.now, context.now, context.now);
+  const requests = [];
+  await telegram.repairTelegramWebhookAndSendTestMessage(
+    context.db,
+    "USR-LIB",
+    "https://preview.example.test",
+    "/librarian/teachers",
+    async (url, init) => {
+      requests.push({ url: String(url), body: JSON.parse(init.body) });
+      return telegramOk(62);
+    },
+  );
+  assert.equal(requests.length, 4);
+  assert.match(requests[0].url, /\/setWebhook$/u);
+  assert.equal(requests[0].body.url, "https://library.example.test/api/telegram/webhook");
   assert.match(requests[1].url, /\/setMyCommands$/u);
   assert.equal(requests[1].body.language_code, undefined);
   assert.equal(requests[2].body.language_code, "uk");
+  assert.match(requests[3].url, /\/sendMessage$/u);
+  assert.equal(requests[3].body.chat_id, "8001");
+  assert.equal(
+    requests[3].body.reply_markup.inline_keyboard[0][0].url,
+    "https://library.example.test/librarian/teachers",
+  );
+  context.sqlite.close();
+});
+
+test("test message is not sent when webhook refresh fails", async () => {
+  const context = await database();
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-LIB','8001','8001',NULL,'active',1,1,1,?,NULL,?,?)`)
+    .run(context.now, context.now, context.now);
+  const requests = [];
+  await assert.rejects(() => telegram.repairTelegramWebhookAndSendTestMessage(
+    context.db,
+    "USR-LIB",
+    "https://preview.example.test",
+    "/librarian/teachers",
+    async (url, init) => {
+      requests.push({ url: String(url), body: JSON.parse(init.body) });
+      return new Response(JSON.stringify({ ok: false, error_code: 401, description: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  ));
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].url, /\/setWebhook$/u);
+  context.sqlite.close();
+});
+
+test("repair fails closed when either command menu cannot be refreshed", async () => {
+  for (const failedRequestIndex of [1, 2]) {
+    const context = await database();
+    context.sqlite.prepare(`INSERT INTO telegram_connections (
+      user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+      linked_at,disabled_at,created_at,updated_at
+    ) VALUES ('USR-LIB','8001','8001',NULL,'active',1,1,1,?,NULL,?,?)`)
+      .run(context.now, context.now, context.now);
+    const requests = [];
+    await assert.rejects(() => telegram.repairTelegramWebhookAndSendTestMessage(
+      context.db,
+      "USR-LIB",
+      "https://preview.example.test",
+      "/librarian/teachers",
+      async (url, init) => {
+        const requestIndex = requests.length;
+        requests.push({ url: String(url), body: JSON.parse(init.body) });
+        if (requestIndex === failedRequestIndex) {
+          return new Response(JSON.stringify({ ok: false, error_code: 429, description: "Retry later" }), {
+            status: 429,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return telegramOk(64);
+      },
+    ));
+    assert.equal(requests.some(({ url }) => url.endsWith("/sendMessage")), false);
+    assert.equal(requests.length, failedRequestIndex + 1);
+    context.sqlite.close();
+  }
 });
 
 test("site disconnect disables the connection and resets the private chat menu", async () => {

@@ -321,6 +321,7 @@ export async function sendTelegramTestMessage(
 export async function registerTelegramWebhook(
   siteOrigin: string,
   fetcher: TelegramFetcher = fetch,
+  strictCommands = false,
 ): Promise<void> {
   const configuration = requireLinkingConfiguration();
   const webhookUrl = new URL("/api/telegram/webhook", trustedSiteOrigin(siteOrigin)).toString();
@@ -342,10 +343,26 @@ export async function registerTelegramWebhook(
         scope: { type: "all_private_chats" },
         ...(languageCode ? { language_code: languageCode } : {}),
       }, fetcher);
-    } catch {
+    } catch (error) {
+      if (strictCommands) throw error;
       // The webhook is authoritative; command hints can be retried on the next link request.
     }
   }
+}
+
+export async function repairTelegramWebhookAndSendTestMessage(
+  db: TelegramDatabase,
+  userId: string,
+  siteOrigin: string,
+  targetPath = "/librarian/teachers",
+  fetcher: TelegramFetcher = fetch,
+): Promise<void> {
+  // A BotFather token rotation preserves the saved chat connection but can
+  // leave inbound updates pointed at stale webhook credentials. A librarian's
+  // explicit test refreshes the pinned webhook and command hints first, then
+  // verifies outbound delivery without disconnecting the existing profile.
+  await registerTelegramWebhook(siteOrigin, fetcher, true);
+  await sendTelegramTestMessage(db, userId, siteOrigin, targetPath, fetcher);
 }
 
 export function queueTelegramForLibrariansStatement(
