@@ -15,8 +15,12 @@ export type ExcelSheet = {
   columns: ExcelColumn[];
   rows: ExcelCell[][];
   metadata?: Array<[label: string, value: string]>;
+  reportTitle?: string;
   emptyMessage?: string;
   printLandscape?: boolean;
+  printFitToHeight?: number;
+  compactRows?: boolean;
+  printFooter?: string;
 };
 
 type ColumnKind = ExcelColumnKind;
@@ -58,8 +62,9 @@ export function createLibraryExcelExport(snapshot: LibraryExportSnapshot): Libra
 export function createExcelWorkbookBytes(
   sheets: ExcelSheet[],
   generatedAt: string,
+  workbookTitle = "Єдина бібліотека — повний експорт",
 ): Uint8Array {
-  return zipStore(workbookEntries(sheets, generatedAt), generatedAt);
+  return zipStore(workbookEntries(sheets, generatedAt, workbookTitle), generatedAt);
 }
 
 export function createStoredZipArchive(
@@ -423,14 +428,18 @@ function requestStatusLabel(value: string) {
 }
 function conditionLabel(value: string) { return ({ good: "Добрий стан", worn: "Зношений", damaged: "Пошкоджений", unspecified: "Не вказано" } as Record<string, string>)[value] ?? value; }
 
-function workbookEntries(sheets: Sheet[], generatedAt: string): Array<{ name: string; data: Uint8Array }> {
+function workbookEntries(
+  sheets: Sheet[],
+  generatedAt: string,
+  workbookTitle = "Єдина бібліотека — повний експорт",
+): Array<{ name: string; data: Uint8Array }> {
   const encoder = new TextEncoder();
   const xml = (name: string, value: string) => ({ name, data: encoder.encode(value) });
   const entries = [
     xml("[Content_Types].xml", contentTypesXml(sheets.length)),
     xml("_rels/.rels", rootRelationshipsXml()),
     xml("docProps/app.xml", appPropertiesXml(sheets)),
-    xml("docProps/core.xml", corePropertiesXml(generatedAt)),
+    xml("docProps/core.xml", corePropertiesXml(generatedAt, workbookTitle)),
     xml("xl/workbook.xml", workbookXml(sheets)),
     xml("xl/_rels/workbook.xml.rels", workbookRelationshipsXml(sheets.length)),
     xml("xl/styles.xml", stylesXml()),
@@ -439,29 +448,95 @@ function workbookEntries(sheets: Sheet[], generatedAt: string): Array<{ name: st
   return entries;
 }
 
-function worksheetXml(sheet: Sheet): string {
-  const lastColumn = columnName(sheet.columns.length);
+type WorksheetLayout = {
+  bodyStartRow: number;
+  compactMetadataRows: Array<Array<[label: string, value: string]>>;
+  hasEmptyMessage: boolean;
+  headerRow: number;
+  lastColumn: string;
+  lastRow: number;
+};
+
+function worksheetLayout(sheet: Sheet): WorksheetLayout {
   const metadata = sheet.metadata ?? [];
-  const headerRow = metadata.length > 0 ? metadata.length + 2 : 1;
+  const compactMetadataRows: Array<Array<[label: string, value: string]>> = [];
+  if (sheet.reportTitle && metadata.length > 0) {
+    compactMetadataRows.push(metadata.slice(0, 3));
+    for (let index = 3; index < metadata.length; index += 2) {
+      compactMetadataRows.push(metadata.slice(index, index + 2));
+    }
+  }
+  const headerRow = sheet.reportTitle
+    ? compactMetadataRows.length + 2
+    : metadata.length > 0 ? metadata.length + 2 : 1;
   const bodyStartRow = headerRow + 1;
   const hasEmptyMessage = sheet.rows.length === 0 && Boolean(sheet.emptyMessage);
-  const lastRow = Math.max(headerRow, sheet.rows.length + headerRow, hasEmptyMessage ? bodyStartRow : headerRow);
+  const lastRow = Math.max(
+    headerRow,
+    sheet.rows.length + headerRow,
+    hasEmptyMessage ? bodyStartRow : headerRow,
+  );
+  return {
+    bodyStartRow,
+    compactMetadataRows,
+    hasEmptyMessage,
+    headerRow,
+    lastColumn: columnName(sheet.columns.length),
+    lastRow,
+  };
+}
+
+function worksheetXml(sheet: Sheet): string {
+  const metadata = sheet.metadata ?? [];
+  const layout = worksheetLayout(sheet);
+  const {
+    bodyStartRow,
+    compactMetadataRows,
+    hasEmptyMessage,
+    headerRow,
+    lastColumn,
+    lastRow,
+  } = layout;
   const cols = sheet.columns.map((column, index) => `<col min="${index + 1}" max="${index + 1}" width="${column.width}" customWidth="1"${column.hidden ? ' hidden="1"' : ""}/>`).join("");
-  const metadataRows = metadata.map(([label, value], index) => {
-    const row = index + 1;
-    return `<row r="${row}" ht="25" customHeight="1">${styledTextCellXml(1, row, label, 6)}${styledTextCellXml(2, row, value, 7)}</row>`;
-  }).join("");
+  const titleRow = sheet.reportTitle
+    ? `<row r="1" ht="32" customHeight="1">${styledTextCellXml(1, 1, sheet.reportTitle, 8)}</row>`
+    : "";
+  const metadataRows = sheet.reportTitle
+    ? compactMetadataRows.map((items, rowIndex) => {
+      const row = rowIndex + 2;
+      const cells = items.map(([label, value], itemIndex) => {
+        const startColumn = Math.floor((itemIndex * sheet.columns.length) / items.length) + 1;
+        return styledTextCellXml(startColumn, row, `${label}: ${value}`, 9);
+      }).join("");
+      return `<row r="${row}" ht="25" customHeight="1">${cells}</row>`;
+    }).join("")
+    : metadata.map(([label, value], index) => {
+      const row = index + 1;
+      return `<row r="${row}" ht="25" customHeight="1">${styledTextCellXml(1, row, label, 6)}${styledTextCellXml(2, row, value, 7)}</row>`;
+    }).join("");
   const header = `<row r="${headerRow}" ht="30" customHeight="1">${sheet.columns.map((column, index) => cellXml(index + 1, headerRow, column.header, "text", true)).join("")}</row>`;
   const body = sheet.rows.map((row, rowIndex) => {
     const excelRow = rowIndex + bodyStartRow;
     const cells = sheet.columns.map((column, columnIndex) => cellXml(columnIndex + 1, excelRow, row[columnIndex] ?? "", column.kind ?? "text", false)).join("");
-    return `<row r="${excelRow}" ht="32" customHeight="1">${cells}</row>`;
+    const rowHeight = sheet.compactRows ? compactRowHeight(row, sheet.columns) : 32;
+    return `<row r="${excelRow}" ht="${rowHeight}" customHeight="1">${cells}</row>`;
   }).join("");
   const emptyRow = hasEmptyMessage
-    ? `<row r="${bodyStartRow}" ht="32" customHeight="1">${styledTextCellXml(1, bodyStartRow, sheet.emptyMessage ?? "", 7)}</row>`
+    ? `<row r="${bodyStartRow}" ht="${sheet.compactRows ? 24 : 32}" customHeight="1">${styledTextCellXml(1, bodyStartRow, sheet.emptyMessage ?? "", 7)}</row>`
     : "";
+  const reportMerges = sheet.reportTitle
+    ? [
+      `A1:${lastColumn}1`,
+      ...compactMetadataRows.flatMap((items, rowIndex) => items.map((_, itemIndex) => {
+        const startColumn = Math.floor((itemIndex * sheet.columns.length) / items.length) + 1;
+        const endColumn = Math.floor(((itemIndex + 1) * sheet.columns.length) / items.length);
+        return `${columnName(startColumn)}${rowIndex + 2}:${columnName(endColumn)}${rowIndex + 2}`;
+      })),
+    ]
+    : [];
   const mergeRanges = [
-    ...metadata.map((_, index) => `B${index + 1}:${lastColumn}${index + 1}`),
+    ...reportMerges,
+    ...(!sheet.reportTitle ? metadata.map((_, index) => `B${index + 1}:${lastColumn}${index + 1}`) : []),
     ...(hasEmptyMessage ? [`A${bodyStartRow}:${lastColumn}${bodyStartRow}`] : []),
   ];
   const merges = mergeRanges.length > 0
@@ -469,20 +544,40 @@ function worksheetXml(sheet: Sheet): string {
     : "";
   const filterEnd = Math.max(headerRow, sheet.rows.length + headerRow);
   const printSettings = sheet.printLandscape
-    ? `<pageMargins left="0.25" right="0.25" top="0.5" bottom="0.5" header="0.2" footer="0.2"/><pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>`
+    ? `<printOptions horizontalCentered="1"/><pageMargins left="0.25" right="0.25" top="0.25" bottom="0.25" header="0.15" footer="0.15"/><pageSetup paperSize="9" orientation="landscape" pageOrder="overThenDown" fitToWidth="1" fitToHeight="${sheet.printFitToHeight ?? 0}"/>${printFooterXml(sheet.printFooter)}`
     : "";
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   ${sheet.printLandscape ? '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>' : ""}
   <dimension ref="A1:${lastColumn}${lastRow}"/>
   <sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="${headerRow}" topLeftCell="A${bodyStartRow}" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A${bodyStartRow}" sqref="A${bodyStartRow}"/></sheetView></sheetViews>
-  <sheetFormatPr defaultRowHeight="24"/>
+  <sheetFormatPr defaultRowHeight="${sheet.compactRows ? 22 : 24}"/>
   <cols>${cols}</cols>
-  <sheetData>${metadataRows}${header}${body}${emptyRow}</sheetData>
-  ${merges}
+  <sheetData>${titleRow}${metadataRows}${header}${body}${emptyRow}</sheetData>
   <autoFilter ref="A${headerRow}:${lastColumn}${filterEnd}"/>
+  ${merges}
   ${printSettings}
 </worksheet>`;
+}
+
+function compactRowHeight(row: Cell[], columns: Column[]): number {
+  let lineCount = 1;
+  for (let index = 0; index < columns.length; index += 1) {
+    const text = cellDisplayText(row[index] ?? "");
+    if (!text) continue;
+    lineCount = Math.max(lineCount, Math.ceil(text.length / Math.max(columns[index].width, 1)));
+  }
+  return Math.min(54, 22 + Math.max(0, lineCount - 1) * 16);
+}
+
+function cellDisplayText(cell: Cell): string {
+  if (isFormula(cell) || isTypedCell(cell)) return String(cell.value ?? "");
+  return cell == null ? "" : String(cell);
+}
+
+function printFooterXml(value?: string): string {
+  const left = value ? `&amp;L${escapeXml(value)}` : "";
+  return `<headerFooter><oddFooter>${left}&amp;RСторінка &amp;P з &amp;N</oddFooter></headerFooter>`;
 }
 
 function styledTextCellXml(column: number, row: number, value: string, style: number): string {
@@ -553,7 +648,17 @@ function rootRelationshipsXml(): string {
 
 function workbookXml(sheets: Sheet[]): string {
   const rows = sheets.map((sheet, index) => `<sheet name="${escapeXml(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join("");
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView activeTab="0"/></bookViews><sheets>${rows}</sheets><calcPr calcId="191029" calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/></workbook>`;
+  const definedNames = sheets.flatMap((sheet, index) => {
+    if (!sheet.printLandscape) return [];
+    const layout = worksheetLayout(sheet);
+    const sheetName = `'${sheet.name.replace(/'/gu, "''")}'`;
+    return [
+      `<definedName name="_xlnm.Print_Area" localSheetId="${index}">${escapeXml(`${sheetName}!$A$1:$${layout.lastColumn}$${layout.lastRow}`)}</definedName>`,
+      `<definedName name="_xlnm.Print_Titles" localSheetId="${index}">${escapeXml(`${sheetName}!$1:$${layout.headerRow}`)}</definedName>`,
+    ];
+  }).join("");
+  const definitions = definedNames ? `<definedNames>${definedNames}</definedNames>` : "";
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView activeTab="0"/></bookViews><sheets>${rows}</sheets>${definitions}<calcPr calcId="191029" calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/></workbook>`;
 }
 
 function workbookRelationshipsXml(sheetCount: number): string {
@@ -561,9 +666,9 @@ function workbookRelationshipsXml(sheetCount: number): string {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets}<Relationship Id="rId${sheetCount + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
 }
 
-function corePropertiesXml(generatedAt: string): string {
+function corePropertiesXml(generatedAt: string, title: string): string {
   const created = Number.isNaN(new Date(generatedAt).getTime()) ? new Date().toISOString() : new Date(generatedAt).toISOString();
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>Єдина бібліотека — повний експорт</dc:title><dc:creator>Єдина бібліотека</dc:creator><cp:lastModifiedBy>Єдина бібліотека</cp:lastModifiedBy><dcterms:created xsi:type="dcterms:W3CDTF">${escapeXml(created)}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${escapeXml(created)}</dcterms:modified></cp:coreProperties>`;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${escapeXml(title)}</dc:title><dc:creator>Єдина бібліотека</dc:creator><cp:lastModifiedBy>Єдина бібліотека</cp:lastModifiedBy><dcterms:created xsi:type="dcterms:W3CDTF">${escapeXml(created)}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${escapeXml(created)}</dcterms:modified></cp:coreProperties>`;
 }
 
 function appPropertiesXml(sheets: Sheet[]): string {
@@ -575,11 +680,11 @@ function stylesXml(): string {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <numFmts count="2"><numFmt numFmtId="164" formatCode="yyyy-mm-dd"/><numFmt numFmtId="165" formatCode="yyyy-mm-dd hh:mm"/></numFmts>
-  <fonts count="3"><font><sz val="14"/><name val="Times New Roman"/><family val="1"/><charset val="204"/></font><font><b/><sz val="14"/><color rgb="FFFFFFFF"/><name val="Times New Roman"/><family val="1"/><charset val="204"/></font><font><b/><sz val="14"/><color rgb="FF163420"/><name val="Times New Roman"/><family val="1"/><charset val="204"/></font></fonts>
+  <fonts count="4"><font><sz val="14"/><name val="Times New Roman"/><family val="1"/><charset val="204"/></font><font><b/><sz val="14"/><color rgb="FFFFFFFF"/><name val="Times New Roman"/><family val="1"/><charset val="204"/></font><font><b/><sz val="14"/><color rgb="FF163420"/><name val="Times New Roman"/><family val="1"/><charset val="204"/></font><font><b/><sz val="18"/><color rgb="FFFFFFFF"/><name val="Times New Roman"/><family val="1"/><charset val="204"/></font></fonts>
   <fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF215732"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFEAF2E7"/><bgColor indexed="64"/></patternFill></fill></fills>
   <borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFD7E0D5"/></left><right style="thin"><color rgb="FFD7E0D5"/></right><top style="thin"><color rgb="FFD7E0D5"/></top><bottom style="thin"><color rgb="FFD7E0D5"/></bottom><diagonal/></border></borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="8">
+  <cellXfs count="10">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyFont="1"/>
     <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
     <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
@@ -588,6 +693,8 @@ function stylesXml(): string {
     <xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
     <xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
     <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
   </cellXfs>
   <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;

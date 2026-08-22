@@ -62,12 +62,14 @@ function seed(sqlite) {
       ('CY-6B','YR-1','COH-2','6-Б',6,'Б',NULL,NULL,'2026-09-01','2027-06-30','active','',1,?,?)`).run(now, now, now, now);
   sqlite.prepare(`INSERT INTO materials (id,catalog_number,title,sort_title,search_text,rubric,publication_type,subject,class_from,class_to,author,publication_year,isbn,isbn_normalized,publisher,notes,status,version,created_at,updated_at)
     VALUES ('CAT-0001',1,'Математика 5 клас','математика 5 клас','математика','Підручники','Підручник','Математика',5,5,'Автор П.',2026,'','','','', 'active',1,?,?),
-      ('CAT-0002',2,'Робочий зошит','робочий зошит','зошит','Робочі зошити','Робочий зошит','Математика',5,5,'Автор З.',2025,'','','','', 'active',1,?,?)`).run(now, now, now, now);
+      ('CAT-0002',2,'Робочий зошит','робочий зошит','зошит','Робочі зошити','Робочий зошит','Математика',5,5,'Автор З.',2025,'','','','', 'active',1,?,?),
+      ('CAT-0003',3,'Атлас світу','атлас світу','атлас','Атласи','Атлас','Географія',5,5,'Автор А.',2024,'','','','', 'active',1,?,?)`).run(now, now, now, now, now, now);
   sqlite.prepare(`INSERT INTO class_loans (id,class_year_id,responsible_teacher_user_id,status,issued_at,due_at,notes,issued_by_user_id,version,created_at,updated_at)
     VALUES ('CLOAN-1','CY-5A','USR-TEACH','open','2026-08-20T09:00:00.000Z','2027-06-01','', 'USR-LIB',1,?,?)`).run(now, now);
   sqlite.prepare(`INSERT INTO class_loan_items (id,class_loan_id,material_id,source_location_id,condition,quantity_issued,quantity_returned,notes,created_at,updated_at)
     VALUES ('CLI-1','CLOAN-1','CAT-0001','LOC-LIB','good',10,2,'',?,?),
-      ('CLI-2','CLOAN-1','CAT-0002','LOC-LIB','good',5,1,'',?,?)`).run(now, now, now, now);
+      ('CLI-2','CLOAN-1','CAT-0002','LOC-LIB','good',5,1,'',?,?),
+      ('CLI-3','CLOAN-1','CAT-0003','LOC-LIB','good',2,0,'',?,?)`).run(now, now, now, now, now, now);
 }
 
 test("class export reads active classes and only outstanding class-loan quantities", async () => {
@@ -79,14 +81,16 @@ test("class export reads active classes and only outstanding class-loan quantiti
   assert.equal(snapshot.classes[0].className, "5-А");
   assert.equal(snapshot.classes[0].teacherName, "Класний Керівник");
   assert.equal(snapshot.classes[0].locationName, "Кабінет № 12");
-  assert.equal(snapshot.classes[0].remainingQuantity, 12);
-  assert.deepEqual(snapshot.classes[0].lines.map((line) => line.remainingQuantity), [8, 4]);
+  assert.equal(snapshot.classes[0].remainingQuantity, 14);
+  assert.equal(snapshot.classes[0].lines.find((line) => line.title === "Математика 5 клас")?.remainingQuantity, 8);
+  assert.equal(snapshot.classes[0].lines.find((line) => line.title === "Робочий зошит")?.remainingQuantity, 4);
+  assert.equal(snapshot.classes[0].lines.find((line) => line.title === "Атлас світу")?.remainingQuantity, 2);
   assert.equal(snapshot.classes[1].teacherName, "Не призначено");
   assert.equal(snapshot.classes[1].lines.length, 0);
   sqlite.close();
 });
 
-test("each class workbook has the exact two sheets, requested columns and Times New Roman 14", async () => {
+test("each class workbook has two compact, printable sheets with class details", async () => {
   const { sqlite, db } = openDatabase();
   const snapshot = await store.readClassExportSnapshot(db, "CY-5A", "2026-08-21T12:00:00.000Z");
   const workbook = generator.createClassExcelWorkbook(snapshot.classes[0], snapshot.generatedAt);
@@ -99,21 +103,34 @@ test("each class workbook has the exact two sheets, requested columns and Times 
   assert.match(workbookXml, /name="Підручники"/u);
   assert.match(workbookXml, /name="Методична література, зошити"/u);
   assert.equal((workbookXml.match(/<sheet /gu) ?? []).length, 2);
+  assert.equal((workbookXml.match(/name="_xlnm.Print_Area"/gu) ?? []).length, 2);
+  assert.equal((workbookXml.match(/name="_xlnm.Print_Titles"/gu) ?? []).length, 2);
   for (const header of ["№", "Предмет", "Назва, автор і рік", "Залишилося у класу", "Рубрика", "Дата видачі"]) {
     assert.match(textbookSheet, new RegExp(`>${header.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}<`, "u"));
   }
-  assert.match(textbookSheet, /Назва класу/u);
-  assert.match(textbookSheet, /5-А/u);
-  assert.match(textbookSheet, /Кабінет № 12/u);
-  assert.match(textbookSheet, /Класний Керівник/u);
+  assert.match(textbookSheet, /Підручники — 5-А/u);
+  assert.match(textbookSheet, /Клас: 5-А/u);
+  assert.match(textbookSheet, /Кабінет: Кабінет № 12/u);
+  assert.match(textbookSheet, /Куратор класу: Класний Керівник/u);
+  assert.match(textbookSheet, /Навчальний рік: 2026\/2027/u);
+  assert.doesNotMatch(textbookSheet, /Відповідальний учитель/u);
   assert.match(textbookSheet, /Математика 5 клас — Автор П. · 2026/u);
   assert.doesNotMatch(textbookSheet, /Робочий зошит/u);
+  assert.doesNotMatch(textbookSheet, /Атлас світу/u);
   assert.match(methodicalSheet, /Робочий зошит — Автор З. · 2025/u);
+  assert.match(methodicalSheet, /Атлас світу — Автор А. · 2024/u);
   assert.match(textbookSheet, /orientation="landscape"/u);
+  assert.match(textbookSheet, /paperSize="9"/u);
+  assert.match(textbookSheet, /fitToWidth="1" fitToHeight="1"/u);
+  assert.match(textbookSheet, /<printOptions horizontalCentered="1"\/>/u);
+  assert.match(textbookSheet, /<headerFooter>/u);
+  assert.match(textbookSheet, /width="5" customWidth="1"/u);
+  assert.ok(textbookSheet.indexOf("<autoFilter") < textbookSheet.indexOf("<mergeCells"));
   assert.match(styles, /<name val="Times New Roman"\/>/u);
   assert.match(styles, /<sz val="14"\/>/u);
+  assert.match(styles, /<sz val="18"\/>/u);
   assert.equal(workbook.sheetCount, 2);
-  assert.equal(workbook.rowCount, 2);
+  assert.equal(workbook.rowCount, 3);
   sqlite.close();
 });
 
@@ -141,11 +158,14 @@ test("protected export UI exposes one class and all-classes downloads", async ()
   assert.match(route, /authorizeLibrarianApi/u);
   assert.match(route, /private, no-store/u);
   assert.match(route, /application\/zip/u);
+  assert.match(route, /class-export\.xlsx/u);
+  assert.match(route, /class-export\.zip/u);
   assert.match(ui, /Видані матеріали по класах/u);
   assert.match(ui, /Підручники/u);
   assert.match(ui, /Методична література, зошити/u);
   assert.match(ui, /Завантажити обраний клас/u);
   assert.match(ui, /Завантажити всі класи/u);
+  assert.match(ui, /Куратор класу/u);
 });
 
 function unzipStored(bytes) {
