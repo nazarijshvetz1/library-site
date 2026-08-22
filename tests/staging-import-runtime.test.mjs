@@ -179,8 +179,8 @@ test("hosted import preserves the four named administrator teacher profiles", as
   plan.tables.users.push({
     ...template,
     id: "USR-006",
-    full_name: "Галака Наталія Григорівна",
-    sort_name: "галака наталія григорівна",
+    full_name: "Орел Галина Миколаївна",
+    sort_name: "орел галина миколаївна",
     email: null,
     auth_user_id: null,
     role: "admin",

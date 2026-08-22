@@ -245,7 +245,7 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
   const dualRole = await database();
   dualRole.sqlite.prepare(`INSERT INTO users
     (id,full_name,sort_name,email,auth_user_id,role,status,created_at,updated_at)
-    VALUES ('USR-006','Галака Наталія Григорівна','галака наталія григорівна',NULL,NULL,'admin','active',?,?)`)
+    VALUES ('USR-006','Орел Галина Миколаївна','орел галина миколаївна',NULL,NULL,'admin','active',?,?)`)
     .run(dualRole.now, dualRole.now);
   dualRole.sqlite.prepare(`INSERT INTO teacher_profiles (teacher_user_id,created_at,updated_at) VALUES ('USR-006',?,?)`)
     .run(dualRole.now, dualRole.now);

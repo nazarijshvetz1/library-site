@@ -36,13 +36,13 @@ SELECT CASE WHEN (SELECT COUNT(*) FROM `users`) = 0 THEN 1 WHEN
     WHERE `id` IN ('USR-006','USR-007','USR-008','USR-009')
       AND `role`='admin' AND `status`='active') = 4
   AND EXISTS (SELECT 1 FROM `users`
-    WHERE `id`='USR-006' AND `full_name`='Галака Наталія Григорівна')
+    WHERE `id`='USR-006' AND `full_name`='Орел Галина Миколаївна')
   AND EXISTS (SELECT 1 FROM `users`
-    WHERE `id`='USR-007' AND `full_name`='Плахотнюк Володимир Віталійович')
+    WHERE `id`='USR-007' AND `full_name`='Галака Наталія Григорівна')
   AND EXISTS (SELECT 1 FROM `users`
     WHERE `id`='USR-008' AND `full_name`='Єгорова Олена Ігорівна')
   AND EXISTS (SELECT 1 FROM `users`
-    WHERE `id`='USR-009' AND `full_name`='Орел Галина Миколаївна')
+    WHERE `id`='USR-009' AND `full_name`='Плахотнюк Володимир Віталійович')
   AND NOT EXISTS (SELECT 1 FROM `teacher_profiles`
     WHERE `teacher_user_id` IN ('USR-006','USR-007','USR-008','USR-009'))
   AND EXISTS (SELECT 1 FROM `academic_years`

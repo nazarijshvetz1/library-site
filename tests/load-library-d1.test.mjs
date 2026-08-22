@@ -30,7 +30,7 @@ async function academicFixtureBundle({ dualRole = false } = {}) {
   const canonical = JSON.parse(await readFile(fixturePath, "utf8"));
   if (dualRole) {
     canonical.sheets.users.values.push([
-      "USR-006", "Галака Наталія Григорівна", "Адміністрація", "", "", "Активний",
+      "USR-006", "Орел Галина Миколаївна", "Адміністрація", "", "", "Активний",
     ]);
   }
   canonical.sheets.academicYears = { rows: [

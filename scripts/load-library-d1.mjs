@@ -14,10 +14,10 @@ const STAGING_VERSION = 1;
 const TARGET_SCHEMA = "0003";
 const MAX_INSERT_SQL_BYTES = 72_000;
 const DUAL_ROLE_TEACHER_IDENTITIES = new Map([
-  ["USR-006", "Галака Наталія Григорівна"],
-  ["USR-007", "Плахотнюк Володимир Віталійович"],
+  ["USR-006", "Орел Галина Миколаївна"],
+  ["USR-007", "Галака Наталія Григорівна"],
   ["USR-008", "Єгорова Альона Ігорівна"],
-  ["USR-009", "Орел Галина Миколаївна"],
+  ["USR-009", "Плахотнюк Володимир Віталійович"],
 ]);
 
 const REQUIRED_STAGING_TABLES = Object.freeze([

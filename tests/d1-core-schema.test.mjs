@@ -54,10 +54,10 @@ function seedVersion35ProductionShape(database, { driftName = false } = {}) {
   const now = "2026-08-22T10:00:00.000Z";
   database.exec(`
     INSERT INTO users (id, full_name, sort_name, email, auth_user_id, role, status, created_at, updated_at) VALUES
-      ('USR-006', 'Галака Наталія Григорівна', 'галака наталія григорівна', NULL, NULL, 'admin', 'active', '${now}', '${now}'),
-      ('USR-007', 'Плахотнюк Володимир Віталійович', 'плахотнюк володимир віталійович', NULL, NULL, 'admin', 'active', '${now}', '${now}'),
+      ('USR-006', 'Орел Галина Миколаївна', 'орел галина миколаївна', NULL, NULL, 'admin', 'active', '${now}', '${now}'),
+      ('USR-007', 'Галака Наталія Григорівна', 'галака наталія григорівна', NULL, NULL, 'admin', 'active', '${now}', '${now}'),
       ('USR-008', 'Єгорова Олена Ігорівна', 'єгорова олена ігорівна', NULL, NULL, 'admin', 'active', '${now}', '${now}'),
-      ('USR-009', '${driftName ? "Інша Особа" : "Орел Галина Миколаївна"}', 'орел галина миколаївна', NULL, NULL, 'admin', 'active', '${now}', '${now}');
+      ('USR-009', '${driftName ? "Інша Особа" : "Плахотнюк Володимир Віталійович"}', 'плахотнюк володимир віталійович', NULL, NULL, 'admin', 'active', '${now}', '${now}');
     INSERT INTO academic_years (id, label, start_date, end_date, status, notes, version, created_at, updated_at) VALUES
       ('YR-2026-2027', '2026/2027', '2026-09-01', '2027-08-31', 'active', '', 1, '${now}', '${now}'),
       ('YR-2027-2028', '2027/2028', '2027-09-01', '2028-08-31', 'draft', '', 1, '${now}', '${now}');
@@ -138,10 +138,10 @@ test("version 35 adds teacher capability without removing administrator access a
   assert.deepEqual(
     database.prepare("SELECT id, role, full_name FROM users ORDER BY id").all().map((row) => ({ ...row })),
     [
-      { id: "USR-006", role: "admin", full_name: "Галака Наталія Григорівна" },
-      { id: "USR-007", role: "admin", full_name: "Плахотнюк Володимир Віталійович" },
+      { id: "USR-006", role: "admin", full_name: "Орел Галина Миколаївна" },
+      { id: "USR-007", role: "admin", full_name: "Галака Наталія Григорівна" },
       { id: "USR-008", role: "admin", full_name: "Єгорова Альона Ігорівна" },
-      { id: "USR-009", role: "admin", full_name: "Орел Галина Миколаївна" },
+      { id: "USR-009", role: "admin", full_name: "Плахотнюк Володимир Віталійович" },
     ],
   );
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM teacher_profiles WHERE closed_at IS NULL").get().count, 4);

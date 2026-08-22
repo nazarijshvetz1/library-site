@@ -74,10 +74,10 @@ const CLASS_YEAR_ID_RE = /^CY-(20\d{2})-\d{3,}$/u;
 const CLASS_CODE_RE = /^[\p{L}\p{N}().'_-]{1,16}$/u;
 
 const DUAL_ROLE_TEACHER_IDENTITIES = new Map<string, string>([
-  ["USR-006", "Галака Наталія Григорівна"],
-  ["USR-007", "Плахотнюк Володимир Віталійович"],
+  ["USR-006", "Орел Галина Миколаївна"],
+  ["USR-007", "Галака Наталія Григорівна"],
   ["USR-008", "Єгорова Альона Ігорівна"],
-  ["USR-009", "Орел Галина Миколаївна"],
+  ["USR-009", "Плахотнюк Володимир Віталійович"],
 ]);
 
 type ScalarKind = "string" | "integer" | "nullable-string" | "nullable-integer";
