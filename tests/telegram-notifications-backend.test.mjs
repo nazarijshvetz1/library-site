@@ -92,8 +92,9 @@ function telegramOk(messageId = 1) {
 test("one-time deep link stores only a SHA-256 digest and links a private chat once", async () => {
   const context = await database();
   const randomBytes = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+  const linkNow = new Date();
   const link = await telegram.createTelegramLinkToken(context.db, "USR-TEACHER", {
-    now: new Date(context.now), randomBytes,
+    now: linkNow, randomBytes,
   });
   const rawToken = new URL(link.linkUrl).searchParams.get("start");
   assert.match(rawToken, /^[A-Za-z0-9_-]{43}$/u);
