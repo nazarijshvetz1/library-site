@@ -2,6 +2,7 @@ import { getRuntimeBoolean, getRuntimeString } from "./runtime-env.ts";
 import { VisitScheduleError, type VisitD1Database } from "./visit-schedule-store.ts";
 
 export const VISIT_TEACHER_COOKIE = "__Host-visit_teacher";
+export const VISIT_TEACHER_TELEGRAM_COOKIE = "__Host-visit_teacher_telegram";
 export const VISIT_TEACHER_CODE_LENGTH = 10;
 export const VISIT_TEACHER_PIN_LENGTH = 4;
 export const VISIT_TEACHER_SESSION_SECONDS = 12 * 60 * 60;
@@ -263,17 +264,225 @@ export async function createVisitTeacherSession(
   return { token, identity };
 }
 
+/** Exchange one verified Telegram Mini App launch for the ordinary teacher browser session. */
+export async function createVisitTeacherTelegramSession(
+  db: VisitD1Database,
+  request: Request,
+  input: {
+    telegramUserId: string;
+    initDataHash: string;
+    authDate: number;
+    receiptExpiresAt: string;
+  },
+): Promise<{ token: string | null; identity: VisitTeacherIdentity }> {
+  requireVisitTeacherCodeAuthEnabled();
+  if (!/^[1-9]\d{0,19}$/u.test(input.telegramUserId)
+    || !/^[0-9a-f]{64}$/u.test(input.initDataHash)
+    || !Number.isSafeInteger(input.authDate) || input.authDate <= 0
+    || !validIsoTimestamp(input.receiptExpiresAt)) {
+    throw new VisitScheduleError("telegram_init_data_invalid", 401, "Не вдалося підтвердити вхід через Telegram.");
+  }
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
+  const credential = await db.prepare(`
+    SELECT c.user_id AS teacher_user_id,u.full_name,v.version,v.must_change_pin,v.locked_until
+    FROM telegram_connections c
+    JOIN users u ON u.id=c.user_id
+    JOIN visit_teacher_credentials v ON v.teacher_user_id=u.id
+    WHERE c.telegram_user_id=? AND c.status='active'
+      AND u.status='active' AND u.role='teacher'
+      AND v.status='active'
+    LIMIT 1
+  `).bind(input.telegramUserId).first<{
+    teacher_user_id: string;
+    full_name: string;
+    version: number;
+    must_change_pin: number;
+    locked_until: string | null;
+  }>();
+  if (!credential) {
+    throw new VisitScheduleError(
+      "telegram_connection_required",
+      401,
+      "Цей Telegram не підключено до активного кабінету вчителя.",
+    );
+  }
+  if (credential.must_change_pin) {
+    throw new VisitScheduleError(
+      "pin_change_required",
+      403,
+      "Спочатку увійдіть на сайті тимчасовим кодом і створіть власний PIN.",
+    );
+  }
+  if (credential.locked_until && credential.locked_until > now) {
+    throw new VisitScheduleError("teacher_locked", 423, "Вхід тимчасово заблоковано. Спробуйте пізніше.");
+  }
+  for (const existingToken of readTeacherSessionTokens(request)) {
+    const existingIdentity = await readVisitTeacherSessionByHash(db, await sha256Hex(existingToken), now);
+    if (existingIdentity?.teacherUserId === credential.teacher_user_id) {
+      return { token: null, identity: existingIdentity };
+    }
+  }
+  const replay = await db.prepare(`SELECT init_data_hash FROM telegram_mini_app_auth_receipts
+    WHERE init_data_hash=? LIMIT 1`).bind(input.initDataHash).first<{ init_data_hash: string }>();
+  if (replay) {
+    throw new VisitScheduleError(
+      "telegram_auth_replayed",
+      409,
+      "Це відкриття кабінету вже використано. Закрийте його й відкрийте з бота ще раз.",
+    );
+  }
+  const pepper = teacherAuthPepper();
+  const token = randomOpaque(32);
+  const tokenHash = await sha256Hex(token);
+  const sessionIpScopeHash = await hmacHex(pepper, `session-ip:${trustedClientIp(request)}`);
+  const pendingScope = randomOpaque(18);
+  const expiresAt = new Date(nowDate.getTime() + VISIT_TEACHER_SESSION_SECONDS * 1000).toISOString();
+  const auditId = `AUD-${crypto.randomUUID()}`;
+  const statements = [
+    db.prepare(`UPDATE visit_teacher_sessions SET revoked_at=?
+      WHERE token_hash=(SELECT token_hash FROM visit_teacher_sessions
+        WHERE teacher_user_id=? AND revoked_at IS NULL AND expires_at>?
+        ORDER BY created_at,token_hash LIMIT 1)
+      AND (SELECT COUNT(*) FROM visit_teacher_sessions
+        WHERE teacher_user_id=? AND revoked_at IS NULL AND expires_at>?) >= ?`)
+      .bind(now, credential.teacher_user_id, now, credential.teacher_user_id, now, MAX_ACTIVE_SESSIONS),
+    db.prepare(`
+      INSERT INTO telegram_mini_app_auth_receipts (
+        init_data_hash,telegram_user_id,teacher_user_id,session_token_hash,
+        auth_date,consumed_at,expires_at,created_at
+      )
+      SELECT ?,c.telegram_user_id,u.id,?,?,?,?,?
+      FROM telegram_connections c
+      JOIN users u ON u.id=c.user_id
+      JOIN visit_teacher_credentials v ON v.teacher_user_id=u.id
+      WHERE c.telegram_user_id=? AND c.status='active'
+        AND u.id=? AND u.status='active' AND u.role='teacher'
+        AND v.status='active' AND v.version=? AND v.must_change_pin=0
+        AND (v.locked_until IS NULL OR v.locked_until<=?)
+        AND NOT EXISTS (SELECT 1 FROM telegram_mini_app_auth_receipts WHERE init_data_hash=?)
+    `).bind(
+      input.initDataHash,
+      tokenHash,
+      input.authDate,
+      now,
+      input.receiptExpiresAt,
+      now,
+      input.telegramUserId,
+      credential.teacher_user_id,
+      credential.version,
+      now,
+      input.initDataHash,
+    ),
+    db.prepare(`
+      INSERT INTO visit_teacher_sessions (
+        token_hash,teacher_user_id,credential_version,pending_scope,ip_scope_hash,
+        expires_at,last_seen_at,revoked_at,created_at
+      )
+      SELECT ?,r.teacher_user_id,v.version,?,?,?, ?,NULL,?
+      FROM telegram_mini_app_auth_receipts r
+      JOIN telegram_connections c ON c.telegram_user_id=r.telegram_user_id AND c.user_id=r.teacher_user_id
+      JOIN users u ON u.id=r.teacher_user_id
+      JOIN visit_teacher_credentials v ON v.teacher_user_id=r.teacher_user_id
+      WHERE r.init_data_hash=? AND r.session_token_hash=? AND r.consumed_at=?
+        AND r.teacher_user_id=? AND r.expires_at>=?
+        AND c.status='active' AND u.status='active' AND u.role='teacher'
+        AND v.status='active' AND v.version=? AND v.must_change_pin=0
+        AND (v.locked_until IS NULL OR v.locked_until<=?)
+    `).bind(
+      tokenHash,
+      pendingScope,
+      sessionIpScopeHash,
+      expiresAt,
+      now,
+      now,
+      input.initDataHash,
+      tokenHash,
+      now,
+      credential.teacher_user_id,
+      now,
+      credential.version,
+      now,
+    ),
+    db.prepare(`UPDATE visit_teacher_credentials SET last_login_at=?,updated_at=?
+      WHERE teacher_user_id=? AND version=? AND status='active'
+        AND EXISTS (SELECT 1 FROM visit_teacher_sessions
+          WHERE token_hash=? AND teacher_user_id=? AND revoked_at IS NULL)`)
+      .bind(now, now, credential.teacher_user_id, credential.version, tokenHash, credential.teacher_user_id),
+    db.prepare(`INSERT INTO audit_events (
+      id,actor_user_id,actor_email,action,entity_type,entity_id,
+      request_id,before_json,after_json,metadata_json,created_at
+    ) VALUES (?,?,'teacher-telegram@local.invalid','visit.teacher_session.telegram',
+      'visit_teacher_session',CASE WHEN EXISTS (
+        SELECT 1 FROM visit_teacher_sessions s
+        JOIN telegram_mini_app_auth_receipts r ON r.session_token_hash=s.token_hash
+        WHERE s.token_hash=? AND s.teacher_user_id=? AND s.credential_version=?
+          AND s.pending_scope=? AND s.expires_at=? AND s.revoked_at IS NULL
+          AND r.init_data_hash=? AND r.telegram_user_id=? AND r.expires_at>=?
+      ) THEN ? ELSE NULL END,?,NULL,NULL,NULL,?)`)
+      .bind(
+        auditId,
+        credential.teacher_user_id,
+        tokenHash,
+        credential.teacher_user_id,
+        credential.version,
+        pendingScope,
+        expiresAt,
+        input.initDataHash,
+        input.telegramUserId,
+        now,
+        tokenHash,
+        input.initDataHash,
+        now,
+      ),
+    boundedSessionCleanup(db, now),
+    boundedTelegramReceiptCleanup(db, now),
+  ];
+  try {
+    await db.batch(statements);
+  } catch {
+    const consumed = await db.prepare(`SELECT init_data_hash FROM telegram_mini_app_auth_receipts
+      WHERE init_data_hash=? LIMIT 1`).bind(input.initDataHash).first<{ init_data_hash: string }>();
+    if (consumed) {
+      throw new VisitScheduleError(
+        "telegram_auth_replayed",
+        409,
+        "Це відкриття кабінету вже використано. Закрийте його й відкрийте з бота ще раз.",
+      );
+    }
+    throw new VisitScheduleError(
+      "teacher_auth_unavailable",
+      503,
+      "Вхід через Telegram тимчасово недоступний.",
+    );
+  }
+  const identity = await readVisitTeacherSessionByHash(db, tokenHash, now);
+  if (!identity) {
+    throw new VisitScheduleError(
+      "teacher_auth_unavailable",
+      503,
+      "Вхід через Telegram тимчасово недоступний.",
+    );
+  }
+  return { token, identity };
+}
+
 export async function requireVisitTeacherSession(
   db: VisitD1Database,
   request: Request,
   options: { allowPinSetup?: boolean } = {},
 ): Promise<VisitTeacherIdentity> {
   requireVisitTeacherCodeAuthEnabled();
-  const token = readCookie(request.headers.get("Cookie"), VISIT_TEACHER_COOKIE);
-  if (!token || !/^[A-Za-z0-9_-]{40,128}$/u.test(token)) {
+  const tokens = readTeacherSessionTokens(request);
+  if (!tokens.length) {
     throw new VisitScheduleError("authentication_required", 401, "Увійдіть за ім’ям і особистим кодом.");
   }
-  const identity = await readVisitTeacherSessionByHash(db, await sha256Hex(token), new Date().toISOString());
+  let identity: VisitTeacherIdentity | null = null;
+  const now = new Date().toISOString();
+  for (const token of tokens) {
+    identity = await readVisitTeacherSessionByHash(db, await sha256Hex(token), now);
+    if (identity) break;
+  }
   if (!identity) {
     throw new VisitScheduleError("authentication_required", 401, "Сеанс завершився. Увійдіть ще раз.");
   }
@@ -287,8 +496,8 @@ export async function revokeVisitTeacherSession(
   db: VisitD1Database,
   request: Request,
 ): Promise<void> {
-  const token = readCookie(request.headers.get("Cookie"), VISIT_TEACHER_COOKIE);
-  if (!token || !/^[A-Za-z0-9_-]{40,128}$/u.test(token)) return;
+  const token = readTeacherSessionTokens(request)[0];
+  if (!token) return;
   const now = new Date().toISOString();
   await db.batch([
     db.prepare(`UPDATE visit_teacher_sessions SET revoked_at = ?, last_seen_at = ?
@@ -303,8 +512,8 @@ export async function rotateVisitTeacherCode(
   input: { requestId: string; currentCode: string; newPin: string },
 ): Promise<{ token: string | null; identity: VisitTeacherIdentity; result: TeacherCodeRotationResult }> {
   requireVisitTeacherCodeAuthEnabled();
-  const rawSessionToken = readCookie(request.headers.get("Cookie"), VISIT_TEACHER_COOKIE);
-  if (!rawSessionToken || !/^[A-Za-z0-9_-]{40,128}$/u.test(rawSessionToken)) {
+  const rawSessionToken = readTeacherSessionTokens(request)[0];
+  if (!rawSessionToken) {
     throw new VisitScheduleError("authentication_required", 401, "Увійдіть за ім’ям і особистим кодом.");
   }
   const presentedTokenHash = await sha256Hex(rawSessionToken);
@@ -620,8 +829,24 @@ export function teacherSessionCookie(token: string): string {
   return `${VISIT_TEACHER_COOKIE}=${token}; Path=/; Max-Age=${VISIT_TEACHER_SESSION_SECONDS}; HttpOnly; Secure; SameSite=Lax`;
 }
 
+export function telegramTeacherSessionCookie(token: string): string {
+  return `${VISIT_TEACHER_TELEGRAM_COOKIE}=${token}; Path=/; Max-Age=${VISIT_TEACHER_SESSION_SECONDS}; HttpOnly; Secure; SameSite=None; Partitioned`;
+}
+
+export function teacherSessionCookieForRequest(request: Request, token: string): string {
+  return isTelegramTeacherRequest(request)
+    ? telegramTeacherSessionCookie(token)
+    : teacherSessionCookie(token);
+}
+
 export function clearTeacherSessionCookie(): string {
   return `${VISIT_TEACHER_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
+}
+
+export function clearTeacherSessionCookieForRequest(request: Request): string {
+  return isTelegramTeacherRequest(request)
+    ? `${VISIT_TEACHER_TELEGRAM_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=None; Partitioned`
+    : clearTeacherSessionCookie();
 }
 
 export async function listVisitTeacherAccess(db: VisitD1Database): Promise<VisitTeacherAccessRow[]> {
@@ -1111,6 +1336,17 @@ function boundedSessionCleanup(db: VisitD1Database, now: string) {
   )`).bind(now, revokedBefore);
 }
 
+function boundedTelegramReceiptCleanup(db: VisitD1Database, now: string) {
+  return db.prepare(`DELETE FROM telegram_mini_app_auth_receipts WHERE init_data_hash IN (
+    SELECT init_data_hash FROM telegram_mini_app_auth_receipts
+    WHERE expires_at<=? ORDER BY expires_at,init_data_hash LIMIT 100
+  )`).bind(now);
+}
+
+function validIsoTimestamp(value: string): boolean {
+  return Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
+}
+
 async function accessCommand(db: VisitD1Database, requestId: string) {
   return db.prepare(`SELECT request_hash, status, result_json FROM visit_teacher_access_commands WHERE id=? LIMIT 1`)
     .bind(requestId).first<{ request_hash: string; status: string; result_json: string | null }>();
@@ -1218,4 +1454,24 @@ function readCookie(header: string | null, name: string): string | null {
     if (rawName === name) return rawValue.join("=") || null;
   }
   return null;
+}
+
+function readTeacherSessionTokens(request: Request): string[] {
+  const header = request.headers.get("Cookie");
+  const standard = readCookie(header, VISIT_TEACHER_COOKIE);
+  const telegram = readCookie(header, VISIT_TEACHER_TELEGRAM_COOKIE);
+  const token = isTelegramTeacherRequest(request) ? telegram : standard;
+  return token && /^[A-Za-z0-9_-]{40,128}$/u.test(token) ? [token] : [];
+}
+
+function isTelegramTeacherRequest(request: Request): boolean {
+  const referer = request.headers.get("Referer");
+  if (!referer) return false;
+  try {
+    const source = new URL(referer);
+    return source.origin === new URL(request.url).origin
+      && (source.pathname === "/teacher/telegram" || source.pathname.startsWith("/teacher/telegram/"));
+  } catch {
+    return false;
+  }
 }

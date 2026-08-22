@@ -648,6 +648,10 @@ test("private workspace supports ISBN lookup, safe scanner lifecycle, and draft 
   assert.match(worker, /camera=\(self\)/);
   assert.match(worker, /frame-ancestors 'none'/);
   assert.match(worker, /X-Frame-Options", "DENY"/);
+  assert.match(worker, /frame-ancestors https:\/\/web\.telegram\.org/u);
+  assert.match(worker, /isTelegramMiniApp/u);
+  assert.match(worker, /url\.pathname\.startsWith\("\/teacher\/telegram\/"\)/u);
+  assert.match(worker, /headers\.delete\("X-Frame-Options"\)/u);
 });
 
 test("Sites build emits a private server bundle", async () => {

@@ -1,6 +1,6 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element, @next/next/no-html-link-for-pages -- Vinext Link navigation fails in production; full-page anchors are intentional. */
+/* eslint-disable @next/next/no-img-element -- Images are remote catalog assets handled outside Next's loader. */
 
 import {
   type FormEvent,
@@ -68,6 +68,7 @@ type Props = {
   initialEndTime: string;
   initialTab?: "overview" | "visits" | "orders" | "loans" | "notifications";
   initialOrderMaterialId?: string;
+  telegramMiniApp?: boolean;
 };
 
 type TeacherTab = NonNullable<Props["initialTab"]>;
@@ -92,6 +93,7 @@ export default function VisitBookingWorkspace({
   initialEndTime,
   initialTab = "overview",
   initialOrderMaterialId = "",
+  telegramMiniApp = false,
 }: Props) {
   const [session, setSession] = useState<VisitTeacherSessionEnvelope | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
@@ -162,7 +164,7 @@ export default function VisitBookingWorkspace({
 
   if (!session) {
     return (
-      <VisitShell>
+      <VisitShell telegramMiniApp={telegramMiniApp}>
         <section className={styles.page}>
           <div className={styles.intro}>
             <p className={styles.eyebrow}>Кабінет учителя</p>
@@ -173,6 +175,7 @@ export default function VisitBookingWorkspace({
             initialDate={initialDate}
             initialStartTime={initialStartTime}
             initialEndTime={initialEndTime}
+            teacherEntryPath={telegramMiniApp ? "/teacher/telegram/cabinet" : "/teacher"}
           />
           <div className={styles.accessModes} id="teacher-access">
             {checkingSession
@@ -193,7 +196,7 @@ export default function VisitBookingWorkspace({
 
   if (session.mustChangePin) {
     return (
-      <VisitShell>
+      <VisitShell telegramMiniApp={telegramMiniApp}>
         <section className={styles.page}>
           <div className={styles.intro}>
             <p className={styles.eyebrow}>Перший вхід</p>
@@ -228,15 +231,16 @@ export default function VisitBookingWorkspace({
       initialEndTime={initialEndTime}
       initialTab={initialTab}
       initialOrderMaterialId={initialOrderMaterialId}
+      telegramMiniApp={telegramMiniApp}
     />
   );
 }
 
-function VisitShell({ children }: { children: React.ReactNode }) {
+function VisitShell({ children, telegramMiniApp = false }: { children: React.ReactNode; telegramMiniApp?: boolean }) {
   return (
     <main className={styles.shell}>
       <header className={styles.header}>
-        <a className={styles.brand} href="/">
+        <a className={styles.brand} href={telegramMiniApp ? "/teacher/telegram/cabinet?tab=overview" : "/"}>
           <img src={LOGO_URL} alt="" width="48" height="48" />
           <span><strong>Єдина бібліотека</strong><small>Кабінет учителя</small></span>
         </a>
@@ -260,7 +264,8 @@ function PublicVisitSchedule({
   initialDate,
   initialStartTime,
   initialEndTime,
-}: Pick<Props, "initialDate" | "initialStartTime" | "initialEndTime">) {
+  teacherEntryPath,
+}: Pick<Props, "initialDate" | "initialStartTime" | "initialEndTime"> & { teacherEntryPath: string }) {
   const today = useMemo(() => todayInKyiv(), []);
   const [weekStart, setWeekStart] = useState(() => publicWeekStart(initialDate, today));
   const [data, setData] = useState<PublicVisitsEnvelope | null>(null);
@@ -337,7 +342,7 @@ function PublicVisitSchedule({
                         return <li key={`${slot.startTime}-${slot.endTime}`} data-status="closed"><strong>{slot.startTime}–{slot.endTime}</strong><span>Час минув</span></li>;
                       }
                       const end = boundedSlotEnd(start, slot.endTime, 40);
-                      const href = `/teacher?${new URLSearchParams({ date, start, end, tab: "visits" }).toString()}#teacher-access`;
+                      const href = `${teacherEntryPath}?${new URLSearchParams({ date, start, end, tab: "visits" }).toString()}#teacher-access`;
                       return (
                         <li key={`${slot.startTime}-${slot.endTime}`} data-status="free" data-selected={selected || undefined}>
                           <a href={href}><strong>{start}–{slot.endTime}</strong><span>{selected ? "Обрано" : "Обрати"}</span></a>
@@ -865,6 +870,7 @@ function VisitBookingPanel({
   initialEndTime,
   initialTab,
   initialOrderMaterialId,
+  telegramMiniApp,
 }: {
   teacher: VisitTeacherIdentity;
   pendingScope: string;
@@ -877,6 +883,7 @@ function VisitBookingPanel({
   initialEndTime: string;
   initialTab: "overview" | "visits" | "orders" | "loans" | "notifications";
   initialOrderMaterialId: string;
+  telegramMiniApp: boolean;
 }) {
   const storageKey = visitPendingKey("teacher", pendingScope);
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -1115,7 +1122,7 @@ function VisitBookingPanel({
   const bookingEnabled = data?.bookingEnabled === true;
 
   return (
-    <VisitShell>
+    <VisitShell telegramMiniApp={telegramMiniApp}>
       <section className={styles.page}>
         <div className={styles.bookingTopbar}>
           <div className={styles.intro}>
@@ -1324,6 +1331,7 @@ type TelegramStatus = {
   configured: boolean;
   linkingEnabled: boolean;
   notificationsEnabled: boolean;
+  miniAppEnabled: boolean;
   botUsername: string | null;
   connected: boolean;
   status: "active" | "disabled" | "blocked" | null;
@@ -1901,6 +1909,20 @@ function TeacherTelegramSettings() {
     return () => window.clearTimeout(timer);
   }, [load]);
 
+  useEffect(() => {
+    function refreshAfterTelegram() {
+      if (document.visibilityState !== "visible") return;
+      setBusy(null);
+      void load();
+    }
+    window.addEventListener("pageshow", refreshAfterTelegram);
+    document.addEventListener("visibilitychange", refreshAfterTelegram);
+    return () => {
+      window.removeEventListener("pageshow", refreshAfterTelegram);
+      document.removeEventListener("visibilitychange", refreshAfterTelegram);
+    };
+  }, [load]);
+
   async function connect() {
     setBusy("link"); setNotice("");
     try {
@@ -1975,6 +1997,7 @@ function TeacherTelegramSettings() {
       ) : null}
       {!loading && telegram?.connected ? (
         <>
+          {telegram.miniAppEnabled ? <div className={styles.info}>У боті доступна кнопка «Кабінет учителя»: каталог, замовлення, записи, посібники та повідомлення відкриваються прямо в Telegram.</div> : null}
           <div className={styles.telegramPreferences}>
             <label htmlFor="teacher-telegram-orders"><input id="teacher-telegram-orders" aria-label="Сповіщення про замовлення" type="checkbox" checked={notifyOrders} onChange={(event) => setNotifyOrders(event.currentTarget.checked)} disabled={Boolean(busy)} /><span><strong>Замовлення</strong><small>Готовність, видача, відмова та інші зміни заявки</small></span></label>
             <label htmlFor="teacher-telegram-visits"><input id="teacher-telegram-visits" aria-label="Сповіщення про відвідування" type="checkbox" checked={notifyVisits} onChange={(event) => setNotifyVisits(event.currentTarget.checked)} disabled={Boolean(busy)} /><span><strong>Відвідування</strong><small>Зміни або скасування запису бібліотекарем</small></span></label>
@@ -1987,7 +2010,10 @@ function TeacherTelegramSettings() {
           </div>
         </>
       ) : !loading && telegram?.linkingEnabled && telegram.configured ? (
-        <button className={styles.primary} type="button" onClick={() => void connect()} disabled={Boolean(busy)}>{busy === "link" ? "Створюємо посилання…" : telegram.status === "blocked" ? "Підключити повторно" : "Підключити Telegram"}</button>
+        <div className={styles.telegramActions}>
+          <button className={styles.primary} type="button" onClick={() => void connect()} disabled={Boolean(busy)}>{busy === "link" ? "Створюємо посилання…" : telegram.status === "blocked" ? "Підключити повторно" : "Підключити Telegram"}</button>
+          <button className={styles.quiet} type="button" onClick={() => void load()} disabled={Boolean(busy)}>Я вже підключив(ла) — перевірити</button>
+        </div>
       ) : null}
     </section>
   );

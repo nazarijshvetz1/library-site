@@ -19,6 +19,7 @@ const migrationFiles = [
   "drizzle/0012_elite_victor_mancha.sql",
   "drizzle/0013_strange_dark_beast.sql",
   "drizzle/0014_rich_lionheart.sql",
+  "drizzle/0015_glamorous_namora.sql",
 ];
 
 async function migratedDatabase() {
@@ -254,6 +255,7 @@ test("core migration extends the existing draft database without recreating it",
     "telegram_connections",
     "telegram_delivery_outbox",
     "telegram_link_tokens",
+    "telegram_mini_app_auth_receipts",
     "telegram_webhook_updates",
     "teacher_profiles",
     "material_request_reservations",

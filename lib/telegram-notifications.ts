@@ -51,6 +51,7 @@ export class TelegramIntegrationError extends Error {
 type TelegramConfiguration = {
   linkingEnabled: boolean;
   notificationsEnabled: boolean;
+  miniAppEnabled: boolean;
   botUsername: string | null;
   botToken: string | null;
   webhookSecret: string | null;
@@ -60,6 +61,7 @@ export type TelegramConnectionStatus = {
   configured: boolean;
   linkingEnabled: boolean;
   notificationsEnabled: boolean;
+  miniAppEnabled: boolean;
   botUsername: string | null;
   connected: boolean;
   status: "active" | "disabled" | "blocked" | null;
@@ -115,6 +117,7 @@ export function telegramConfigurationStatus(): Omit<TelegramConnectionStatus,
     configured: Boolean(configuration.botUsername && configuration.botToken && configuration.webhookSecret),
     linkingEnabled: configuration.linkingEnabled,
     notificationsEnabled: configuration.notificationsEnabled,
+    miniAppEnabled: configuration.miniAppEnabled,
     botUsername: configuration.botUsername,
   };
 }
@@ -250,8 +253,13 @@ export async function disconnectTelegram(
   db: TelegramDatabase,
   userId: string,
   expectedVersion: number,
+  fetcher?: TelegramFetcher,
 ): Promise<TelegramConnectionStatus> {
   const now = new Date().toISOString();
+  const connection = fetcher ? await db.prepare(`
+    SELECT chat_id FROM telegram_connections
+    WHERE user_id=? AND status='active' AND version=? LIMIT 1
+  `).bind(userId, expectedVersion).first<{ chat_id: string }>() : null;
   await db.batch([
     db.prepare(`
       UPDATE telegram_connections
@@ -270,6 +278,10 @@ export async function disconnectTelegram(
       "Підключення Telegram уже змінилося. Оновіть сторінку.",
       { permanent: true },
     );
+  }
+  const botToken = telegramConfiguration().botToken;
+  if (fetcher && botToken && connection) {
+    await bestEffortChatMenuButton(botToken, connection.chat_id, null, fetcher);
   }
   return status;
 }
@@ -318,6 +330,22 @@ export async function registerTelegramWebhook(
     allowed_updates: ["message"],
     drop_pending_updates: false,
   }, fetcher);
+  const commands = [
+    { command: "start", description: "Підключити бота або відкрити меню" },
+    { command: "menu", description: "Показати меню бібліотеки" },
+    { command: "stop", description: "Вимкнути Telegram-сповіщення" },
+  ];
+  for (const languageCode of [null, "uk"] as const) {
+    try {
+      await telegramApiRequest(configuration.botToken, "setMyCommands", {
+        commands,
+        scope: { type: "all_private_chats" },
+        ...(languageCode ? { language_code: languageCode } : {}),
+      }, fetcher);
+    } catch {
+      // The webhook is authoritative; command hints can be retried on the next link request.
+    }
+  }
 }
 
 export function queueTelegramForLibrariansStatement(
@@ -526,6 +554,7 @@ export async function processTelegramWebhookUpdate(
   rawPayload: string,
   payload: unknown,
   fetcher: TelegramFetcher = fetch,
+  siteOrigin?: string,
 ): Promise<{ outcome: string; duplicate: boolean }> {
   const configuration = requireLinkingConfiguration();
   const update = telegramUpdate(payload);
@@ -549,12 +578,12 @@ export async function processTelegramWebhookUpdate(
     const tokenHash = await sha256Hex(command.token);
     const now = new Date().toISOString();
     const token = await db.prepare(`
-      SELECT t.user_id,u.full_name
+      SELECT t.user_id,u.full_name,u.role
       FROM telegram_link_tokens t JOIN users u ON u.id=t.user_id
       WHERE t.token_hash=? AND t.consumed_at IS NULL AND t.revoked_at IS NULL
         AND t.expires_at>? AND u.status='active' AND u.role IN ('admin','librarian','teacher')
       LIMIT 1
-    `).bind(tokenHash, now).first<{ user_id: string; full_name: string }>();
+    `).bind(tokenHash, now).first<{ user_id: string; full_name: string; role: "admin" | "librarian" | "teacher" }>();
     if (!token) {
       const inserted = await insertWebhookReceipt(db, update.updateId, payloadHash, "link_invalid");
       if (inserted) await bestEffortBotReply(configuration.botToken, update.message.chatId,
@@ -628,10 +657,13 @@ export async function processTelegramWebhookUpdate(
     if (Number(results[0]?.meta?.changes ?? 0) !== 1) {
       return { outcome: "linked", duplicate: true };
     }
-    await bestEffortBotReply(
+    await bestEffortConnectedMenu(
       configuration.botToken,
       update.message.chatId,
-      `Telegram підключено до профілю «${safePlainText(token.full_name, 120)}». Сповіщення можна налаштувати на сайті.`,
+      token.role,
+      token.full_name,
+      siteOrigin,
+      true,
       fetcher,
     );
     return { outcome: "linked", duplicate: false };
@@ -650,9 +682,41 @@ export async function processTelegramWebhookUpdate(
       `).bind(now, now, update.message.chatId, update.message.telegramUserId, update.updateId, payloadHash),
     ]);
     const inserted = Number(results[0]?.meta?.changes ?? 0) === 1;
-    if (inserted) await bestEffortBotReply(configuration.botToken, update.message.chatId,
-      "Telegram-сповіщення вимкнено. Підключити їх знову можна у своєму кабінеті.", fetcher);
+    if (inserted) {
+      await bestEffortBotReply(configuration.botToken, update.message.chatId,
+        "Telegram-сповіщення вимкнено. Підключити їх знову можна у своєму кабінеті.", fetcher);
+      await bestEffortChatMenuButton(configuration.botToken, update.message.chatId, null, fetcher);
+    }
     return { outcome: "disconnected", duplicate: !inserted };
+  }
+  if (command.kind === "menu") {
+    const profile = await connectedTelegramProfile(
+      db,
+      update.message.chatId,
+      update.message.telegramUserId,
+    );
+    const inserted = await insertWebhookReceipt(db, update.updateId, payloadHash, profile ? "menu" : "menu_unlinked");
+    if (inserted) {
+      if (profile) {
+        await bestEffortConnectedMenu(
+          configuration.botToken,
+          update.message.chatId,
+          profile.role,
+          profile.full_name,
+          siteOrigin,
+          false,
+          fetcher,
+        );
+      } else {
+        await bestEffortBotReply(
+          configuration.botToken,
+          update.message.chatId,
+          "Спочатку підключіть Telegram у кабінеті вчителя або бібліотекаря на сайті.",
+          fetcher,
+        );
+      }
+    }
+    return { outcome: profile ? "menu" : "menu_unlinked", duplicate: !inserted };
   }
   const inserted = await insertWebhookReceipt(db, update.updateId, payloadHash, "ignored_command");
   if (inserted) await bestEffortBotReply(configuration.botToken, update.message.chatId,
@@ -674,6 +738,7 @@ function telegramConfiguration(): TelegramConfiguration {
   return {
     linkingEnabled: getRuntimeBoolean("TELEGRAM_LINKING_ENABLED"),
     notificationsEnabled: getRuntimeBoolean("TELEGRAM_NOTIFICATIONS_ENABLED"),
+    miniAppEnabled: getRuntimeBoolean("TELEGRAM_MINI_APP_ENABLED"),
     botUsername: username && /^[A-Za-z0-9_]{5,32}$/u.test(username) ? username : null,
     botToken: getRuntimeString("TELEGRAM_BOT_TOKEN"),
     webhookSecret: validWebhookSecret(getRuntimeString("TELEGRAM_WEBHOOK_SECRET")),
@@ -747,7 +812,15 @@ function safeTargetPath(value: string): string {
 }
 
 function trustedSiteOrigin(value: string): string {
-  const url = new URL(value);
+  const configured = getRuntimeString("TELEGRAM_SITE_ORIGIN");
+  if (telegramConfiguration().miniAppEnabled && !configured) {
+    throw new TelegramIntegrationError(
+      "site_origin_unconfigured",
+      503,
+      "Не налаштовано канонічну адресу Telegram Mini App.",
+    );
+  }
+  const url = new URL(configured ?? value);
   if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/"
     || url.search || url.hash) {
     throw new TelegramIntegrationError("site_origin_invalid", 500, "Некоректна адреса сайту.");
@@ -791,10 +864,15 @@ function telegramUpdate(value: unknown): {
   return { updateId, message: { chatId, telegramUserId, username, chatType, text } };
 }
 
-function telegramCommand(text: string): { kind: "start"; token: string } | { kind: "stop" } | { kind: "other" } {
+function telegramCommand(text: string):
+  | { kind: "start"; token: string }
+  | { kind: "menu" }
+  | { kind: "stop" }
+  | { kind: "other" } {
   const trimmed = text.trim();
   const start = trimmed.match(/^\/start(?:@[A-Za-z0-9_]+)?\s+([A-Za-z0-9_-]{40,64})$/u);
   if (start) return { kind: "start", token: start[1] };
+  if (/^\/(?:start|menu|cabinet|help)(?:@[A-Za-z0-9_]+)?$/u.test(trimmed)) return { kind: "menu" };
   if (/^\/(?:stop|disconnect)(?:@[A-Za-z0-9_]+)?$/u.test(trimmed)) return { kind: "stop" };
   return { kind: "other" };
 }
@@ -824,7 +902,7 @@ async function telegramSendMessage(
     chat_id: chatId,
     text,
     parse_mode: "HTML",
-    disable_web_page_preview: true,
+    link_preview_options: { is_disabled: true },
     ...(value.targetUrl ? {
       reply_markup: { inline_keyboard: [[{ text: "Відкрити на сайті", url: value.targetUrl }]] },
     } : {}),
@@ -898,10 +976,110 @@ async function bestEffortBotReply(
     await telegramApiRequest(botToken, "sendMessage", {
       chat_id: chatId,
       text: safePlainText(message, 1200),
-      disable_web_page_preview: true,
+      link_preview_options: { is_disabled: true },
     }, fetcher);
   } catch {
     // Linking state is authoritative in D1 even when Telegram cannot display the confirmation.
+  }
+}
+
+type ConnectedTelegramRole = "admin" | "librarian" | "teacher";
+
+async function connectedTelegramProfile(
+  db: TelegramDatabase,
+  chatId: string,
+  telegramUserId: string,
+): Promise<{ full_name: string; role: ConnectedTelegramRole } | null> {
+  return db.prepare(`
+    SELECT u.full_name,u.role
+    FROM telegram_connections c JOIN users u ON u.id=c.user_id
+    WHERE c.chat_id=? AND c.telegram_user_id=? AND c.status='active'
+      AND u.status='active' AND u.role IN ('admin','librarian','teacher')
+    LIMIT 1
+  `).bind(chatId, telegramUserId).first<{ full_name: string; role: ConnectedTelegramRole }>();
+}
+
+async function bestEffortConnectedMenu(
+  botToken: string,
+  chatId: string,
+  role: ConnectedTelegramRole,
+  fullName: string,
+  siteOrigin: string | undefined,
+  linked: boolean,
+  fetcher: TelegramFetcher,
+): Promise<void> {
+  try {
+    const origin = siteOrigin ? trustedSiteOrigin(siteOrigin) : null;
+    const configuration = telegramConfiguration();
+    const keyboard = origin ? telegramRoleKeyboard(role, origin, configuration.miniAppEnabled) : null;
+    const greeting = linked
+      ? `Telegram підключено до профілю «${safePlainText(fullName, 120)}».`
+      : `Профіль: «${safePlainText(fullName, 120)}».`;
+    await telegramApiRequest(botToken, "sendMessage", {
+      chat_id: chatId,
+      text: `<b>${escapeHtml(greeting)}</b>\nОберіть потрібний розділ:`,
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+      ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
+    }, fetcher);
+    if (role === "teacher" && origin && configuration.miniAppEnabled) {
+      await bestEffortChatMenuButton(
+        botToken,
+        chatId,
+        new URL("/teacher/telegram?tab=overview", origin).toString(),
+        fetcher,
+      );
+    } else if (origin) {
+      await bestEffortChatMenuButton(botToken, chatId, null, fetcher);
+    }
+  } catch {
+    // D1 remains authoritative even if Telegram cannot render the optional menu.
+  }
+}
+
+function telegramRoleKeyboard(
+  role: ConnectedTelegramRole,
+  siteOrigin: string,
+  miniAppEnabled: boolean,
+): Array<Array<Record<string, unknown>>> {
+  if (role === "teacher") {
+    const buttons = [
+      ["📚 Каталог і замовлення", "/teacher/telegram?tab=orders"],
+      ["📅 Записатися / мої відвідування", "/teacher/telegram?tab=visits"],
+      ["📖 Мої посібники", "/teacher/telegram?tab=loans"],
+      ["🔔 Мої повідомлення", "/teacher/telegram?tab=notifications"],
+    ] as const;
+    return buttons.map(([text, miniPath]) => {
+      const path = miniAppEnabled ? miniPath : miniPath.replace("/teacher/telegram", "/teacher");
+      const url = new URL(path, siteOrigin).toString();
+      return [{ text, ...(miniAppEnabled ? { web_app: { url } } : { url }) }];
+    });
+  }
+  return [
+    [{ text: "🆕 Замовлення вчителів", url: new URL("/librarian/visits#request-inbox-title", siteOrigin).toString() }],
+    [{ text: "📅 Відвідування", url: new URL("/librarian/visits", siteOrigin).toString() }],
+    [{ text: "👩‍🏫 Вчителі", url: new URL("/librarian/teachers", siteOrigin).toString() }],
+    [{ text: "🏠 Кабінет бібліотекаря", url: new URL("/librarian", siteOrigin).toString() }],
+  ];
+}
+
+async function bestEffortChatMenuButton(
+  botToken: string,
+  chatId: string,
+  miniAppUrl: string | null,
+  fetcher: TelegramFetcher,
+): Promise<void> {
+  const numericChatId = Number(chatId);
+  if (!Number.isSafeInteger(numericChatId)) return;
+  try {
+    await telegramApiRequest(botToken, "setChatMenuButton", {
+      chat_id: numericChatId,
+      menu_button: miniAppUrl
+        ? { type: "web_app", text: "Кабінет учителя", web_app: { url: miniAppUrl } }
+        : { type: "commands" },
+    }, fetcher);
+  } catch {
+    // Inline buttons remain available even when Telegram rejects a menu-button update.
   }
 }
 

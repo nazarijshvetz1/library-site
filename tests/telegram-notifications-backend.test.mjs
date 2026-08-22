@@ -7,9 +7,11 @@ import test from "node:test";
 globalThis.__TELEGRAM_TEST_ENV = {
   TELEGRAM_LINKING_ENABLED: "true",
   TELEGRAM_NOTIFICATIONS_ENABLED: "true",
+  TELEGRAM_MINI_APP_ENABLED: "true",
   TELEGRAM_BOT_USERNAME: "LibraryTestBot",
   TELEGRAM_BOT_TOKEN: "123456789:test-token-never-used-outside-tests",
   TELEGRAM_WEBHOOK_SECRET: "test_webhook_secret_123456789",
+  TELEGRAM_SITE_ORIGIN: "https://library.example.test",
 };
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -63,7 +65,7 @@ const migrations = [
   "0006_pale_sauron.sql", "0007_cold_whiplash.sql", "0008_sudden_thunderbird.sql",
   "0009_happy_silver_samurai.sql", "0010_shocking_cobalt_man.sql",
   "0011_normalize_holding_conditions.sql", "0012_elite_victor_mancha.sql",
-  "0013_strange_dark_beast.sql", "0014_rich_lionheart.sql",
+  "0013_strange_dark_beast.sql", "0014_rich_lionheart.sql", "0015_glamorous_namora.sql",
 ];
 
 async function database() {
@@ -140,6 +142,140 @@ test("group start never consumes the token", async () => {
   assert.deepEqual(result, { outcome: "ignored_non_private", duplicate: false });
   assert.equal(context.sqlite.prepare("SELECT consumed_at FROM telegram_link_tokens").get().consumed_at, null);
   assert.equal(context.sqlite.prepare("SELECT count(*) AS count FROM telegram_connections").get().count, 0);
+  context.sqlite.close();
+});
+
+test("connected private chats receive role-aware menus and teacher Mini App buttons", async () => {
+  const teacher = await database();
+  teacher.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-TEACHER','7001','7001',NULL,'active',1,1,1,?,NULL,?,?)`)
+    .run(teacher.now, teacher.now, teacher.now);
+  const teacherPayload = {
+    update_id: 93,
+    message: { text: "/menu", chat: { id: 7001, type: "private" }, from: { id: 7001 } },
+  };
+  const teacherBodies = [];
+  const teacherResult = await telegram.processTelegramWebhookUpdate(
+    teacher.db,
+    JSON.stringify(teacherPayload),
+    teacherPayload,
+    async (_url, init) => { teacherBodies.push(JSON.parse(init.body)); return telegramOk(51); },
+    "https://preview.example.test",
+  );
+  assert.deepEqual(teacherResult, { outcome: "menu", duplicate: false });
+  const teacherMessage = teacherBodies.find((body) => body.text);
+  const menuButton = teacherBodies.find((body) => body.menu_button);
+  assert.equal(teacherMessage.reply_markup.inline_keyboard.length, 4);
+  assert.deepEqual(
+    teacherMessage.reply_markup.inline_keyboard.map((row) => row[0].web_app.url),
+    [
+      "https://library.example.test/teacher/telegram?tab=orders",
+      "https://library.example.test/teacher/telegram?tab=visits",
+      "https://library.example.test/teacher/telegram?tab=loans",
+      "https://library.example.test/teacher/telegram?tab=notifications",
+    ],
+  );
+  assert.equal(menuButton.menu_button.type, "web_app");
+  assert.equal(menuButton.chat_id, 7001);
+  assert.equal(menuButton.menu_button.web_app.url, "https://library.example.test/teacher/telegram?tab=overview");
+  const beforeReplay = teacherBodies.length;
+  assert.deepEqual(await telegram.processTelegramWebhookUpdate(
+    teacher.db,
+    JSON.stringify(teacherPayload),
+    teacherPayload,
+    async (_url, init) => { teacherBodies.push(JSON.parse(init.body)); return telegramOk(53); },
+    "https://library.example.test",
+  ), { outcome: "menu", duplicate: true });
+  assert.equal(teacherBodies.length, beforeReplay);
+
+  const stopPayload = {
+    update_id: 95,
+    message: { text: "/stop", chat: { id: 7001, type: "private" }, from: { id: 7001 } },
+  };
+  await telegram.processTelegramWebhookUpdate(
+    teacher.db,
+    JSON.stringify(stopPayload),
+    stopPayload,
+    async (_url, init) => { teacherBodies.push(JSON.parse(init.body)); return telegramOk(54); },
+    "https://library.example.test",
+  );
+  const unlinkedPayload = {
+    update_id: 96,
+    message: { text: "/menu", chat: { id: 7001, type: "private" }, from: { id: 7001 } },
+  };
+  const unlinkedBodies = [];
+  assert.deepEqual(await telegram.processTelegramWebhookUpdate(
+    teacher.db,
+    JSON.stringify(unlinkedPayload),
+    unlinkedPayload,
+    async (_url, init) => { unlinkedBodies.push(JSON.parse(init.body)); return telegramOk(55); },
+    "https://library.example.test",
+  ), { outcome: "menu_unlinked", duplicate: false });
+  assert.equal(unlinkedBodies[0].reply_markup, undefined);
+
+  const librarian = await database();
+  librarian.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-LIB','8001','8001',NULL,'active',1,1,1,?,NULL,?,?)`)
+    .run(librarian.now, librarian.now, librarian.now);
+  const librarianPayload = {
+    update_id: 94,
+    message: { text: "/start", chat: { id: 8001, type: "private" }, from: { id: 8001 } },
+  };
+  const librarianBodies = [];
+  const librarianResult = await telegram.processTelegramWebhookUpdate(
+    librarian.db,
+    JSON.stringify(librarianPayload),
+    librarianPayload,
+    async (_url, init) => { librarianBodies.push(JSON.parse(init.body)); return telegramOk(52); },
+    "https://library.example.test",
+  );
+  assert.deepEqual(librarianResult, { outcome: "menu", duplicate: false });
+  const librarianMessage = librarianBodies.find((body) => body.text);
+  assert.equal(librarianMessage.reply_markup.inline_keyboard[0][0].url,
+    "https://library.example.test/librarian/visits#request-inbox-title");
+  assert.equal(librarianMessage.reply_markup.inline_keyboard.some((row) => row[0].web_app), false);
+  teacher.sqlite.close();
+  librarian.sqlite.close();
+});
+
+test("webhook registration pins the canonical origin and publishes fallback plus Ukrainian commands", async () => {
+  const requests = [];
+  await telegram.registerTelegramWebhook(
+    "https://preview.example.test",
+    async (url, init) => { requests.push({ url: String(url), body: JSON.parse(init.body) }); return telegramOk(60); },
+  );
+  assert.equal(requests.length, 3);
+  assert.match(requests[0].url, /\/setWebhook$/u);
+  assert.equal(requests[0].body.url, "https://library.example.test/api/telegram/webhook");
+  assert.match(requests[1].url, /\/setMyCommands$/u);
+  assert.equal(requests[1].body.language_code, undefined);
+  assert.equal(requests[2].body.language_code, "uk");
+});
+
+test("site disconnect disables the connection and resets the private chat menu", async () => {
+  const context = await database();
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-TEACHER','7001','7001',NULL,'active',1,1,4,?,NULL,?,?)`)
+    .run(context.now, context.now, context.now);
+  const requests = [];
+  const status = await telegram.disconnectTelegram(
+    context.db,
+    "USR-TEACHER",
+    4,
+    async (url, init) => { requests.push({ url: String(url), body: JSON.parse(init.body) }); return telegramOk(61); },
+  );
+  assert.equal(status.status, "disabled");
+  assert.equal(status.version, 5);
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].url, /\/setChatMenuButton$/u);
+  assert.equal(requests[0].body.chat_id, 7001);
+  assert.deepEqual(requests[0].body.menu_button, { type: "commands" });
   context.sqlite.close();
 });
 

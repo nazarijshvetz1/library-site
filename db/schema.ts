@@ -1902,6 +1902,38 @@ export const telegramWebhookUpdates = sqliteTable(
   ],
 );
 
+/** One-use receipts for exchanging signed Telegram Mini App data for a teacher session. */
+export const telegramMiniAppAuthReceipts = sqliteTable(
+  "telegram_mini_app_auth_receipts",
+  {
+    initDataHash: text("init_data_hash").primaryKey(),
+    telegramUserId: text("telegram_user_id").notNull(),
+    teacherUserId: text("teacher_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    sessionTokenHash: text("session_token_hash").notNull(),
+    authDate: integer("auth_date").notNull(),
+    consumedAt: text("consumed_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_telegram_mini_app_auth_session").on(table.sessionTokenHash),
+    index("idx_telegram_mini_app_auth_expires").on(table.expiresAt),
+    index("idx_telegram_mini_app_auth_teacher_created").on(table.teacherUserId, table.createdAt),
+    check(
+      "telegram_mini_app_auth_hash_valid",
+      sql`length(${table.initDataHash}) = 64 and lower(${table.initDataHash}) not glob '*[^0-9a-f]*'`,
+    ),
+    check(
+      "telegram_mini_app_auth_session_hash_valid",
+      sql`length(${table.sessionTokenHash}) = 64 and lower(${table.sessionTokenHash}) not glob '*[^0-9a-f]*'`,
+    ),
+    check("telegram_mini_app_auth_user_not_blank", sql`length(trim(${table.telegramUserId})) > 0`),
+    check("telegram_mini_app_auth_date_positive", sql`${table.authDate} > 0`),
+  ],
+);
+
 const migrationImportStatuses = [
   "uploaded",
   "preflighted",

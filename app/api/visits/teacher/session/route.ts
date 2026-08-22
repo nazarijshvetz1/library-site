@@ -4,11 +4,11 @@ import { isSameOriginRequest } from "@/lib/librarian-api";
 import { featureGate, readVisitJson, visitError, visitJson, visitStoreError } from "@/lib/visit-schedule-api";
 import { type VisitD1Database } from "@/lib/visit-schedule-store";
 import {
-  clearTeacherSessionCookie,
+  clearTeacherSessionCookieForRequest,
   createVisitTeacherSession,
   requireVisitTeacherSession,
   revokeVisitTeacherSession,
-  teacherSessionCookie,
+  teacherSessionCookieForRequest,
 } from "@/lib/visit-teacher-auth";
 
 export const dynamic = "force-dynamic";
@@ -61,7 +61,7 @@ export async function POST(request: Request): Promise<Response> {
       pendingScope: result.identity.pendingScope,
       expiresAt: result.identity.expiresAt,
       mustChangePin: result.identity.mustChangePin,
-    }, { headers: { "Set-Cookie": teacherSessionCookie(result.token) } });
+    }, { headers: { "Set-Cookie": teacherSessionCookieForRequest(request, result.token) } });
   } catch (error) {
     return visitStoreError(error, "teacher_session_unavailable");
   }
@@ -76,7 +76,7 @@ export async function DELETE(request: Request): Promise<Response> {
   try {
     await revokeVisitTeacherSession(env.DB as unknown as VisitD1Database, request);
     return visitJson({ schemaVersion: 2, success: true }, {
-      headers: { "Set-Cookie": clearTeacherSessionCookie() },
+      headers: { "Set-Cookie": clearTeacherSessionCookieForRequest(request) },
     });
   } catch (error) {
     return visitStoreError(error, "teacher_session_unavailable");

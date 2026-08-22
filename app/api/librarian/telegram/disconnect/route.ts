@@ -18,7 +18,7 @@ export async function POST(request: Request): Promise<Response> {
   const db = env.DB as unknown as TelegramDatabase;
   try {
     const userId = await resolveLibrarianTelegramUserId(db, authorization.value.user);
-    const telegram = await disconnectTelegram(db, userId, input.value.expectedVersion);
+    const telegram = await disconnectTelegram(db, userId, input.value.expectedVersion, fetch);
     return telegramJson({ schemaVersion: 1, success: true, telegram, writesEnabled: true });
   } catch (error) {
     return telegramStoreError(error);

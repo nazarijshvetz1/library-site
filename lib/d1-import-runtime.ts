@@ -22,6 +22,7 @@ export const HOSTED_IMPORT_MAX_ROWS = 20_000;
  * uploaded again after a reset.
  */
 export const STAGING_IMPORT_RESET_TABLES = Object.freeze([
+  "telegram_mini_app_auth_receipts",
   "telegram_delivery_outbox",
   "telegram_link_tokens",
   "telegram_connections",

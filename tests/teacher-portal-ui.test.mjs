@@ -257,3 +257,37 @@ test("public catalog navigation names the cabinet while preserving explicit sche
   assert.match(config, /\/teacher"/u);
   assert.match(css, /a:not\(\.teacher-nav-link\)\{display:none\}/u);
 });
+
+test("Telegram Mini App launch is bounded, signed server-side and stays on its framed cabinet route", async () => {
+  const [page, cabinet, launch, route, validator, teacherAuth, workspace] = await Promise.all([
+    read("app/teacher/telegram/page.tsx"),
+    read("app/teacher/telegram/cabinet/page.tsx"),
+    read("app/teacher/telegram/telegram-teacher-launch.tsx"),
+    read("app/api/teacher/session/telegram/route.ts"),
+    read("lib/telegram-mini-app-auth.ts"),
+    read("lib/visit-teacher-auth.ts"),
+    read("app/visits/visit-booking-workspace.tsx"),
+  ]);
+  assert.match(page, /boundedTab\(params\?\.tab\)/u);
+  assert.match(page, /robots: \{ index: false, follow: false \}/u);
+  assert.match(launch, /Telegram\.WebApp/u);
+  assert.match(launch, /webApp\.initData/u);
+  assert.doesNotMatch(launch, /initDataUnsafe/u);
+  assert.doesNotMatch(launch, /fetch\("\/api\/teacher\/session"/u);
+  assert.match(launch, /credentials: "same-origin"/u);
+  assert.match(launch, /window\.location\.replace\(targetUrl\)/u);
+  assert.match(launch, /\/teacher\/telegram\/cabinet\?tab=/u);
+  assert.match(cabinet, /telegramMiniApp/u);
+  assert.match(route, /readVisitJson\(request\)/u);
+  assert.match(route, /validateTelegramMiniAppInitData/u);
+  assert.match(route, /createVisitTeacherTelegramSession/u);
+  assert.match(route, /telegramTeacherSessionCookie\(result\.token\)/u);
+  assert.match(teacherAuth, /SameSite=None; Partitioned/u);
+  assert.match(teacherAuth, /VISIT_TEACHER_TELEGRAM_COOKIE/u);
+  assert.match(validator, /crypto\.subtle\.verify/u);
+  assert.match(validator, /authTimeMs > nowMs/u);
+  assert.match(validator, /nowMs - authTimeMs/u);
+  assert.match(workspace, /visibilitychange/u);
+  assert.match(workspace, /Я вже підключив\(ла\) — перевірити/u);
+  assert.match(workspace, /teacherEntryPath/u);
+});

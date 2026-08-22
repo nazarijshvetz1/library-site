@@ -1,0 +1,100 @@
+.page {
+  min-height: 100svh;
+  padding: max(28px, env(safe-area-inset-top)) 18px max(28px, env(safe-area-inset-bottom));
+  display: grid;
+  place-items: center;
+  background: var(--tg-theme-secondary-bg-color, #eef2ea);
+  color: var(--tg-theme-text-color, #173f31);
+  font-family: Arial, sans-serif;
+}
+
+.panel {
+  width: min(100%, 440px);
+  padding: 34px 24px;
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+  border: 1px solid color-mix(in srgb, var(--tg-theme-text-color, #173f31) 14%, transparent);
+  border-radius: 24px;
+  background: var(--tg-theme-bg-color, #fffdf8);
+  box-shadow: 0 18px 50px rgba(19, 55, 40, .12);
+  text-align: center;
+}
+
+.mark {
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #174d38;
+  color: #fff;
+  font: 700 22px/1 Georgia, serif;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--tg-theme-hint-color, #69776f);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.panel h1 {
+  margin: -6px 0 0;
+  font: 700 clamp(32px, 9vw, 46px)/1 Georgia, serif;
+}
+
+.message {
+  min-height: 44px;
+  margin: 0;
+  color: var(--tg-theme-hint-color, #607069);
+  line-height: 1.5;
+}
+
+.spinner {
+  width: 34px;
+  height: 34px;
+  border: 3px solid #d8e3d9;
+  border-top-color: #174d38;
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+
+.primary,
+.secondary {
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  font: 800 16px/1 Arial, sans-serif;
+  text-decoration: none;
+}
+
+.primary {
+  border: 0;
+  background: var(--tg-theme-button-color, #174d38);
+  color: var(--tg-theme-button-text-color, #fff);
+  cursor: pointer;
+}
+
+.secondary {
+  border: 1px solid #bfd0c2;
+  background: transparent;
+  color: var(--tg-theme-link-color, #174d38);
+}
+
+.panel small {
+  color: var(--tg-theme-hint-color, #718078);
+  line-height: 1.45;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 1.8s; }
+}

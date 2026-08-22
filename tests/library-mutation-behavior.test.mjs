@@ -93,6 +93,7 @@ function openDatabase() {
     "0012_elite_victor_mancha.sql",
     "0013_strange_dark_beast.sql",
     "0014_rich_lionheart.sql",
+    "0015_glamorous_namora.sql",
   ]) {
     const sql = fs.readFileSync(path.join(root, "drizzle", file), "utf8");
     for (const statement of sql.split(/-->\s*statement-breakpoint/gu)) {

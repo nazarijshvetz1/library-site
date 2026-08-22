@@ -20,6 +20,8 @@ export async function POST(request: Request): Promise<Response> {
       env.DB as unknown as TelegramDatabase,
       body.raw,
       body.value,
+      fetch,
+      new URL(request.url).origin,
     );
     return telegramJson({ success: true, ...result });
   } catch (error) {

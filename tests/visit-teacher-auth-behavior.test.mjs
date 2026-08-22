@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash, createHmac } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { registerHooks } from "node:module";
 import { DatabaseSync } from "node:sqlite";
@@ -8,6 +9,8 @@ globalThis.__VISIT_TEST_ENV = {
   VISIT_TEACHER_CODE_AUTH_ENABLED: "true",
   VISIT_TEACHER_AUTH_PEPPER: "test-only-pepper-that-is-at-least-32-characters-long",
   VISIT_GUEST_AUTH_PEPPER: "guest-test-pepper-that-is-at-least-32-characters-long",
+  TELEGRAM_MINI_APP_ENABLED: "true",
+  TELEGRAM_BOT_TOKEN: "123456789:test-token-for-mini-app-tests",
 };
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -22,6 +25,7 @@ registerHooks({
 });
 
 const auth = await import("../lib/visit-teacher-auth.ts");
+const miniAppAuth = await import("../lib/telegram-mini-app-auth.ts");
 const guestAuth = await import("../lib/visit-guest-auth.ts");
 const guestStore = await import("../lib/visit-guest-store.ts");
 const store = await import("../lib/visit-schedule-store.ts");
@@ -77,6 +81,7 @@ async function database() {
     "0012_elite_victor_mancha.sql",
     "0013_strange_dark_beast.sql",
     "0014_rich_lionheart.sql",
+    "0015_glamorous_namora.sql",
   ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
   const now = new Date().toISOString();
   insertUser(sqlite, "USR-LIB", "Бібліотекар", "library@example.test", "auth-library", "librarian", now);
@@ -97,6 +102,15 @@ function request(ip = "203.0.113.10", cookie = null) {
   return new Request("https://library.example.test/api/visits/teacher/session", { headers });
 }
 
+function telegramRequest(ip = "203.0.113.90", cookie = null) {
+  const headers = new Headers({
+    "CF-Connecting-IP": ip,
+    Referer: "https://library.example.test/teacher/telegram/cabinet?tab=overview",
+  });
+  if (cookie) headers.set("Cookie", `${auth.VISIT_TEACHER_TELEGRAM_COOKIE}=${cookie}`);
+  return new Request("https://library.example.test/api/teacher/session", { headers });
+}
+
 function guestRequest(ip = "203.0.113.210", cookie = null) {
   const headers = new Headers({ "CF-Connecting-IP": ip });
   if (cookie) headers.set("Cookie", `${guestAuth.VISIT_GUEST_COOKIE}=${cookie}`);
@@ -104,6 +118,26 @@ function guestRequest(ip = "203.0.113.210", cookie = null) {
 }
 
 function commandId() { return crypto.randomUUID(); }
+
+function signedTelegramInitData({ telegramUserId = 7001, now = new Date(), extra = {} } = {}) {
+  const entries = {
+    auth_date: String(Math.floor(now.getTime() / 1000)),
+    query_id: "AAHdF6IQAAAAAN0XohDhrOrc",
+    user: JSON.stringify({ id: telegramUserId, first_name: "Олена", language_code: "uk" }),
+    ...extra,
+  };
+  const dataCheckString = Object.entries(entries)
+    .sort(([left], [right]) => left.localeCompare(right, "en"))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+  const secret = createHmac("sha256", "WebAppData")
+    .update(globalThis.__VISIT_TEST_ENV.TELEGRAM_BOT_TOKEN)
+    .digest();
+  const hash = createHmac("sha256", secret).update(dataCheckString).digest("hex");
+  const params = new URLSearchParams(entries);
+  params.set("hash", hash);
+  return params.toString();
+}
 
 function futureWeekday() {
   const today = validation.kyivToday();
@@ -155,6 +189,15 @@ test("one-time code, Ukrainian directory and opaque cookie session work without 
     { allowPinSetup: true },
   )).teacherUserId, "USR-T1");
   assert.match(auth.teacherSessionCookie(loggedIn.token), /^__Host-visit_teacher=.*HttpOnly; Secure; SameSite=Lax$/u);
+  assert.match(
+    auth.telegramTeacherSessionCookie(loggedIn.token),
+    /^__Host-visit_teacher_telegram=.*HttpOnly; Secure; SameSite=None; Partitioned$/u,
+  );
+  assert.match(auth.teacherSessionCookieForRequest(request(), loggedIn.token), /^__Host-visit_teacher=/u);
+  assert.match(
+    auth.teacherSessionCookieForRequest(telegramRequest(), loggedIn.token),
+    /^__Host-visit_teacher_telegram=/u,
+  );
 
   const persisted = JSON.stringify(context.sqlite.prepare(
     "SELECT code_hmac FROM visit_teacher_credentials WHERE teacher_user_id='USR-T1'",
@@ -731,6 +774,206 @@ test("same-millisecond reset and access-action losers roll back by exact command
   } finally {
     globalThis.Date = OriginalDate;
   }
+});
+
+test("Telegram Mini App validates signed initData and rejects tampering, expiry and duplicate fields", async () => {
+  const now = new Date();
+  const raw = signedTelegramInitData({ now });
+  const valid = await miniAppAuth.validateTelegramMiniAppInitData(raw, {
+    now,
+    botToken: globalThis.__VISIT_TEST_ENV.TELEGRAM_BOT_TOKEN,
+    requireEnabled: false,
+  });
+  assert.equal(valid.telegramUserId, "7001");
+  assert.match(valid.initDataHash, /^[0-9a-f]{64}$/u);
+  assert.equal(valid.authDate, Math.floor(now.getTime() / 1000));
+
+  const reordered = new URLSearchParams();
+  for (const [key, value] of [...new URLSearchParams(raw).entries()].reverse()) {
+    reordered.append(key, key === "hash" ? value.toUpperCase() : value);
+  }
+  const equivalentRaw = reordered.toString().replace(/%[0-9A-F]{2}/gu, (value) => value.toLowerCase());
+  const equivalent = await miniAppAuth.validateTelegramMiniAppInitData(equivalentRaw, {
+    now,
+    botToken: globalThis.__VISIT_TEST_ENV.TELEGRAM_BOT_TOKEN,
+    requireEnabled: false,
+  });
+  assert.equal(equivalent.initDataHash, valid.initDataHash);
+
+  const tampered = new URLSearchParams(raw);
+  tampered.set("user", JSON.stringify({ id: 7002, first_name: "Олена" }));
+  await assert.rejects(
+    () => miniAppAuth.validateTelegramMiniAppInitData(tampered.toString(), {
+      now, botToken: globalThis.__VISIT_TEST_ENV.TELEGRAM_BOT_TOKEN, requireEnabled: false,
+    }),
+    (error) => error.code === "telegram_init_data_invalid" && error.status === 401,
+  );
+
+  await assert.rejects(
+    () => miniAppAuth.validateTelegramMiniAppInitData(`${raw}&auth_date=1`, {
+      now, botToken: globalThis.__VISIT_TEST_ENV.TELEGRAM_BOT_TOKEN, requireEnabled: false,
+    }),
+    (error) => error.code === "telegram_init_data_invalid",
+  );
+  const expired = signedTelegramInitData({ now: new Date(now.getTime() - 301_000) });
+  await assert.rejects(
+    () => miniAppAuth.validateTelegramMiniAppInitData(expired, {
+      now, botToken: globalThis.__VISIT_TEST_ENV.TELEGRAM_BOT_TOKEN, requireEnabled: false,
+    }),
+    (error) => error.code === "telegram_init_data_expired",
+  );
+  const exactNow = new Date("2026-08-22T10:00:00.000Z");
+  const exactBoundary = signedTelegramInitData({ now: new Date(exactNow.getTime() - 300_000) });
+  await assert.rejects(
+    () => miniAppAuth.validateTelegramMiniAppInitData(exactBoundary, {
+      now: exactNow, botToken: globalThis.__VISIT_TEST_ENV.TELEGRAM_BOT_TOKEN, requireEnabled: false,
+    }),
+    (error) => error.code === "telegram_init_data_expired",
+  );
+  const future = signedTelegramInitData({ now: new Date(now.getTime() + 61_000) });
+  await assert.rejects(
+    () => miniAppAuth.validateTelegramMiniAppInitData(future, {
+      now, botToken: globalThis.__VISIT_TEST_ENV.TELEGRAM_BOT_TOKEN, requireEnabled: false,
+    }),
+    (error) => error.code === "telegram_init_data_expired",
+  );
+});
+
+test("a linked Telegram creates one ordinary teacher session and cannot be replayed", async () => {
+  const context = await database();
+  const issued = await issuedCredential(context);
+  const loginId = context.sqlite.prepare("SELECT login_id FROM visit_teacher_credentials").get().login_id;
+  const first = await auth.createVisitTeacherSession(context.db, request(), { loginId, code: issued.code });
+  const rotated = await auth.rotateVisitTeacherCode(
+    context.db,
+    request("203.0.113.10", first.token),
+    { requestId: commandId(), currentCode: issued.code, newPin: "4826" },
+  );
+  const now = new Date().toISOString();
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-T1','7001','7001',NULL,'active',1,1,1,?,NULL,?,?)`).run(now, now, now);
+  const raw = signedTelegramInitData();
+  const validated = await miniAppAuth.validateTelegramMiniAppInitData(raw, {
+    botToken: globalThis.__VISIT_TEST_ENV.TELEGRAM_BOT_TOKEN,
+    requireEnabled: false,
+  });
+  const opened = await auth.createVisitTeacherTelegramSession(context.db, telegramRequest(), {
+    telegramUserId: validated.telegramUserId,
+    initDataHash: validated.initDataHash,
+    authDate: validated.authDate,
+    receiptExpiresAt: validated.expiresAt,
+  });
+  assert.equal(opened.identity.teacherUserId, "USR-T1");
+  assert.equal(opened.identity.mustChangePin, false);
+  assert.equal((await auth.requireVisitTeacherSession(
+    context.db,
+    telegramRequest("203.0.113.90", opened.token),
+  )).credentialVersion, rotated.result.credentialVersion);
+  const receipt = context.sqlite.prepare(`SELECT init_data_hash,telegram_user_id,teacher_user_id,
+    session_token_hash FROM telegram_mini_app_auth_receipts`).get();
+  assert.equal(receipt.init_data_hash, validated.initDataHash);
+  assert.equal(receipt.telegram_user_id, "7001");
+  assert.equal(receipt.teacher_user_id, "USR-T1");
+  assert.equal(receipt.session_token_hash, opened.identity.tokenHash);
+  assert.doesNotMatch(JSON.stringify(receipt), new RegExp(raw.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+  const sessionCount = context.sqlite.prepare("SELECT COUNT(*) AS count FROM visit_teacher_sessions").get().count;
+  const reopened = await auth.createVisitTeacherTelegramSession(
+    context.db,
+    telegramRequest("203.0.113.90", opened.token),
+    {
+      telegramUserId: validated.telegramUserId,
+      initDataHash: validated.initDataHash,
+      authDate: validated.authDate,
+      receiptExpiresAt: validated.expiresAt,
+    },
+  );
+  assert.equal(reopened.token, null);
+  assert.equal(reopened.identity.teacherUserId, "USR-T1");
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS count FROM visit_teacher_sessions").get().count, sessionCount);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS count FROM telegram_mini_app_auth_receipts").get().count, 1);
+
+  insertUser(context.sqlite, "USR-T2", "Коваленко Марія", "teacher2@example.test", "auth-t2", "teacher", now);
+  context.sqlite.prepare(`INSERT INTO visit_teacher_credentials (
+    teacher_user_id,login_id,code_hmac,status,version,failed_attempts,failure_window_started_at,
+    locked_until,last_login_at,code_rotated_at,last_access_command_id,created_by_user_id,
+    updated_by_user_id,created_at,updated_at,must_change_pin
+  ) VALUES ('USR-T2','teacher-login-id-0002',?,'active',1,0,NULL,NULL,NULL,?,NULL,
+    'USR-LIB','USR-LIB',?,?,0)`).run("a".repeat(64), now, now, now);
+  const standardToken = "S".repeat(43);
+  const standardTokenHash = createHash("sha256").update(standardToken).digest("hex");
+  context.sqlite.prepare(`INSERT INTO visit_teacher_sessions (
+    token_hash,teacher_user_id,credential_version,pending_scope,ip_scope_hash,
+    expires_at,last_seen_at,revoked_at,created_at
+  ) VALUES (?,'USR-T2',1,'pending-scope-t2-0002',?, ?,?,NULL,?)`).run(
+    standardTokenHash,
+    "b".repeat(64),
+    new Date(Date.now() + 60_000).toISOString(),
+    now,
+    now,
+  );
+  const mixedHeaders = new Headers({
+    "CF-Connecting-IP": "203.0.113.90",
+    Cookie: `${auth.VISIT_TEACHER_COOKIE}=${standardToken}; ${auth.VISIT_TEACHER_TELEGRAM_COOKIE}=${opened.token}`,
+  });
+  const ordinaryMixedRequest = new Request("https://library.example.test/api/teacher/session", { headers: mixedHeaders });
+  assert.equal((await auth.requireVisitTeacherSession(context.db, ordinaryMixedRequest)).teacherUserId, "USR-T2");
+  mixedHeaders.set("Referer", "https://library.example.test/teacher/telegram/cabinet?tab=overview");
+  const telegramMixedRequest = new Request("https://library.example.test/api/teacher/session", { headers: mixedHeaders });
+  assert.equal((await auth.requireVisitTeacherSession(context.db, telegramMixedRequest)).teacherUserId, "USR-T1");
+  context.sqlite.prepare("UPDATE visit_teacher_sessions SET expires_at=? WHERE token_hash=?")
+    .run(new Date(Date.now() - 1_000).toISOString(), opened.identity.tokenHash);
+  await assert.rejects(
+    () => auth.requireVisitTeacherSession(context.db, telegramMixedRequest),
+    (error) => error.code === "authentication_required" && error.status === 401,
+  );
+  await assert.rejects(
+    () => auth.createVisitTeacherTelegramSession(context.db, telegramRequest(), {
+      telegramUserId: validated.telegramUserId,
+      initDataHash: validated.initDataHash,
+      authDate: validated.authDate,
+      receiptExpiresAt: validated.expiresAt,
+    }),
+    (error) => error.code === "telegram_auth_replayed" && error.status === 409,
+  );
+});
+
+test("Telegram session exchange rolls back if the connection changes after lookup", async () => {
+  const context = await database();
+  const issued = await issuedCredential(context);
+  const loginId = context.sqlite.prepare("SELECT login_id FROM visit_teacher_credentials").get().login_id;
+  const first = await auth.createVisitTeacherSession(context.db, request(), { loginId, code: issued.code });
+  await auth.rotateVisitTeacherCode(
+    context.db,
+    request("203.0.113.10", first.token),
+    { requestId: commandId(), currentCode: issued.code, newPin: "4826" },
+  );
+  const now = new Date().toISOString();
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-T1','7001','7001',NULL,'active',1,1,1,?,NULL,?,?)`).run(now, now, now);
+  const validated = await miniAppAuth.validateTelegramMiniAppInitData(signedTelegramInitData(), {
+    botToken: globalThis.__VISIT_TEST_ENV.TELEGRAM_BOT_TOKEN,
+    requireEnabled: false,
+  });
+  context.db.beforeBatch = () => context.sqlite.prepare(
+    "UPDATE telegram_connections SET status='disabled',disabled_at=?,updated_at=? WHERE telegram_user_id='7001'",
+  ).run(now, now);
+  await assert.rejects(
+    () => auth.createVisitTeacherTelegramSession(context.db, telegramRequest("203.0.113.91"), {
+      telegramUserId: validated.telegramUserId,
+      initDataHash: validated.initDataHash,
+      authDate: validated.authDate,
+      receiptExpiresAt: validated.expiresAt,
+    }),
+    (error) => error.code === "teacher_auth_unavailable" && error.status === 503,
+  );
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS count FROM telegram_mini_app_auth_receipts").get().count, 0);
+  assert.equal(context.sqlite.prepare(
+    "SELECT COUNT(*) AS count FROM visit_teacher_sessions WHERE token_hash IN (SELECT session_token_hash FROM telegram_mini_app_auth_receipts)",
+  ).get().count, 0);
 });
 
 test("bulk issue is constant-statement, stores no codes and rolls back a subset race", async () => {

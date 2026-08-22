@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { isSameOriginRequest } from "@/lib/librarian-api";
 import { readVisitJson, teacherPortalGate, visitError, visitJson, visitStoreError } from "@/lib/visit-schedule-api";
 import type { VisitD1Database } from "@/lib/visit-schedule-store";
-import { rotateVisitTeacherCode, teacherSessionCookie } from "@/lib/visit-teacher-auth";
+import { rotateVisitTeacherCode, teacherSessionCookieForRequest } from "@/lib/visit-teacher-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +23,7 @@ export async function POST(request: Request): Promise<Response> {
       currentCode: body.value.currentCode,
       newPin: body.value.newPin,
     });
-    const headers = rotated.token ? { "Set-Cookie": teacherSessionCookie(rotated.token) } : undefined;
+    const headers = rotated.token ? { "Set-Cookie": teacherSessionCookieForRequest(request, rotated.token) } : undefined;
     return visitJson({ schemaVersion: 1, success: true, ...rotated.result }, { headers });
   } catch (error) { return visitStoreError(error, "teacher_code_rotation_unavailable"); }
 }

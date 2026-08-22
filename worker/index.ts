@@ -42,8 +42,15 @@ const worker = {
 
     const response = await handler.fetch(request, env, ctx);
     const headers = new Headers(response.headers);
-    headers.set("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
-    headers.set("X-Frame-Options", "DENY");
+    const isTelegramMiniApp = url.pathname === "/teacher/telegram" || url.pathname.startsWith("/teacher/telegram/");
+    headers.set(
+      "Content-Security-Policy",
+      isTelegramMiniApp
+        ? "frame-ancestors https://web.telegram.org; base-uri 'self'; form-action 'self'"
+        : "frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    );
+    if (isTelegramMiniApp) headers.delete("X-Frame-Options");
+    else headers.set("X-Frame-Options", "DENY");
     headers.set("X-Content-Type-Options", "nosniff");
     headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
     headers.set(
