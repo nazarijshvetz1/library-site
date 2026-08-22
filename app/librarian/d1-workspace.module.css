@@ -1642,9 +1642,15 @@
 }
 
 .directCoverActions label {
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.directCoverActions label[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .directCoverActions input[type="file"] {
@@ -2493,9 +2499,10 @@
   .returnSelectionActions .secondaryButton { width: 100%; }
   .linkEditor article { grid-template-columns: 1fr; }
   .linkNumber, .linkUrlField, .publicLinkToggle { grid-column: auto; }
-  .directCoverField { grid-template-columns: 66px minmax(0, 1fr); }
-  .directCoverPreview { width: 66px; }
-  .directCoverActions .secondaryButton { width: auto; }
+  .directCoverField { grid-template-columns: 1fr; align-items: start; }
+  .directCoverPreview { width: 82px; }
+  .directCoverActions { display: grid; grid-template-columns: 1fr; }
+  .directCoverActions .secondaryButton { width: 100%; min-height: 44px; }
   .duplicateWarning { grid-template-columns: 26px minmax(0, 1fr); }
   .duplicateWarning button { grid-column: 1 / -1; width: 100%; }
   .academicRows article { grid-template-columns: 1fr; }

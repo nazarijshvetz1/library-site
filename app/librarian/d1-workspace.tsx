@@ -1620,6 +1620,14 @@ function CoverPhotoField({
 }) {
   const [remoteUrl, setRemoteUrl] = useState("");
   const previewUrl = upload.previewUrl || currentUrl;
+  const pickerDisabled = disabled || upload.normalizing;
+
+  function choosePhoto(input: HTMLInputElement) {
+    const file = input.files?.[0] ?? null;
+    input.value = "";
+    void upload.choose(file);
+  }
+
   return (
     <section className={styles.directCoverField} aria-busy={upload.normalizing}>
       <div className={styles.directCoverPreview}>
@@ -1635,18 +1643,25 @@ function CoverPhotoField({
               : "JPG, PNG або WEBP. Браузер підготує JPEG до 600 × 900 пікселів."}
         </p>
         <div className={styles.directCoverActions}>
-          <label className={styles.secondaryButton}>
-            {upload.file || currentUrl ? "Обрати інше фото" : "Обрати фото"}
+          <label className={styles.secondaryButton} aria-disabled={pickerDisabled}>
+            Зробити фото
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              aria-label="Зробити фото обкладинки камерою"
+              disabled={pickerDisabled}
+              onChange={(event) => choosePhoto(event.currentTarget)}
+            />
+          </label>
+          <label className={styles.secondaryButton} aria-disabled={pickerDisabled}>
+            Обрати з галереї
             <input
               type="file"
               accept="image/jpeg,image/png,image/webp"
-              capture="environment"
-              disabled={disabled || upload.normalizing}
-              onChange={(event) => {
-                const file = event.currentTarget.files?.[0] ?? null;
-                event.currentTarget.value = "";
-                void upload.choose(file);
-              }}
+              aria-label="Обрати фото обкладинки з галереї"
+              disabled={pickerDisabled}
+              onChange={(event) => choosePhoto(event.currentTarget)}
             />
           </label>
           {upload.file ? <button type="button" className={styles.secondaryButton} disabled={disabled} onClick={upload.clear}>Прибрати нове фото</button> : null}
@@ -5175,7 +5190,28 @@ function IsbnLookupAssist({
 }
 
 type NativeBarcodeDetector = { detect(source: HTMLVideoElement): Promise<Array<{ rawValue: string }>> };
-type NativeBarcodeDetectorConstructor = new (options?: { formats?: string[] }) => NativeBarcodeDetector;
+type NativeBarcodeDetectorConstructor = {
+  new (options?: { formats?: string[] }): NativeBarcodeDetector;
+  getSupportedFormats?: () => Promise<string[]>;
+};
+type IsbnScannerControls = { stop: () => void };
+
+function isbnCameraErrorMessage(error: unknown): string {
+  const errorName = error && typeof error === "object" && "name" in error
+    ? (error as { name?: unknown }).name
+    : "";
+  const name = typeof errorName === "string" ? errorName : "";
+  if (name === "NotAllowedError" || name === "SecurityError") {
+    return "Доступ до камери заборонено. Дозвольте камеру для цього сайту в налаштуваннях браузера й спробуйте ще раз.";
+  }
+  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+    return "Камеру не знайдено. Перевірте пристрій або введіть ISBN вручну.";
+  }
+  if (name === "NotReadableError" || name === "TrackStartError") {
+    return "Не вдалося запустити камеру. Можливо, її використовує інша програма.";
+  }
+  return "Не вдалося запустити сканування. Спробуйте ще раз або введіть ISBN вручну.";
+}
 
 function IsbnCameraScanner({ disabled, onDetected }: { disabled: boolean; onDetected: (value: string) => void }) {
   const [open, setOpen] = useState(false);
@@ -5184,19 +5220,37 @@ function IsbnCameraScanner({ disabled, onDetected }: { disabled: boolean; onDete
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const frameRef = useRef<number | null>(null);
+  const controlsRef = useRef<IsbnScannerControls | null>(null);
   const scanningRef = useRef(false);
+  const startingRef = useRef(false);
 
-  const stop = useCallback(() => {
+  const releaseCamera = useCallback(() => {
     scanningRef.current = false;
+    controlsRef.current?.stop();
+    controlsRef.current = null;
     if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
     frameRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
-    setOpen(false);
   }, []);
 
-  useEffect(() => () => stop(), [stop]);
+  const stop = useCallback(() => {
+    releaseCamera();
+    setOpen(false);
+  }, [releaseCamera]);
+
+  useEffect(() => {
+    const handlePageHide = () => {
+      releaseCamera();
+      setOpen(false);
+    };
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+      releaseCamera();
+    };
+  }, [releaseCamera]);
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -5207,47 +5261,95 @@ function IsbnCameraScanner({ disabled, onDetected }: { disabled: boolean; onDete
   }, [open, stop]);
 
   async function start() {
-    const detectorConstructor = (window as Window & { BarcodeDetector?: NativeBarcodeDetectorConstructor }).BarcodeDetector;
-    if (!detectorConstructor || !navigator.mediaDevices?.getUserMedia) {
-      setMessage("Цей браузер не підтримує сканування. Введіть ISBN вручну.");
+    if (startingRef.current || scanningRef.current) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMessage("Цей браузер не надає доступу до камери. Відкрийте сайт через HTTPS або введіть ISBN вручну.");
       return;
     }
+    startingRef.current = true;
     setStarting(true);
     setMessage("");
     setOpen(true);
     scanningRef.current = true;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+        audio: false,
+      });
       if (!scanningRef.current) {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
       streamRef.current = stream;
-      const video = videoRef.current;
+      let video = videoRef.current;
+      for (let attempt = 0; !video && attempt < 30 && scanningRef.current; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 16));
+        video = videoRef.current;
+      }
       if (!video) throw new Error("camera_not_ready");
       video.srcObject = stream;
       await video.play();
-      const detector = new detectorConstructor({ formats: ["ean_13"] });
-      const scan = async () => {
-        if (!scanningRef.current || !videoRef.current) return;
+
+      const detectorConstructor = (window as Window & { BarcodeDetector?: NativeBarcodeDetectorConstructor }).BarcodeDetector;
+      let detector: NativeBarcodeDetector | null = null;
+      if (detectorConstructor) {
         try {
-          const results = await detector.detect(videoRef.current);
-          const normalized = results.map((result) => normalizeIsbn(result.rawValue)).find((value) => value?.length === 13) ?? null;
-          if (normalized) {
-            onDetected(normalized);
-            stop();
-            return;
+          const supportedFormats = detectorConstructor.getSupportedFormats
+            ? await detectorConstructor.getSupportedFormats()
+            : ["ean_13"];
+          if (supportedFormats.includes("ean_13")) {
+            detector = new detectorConstructor({ formats: ["ean_13"] });
           }
         } catch {
-          // The camera can miss frames while it focuses; continue scanning.
+          detector = null;
         }
+      }
+
+      if (detector) {
+        const scan = async () => {
+          if (!scanningRef.current || !videoRef.current || !detector) return;
+          try {
+            const results = await detector.detect(videoRef.current);
+            const normalized = results
+              .map((result) => normalizeIsbn(result.rawValue))
+              .find((value) => value?.length === 13) ?? null;
+            if (normalized) {
+              onDetected(normalized);
+              stop();
+              return;
+            }
+          } catch {
+            // The camera can miss frames while it focuses; continue scanning.
+          }
+          frameRef.current = requestAnimationFrame(scan);
+        };
         frameRef.current = requestAnimationFrame(scan);
-      };
-      frameRef.current = requestAnimationFrame(scan);
-    } catch {
-      setMessage("Камера недоступна. Дозвольте доступ або введіть ISBN вручну.");
-      stop();
+      } else {
+        const [{ BarcodeFormat, BrowserMultiFormatOneDReader }, { DecodeHintType }] = await Promise.all([
+          import("@zxing/browser"),
+          import("@zxing/library"),
+        ]);
+        if (!scanningRef.current) return;
+        const hints = new Map([[DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.EAN_13]]]);
+        const reader = new BrowserMultiFormatOneDReader(hints);
+        controlsRef.current = await reader.decodeFromStream(stream, video, (result, _error, controls) => {
+          const normalized = result ? normalizeIsbn(result.getText()) : null;
+          if (!normalized || normalized.length !== 13 || !scanningRef.current) return;
+          controls.stop();
+          onDetected(normalized);
+          stop();
+        });
+      }
+    } catch (error) {
+      if (scanningRef.current) setMessage(isbnCameraErrorMessage(error));
+      releaseCamera();
+      setOpen(false);
     } finally {
+      startingRef.current = false;
       setStarting(false);
     }
   }
@@ -5262,7 +5364,7 @@ function IsbnCameraScanner({ disabled, onDetected }: { disabled: boolean; onDete
         <div className={styles.scannerOverlay} role="dialog" aria-modal="true" aria-labelledby="isbn-scanner-title">
           <div className={styles.scannerDialog}>
             <header><div><p>Сканування ISBN</p><h2 id="isbn-scanner-title">Наведіть камеру на штрихкод книги</h2></div><button type="button" onClick={stop} aria-label="Закрити сканер">×</button></header>
-            <div className={styles.scannerVideo}><video ref={videoRef} muted playsInline /><span aria-hidden="true" /></div>
+            <div className={styles.scannerVideo}><video ref={videoRef} autoPlay muted playsInline /><span aria-hidden="true" /></div>
             <p>Тримайте код EAN-13 у рамці. Після розпізнавання опис буде знайдено автоматично.</p>
             <button className={styles.secondaryButton} type="button" onClick={stop}>Ввести ISBN вручну</button>
           </div>
