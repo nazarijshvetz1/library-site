@@ -45,6 +45,7 @@ const migrationUrls = [
     "0014_rich_lionheart.sql",
     "0015_glamorous_namora.sql",
     "0016_busy_jane_foster.sql",
+    "0017_fresh_robbie_robertson.sql",
   ].map((file) => new URL(`../drizzle/${file}`, import.meta.url));
 
 async function fixturePlan() {
@@ -406,6 +407,14 @@ test("staging reset atomically clears domain/import rows while preserving migrat
       'completed', '{"version":1}', '2026-09-10T00:00:00.000Z',
       '2026-09-10T00:00:00.000Z', '2026-09-10T00:00:00.000Z')
   `).run(actorId, teacherId, "f".repeat(64));
+  database.prepare(`
+    INSERT INTO telegram_teacher_activation_invites (
+      id, kind, teacher_user_id, credential_version, token_hash,
+      issued_by_user_id, request_id, expires_at, created_at, updated_at
+    ) VALUES ('TAI-RESET', 'generic', NULL, NULL, NULL, NULL, NULL,
+      '2026-09-11T00:00:00.000Z', '2026-09-10T00:00:00.000Z',
+      '2026-09-10T00:00:00.000Z')
+  `).run();
   database.prepare(`INSERT INTO visit_guest_sessions (
     id,token_hash,pending_scope,ip_scope_hash,expires_at,last_seen_at,revoked_at,created_at
   ) VALUES ('GST-RESET',?,'guest-reset-scope',?,'2026-09-11T00:00:00.000Z',
@@ -462,6 +471,7 @@ test("staging reset atomically clears domain/import rows while preserving migrat
   assert.equal(report.deletedByTable.visit_teacher_sessions, 1);
   assert.equal(report.deletedByTable.visit_teacher_login_limits, 1);
   assert.equal(report.deletedByTable.visit_teacher_access_commands, 1);
+  assert.equal(report.deletedByTable.telegram_teacher_activation_invites, 1);
   assert.equal(report.deletedByTable.visit_teacher_credentials, 1);
   assert.equal(
     report.deletedByTable.teacher_profiles,

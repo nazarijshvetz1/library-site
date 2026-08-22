@@ -21,6 +21,7 @@ const migrationFiles = [
   "drizzle/0014_rich_lionheart.sql",
   "drizzle/0015_glamorous_namora.sql",
   "drizzle/0016_busy_jane_foster.sql",
+  "drizzle/0017_fresh_robbie_robertson.sql",
 ];
 
 async function migratedDatabase() {
@@ -44,7 +45,7 @@ async function databaseBeforeConditionNormalization() {
 async function databaseBeforeVersion35() {
   const database = new DatabaseSync(":memory:");
   database.exec("PRAGMA foreign_keys = ON;");
-  for (const file of migrationFiles.slice(0, -1)) {
+  for (const file of migrationFiles.slice(0, migrationFiles.indexOf("drizzle/0016_busy_jane_foster.sql"))) {
     database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
   }
   return database;
@@ -339,6 +340,7 @@ test("core migration extends the existing draft database without recreating it",
     "telegram_delivery_outbox",
     "telegram_link_tokens",
     "telegram_mini_app_auth_receipts",
+    "telegram_teacher_activation_invites",
     "telegram_webhook_updates",
     "teacher_profiles",
     "material_request_reservations",
@@ -415,6 +417,54 @@ test("core migration extends the existing draft database without recreating it",
     ],
   );
   tokenizedDatabase.close();
+});
+
+test("Telegram teacher activation grants keep personal tokens hashed and enforce terminal states", async () => {
+  const database = await migratedDatabase();
+  const now = "2026-08-22T10:00:00.000Z";
+  const future = "2026-08-22T10:30:00.000Z";
+  database.exec(`
+    INSERT INTO users (id,full_name,sort_name,email,auth_user_id,role,status,created_at,updated_at) VALUES
+      ('USR-LIB-TGA','Бібліотекар','бібліотекар','lib-tga@example.test','auth-lib-tga','librarian','active','${now}','${now}'),
+      ('USR-TEACHER-TGA','Учитель','учитель',NULL,NULL,'teacher','active','${now}','${now}');
+    INSERT INTO teacher_profiles (teacher_user_id,created_at,updated_at)
+      VALUES ('USR-TEACHER-TGA','${now}','${now}');
+    INSERT INTO visit_teacher_credentials (
+      teacher_user_id,login_id,code_hmac,must_change_pin,status,version,failed_attempts,
+      failure_window_started_at,locked_until,last_login_at,code_rotated_at,last_access_command_id,
+      created_by_user_id,updated_by_user_id,created_at,updated_at
+    ) VALUES ('USR-TEACHER-TGA','teacher-login-tga-0001','${"a".repeat(64)}',1,'active',1,0,
+      NULL,NULL,NULL,'${now}',NULL,'USR-LIB-TGA','USR-LIB-TGA','${now}','${now}');
+  `);
+  database.prepare(`INSERT INTO telegram_teacher_activation_invites (
+    id,kind,teacher_user_id,credential_version,token_hash,issued_by_user_id,request_id,
+    bound_telegram_user_id,bound_chat_id,bound_username,bound_update_id,presented_at,
+    expires_at,consumed_init_data_hash,consumed_at,revoked_at,created_at,updated_at
+  ) VALUES ('TGA-schema-personal','personal','USR-TEACHER-TGA',1,?,'USR-LIB-TGA',?,
+    NULL,NULL,NULL,NULL,NULL,?,NULL,NULL,NULL,?,?)`)
+    .run("b".repeat(64), crypto.randomUUID(), future, now, now);
+  database.prepare(`INSERT INTO telegram_teacher_activation_invites (
+    id,kind,teacher_user_id,credential_version,token_hash,issued_by_user_id,request_id,
+    bound_telegram_user_id,bound_chat_id,bound_username,bound_update_id,presented_at,
+    expires_at,consumed_init_data_hash,consumed_at,revoked_at,created_at,updated_at
+  ) VALUES ('TGA-schema-generic','generic',NULL,NULL,NULL,NULL,NULL,
+    '7001','7001',NULL,'701','${now}',?,NULL,NULL,NULL,?,?)`)
+    .run(future, now, now);
+  assert.throws(() => database.prepare(`INSERT INTO telegram_teacher_activation_invites (
+    id,kind,teacher_user_id,credential_version,token_hash,issued_by_user_id,request_id,
+    expires_at,created_at,updated_at
+  ) VALUES ('TGA-bad-token','personal','USR-TEACHER-TGA',1,'plain-token','USR-LIB-TGA',?,?,?,?)`)
+    .run(crypto.randomUUID(), future, now, now), /telegram_teacher_activation_token_valid/u);
+  assert.throws(() => database.prepare(`UPDATE telegram_teacher_activation_invites SET
+    consumed_at=?,consumed_init_data_hash=NULL WHERE id='TGA-schema-generic'`).run(now),
+  /telegram_teacher_activation_consumption_consistent/u);
+  assert.throws(() => database.prepare(`UPDATE telegram_teacher_activation_invites SET
+    consumed_at=?,consumed_init_data_hash=?,revoked_at=? WHERE id='TGA-schema-generic'`)
+    .run(now, "c".repeat(64), now), /telegram_teacher_activation_terminal_state/u);
+  const indexes = database.prepare("PRAGMA index_list('telegram_teacher_activation_invites')").all();
+  assert.equal(indexes.some((index) => index.name === "idx_telegram_teacher_activation_token" && index.unique === 1), true);
+  assert.equal(indexes.some((index) => index.name === "idx_telegram_teacher_activation_request" && index.unique === 1), true);
+  database.close();
 });
 
 test("catalog and sparse stock constraints support an explicit FTS rebuild", async () => {

@@ -46,6 +46,7 @@ async function visitDatabase() {
     "0014_rich_lionheart.sql",
     "0015_glamorous_namora.sql",
     "0016_busy_jane_foster.sql",
+    "0017_fresh_robbie_robertson.sql",
   ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
   const now = new Date().toISOString();
   sqlite.prepare(`INSERT INTO users

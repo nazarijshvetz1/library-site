@@ -55,6 +55,23 @@ export type VisitTeacherAccessRow = {
   fullName: string;
   status: "active" | "inactive";
   credential: VisitTeacherCredentialProjection | null;
+  telegram: {
+    connected: boolean;
+    status: "active" | "disabled" | "blocked" | null;
+    version: number | null;
+    linkedAt: string | null;
+    activeInviteId: string | null;
+    activeInviteExpiresAt: string | null;
+  };
+};
+
+export type VisitTeacherTelegramBootstrap = {
+  kind: "activation";
+  mode: "generic" | "personal" | "connected";
+  teacher: { fullName: string } | null;
+  requiresCode: boolean;
+  requiresNewPin: boolean;
+  grantExpiresAt: string | null;
 };
 
 export type VisitTeacherCodeImportRow = {
@@ -232,9 +249,12 @@ export async function createVisitTeacherSession(
         AND (c.locked_until IS NULL OR c.locked_until <= ?)
         AND u.status = 'active'
         AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL)
+        AND NOT EXISTS (SELECT 1 FROM visit_teacher_login_limits
+          WHERE scope_hash IN (?,?) AND blocked_until IS NOT NULL AND blocked_until>?)
     `).bind(
       tokenHash, pendingScope, sessionIpScopeHash, expiresAt, now, now,
       credential.teacher_user_id, loginId, presented, credential.version, now,
+      ipRateScopeHash, pairRateScopeHash, now,
     ),
     db.prepare(`
       UPDATE visit_teacher_credentials
@@ -273,6 +293,9 @@ export async function createVisitTeacherSession(
   try {
     await db.batch(statements);
   } catch {
+    if (await anyRateLimitBlocked(db, [ipRateScopeHash, pairRateScopeHash], now)) {
+      throw new VisitScheduleError("rate_limited", 429, "Забагато спроб входу. Спробуйте пізніше.");
+    }
     throw new VisitScheduleError("teacher_auth_unavailable", 503, "Вхід учителя тимчасово недоступний.");
   }
   const identity = await readVisitTeacherSessionByHash(db, tokenHash, now);
@@ -290,7 +313,7 @@ export async function createVisitTeacherTelegramSession(
     authDate: number;
     receiptExpiresAt: string;
   },
-): Promise<{ token: string | null; identity: VisitTeacherIdentity }> {
+): Promise<({ kind: "session"; token: string | null; identity: VisitTeacherIdentity }) | VisitTeacherTelegramBootstrap> {
   requireVisitTeacherCodeAuthEnabled();
   if (!/^[1-9]\d{0,19}$/u.test(input.telegramUserId)
     || !/^[0-9a-f]{64}$/u.test(input.initDataHash)
@@ -318,27 +341,56 @@ export async function createVisitTeacherTelegramSession(
     locked_until: string | null;
   }>();
   if (!credential) {
-    throw new VisitScheduleError(
-      "telegram_connection_required",
-      401,
-      "Цей Telegram не підключено до активного кабінету вчителя.",
-    );
+    const grant = await db.prepare(`
+      SELECT i.kind,i.expires_at,u.full_name,c.must_change_pin
+      FROM telegram_teacher_activation_invites i
+      LEFT JOIN users u ON u.id=i.teacher_user_id AND u.status='active'
+      LEFT JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+      LEFT JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id AND c.status='active'
+      WHERE i.bound_telegram_user_id=? AND i.consumed_at IS NULL
+        AND i.revoked_at IS NULL AND i.expires_at>?
+        AND (
+          i.kind='generic'
+          OR (i.kind='personal' AND u.id IS NOT NULL AND p.teacher_user_id IS NOT NULL
+            AND c.teacher_user_id IS NOT NULL AND c.version=i.credential_version
+            AND (c.locked_until IS NULL OR c.locked_until<=?))
+        )
+      ORDER BY CASE WHEN i.kind='personal' THEN 0 ELSE 1 END,
+        i.presented_at DESC,i.created_at DESC LIMIT 1
+    `).bind(input.telegramUserId, now, now).first<{
+      kind: "generic" | "personal";
+      expires_at: string;
+      full_name: string | null;
+      must_change_pin: number | null;
+    }>();
+    if (!grant) {
+      throw new VisitScheduleError(
+        "telegram_activation_start_required",
+        401,
+        "Поверніться до приватного чату з ботом, натисніть Start і відкрийте активацію ще раз.",
+      );
+    }
+    return {
+      kind: "activation",
+      mode: grant.kind,
+      teacher: grant.full_name ? { fullName: grant.full_name } : null,
+      requiresCode: grant.kind === "generic" || !grant.must_change_pin,
+      requiresNewPin: grant.kind === "generic" || Boolean(grant.must_change_pin),
+      grantExpiresAt: grant.expires_at,
+    };
   }
   if (credential.must_change_pin) {
-    throw new VisitScheduleError(
-      "pin_change_required",
-      403,
-      "Спочатку увійдіть на сайті тимчасовим кодом і створіть власний PIN.",
-    );
+    return {
+      kind: "activation",
+      mode: "connected",
+      teacher: { fullName: credential.full_name },
+      requiresCode: true,
+      requiresNewPin: true,
+      grantExpiresAt: null,
+    };
   }
   if (credential.locked_until && credential.locked_until > now) {
     throw new VisitScheduleError("teacher_locked", 423, "Вхід тимчасово заблоковано. Спробуйте пізніше.");
-  }
-  for (const existingToken of readTeacherSessionTokens(request)) {
-    const existingIdentity = await readVisitTeacherSessionByHash(db, await sha256Hex(existingToken), now);
-    if (existingIdentity?.teacherUserId === credential.teacher_user_id) {
-      return { token: null, identity: existingIdentity };
-    }
   }
   const replay = await db.prepare(`SELECT init_data_hash FROM telegram_mini_app_auth_receipts
     WHERE init_data_hash=? LIMIT 1`).bind(input.initDataHash).first<{ init_data_hash: string }>();
@@ -481,6 +533,507 @@ export async function createVisitTeacherTelegramSession(
       "teacher_auth_unavailable",
       503,
       "Вхід через Telegram тимчасово недоступний.",
+    );
+  }
+  return { kind: "session", token, identity };
+}
+
+/**
+ * Activate or connect a teacher cabinet from a verified Telegram Mini App.
+ * The private bot-chat grant supplies the authoritative chat id; the client
+ * supplies only signed initData and teacher secrets inside the HTTPS Mini App.
+ */
+export async function activateVisitTeacherTelegramSession(
+  db: VisitD1Database,
+  request: Request,
+  input: {
+    telegramUserId: string;
+    initDataHash: string;
+    authDate: number;
+    receiptExpiresAt: string;
+    requestId: string;
+    loginId: string;
+    code: string;
+    newPin: string;
+  },
+): Promise<{ token: string; identity: VisitTeacherIdentity }> {
+  requireVisitTeacherCodeAuthEnabled();
+  if (!/^[1-9]\d{0,19}$/u.test(input.telegramUserId)
+    || !/^[0-9a-f]{64}$/u.test(input.initDataHash)
+    || !Number.isSafeInteger(input.authDate) || input.authDate <= 0
+    || !validIsoTimestamp(input.receiptExpiresAt)
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(input.requestId)) {
+    throw new VisitScheduleError("telegram_init_data_invalid", 401, "Не вдалося підтвердити вхід через Telegram.");
+  }
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
+  const pepper = teacherAuthPepper();
+  const ip = trustedClientIp(request);
+  const ipRateScopeHash = await hmacHex(pepper, `telegram-activation-ip:${ip}`);
+  const telegramRateScopeHash = await hmacHex(pepper, `telegram-activation-user:${input.telegramUserId}`);
+  if (await anyRateLimitBlocked(db, [ipRateScopeHash, telegramRateScopeHash], now)) {
+    throw new VisitScheduleError("rate_limited", 429, "Забагато спроб активації. Спробуйте пізніше.");
+  }
+  const replay = await db.prepare(`SELECT init_data_hash FROM telegram_mini_app_auth_receipts
+    WHERE init_data_hash=? LIMIT 1`).bind(input.initDataHash).first<{ init_data_hash: string }>();
+  if (replay) {
+    throw new VisitScheduleError(
+      "telegram_auth_replayed",
+      409,
+      "Це відкриття вже використано. Закрийте кабінет і відкрийте його з бота ще раз.",
+    );
+  }
+
+  type ActivationGrant = {
+    kind: "connected" | "generic" | "personal";
+    inviteId: string | null;
+    chatId: string;
+    username: string | null;
+    expiresAt: string | null;
+    fixedTeacherUserId: string | null;
+  };
+  const connected = await db.prepare(`
+    SELECT c.chat_id,c.username,c.user_id
+    FROM telegram_connections c
+    JOIN users u ON u.id=c.user_id AND u.status='active'
+    JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+    JOIN visit_teacher_credentials v ON v.teacher_user_id=u.id
+    WHERE c.telegram_user_id=? AND c.status='active' AND v.status='active'
+      AND v.must_change_pin=1 AND (v.locked_until IS NULL OR v.locked_until<=?)
+    LIMIT 1
+  `).bind(input.telegramUserId, now).first<{
+    chat_id: string; username: string | null; user_id: string;
+  }>();
+  let grant: ActivationGrant | null = connected ? {
+    kind: "connected",
+    inviteId: null,
+    chatId: connected.chat_id,
+    username: connected.username,
+    expiresAt: null,
+    fixedTeacherUserId: connected.user_id,
+  } : null;
+  if (!grant) {
+    const row = await db.prepare(`
+      SELECT i.id,i.kind,i.bound_chat_id,i.bound_username,i.expires_at,i.teacher_user_id
+      FROM telegram_teacher_activation_invites i
+      LEFT JOIN users u ON u.id=i.teacher_user_id AND u.status='active'
+      LEFT JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+      LEFT JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id AND c.status='active'
+      WHERE i.bound_telegram_user_id=? AND i.bound_chat_id IS NOT NULL
+        AND i.consumed_at IS NULL AND i.revoked_at IS NULL AND i.expires_at>?
+        AND (i.kind='generic' OR (i.kind='personal' AND u.id IS NOT NULL
+          AND p.teacher_user_id IS NOT NULL AND c.version=i.credential_version
+          AND (c.locked_until IS NULL OR c.locked_until<=?)))
+      ORDER BY CASE WHEN i.kind='personal' THEN 0 ELSE 1 END,
+        i.presented_at DESC,i.created_at DESC LIMIT 1
+    `).bind(input.telegramUserId, now, now).first<{
+      id: string; kind: "generic" | "personal"; bound_chat_id: string;
+      bound_username: string | null; expires_at: string; teacher_user_id: string | null;
+    }>();
+    if (row) {
+      grant = {
+        kind: row.kind,
+        inviteId: row.id,
+        chatId: row.bound_chat_id,
+        username: row.bound_username,
+        expiresAt: row.expires_at,
+        fixedTeacherUserId: row.teacher_user_id,
+      };
+    }
+  }
+  if (!grant) {
+    throw new VisitScheduleError(
+      "telegram_activation_start_required",
+      401,
+      "Поверніться до приватного чату з ботом, натисніть Start і відкрийте активацію ще раз.",
+    );
+  }
+
+  const loginId = input.loginId.trim();
+  const safeLoginId = /^[A-Za-z0-9_-]{16,128}$/u.test(loginId);
+  const credential = grant.fixedTeacherUserId
+    ? await db.prepare(`
+        SELECT c.teacher_user_id,u.full_name,c.login_id,c.code_hmac,c.status,
+          c.must_change_pin,c.version,c.failed_attempts,c.failure_window_started_at,c.locked_until
+        FROM visit_teacher_credentials c JOIN users u ON u.id=c.teacher_user_id
+        WHERE c.teacher_user_id=? AND u.status='active'
+          AND EXISTS (SELECT 1 FROM teacher_profiles p
+            WHERE p.teacher_user_id=u.id AND p.closed_at IS NULL) LIMIT 1
+      `).bind(grant.fixedTeacherUserId).first<CredentialRow>()
+    : safeLoginId
+      ? await db.prepare(`
+          SELECT c.teacher_user_id,u.full_name,c.login_id,c.code_hmac,c.status,
+            c.must_change_pin,c.version,c.failed_attempts,c.failure_window_started_at,c.locked_until
+          FROM visit_teacher_credentials c JOIN users u ON u.id=c.teacher_user_id
+          WHERE c.login_id=? AND u.status='active'
+            AND EXISTS (SELECT 1 FROM teacher_profiles p
+              WHERE p.teacher_user_id=u.id AND p.closed_at IS NULL) LIMIT 1
+        `).bind(loginId).first<CredentialRow>()
+      : null;
+  const pairKey = credential?.login_id ?? (loginId || "unknown");
+  const pairRateScopeHash = await hmacHex(
+    pepper,
+    `telegram-activation-pair:${input.telegramUserId}:${ip}:${pairKey}`,
+  );
+  if (await anyRateLimitBlocked(db, [pairRateScopeHash], now)) {
+    throw new VisitScheduleError("rate_limited", 429, "Забагато спроб активації. Спробуйте пізніше.");
+  }
+  const requiresRotation = Boolean(credential?.must_change_pin);
+  const trustedPersonalSetup = Boolean(
+    credential && requiresRotation && grant.kind === "personal",
+  );
+  const currentCode = normalizeCode(input.code);
+  const presentedHmac = credential
+    ? await hmacHex(pepper, `code:${credential.teacher_user_id}:${currentCode}`)
+    : await hmacHex(pepper, `code:unknown:${currentCode}`);
+  const requiresCode = !trustedPersonalSetup;
+  const codeAllowed = !requiresCode || Boolean(
+    credential
+      && credentialCodeShape(currentCode, requiresRotation)
+      && constantTimeHexEqual(presentedHmac, credential.code_hmac),
+  );
+  const newPin = strictTeacherPin(input.newPin);
+  const pinAllowed = !requiresRotation || Boolean(newPin && strongTeacherPin(newPin));
+  const credentialAllowed = Boolean(
+    credential
+      && credential.status === "active"
+      && (!credential.locked_until || credential.locked_until <= now)
+      && (grant.fixedTeacherUserId === null || grant.fixedTeacherUserId === credential.teacher_user_id),
+  );
+  if (!credentialAllowed || !codeAllowed || !credential) {
+    if (requiresCode) {
+      await recordFailedLogin(
+        db,
+        ipRateScopeHash,
+        pairRateScopeHash,
+        credential,
+        nowDate,
+        presentedHmac,
+        telegramRateScopeHash,
+      );
+    }
+    throw new VisitScheduleError(
+      "invalid_teacher_credentials",
+      401,
+      "Не вдалося активувати кабінет. Перевірте ім’я та код.",
+    );
+  }
+  if (!pinAllowed) {
+    throw new VisitScheduleError("weak_new_pin", 400, "PIN надто простий. Оберіть інші 4 цифри.");
+  }
+  if (requiresRotation && !newPin) {
+    throw new VisitScheduleError("validation_failed", 400, "Створіть новий PIN із 4 цифр.");
+  }
+  const conflict = await db.prepare(`
+    SELECT user_id FROM telegram_connections
+    WHERE status='active' AND (
+      ((telegram_user_id=? OR chat_id=?) AND user_id!=?)
+      OR (user_id=? AND (telegram_user_id!=? OR chat_id!=?))
+    ) LIMIT 1
+  `).bind(
+    input.telegramUserId,
+    grant.chatId,
+    credential.teacher_user_id,
+    credential.teacher_user_id,
+    input.telegramUserId,
+    grant.chatId,
+  ).first<{ user_id: string }>();
+  if (conflict) {
+    throw new VisitScheduleError(
+      "telegram_connection_conflict",
+      409,
+      "Цей Telegram або картка вчителя вже мають інше активне підключення. Зверніться до бібліотекаря.",
+    );
+  }
+
+  const newHmac = requiresRotation
+    ? await hmacHex(pepper, `code:${credential.teacher_user_id}:${newPin!}`)
+    : credential.code_hmac;
+  const nextCredentialVersion = credential.version + (requiresRotation ? 1 : 0);
+  const token = randomOpaque(32);
+  const tokenHash = await sha256Hex(token);
+  const pendingScope = randomOpaque(18);
+  const sessionIpScopeHash = await hmacHex(pepper, `session-ip:${ip}`);
+  const expiresAt = new Date(nowDate.getTime() + VISIT_TEACHER_SESSION_SECONDS * 1000).toISOString();
+  const grantKind = grant.kind;
+  const grantId = grant.inviteId;
+  const statements = [
+    db.prepare(`
+      INSERT INTO telegram_mini_app_auth_receipts (
+        init_data_hash,telegram_user_id,teacher_user_id,session_token_hash,
+        auth_date,consumed_at,expires_at,created_at
+      )
+      SELECT ?,?,c.teacher_user_id,?,?,?,?,?
+      FROM visit_teacher_credentials c
+      JOIN users u ON u.id=c.teacher_user_id AND u.status='active'
+      JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+      WHERE c.teacher_user_id=? AND c.status='active' AND c.version=?
+        AND c.must_change_pin=? AND (c.locked_until IS NULL OR c.locked_until<=?)
+        AND (?=0 OR c.code_hmac=?)
+        AND NOT EXISTS (SELECT 1 FROM telegram_mini_app_auth_receipts WHERE init_data_hash=?)
+        AND NOT EXISTS (SELECT 1 FROM visit_teacher_login_limits
+          WHERE scope_hash IN (?,?,?) AND blocked_until IS NOT NULL AND blocked_until>?)
+        AND NOT EXISTS (SELECT 1 FROM telegram_connections x WHERE x.status='active' AND (
+          ((x.telegram_user_id=? OR x.chat_id=?) AND x.user_id!=c.teacher_user_id)
+          OR (x.user_id=c.teacher_user_id AND (x.telegram_user_id!=? OR x.chat_id!=?))
+        ))
+        AND (
+          (?='connected' AND EXISTS (SELECT 1 FROM telegram_connections tc
+            WHERE tc.user_id=c.teacher_user_id AND tc.telegram_user_id=? AND tc.chat_id=?
+              AND tc.status='active'))
+          OR (?!='connected' AND EXISTS (SELECT 1 FROM telegram_teacher_activation_invites i
+            WHERE i.id=? AND i.bound_telegram_user_id=? AND i.bound_chat_id=?
+              AND i.consumed_at IS NULL AND i.revoked_at IS NULL AND i.expires_at>?
+              AND ((i.kind='generic' AND i.teacher_user_id IS NULL)
+                OR (i.kind='personal' AND i.teacher_user_id=c.teacher_user_id
+                  AND i.credential_version=c.version))))
+        )
+    `).bind(
+      input.initDataHash,
+      input.telegramUserId,
+      tokenHash,
+      input.authDate,
+      now,
+      input.receiptExpiresAt,
+      now,
+      credential.teacher_user_id,
+      credential.version,
+      requiresRotation ? 1 : 0,
+      now,
+      requiresCode ? 1 : 0,
+      presentedHmac,
+      input.initDataHash,
+      ipRateScopeHash,
+      telegramRateScopeHash,
+      pairRateScopeHash,
+      now,
+      input.telegramUserId,
+      grant.chatId,
+      input.telegramUserId,
+      grant.chatId,
+      grantKind,
+      input.telegramUserId,
+      grant.chatId,
+      grantKind,
+      grantId,
+      input.telegramUserId,
+      grant.chatId,
+      now,
+    ),
+  ];
+  if (requiresRotation) {
+    statements.push(db.prepare(`UPDATE visit_teacher_credentials SET
+        code_hmac=?,must_change_pin=0,version=version+1,failed_attempts=0,
+        failure_window_started_at=NULL,locked_until=NULL,last_login_at=?,code_rotated_at=?,
+        last_access_command_id=?,updated_by_user_id=?,updated_at=?
+      WHERE teacher_user_id=? AND version=? AND status='active' AND must_change_pin=1
+        AND (?=0 OR code_hmac=?)
+        AND EXISTS (SELECT 1 FROM telegram_mini_app_auth_receipts
+          WHERE init_data_hash=? AND teacher_user_id=? AND session_token_hash=?)`)
+      .bind(
+        newHmac,
+        now,
+        now,
+        input.requestId,
+        credential.teacher_user_id,
+        now,
+        credential.teacher_user_id,
+        credential.version,
+        requiresCode ? 1 : 0,
+        presentedHmac,
+        input.initDataHash,
+        credential.teacher_user_id,
+        tokenHash,
+      ));
+    statements.push(db.prepare(`UPDATE visit_teacher_sessions SET revoked_at=?,last_seen_at=?
+      WHERE teacher_user_id=? AND revoked_at IS NULL
+        AND EXISTS (SELECT 1 FROM visit_teacher_credentials
+          WHERE teacher_user_id=? AND version=? AND code_hmac=?)`)
+      .bind(now, now, credential.teacher_user_id, credential.teacher_user_id, nextCredentialVersion, newHmac));
+  } else {
+    statements.push(db.prepare(`UPDATE visit_teacher_sessions SET revoked_at=?,last_seen_at=?
+      WHERE token_hash=(SELECT token_hash FROM visit_teacher_sessions
+        WHERE teacher_user_id=? AND revoked_at IS NULL AND expires_at>?
+        ORDER BY created_at,token_hash LIMIT 1)
+        AND (SELECT COUNT(*) FROM visit_teacher_sessions
+          WHERE teacher_user_id=? AND revoked_at IS NULL AND expires_at>?)>=?
+        AND EXISTS (SELECT 1 FROM telegram_mini_app_auth_receipts
+          WHERE init_data_hash=? AND teacher_user_id=? AND session_token_hash=?)`)
+      .bind(
+        now,
+        now,
+        credential.teacher_user_id,
+        now,
+        credential.teacher_user_id,
+        now,
+        MAX_ACTIVE_SESSIONS,
+        input.initDataHash,
+        credential.teacher_user_id,
+        tokenHash,
+      ));
+    statements.push(db.prepare(`UPDATE visit_teacher_credentials SET
+        failed_attempts=0,failure_window_started_at=NULL,locked_until=NULL,last_login_at=?,updated_at=?
+      WHERE teacher_user_id=? AND version=? AND code_hmac=? AND status='active'
+        AND EXISTS (SELECT 1 FROM telegram_mini_app_auth_receipts
+          WHERE init_data_hash=? AND teacher_user_id=? AND session_token_hash=?)`)
+      .bind(
+        now,
+        now,
+        credential.teacher_user_id,
+        credential.version,
+        presentedHmac,
+        input.initDataHash,
+        credential.teacher_user_id,
+        tokenHash,
+      ));
+  }
+  statements.push(
+    db.prepare(`DELETE FROM telegram_connections
+      WHERE user_id!=? AND status!='active' AND (telegram_user_id=? OR chat_id=?)
+        AND EXISTS (SELECT 1 FROM telegram_mini_app_auth_receipts
+          WHERE init_data_hash=? AND teacher_user_id=? AND session_token_hash=?)`)
+      .bind(
+        credential.teacher_user_id,
+        input.telegramUserId,
+        grant.chatId,
+        input.initDataHash,
+        credential.teacher_user_id,
+        tokenHash,
+      ),
+    db.prepare(`INSERT INTO telegram_connections (
+        user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+        linked_at,disabled_at,last_success_at,last_failure_at,last_error_code,created_at,updated_at
+      )
+      SELECT r.teacher_user_id,?,?,?,'active',1,1,1,?,NULL,NULL,NULL,NULL,?,?
+      FROM telegram_mini_app_auth_receipts r
+      WHERE r.init_data_hash=? AND r.teacher_user_id=? AND r.session_token_hash=?
+      ON CONFLICT(user_id) DO UPDATE SET telegram_user_id=excluded.telegram_user_id,
+        chat_id=excluded.chat_id,username=excluded.username,status='active',disabled_at=NULL,
+        linked_at=excluded.linked_at,last_error_code=NULL,
+        version=telegram_connections.version+1,updated_at=excluded.updated_at
+      WHERE telegram_connections.status!='active'
+        OR (telegram_connections.telegram_user_id=excluded.telegram_user_id
+          AND telegram_connections.chat_id=excluded.chat_id)`)
+      .bind(
+        input.telegramUserId,
+        grant.chatId,
+        grant.username,
+        now,
+        now,
+        now,
+        input.initDataHash,
+        credential.teacher_user_id,
+        tokenHash,
+      ),
+    db.prepare(`INSERT INTO visit_teacher_sessions (
+        token_hash,teacher_user_id,credential_version,pending_scope,ip_scope_hash,
+        expires_at,last_seen_at,revoked_at,created_at
+      )
+      SELECT ?,r.teacher_user_id,c.version,?,?,?, ?,NULL,?
+      FROM telegram_mini_app_auth_receipts r
+      JOIN visit_teacher_credentials c ON c.teacher_user_id=r.teacher_user_id
+      JOIN telegram_connections tc ON tc.user_id=r.teacher_user_id
+      WHERE r.init_data_hash=? AND r.session_token_hash=? AND r.teacher_user_id=?
+        AND c.status='active' AND c.version=? AND c.must_change_pin=0
+        AND tc.status='active' AND tc.telegram_user_id=? AND tc.chat_id=?`)
+      .bind(
+        tokenHash,
+        pendingScope,
+        sessionIpScopeHash,
+        expiresAt,
+        now,
+        now,
+        input.initDataHash,
+        tokenHash,
+        credential.teacher_user_id,
+        nextCredentialVersion,
+        input.telegramUserId,
+        grant.chatId,
+      ),
+  );
+  if (grantId) {
+    statements.push(db.prepare(`UPDATE telegram_teacher_activation_invites SET
+        consumed_init_data_hash=?,consumed_at=?,updated_at=?
+      WHERE id=? AND bound_telegram_user_id=? AND bound_chat_id=?
+        AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at>?
+        AND EXISTS (SELECT 1 FROM visit_teacher_sessions
+          WHERE token_hash=? AND teacher_user_id=? AND revoked_at IS NULL)`)
+      .bind(
+        input.initDataHash,
+        now,
+        now,
+        grantId,
+        input.telegramUserId,
+        grant.chatId,
+        now,
+        tokenHash,
+        credential.teacher_user_id,
+      ));
+  }
+  statements.push(
+    db.prepare(`UPDATE telegram_teacher_activation_invites SET revoked_at=?,updated_at=?
+      WHERE consumed_at IS NULL AND revoked_at IS NULL AND id!=COALESCE(?, '')
+        AND (teacher_user_id=? OR bound_telegram_user_id=?)
+        AND EXISTS (SELECT 1 FROM visit_teacher_sessions
+          WHERE token_hash=? AND teacher_user_id=? AND revoked_at IS NULL)`)
+      .bind(
+        now,
+        now,
+        grantId,
+        credential.teacher_user_id,
+        input.telegramUserId,
+        tokenHash,
+        credential.teacher_user_id,
+      ),
+    db.prepare(`INSERT INTO audit_events (
+      id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,
+      before_json,after_json,metadata_json,created_at
+    ) VALUES (?,?,'teacher-telegram@local.invalid','visit.teacher_session.telegram_activate',
+      'visit_teacher_session',CASE WHEN EXISTS (SELECT 1 FROM visit_teacher_sessions
+        WHERE token_hash=? AND teacher_user_id=? AND credential_version=? AND revoked_at IS NULL)
+        THEN ? ELSE NULL END,?,NULL,NULL,?,?)`)
+      .bind(
+        `AUD-${crypto.randomUUID()}`,
+        credential.teacher_user_id,
+        tokenHash,
+        credential.teacher_user_id,
+        nextCredentialVersion,
+        tokenHash,
+        input.requestId,
+        JSON.stringify({ grantKind, pinCreated: requiresRotation }),
+        now,
+      ),
+    db.prepare("DELETE FROM visit_teacher_login_limits WHERE scope_hash IN (?,?)")
+      .bind(pairRateScopeHash, telegramRateScopeHash),
+    boundedSessionCleanup(db, now),
+    boundedTelegramReceiptCleanup(db, now),
+  );
+  try {
+    await db.batch(statements);
+  } catch {
+    if (await anyRateLimitBlocked(
+      db,
+      [ipRateScopeHash, telegramRateScopeHash, pairRateScopeHash],
+      now,
+    )) {
+      throw new VisitScheduleError("rate_limited", 429, "Забагато спроб активації. Спробуйте пізніше.");
+    }
+    throw new VisitScheduleError(
+      "telegram_activation_conflict",
+      409,
+      "Активаційні дані вже змінилися. Закрийте вікно й відкрийте його з бота ще раз.",
+    );
+  }
+  const identity = await readVisitTeacherSessionByHash(db, tokenHash, now);
+  if (!identity) {
+    const consumed = await db.prepare(`SELECT init_data_hash FROM telegram_mini_app_auth_receipts
+      WHERE init_data_hash=? LIMIT 1`).bind(input.initDataHash).first<{ init_data_hash: string }>();
+    throw new VisitScheduleError(
+      consumed ? "telegram_activation_conflict" : "invalid_teacher_credentials",
+      consumed ? 409 : 401,
+      consumed
+        ? "Активаційні дані вже змінилися. Відкрийте кабінет з бота ще раз."
+        : "Не вдалося активувати кабінет. Перевірте ім’я та код.",
     );
   }
   return { token, identity };
@@ -879,18 +1432,35 @@ export async function listVisitTeacherAccess(db: VisitD1Database): Promise<Visit
   const rows = await db.prepare(`
     SELECT u.id, u.full_name, u.status AS user_status,
            c.status, c.version, c.last_login_at, c.locked_until, c.must_change_pin,
+           tc.status AS telegram_status,tc.version AS telegram_version,tc.linked_at,
+           (SELECT i.id FROM telegram_teacher_activation_invites i
+             WHERE i.teacher_user_id=u.id AND i.kind='personal'
+               AND i.consumed_at IS NULL AND i.revoked_at IS NULL AND i.expires_at>?
+               AND c.status='active' AND i.credential_version=c.version
+             ORDER BY i.created_at DESC LIMIT 1) AS active_invite_id,
+           (SELECT i.expires_at FROM telegram_teacher_activation_invites i
+             WHERE i.teacher_user_id=u.id AND i.kind='personal'
+               AND i.consumed_at IS NULL AND i.revoked_at IS NULL AND i.expires_at>?
+               AND c.status='active' AND i.credential_version=c.version
+             ORDER BY i.created_at DESC LIMIT 1) AS active_invite_expires_at,
            (SELECT COUNT(*) FROM visit_teacher_sessions s
              WHERE s.teacher_user_id = u.id AND s.revoked_at IS NULL AND s.expires_at > ?) AS active_sessions
     FROM users u
     LEFT JOIN visit_teacher_credentials c ON c.teacher_user_id = u.id
+    LEFT JOIN telegram_connections tc ON tc.user_id=u.id
     WHERE u.status = 'active'
       AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL)
     ORDER BY u.status DESC, u.sort_name, u.id LIMIT 101
-  `).bind(now).all<{
+  `).bind(now, now, now).all<{
     id: string; full_name: string; user_status: "active" | "inactive";
     status: "active" | "disabled" | null; version: number | null;
     last_login_at: string | null; locked_until: string | null; active_sessions: number;
     must_change_pin: number | null;
+    telegram_status: "active" | "disabled" | "blocked" | null;
+    telegram_version: number | null;
+    linked_at: string | null;
+    active_invite_id: string | null;
+    active_invite_expires_at: string | null;
   }>();
   if ((rows.results ?? []).length > 100) throw new VisitScheduleError("teacher_result_limit", 409, "У базі понад 100 учителів.");
   return (rows.results ?? []).map((row) => ({
@@ -904,6 +1474,14 @@ export async function listVisitTeacherAccess(db: VisitD1Database): Promise<Visit
       lockedUntil: row.locked_until,
       activeSessions: Number(row.active_sessions),
       mustChangePin: Boolean(row.must_change_pin),
+    },
+    telegram: {
+      connected: row.telegram_status === "active",
+      status: row.telegram_status,
+      version: row.telegram_version === null ? null : Number(row.telegram_version),
+      linkedAt: row.linked_at,
+      activeInviteId: row.active_invite_id,
+      activeInviteExpiresAt: row.active_invite_expires_at,
     },
   }));
 }
@@ -982,6 +1560,11 @@ export async function issueVisitTeacherCode(
     `).bind(loginId, codeHmac, now, input.requestId, actor.id, actor.id, now, now, teacherUserId, currentVersion),
     db.prepare(`UPDATE visit_teacher_sessions SET revoked_at = ?
       WHERE teacher_user_id = ? AND revoked_at IS NULL AND ? > 0`).bind(now, teacherUserId, currentVersion),
+    db.prepare(`UPDATE telegram_link_tokens SET revoked_at=?
+      WHERE user_id=? AND consumed_at IS NULL AND revoked_at IS NULL`).bind(now, teacherUserId),
+    db.prepare(`UPDATE telegram_teacher_activation_invites SET revoked_at=?,updated_at=?
+      WHERE teacher_user_id=? AND consumed_at IS NULL AND revoked_at IS NULL`)
+      .bind(now, now, teacherUserId),
     guardedAccessAudit(db, {
       actor, requestId: input.requestId, action: "visit.teacher_code.issue", teacherUserId,
       expectedVersion: nextVersion, expectedStatus: "active", expectedCodeHmac: codeHmac,
@@ -1001,6 +1584,159 @@ export async function issueVisitTeacherCode(
     credential: publicCredential,
     code: formatTeacherCode(code),
   };
+}
+
+/**
+ * Atomically protect a teacher account after a phone is lost.
+ * The previous PIN, Telegram binding, browser sessions and pending links all
+ * become unusable. The replacement temporary code is returned once and is
+ * never persisted in plaintext.
+ */
+export async function protectLostVisitTeacherPhone(
+  db: VisitD1Database,
+  actor: { id: string; email: string },
+  teacherUserId: string,
+  input: { requestId: string; expectedCredentialVersion: number; expectedTelegramVersion: number },
+) {
+  const requestHash = await sha256Hex(JSON.stringify({
+    kind: "phone.protect",
+    actor: actor.id,
+    teacherUserId,
+    ...input,
+  }));
+  const existingCommand = await accessCommand(db, input.requestId);
+  if (existingCommand) {
+    if (existingCommand.request_hash !== requestHash) {
+      throw new VisitScheduleError("request_id_conflict", 409, "requestId уже використано.");
+    }
+    throw unrecoverableCodeResult(existingCommand.request_hash);
+  }
+  const row = await db.prepare(`
+    SELECT u.id,u.full_name,c.version AS credential_version,
+      tc.version AS telegram_version
+    FROM users u
+    JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+    JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id
+    JOIN telegram_connections tc ON tc.user_id=u.id AND tc.status='active'
+    WHERE u.id=? AND u.status='active' AND c.status='active' LIMIT 1
+  `).bind(teacherUserId).first<{
+    id: string;
+    full_name: string;
+    credential_version: number;
+    telegram_version: number;
+  }>();
+  if (!row) {
+    throw new VisitScheduleError(
+      "telegram_connection_not_found",
+      404,
+      "Активне підключення Telegram для цього вчителя не знайдено.",
+    );
+  }
+  if (Number(row.credential_version) !== input.expectedCredentialVersion
+    || Number(row.telegram_version) !== input.expectedTelegramVersion) {
+    throw new VisitScheduleError(
+      "credential_version_conflict",
+      409,
+      "Доступ або Telegram уже змінилися. Оновіть список.",
+    );
+  }
+  const code = randomTeacherCode();
+  const codeHmac = await hmacHex(teacherAuthPepper(), `code:${teacherUserId}:${code}`);
+  const now = new Date().toISOString();
+  const nextCredentialVersion = input.expectedCredentialVersion + 1;
+  const nextTelegramVersion = input.expectedTelegramVersion + 1;
+  const credential: VisitTeacherCredentialProjection = {
+    status: "active",
+    version: nextCredentialVersion,
+    lastLoginAt: null,
+    lockedUntil: null,
+    activeSessions: 0,
+    mustChangePin: true,
+  };
+  const safeResult = {
+    teacher: { id: row.id, fullName: row.full_name },
+    credential,
+    telegram: { connected: false, status: "disabled" as const, version: nextTelegramVersion },
+  };
+  const statements = [
+    insertAccessCommand(db, input.requestId, actor.id, "sessions.revoke", teacherUserId, requestHash, now),
+    db.prepare(`UPDATE visit_teacher_credentials SET
+        code_hmac=?,must_change_pin=1,version=version+1,failed_attempts=0,
+        failure_window_started_at=NULL,locked_until=NULL,last_login_at=NULL,
+        code_rotated_at=?,last_access_command_id=?,updated_by_user_id=?,updated_at=?
+      WHERE teacher_user_id=? AND version=? AND status='active'`)
+      .bind(
+        codeHmac,
+        now,
+        input.requestId,
+        actor.id,
+        now,
+        teacherUserId,
+        input.expectedCredentialVersion,
+      ),
+    db.prepare(`UPDATE visit_teacher_sessions SET revoked_at=?,last_seen_at=?
+      WHERE teacher_user_id=? AND revoked_at IS NULL`).bind(now, now, teacherUserId),
+    db.prepare(`UPDATE telegram_link_tokens SET revoked_at=?
+      WHERE user_id=? AND consumed_at IS NULL AND revoked_at IS NULL`).bind(now, teacherUserId),
+    db.prepare(`UPDATE telegram_teacher_activation_invites SET revoked_at=?,updated_at=?
+      WHERE consumed_at IS NULL AND revoked_at IS NULL
+        AND (teacher_user_id=? OR bound_telegram_user_id=(SELECT telegram_user_id
+          FROM telegram_connections WHERE user_id=? AND status='active' AND version=? LIMIT 1))`)
+      .bind(now, now, teacherUserId, teacherUserId, input.expectedTelegramVersion),
+    db.prepare(`UPDATE telegram_connections SET status='disabled',disabled_at=?,
+        version=version+1,updated_at=?
+      WHERE user_id=? AND status='active' AND version=?`)
+      .bind(now, now, teacherUserId, input.expectedTelegramVersion),
+    guardedAccessAudit(db, {
+      actor,
+      requestId: input.requestId,
+      action: "visit.teacher_access.lost_phone_protect",
+      teacherUserId,
+      expectedVersion: nextCredentialVersion,
+      expectedStatus: "active",
+      expectedCodeHmac: codeHmac,
+      expectedLockedUntil: null,
+      checkLockedUntil: true,
+      expectedUpdatedAt: now,
+      metadata: {
+        previousCredentialVersion: input.expectedCredentialVersion,
+        previousTelegramVersion: input.expectedTelegramVersion,
+      },
+      now,
+    }),
+    db.prepare(`INSERT INTO audit_events (
+        id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,
+        before_json,after_json,metadata_json,created_at
+      ) VALUES (?,?,?,'telegram.connection.lost_phone_protect','telegram_connection',
+        CASE WHEN EXISTS (SELECT 1 FROM telegram_connections
+          WHERE user_id=? AND status='disabled' AND version=? AND disabled_at=?) THEN ? ELSE NULL END,
+        ?,NULL,NULL,json_object('previousVersion',?,'version',?),?)`)
+      .bind(
+        `AUD-${crypto.randomUUID()}`,
+        actor.id,
+        actor.email.toLowerCase(),
+        teacherUserId,
+        nextTelegramVersion,
+        now,
+        teacherUserId,
+        input.requestId,
+        input.expectedTelegramVersion,
+        nextTelegramVersion,
+        now,
+      ),
+    activeActorGuardAudit(db, actor, input.requestId, now),
+    completeAccessCommand(db, input.requestId, safeResult, now),
+  ];
+  try {
+    await db.batch(statements);
+  } catch {
+    throw new VisitScheduleError(
+      "credential_version_conflict",
+      409,
+      "Доступ або Telegram уже змінилися. Оновіть список.",
+    );
+  }
+  return { ...safeResult, code: formatTeacherCode(code) };
 }
 
 export async function bulkIssueVisitTeacherCodes(
@@ -1324,7 +2060,10 @@ export async function updateVisitTeacherAccess(
   };
   const result = { teacher: { id: row.id, fullName: row.full_name }, credential };
   const commandKind = ({
-    enable: "credential.enable", disable: "credential.disable", unlock: "credential.unlock", revoke_sessions: "sessions.revoke",
+    enable: "credential.enable",
+    disable: "credential.disable",
+    unlock: "credential.unlock",
+    revoke_sessions: "sessions.revoke",
   } as const)[input.action];
   const statements = [
     insertAccessCommand(db, input.requestId, actor.id, commandKind, teacherUserId, requestHash, now),
@@ -1344,12 +2083,21 @@ export async function updateVisitTeacherAccess(
     ),
     db.prepare(`UPDATE visit_teacher_sessions SET revoked_at = ?
       WHERE teacher_user_id = ? AND revoked_at IS NULL`).bind(now, teacherUserId),
+    db.prepare(`UPDATE telegram_link_tokens SET revoked_at=?
+      WHERE user_id=? AND consumed_at IS NULL AND revoked_at IS NULL`).bind(now, teacherUserId),
+    db.prepare(`UPDATE telegram_teacher_activation_invites SET revoked_at=?,updated_at=?
+      WHERE teacher_user_id=? AND consumed_at IS NULL AND revoked_at IS NULL`)
+      .bind(now, now, teacherUserId),
+    db.prepare(`UPDATE telegram_connections SET status='disabled',disabled_at=?,
+        version=version+1,updated_at=?
+      WHERE user_id=? AND status='active' AND ?='disable'`)
+      .bind(now, now, teacherUserId, input.action),
     guardedAccessAudit(db, {
       actor, requestId: input.requestId, action: `visit.teacher_access.${input.action}`,
-      teacherUserId, expectedVersion: nextVersion, expectedStatus: nextStatus,
-      expectedLockedUntil: nextLockedUntil, checkLockedUntil: input.action === "unlock",
+       teacherUserId, expectedVersion: nextVersion, expectedStatus: nextStatus,
+       expectedLockedUntil: nextLockedUntil, checkLockedUntil: input.action === "unlock",
       expectedUpdatedAt: now,
-      metadata: { previousVersion: input.expectedVersion }, now,
+       metadata: { previousVersion: input.expectedVersion }, now,
     }),
     activeActorGuardAudit(db, actor, input.requestId, now),
     completeAccessCommand(db, input.requestId, result, now),
@@ -1474,6 +2222,7 @@ async function recordFailedLogin(
   credential: CredentialRow | null,
   nowDate: Date,
   presentedHmac: string,
+  additionalScopeHash?: string,
 ) {
   const now = nowDate.toISOString();
   const teacherWindowStart = new Date(nowDate.getTime() - LOGIN_TEACHER_WINDOW_MS).toISOString();
@@ -1482,6 +2231,15 @@ async function recordFailedLogin(
     rateLimitFailureStatement(db, ipScopeHash, nowDate, LOGIN_IP_WINDOW_MS, LOGIN_IP_LIMIT),
     rateLimitFailureStatement(db, pairScopeHash, nowDate, LOGIN_PAIR_WINDOW_MS, LOGIN_PAIR_LIMIT),
   ];
+  if (additionalScopeHash) {
+    statements.push(rateLimitFailureStatement(
+      db,
+      additionalScopeHash,
+      nowDate,
+      LOGIN_PAIR_WINDOW_MS,
+      LOGIN_PAIR_LIMIT,
+    ));
+  }
   if (credential) {
     statements.push(db.prepare(`
       UPDATE visit_teacher_credentials SET
@@ -1608,6 +2366,11 @@ function normalizeTeacherImportName(value: string): string {
 
 function normalizePin(value: string): string {
   return value.normalize("NFKC").replace(/\D+/gu, "").slice(0, VISIT_TEACHER_PIN_LENGTH);
+}
+
+function strictTeacherPin(value: string): string | null {
+  const normalized = value.normalize("NFKC").trim();
+  return /^\d{4}$/u.test(normalized) ? normalized : null;
 }
 
 function temporaryCodeShape(value: string): boolean {

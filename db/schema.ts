@@ -1766,6 +1766,7 @@ export const portalNotifications = sqliteTable(
 const telegramConnectionStatuses = ["active", "disabled", "blocked"] as const;
 const telegramDeliveryStatuses = ["pending", "processing", "retry", "sent", "dead"] as const;
 const telegramNotificationCategories = ["orders", "visits", "system"] as const;
+const telegramTeacherActivationKinds = ["generic", "personal"] as const;
 
 /** Private Telegram chats explicitly linked by a signed-in library user. */
 export const telegramConnections = sqliteTable(
@@ -1835,6 +1836,92 @@ export const telegramLinkTokens = sqliteTable(
       "telegram_link_tokens_consumption_consistent",
       sql`(${table.consumedAt} is null and ${table.consumedUpdateId} is null)
         or (${table.consumedAt} is not null and ${table.consumedUpdateId} is not null)`,
+    ),
+  ],
+);
+
+/**
+ * Short-lived Telegram teacher activation grants.
+ *
+ * Generic grants are created only after an unlinked user sends /start in a
+ * private bot chat. Personal grants are issued by a librarian, contain only a
+ * random token in the deep link, and are bound to the first private Telegram
+ * account that presents them. Plaintext tokens, access codes and PINs are
+ * never stored here.
+ */
+export const telegramTeacherActivationInvites = sqliteTable(
+  "telegram_teacher_activation_invites",
+  {
+    id: text("id").primaryKey(),
+    kind: text("kind", { enum: telegramTeacherActivationKinds }).notNull(),
+    teacherUserId: text("teacher_user_id").references(() => users.id, {
+      onDelete: "cascade",
+      onUpdate: "cascade",
+    }),
+    credentialVersion: integer("credential_version"),
+    tokenHash: text("token_hash"),
+    issuedByUserId: text("issued_by_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    requestId: text("request_id"),
+    boundTelegramUserId: text("bound_telegram_user_id"),
+    boundChatId: text("bound_chat_id"),
+    boundUsername: text("bound_username"),
+    boundUpdateId: text("bound_update_id"),
+    presentedAt: text("presented_at"),
+    expiresAt: text("expires_at").notNull(),
+    consumedInitDataHash: text("consumed_init_data_hash"),
+    consumedAt: text("consumed_at"),
+    revokedAt: text("revoked_at"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_telegram_teacher_activation_token").on(table.tokenHash),
+    uniqueIndex("idx_telegram_teacher_activation_request").on(table.requestId),
+    index("idx_telegram_teacher_activation_teacher_expiry").on(
+      table.teacherUserId,
+      table.expiresAt,
+    ),
+    index("idx_telegram_teacher_activation_bound_expiry").on(
+      table.boundTelegramUserId,
+      table.expiresAt,
+      table.createdAt,
+    ),
+    check("telegram_teacher_activation_kind_valid", sql`${table.kind} in ('generic','personal')`),
+    check(
+      "telegram_teacher_activation_token_valid",
+      sql`${table.tokenHash} is null or (length(${table.tokenHash}) = 64 and lower(${table.tokenHash}) not glob '*[^0-9a-f]*')`,
+    ),
+    check(
+      "telegram_teacher_activation_receipt_valid",
+      sql`${table.consumedInitDataHash} is null or (length(${table.consumedInitDataHash}) = 64 and lower(${table.consumedInitDataHash}) not glob '*[^0-9a-f]*')`,
+    ),
+    check(
+      "telegram_teacher_activation_personal_shape",
+      sql`(${table.kind}='generic' and ${table.teacherUserId} is null and ${table.credentialVersion} is null
+          and ${table.tokenHash} is null and ${table.issuedByUserId} is null and ${table.requestId} is null)
+        or (${table.kind}='personal' and ${table.teacherUserId} is not null
+          and ${table.credentialVersion} > 0 and ${table.tokenHash} is not null
+          and ${table.issuedByUserId} is not null and length(${table.requestId})=36)`,
+    ),
+    check(
+      "telegram_teacher_activation_binding_consistent",
+      sql`(${table.boundTelegramUserId} is null and ${table.boundChatId} is null
+          and ${table.boundUpdateId} is null and ${table.presentedAt} is null)
+        or (${table.boundTelegramUserId} is not null and ${table.boundChatId} is not null
+          and ${table.boundUpdateId} is not null and ${table.presentedAt} is not null)`,
+    ),
+    check(
+      "telegram_teacher_activation_terminal_state",
+      sql`not (${table.consumedAt} is not null and ${table.revokedAt} is not null)`,
+    ),
+    check(
+      "telegram_teacher_activation_consumption_consistent",
+      sql`(${table.consumedAt} is null and ${table.consumedInitDataHash} is null)
+        or (${table.consumedAt} is not null and ${table.consumedInitDataHash} is not null
+          and ${table.boundTelegramUserId} is not null)`,
     ),
   ],
 );

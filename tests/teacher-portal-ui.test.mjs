@@ -259,11 +259,12 @@ test("public catalog navigation names the cabinet while preserving explicit sche
 });
 
 test("Telegram Mini App launch is bounded, signed server-side and stays on its framed cabinet route", async () => {
-  const [page, cabinet, launch, route, validator, teacherAuth, workspace] = await Promise.all([
+  const [page, cabinet, launch, route, activationRoute, validator, teacherAuth, workspace] = await Promise.all([
     read("app/teacher/telegram/page.tsx"),
     read("app/teacher/telegram/cabinet/page.tsx"),
     read("app/teacher/telegram/telegram-teacher-launch.tsx"),
     read("app/api/teacher/session/telegram/route.ts"),
+    read("app/api/teacher/session/telegram/activate/route.ts"),
     read("lib/telegram-mini-app-auth.ts"),
     read("lib/visit-teacher-auth.ts"),
     read("app/visits/visit-booking-workspace.tsx"),
@@ -276,14 +277,32 @@ test("Telegram Mini App launch is bounded, signed server-side and stays on its f
   assert.doesNotMatch(launch, /fetch\("\/api\/teacher\/session"/u);
   assert.match(launch, /credentials: "same-origin"/u);
   assert.match(launch, /window\.location\.replace\(targetUrl\)/u);
+  assert.match(launch, /payload\.onboardingRequired/u);
+  assert.match(launch, /TelegramTeacherActivationForm/u);
+  assert.match(launch, /teacherSearchUrl\(normalizedQuery\)/u);
+  assert.match(launch, /\/api\/teacher\/session\/telegram\/activate/u);
+  assert.match(launch, /requestId: crypto\.randomUUID\(\)/u);
+  assert.match(launch, /Створіть власний 4-значний PIN/u);
+  assert.match(launch, /Код і PIN вводьте лише/u);
+  assert.match(launch, /activation\.mode === "connected" \? "Telegram підтверджено"/u);
+  assert.doesNotMatch(launch, /role="option"[\s\S]{0,120}<button/u);
+  assert.doesNotMatch(launch, /localStorage|sessionStorage|URLSearchParams\([^)]*(?:code|pin)|console\./iu);
   assert.match(launch, /\/teacher\/telegram\/cabinet\?tab=/u);
   assert.match(cabinet, /telegramMiniApp/u);
   assert.match(route, /readVisitJson\(request\)/u);
   assert.match(route, /validateTelegramMiniAppInitData/u);
   assert.match(route, /createVisitTeacherTelegramSession/u);
+  assert.match(route, /onboardingRequired: true/u);
+  assert.match(route, /onboardingRequired: false/u);
+  assert.match(route, /isSameOriginRequest\(request\)/u);
   assert.match(route, /telegramTeacherSessionCookie\(result\.token\)/u);
   assert.match(teacherAuth, /SameSite=None; Partitioned/u);
   assert.match(teacherAuth, /VISIT_TEACHER_TELEGRAM_COOKIE/u);
+  assert.match(activationRoute, /isSameOriginRequest\(request\)/u);
+  assert.match(activationRoute, /expectedKeys = \["initData", "requestId", "loginId", "code", "newPin"\]/u);
+  assert.match(activationRoute, /validateTelegramMiniAppInitData/u);
+  assert.match(activationRoute, /activateVisitTeacherTelegramSession/u);
+  assert.match(activationRoute, /telegramTeacherSessionCookie\(result\.token\)/u);
   assert.match(validator, /crypto\.subtle\.verify/u);
   assert.match(validator, /authTimeMs > nowMs/u);
   assert.match(validator, /nowMs - authTimeMs/u);

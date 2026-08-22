@@ -284,6 +284,7 @@
 }
 
 .activeBadge { background: var(--green-100); color: var(--green-900); }
+.inviteBadge { background: #eef3c9; color: #53620f; }
 .missingBadge { background: #edf0eb; color: #53645a; }
 .disabledBadge { background: #f8e9e5; color: var(--danger); }
 .lockedBadge { background: #fff0cf; color: #765716; }
@@ -311,6 +312,118 @@
 .empty {
   color: var(--muted);
   line-height: 1.55;
+}
+
+.dialogBackdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  display: grid;
+  box-sizing: border-box;
+  place-items: center;
+  padding: 18px;
+  border: 0;
+  background: rgba(12, 37, 25, .68);
+}
+
+.dialogBackdrop:not([open]) { display: none; }
+.dialogBackdrop::backdrop { background: transparent; }
+
+.inviteDialog {
+  width: min(100%, 520px);
+  max-height: calc(100svh - 36px);
+  padding: 24px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  box-shadow: 0 24px 70px rgba(8, 33, 20, .28);
+}
+
+.dialogHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dialogHeading span {
+  color: var(--green-700);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.dialogHeading h3 {
+  margin: 4px 0 0;
+  color: var(--green-950);
+  font: 650 27px/1.05 Georgia, serif;
+}
+
+.dialogHeading > button {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--green-950);
+  cursor: pointer;
+  font-size: 24px;
+}
+
+.qrCanvas {
+  display: block;
+  width: min(100%, 280px);
+  height: auto;
+  margin: 18px auto;
+  border: 10px solid #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 26px rgba(21, 61, 40, .12);
+}
+
+.inviteWarning {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #fff4d7;
+  color: #715716;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.dialogActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.dialogActions a,
+.dialogActions button {
+  min-height: 44px;
+  padding: 10px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--green-900);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+  text-decoration: none;
+}
+
+.dialogActions .dangerButton {
+  border-color: #e6c4bd;
+  background: #fff5f2;
+  color: var(--danger);
 }
 
 @media (max-width: 760px) {
@@ -391,6 +504,10 @@
 
   .rowActions button {
     width: 100%;
+  }
+
+  .dialogActions {
+    grid-template-columns: 1fr;
   }
 }
 

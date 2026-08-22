@@ -83,6 +83,7 @@ async function database() {
     "0014_rich_lionheart.sql",
     "0015_glamorous_namora.sql",
     "0016_busy_jane_foster.sql",
+    "0017_fresh_robbie_robertson.sql",
   ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
   const now = new Date().toISOString();
   insertUser(sqlite, "USR-LIB", "Бібліотекар", "library@example.test", "auth-library", "librarian", now);
@@ -126,6 +127,34 @@ function guestRequest(ip = "203.0.113.210", cookie = null) {
 }
 
 function commandId() { return crypto.randomUUID(); }
+
+function insertBoundPersonalActivationInvite(
+  context,
+  { id, credentialVersion, telegramUserId = "7001", chatId = telegramUserId },
+) {
+  const now = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 30 * 60_000).toISOString();
+  const tokenHash = createHash("sha256").update(id).digest("hex");
+  context.sqlite.prepare(`INSERT INTO telegram_teacher_activation_invites (
+    id,kind,teacher_user_id,credential_version,token_hash,issued_by_user_id,request_id,
+    bound_telegram_user_id,bound_chat_id,bound_username,bound_update_id,presented_at,
+    expires_at,consumed_init_data_hash,consumed_at,revoked_at,created_at,updated_at
+  ) VALUES (?,'personal','USR-T1',?,?,'USR-LIB',?, ?,?,'teacher_one',?, ?,?,NULL,NULL,NULL,?,?)`)
+    .run(
+      id,
+      credentialVersion,
+      tokenHash,
+      commandId(),
+      telegramUserId,
+      chatId,
+      `update-${id}`,
+      now,
+      expiresAt,
+      now,
+      now,
+    );
+  return expiresAt;
+}
 
 function signedTelegramInitData({ telegramUserId = 7001, now = new Date(), extra = {} } = {}) {
   const entries = {
@@ -445,6 +474,40 @@ test("session login races fail closed and do not revoke an existing oldest sessi
     assert.equal(context.sqlite.prepare("SELECT revoked_at FROM visit_teacher_sessions WHERE token_hash=?")
       .get(previous[0].identity.tokenHash).revoked_at, null);
   }
+});
+
+test("session login reasserts rate limits inside the successful batch", async () => {
+  const context = await database();
+  const issued = await issuedCredential(context);
+  const loginId = context.sqlite.prepare("SELECT login_id FROM visit_teacher_credentials").get().login_id;
+  const previous = [];
+  for (let index = 0; index < 3; index += 1) {
+    previous.push(await auth.createVisitTeacherSession(
+      context.db,
+      request(`203.0.113.${60 + index}`),
+      { loginId, code: issued.code },
+    ));
+  }
+  const racedIp = "203.0.113.70";
+  const pairScope = createHmac("sha256", globalThis.__VISIT_TEST_ENV.VISIT_TEACHER_AUTH_PEPPER)
+    .update(`pair:${racedIp}:${loginId}`)
+    .digest("hex");
+  context.db.beforeBatch = () => context.sqlite.prepare(`INSERT INTO visit_teacher_login_limits (
+    scope_hash,attempts,window_started_at,blocked_until,updated_at
+  ) VALUES (?,1,?,?,?)`).run(
+    pairScope,
+    new Date().toISOString(),
+    "2999-01-01T00:00:00.000Z",
+    new Date().toISOString(),
+  );
+  await assert.rejects(
+    () => auth.createVisitTeacherSession(context.db, request(racedIp), { loginId, code: issued.code }),
+    (error) => error.code === "rate_limited" && error.status === 429,
+  );
+  assert.equal(context.sqlite.prepare(`SELECT COUNT(*) AS n FROM visit_teacher_sessions
+    WHERE revoked_at IS NULL AND expires_at>?`).get(new Date().toISOString()).n, 3);
+  assert.equal(context.sqlite.prepare("SELECT revoked_at FROM visit_teacher_sessions WHERE token_hash=?")
+    .get(previous[0].identity.tokenHash).revoked_at, null);
 });
 
 test("credential lock blocks only new login, while established session remains usable", async () => {
@@ -814,6 +877,10 @@ test("librarian reset revokes a forgotten PIN and restores one-time setup", asyn
     request("203.0.113.80", firstSession.token),
     { requestId: commandId(), currentCode: issued.code, newPin: pin },
   );
+  insertBoundPersonalActivationInvite(context, {
+    id: "TGA-reset-personal",
+    credentialVersion: rotated.result.credentialVersion,
+  });
   const reset = await auth.issueVisitTeacherCode(context.db, context.actor, "USR-T1", {
     requestId: commandId(),
     expectedVersion: rotated.result.credentialVersion,
@@ -824,6 +891,8 @@ test("librarian reset revokes a forgotten PIN and restores one-time setup", asyn
     WHERE teacher_user_id='USR-T1'`).get().must_change_pin, 1);
   assert.equal(context.sqlite.prepare(`SELECT COUNT(*) AS n FROM visit_teacher_sessions
     WHERE teacher_user_id='USR-T1' AND revoked_at IS NULL`).get().n, 0);
+  assert.ok(context.sqlite.prepare(`SELECT revoked_at FROM telegram_teacher_activation_invites
+    WHERE id='TGA-reset-personal'`).get().revoked_at);
   await assert.rejects(
     () => auth.createVisitTeacherSession(context.db, request("203.0.113.81"), { loginId, code: pin }),
     (error) => error.code === "invalid_teacher_credentials",
@@ -832,6 +901,67 @@ test("librarian reset revokes a forgotten PIN and restores one-time setup", asyn
     context.db, request("203.0.113.82"), { loginId, code: reset.code },
   );
   assert.equal(recovered.identity.mustChangePin, true);
+});
+
+test("lost-phone protection atomically disconnects Telegram and returns one replacement code", async () => {
+  const context = await database();
+  const issued = await issuedCredential(context);
+  const loginId = context.sqlite.prepare("SELECT login_id FROM visit_teacher_credentials WHERE teacher_user_id='USR-T1'").get().login_id;
+  const oldSession = await auth.createVisitTeacherSession(context.db, request(), { loginId, code: issued.code });
+  const now = new Date().toISOString();
+  const future = new Date(Date.now() + 30 * 60_000).toISOString();
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-T1','7001','7001','olena','active',1,1,1,?,NULL,?,?)`).run(now, now, now);
+  context.sqlite.prepare(`INSERT INTO telegram_link_tokens (
+    id,user_id,token_hash,expires_at,consumed_at,consumed_update_id,revoked_at,created_at
+  ) VALUES ('TGL-lost','USR-T1',?, ?,NULL,NULL,NULL,?)`).run("b".repeat(64), future, now);
+  context.sqlite.prepare(`INSERT INTO telegram_teacher_activation_invites (
+    id,kind,teacher_user_id,credential_version,token_hash,issued_by_user_id,request_id,
+    bound_telegram_user_id,bound_chat_id,bound_username,bound_update_id,presented_at,
+    expires_at,consumed_init_data_hash,consumed_at,revoked_at,created_at,updated_at
+  ) VALUES ('TGA-lost-personal','personal','USR-T1',1,?,'USR-LIB',?,
+    NULL,NULL,NULL,NULL,NULL,?,NULL,NULL,NULL,?,?)`)
+    .run("c".repeat(64), commandId(), future, now, now);
+  const protectedAccess = await auth.protectLostVisitTeacherPhone(
+    context.db,
+    context.actor,
+    "USR-T1",
+    { requestId: commandId(), expectedCredentialVersion: 1, expectedTelegramVersion: 1 },
+  );
+  assert.match(protectedAccess.code, /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}$/u);
+  assert.deepEqual(protectedAccess.telegram, { connected: false, status: "disabled", version: 2 });
+  assert.deepEqual(
+    { ...context.sqlite.prepare(`SELECT version,must_change_pin,status,last_login_at
+      FROM visit_teacher_credentials WHERE teacher_user_id='USR-T1'`).get() },
+    { version: 2, must_change_pin: 1, status: "active", last_login_at: null },
+  );
+  assert.deepEqual(
+    { ...context.sqlite.prepare(`SELECT status,version FROM telegram_connections WHERE user_id='USR-T1'`).get() },
+    { status: "disabled", version: 2 },
+  );
+  assert.ok(context.sqlite.prepare("SELECT revoked_at FROM visit_teacher_sessions WHERE token_hash=?")
+    .get(oldSession.identity.tokenHash).revoked_at);
+  assert.ok(context.sqlite.prepare("SELECT revoked_at FROM telegram_link_tokens WHERE id='TGL-lost'").get().revoked_at);
+  assert.ok(context.sqlite.prepare("SELECT revoked_at FROM telegram_teacher_activation_invites WHERE id='TGA-lost-personal'").get().revoked_at);
+  await assert.rejects(
+    () => auth.createVisitTeacherSession(context.db, request("203.0.113.33"), { loginId, code: issued.code }),
+    (error) => error.code === "invalid_teacher_credentials",
+  );
+  const replacementLogin = await auth.createVisitTeacherSession(
+    context.db,
+    request("203.0.113.34"),
+    { loginId, code: protectedAccess.code },
+  );
+  assert.equal(replacementLogin.identity.mustChangePin, true);
+  const persisted = JSON.stringify({
+    credential: context.sqlite.prepare("SELECT * FROM visit_teacher_credentials WHERE teacher_user_id='USR-T1'").get(),
+    command: context.sqlite.prepare("SELECT * FROM visit_teacher_access_commands ORDER BY created_at DESC LIMIT 1").get(),
+    audits: context.sqlite.prepare("SELECT * FROM audit_events").all(),
+  });
+  assert.doesNotMatch(persisted, new RegExp(protectedAccess.code.replace("-", ""), "u"));
+  context.sqlite.close();
 });
 
 test("same-millisecond reset and access-action losers roll back by exact command marker", async () => {
@@ -959,6 +1089,7 @@ test("a linked Telegram creates one ordinary teacher session and cannot be repla
     authDate: validated.authDate,
     receiptExpiresAt: validated.expiresAt,
   });
+  assert.equal(opened.kind, "session");
   assert.equal(opened.identity.teacherUserId, "USR-T1");
   assert.equal(opened.identity.mustChangePin, false);
   assert.equal((await auth.requireVisitTeacherSession(
@@ -972,21 +1103,35 @@ test("a linked Telegram creates one ordinary teacher session and cannot be repla
   assert.equal(receipt.teacher_user_id, "USR-T1");
   assert.equal(receipt.session_token_hash, opened.identity.tokenHash);
   assert.doesNotMatch(JSON.stringify(receipt), new RegExp(raw.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
-  const sessionCount = context.sqlite.prepare("SELECT COUNT(*) AS count FROM visit_teacher_sessions").get().count;
+  const freshRaw = signedTelegramInitData({ extra: { query_id: "AAHdF6IQAAAAAN0XohDhrFresh" } });
+  const freshValidated = await miniAppAuth.validateTelegramMiniAppInitData(freshRaw, {
+    botToken: globalThis.__VISIT_TEST_ENV.TELEGRAM_BOT_TOKEN,
+    requireEnabled: false,
+  });
   const reopened = await auth.createVisitTeacherTelegramSession(
     context.db,
     telegramRequest("203.0.113.90", opened.token),
     {
-      telegramUserId: validated.telegramUserId,
-      initDataHash: validated.initDataHash,
-      authDate: validated.authDate,
-      receiptExpiresAt: validated.expiresAt,
+      telegramUserId: freshValidated.telegramUserId,
+      initDataHash: freshValidated.initDataHash,
+      authDate: freshValidated.authDate,
+      receiptExpiresAt: freshValidated.expiresAt,
     },
   );
-  assert.equal(reopened.token, null);
+  assert.equal(reopened.kind, "session");
+  assert.equal(typeof reopened.token, "string");
   assert.equal(reopened.identity.teacherUserId, "USR-T1");
-  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS count FROM visit_teacher_sessions").get().count, sessionCount);
-  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS count FROM telegram_mini_app_auth_receipts").get().count, 1);
+  assert.notEqual(reopened.token, opened.token);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS count FROM telegram_mini_app_auth_receipts").get().count, 2);
+  await assert.rejects(
+    () => auth.createVisitTeacherTelegramSession(context.db, telegramRequest("203.0.113.90"), {
+      telegramUserId: freshValidated.telegramUserId,
+      initDataHash: freshValidated.initDataHash,
+      authDate: freshValidated.authDate,
+      receiptExpiresAt: freshValidated.expiresAt,
+    }),
+    (error) => error.code === "telegram_auth_replayed" && error.status === 409,
+  );
 
   insertUser(context.sqlite, "USR-T2", "Коваленко Марія", "teacher2@example.test", "auth-t2", "teacher", now);
   context.sqlite.prepare(`INSERT INTO visit_teacher_credentials (
@@ -1031,6 +1176,315 @@ test("a linked Telegram creates one ordinary teacher session and cannot be repla
     }),
     (error) => error.code === "telegram_auth_replayed" && error.status === 409,
   );
+});
+
+test("Telegram generic onboarding activates an existing teacher and rotates the temporary code", async () => {
+  const context = await database();
+  const issued = await issuedCredential(context);
+  const credentialBefore = context.sqlite.prepare(`SELECT login_id,version,must_change_pin
+    FROM visit_teacher_credentials WHERE teacher_user_id='USR-T1'`).get();
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const expiresAt = new Date(now.getTime() + 30 * 60_000).toISOString();
+  context.sqlite.prepare(`INSERT INTO telegram_teacher_activation_invites (
+    id,kind,teacher_user_id,credential_version,token_hash,issued_by_user_id,request_id,
+    bound_telegram_user_id,bound_chat_id,bound_username,bound_update_id,presented_at,
+    expires_at,consumed_init_data_hash,consumed_at,revoked_at,created_at,updated_at
+  ) VALUES ('TGA-generic-test','generic',NULL,NULL,NULL,NULL,NULL,
+    '7001','7001','teacher_one','501',?, ?,NULL,NULL,NULL,?,?)`)
+    .run(nowIso, expiresAt, nowIso, nowIso);
+  const validated = await miniAppAuth.validateTelegramMiniAppInitData(signedTelegramInitData({ now }), {
+    now,
+    botToken: globalThis.__VISIT_TEST_ENV.TELEGRAM_BOT_TOKEN,
+    requireEnabled: false,
+  });
+  const bootstrap = await auth.createVisitTeacherTelegramSession(context.db, telegramRequest(), {
+    telegramUserId: validated.telegramUserId,
+    initDataHash: validated.initDataHash,
+    authDate: validated.authDate,
+    receiptExpiresAt: validated.expiresAt,
+  });
+  assert.deepEqual(bootstrap, {
+    kind: "activation",
+    mode: "generic",
+    teacher: null,
+    requiresCode: true,
+    requiresNewPin: true,
+    grantExpiresAt: expiresAt,
+  });
+  const activated = await auth.activateVisitTeacherTelegramSession(
+    context.db,
+    telegramRequest(),
+    {
+      telegramUserId: validated.telegramUserId,
+      initDataHash: validated.initDataHash,
+      authDate: validated.authDate,
+      receiptExpiresAt: validated.expiresAt,
+      requestId: commandId(),
+      loginId: credentialBefore.login_id,
+      code: issued.code,
+      newPin: "4826",
+    },
+  );
+  assert.equal(activated.identity.teacherUserId, "USR-T1");
+  assert.equal(activated.identity.mustChangePin, false);
+  assert.deepEqual(
+    { ...context.sqlite.prepare(`SELECT version,must_change_pin,status
+      FROM visit_teacher_credentials WHERE teacher_user_id='USR-T1'`).get() },
+    { version: credentialBefore.version + 1, must_change_pin: 0, status: "active" },
+  );
+  assert.deepEqual(
+    { ...context.sqlite.prepare(`SELECT user_id,telegram_user_id,chat_id,status
+      FROM telegram_connections WHERE user_id='USR-T1'`).get() },
+    { user_id: "USR-T1", telegram_user_id: "7001", chat_id: "7001", status: "active" },
+  );
+  const grant = context.sqlite.prepare(`SELECT consumed_at,consumed_init_data_hash,revoked_at
+    FROM telegram_teacher_activation_invites WHERE id='TGA-generic-test'`).get();
+  assert.ok(grant.consumed_at);
+  assert.equal(grant.consumed_init_data_hash, validated.initDataHash);
+  assert.equal(grant.revoked_at, null);
+  assert.equal((await auth.requireVisitTeacherSession(
+    context.db,
+    telegramRequest("203.0.113.90", activated.token),
+  )).teacherUserId, "USR-T1");
+  const persisted = JSON.stringify({
+    credentials: context.sqlite.prepare("SELECT * FROM visit_teacher_credentials").all(),
+    receipts: context.sqlite.prepare("SELECT * FROM telegram_mini_app_auth_receipts").all(),
+    grants: context.sqlite.prepare("SELECT * FROM telegram_teacher_activation_invites").all(),
+    audits: context.sqlite.prepare("SELECT * FROM audit_events").all(),
+  });
+  assert.doesNotMatch(persisted, /4826/u);
+  assert.doesNotMatch(persisted, new RegExp(issued.code.replace("-", ""), "u"));
+});
+
+test("Telegram activation reasserts rate limits inside the successful batch", async () => {
+  const context = await database();
+  const issued = await issuedCredential(context);
+  const credential = context.sqlite.prepare(`SELECT login_id,version FROM visit_teacher_credentials
+    WHERE teacher_user_id='USR-T1'`).get();
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const expiresAt = new Date(now.getTime() + 30 * 60_000).toISOString();
+  context.sqlite.prepare(`INSERT INTO telegram_teacher_activation_invites (
+    id,kind,teacher_user_id,credential_version,token_hash,issued_by_user_id,request_id,
+    bound_telegram_user_id,bound_chat_id,bound_username,bound_update_id,presented_at,
+    expires_at,consumed_init_data_hash,consumed_at,revoked_at,created_at,updated_at
+  ) VALUES ('TGA-rate-race','generic',NULL,NULL,NULL,NULL,NULL,
+    '7001','7001','teacher_one','rate-race-update',?,?,NULL,NULL,NULL,?,?)`)
+    .run(nowIso, expiresAt, nowIso, nowIso);
+  const validated = await miniAppAuth.validateTelegramMiniAppInitData(signedTelegramInitData({
+    now,
+    extra: { query_id: "AAHdF6IQAAAAAN0XohDRateRace" },
+  }), {
+    now,
+    botToken: globalThis.__VISIT_TEST_ENV.TELEGRAM_BOT_TOKEN,
+    requireEnabled: false,
+  });
+  const telegramScope = createHmac("sha256", globalThis.__VISIT_TEST_ENV.VISIT_TEACHER_AUTH_PEPPER)
+    .update(`telegram-activation-user:${validated.telegramUserId}`)
+    .digest("hex");
+  context.db.beforeBatch = () => context.sqlite.prepare(`INSERT INTO visit_teacher_login_limits (
+    scope_hash,attempts,window_started_at,blocked_until,updated_at
+  ) VALUES (?,1,?,?,?)`).run(
+    telegramScope,
+    new Date().toISOString(),
+    "2999-01-01T00:00:00.000Z",
+    new Date().toISOString(),
+  );
+  await assert.rejects(
+    () => auth.activateVisitTeacherTelegramSession(context.db, telegramRequest(), {
+      telegramUserId: validated.telegramUserId,
+      initDataHash: validated.initDataHash,
+      authDate: validated.authDate,
+      receiptExpiresAt: validated.expiresAt,
+      requestId: commandId(),
+      loginId: credential.login_id,
+      code: issued.code,
+      newPin: "4826",
+    }),
+    (error) => error.code === "rate_limited" && error.status === 429,
+  );
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM telegram_mini_app_auth_receipts").get().n, 0);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM telegram_connections").get().n, 0);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM visit_teacher_sessions").get().n, 0);
+  assert.deepEqual(
+    { ...context.sqlite.prepare(`SELECT version,must_change_pin FROM visit_teacher_credentials
+      WHERE teacher_user_id='USR-T1'`).get() },
+    { version: credential.version, must_change_pin: 1 },
+  );
+  assert.equal(context.sqlite.prepare(`SELECT consumed_at FROM telegram_teacher_activation_invites
+    WHERE id='TGA-rate-race'`).get().consumed_at, null);
+});
+
+test("Telegram personal invite creates the first PIN without exposing the temporary code", async () => {
+  const context = await database();
+  await issuedCredential(context);
+  const expiresAt = insertBoundPersonalActivationInvite(context, {
+    id: "TGA-personal-first-pin",
+    credentialVersion: 1,
+  });
+  const now = new Date();
+  const validated = await miniAppAuth.validateTelegramMiniAppInitData(signedTelegramInitData({ now }), {
+    now,
+    botToken: globalThis.__VISIT_TEST_ENV.TELEGRAM_BOT_TOKEN,
+    requireEnabled: false,
+  });
+  assert.deepEqual(await auth.createVisitTeacherTelegramSession(context.db, telegramRequest(), {
+    telegramUserId: validated.telegramUserId,
+    initDataHash: validated.initDataHash,
+    authDate: validated.authDate,
+    receiptExpiresAt: validated.expiresAt,
+  }), {
+    kind: "activation",
+    mode: "personal",
+    teacher: { fullName: "Шевченко Олена" },
+    requiresCode: false,
+    requiresNewPin: true,
+    grantExpiresAt: expiresAt,
+  });
+  const activated = await auth.activateVisitTeacherTelegramSession(context.db, telegramRequest(), {
+    telegramUserId: validated.telegramUserId,
+    initDataHash: validated.initDataHash,
+    authDate: validated.authDate,
+    receiptExpiresAt: validated.expiresAt,
+    requestId: commandId(),
+    loginId: "",
+    code: "",
+    newPin: "4826",
+  });
+  assert.equal(activated.identity.teacherUserId, "USR-T1");
+  assert.equal(activated.identity.credentialVersion, 2);
+  assert.deepEqual(
+    { ...context.sqlite.prepare(`SELECT version,must_change_pin FROM visit_teacher_credentials
+      WHERE teacher_user_id='USR-T1'`).get() },
+    { version: 2, must_change_pin: 0 },
+  );
+  assert.ok(context.sqlite.prepare(`SELECT consumed_at FROM telegram_teacher_activation_invites
+    WHERE id='TGA-personal-first-pin'`).get().consumed_at);
+  assert.equal(context.sqlite.prepare(`SELECT COUNT(*) AS n FROM telegram_connections
+    WHERE user_id='USR-T1' AND telegram_user_id='7001' AND status='active'`).get().n, 1);
+  context.sqlite.close();
+});
+
+test("Telegram personal invite for an existing cabinet requires the current PIN", async () => {
+  const context = await database();
+  const issued = await issuedCredential(context);
+  const loginId = context.sqlite.prepare("SELECT login_id FROM visit_teacher_credentials").get().login_id;
+  const first = await auth.createVisitTeacherSession(context.db, request(), { loginId, code: issued.code });
+  await auth.rotateVisitTeacherCode(
+    context.db,
+    request("203.0.113.10", first.token),
+    { requestId: commandId(), currentCode: issued.code, newPin: "4826" },
+  );
+  const expiresAt = insertBoundPersonalActivationInvite(context, {
+    id: "TGA-personal-existing-pin",
+    credentialVersion: 2,
+    telegramUserId: "7002",
+  });
+  const now = new Date();
+  const validated = await miniAppAuth.validateTelegramMiniAppInitData(
+    signedTelegramInitData({ telegramUserId: 7002, now }),
+    { now, botToken: globalThis.__VISIT_TEST_ENV.TELEGRAM_BOT_TOKEN, requireEnabled: false },
+  );
+  assert.deepEqual(await auth.createVisitTeacherTelegramSession(context.db, telegramRequest(), {
+    telegramUserId: validated.telegramUserId,
+    initDataHash: validated.initDataHash,
+    authDate: validated.authDate,
+    receiptExpiresAt: validated.expiresAt,
+  }), {
+    kind: "activation",
+    mode: "personal",
+    teacher: { fullName: "Шевченко Олена" },
+    requiresCode: true,
+    requiresNewPin: false,
+    grantExpiresAt: expiresAt,
+  });
+  await assert.rejects(
+    () => auth.activateVisitTeacherTelegramSession(context.db, telegramRequest(), {
+      telegramUserId: validated.telegramUserId,
+      initDataHash: validated.initDataHash,
+      authDate: validated.authDate,
+      receiptExpiresAt: validated.expiresAt,
+      requestId: commandId(),
+      loginId: "",
+      code: "5937",
+      newPin: "",
+    }),
+    (error) => error.code === "invalid_teacher_credentials" && error.status === 401,
+  );
+  const activated = await auth.activateVisitTeacherTelegramSession(context.db, telegramRequest(), {
+    telegramUserId: validated.telegramUserId,
+    initDataHash: validated.initDataHash,
+    authDate: validated.authDate,
+    receiptExpiresAt: validated.expiresAt,
+    requestId: commandId(),
+    loginId: "",
+    code: "4826",
+    newPin: "",
+  });
+  assert.equal(activated.identity.credentialVersion, 2);
+  assert.equal(context.sqlite.prepare(`SELECT version FROM visit_teacher_credentials
+    WHERE teacher_user_id='USR-T1'`).get().version, 2);
+  assert.ok(context.sqlite.prepare(`SELECT consumed_at FROM telegram_teacher_activation_invites
+    WHERE id='TGA-personal-existing-pin'`).get().consumed_at);
+  context.sqlite.close();
+});
+
+test("connected Telegram with a reset credential still requires its temporary code", async () => {
+  const context = await database();
+  const issued = await issuedCredential(context);
+  const nowIso = new Date().toISOString();
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-T1','7003','7003','teacher_one','active',1,1,1,?,NULL,?,?)`)
+    .run(nowIso, nowIso, nowIso);
+  const now = new Date();
+  const validated = await miniAppAuth.validateTelegramMiniAppInitData(
+    signedTelegramInitData({ telegramUserId: 7003, now }),
+    { now, botToken: globalThis.__VISIT_TEST_ENV.TELEGRAM_BOT_TOKEN, requireEnabled: false },
+  );
+  assert.deepEqual(await auth.createVisitTeacherTelegramSession(context.db, telegramRequest(), {
+    telegramUserId: validated.telegramUserId,
+    initDataHash: validated.initDataHash,
+    authDate: validated.authDate,
+    receiptExpiresAt: validated.expiresAt,
+  }), {
+    kind: "activation",
+    mode: "connected",
+    teacher: { fullName: "Шевченко Олена" },
+    requiresCode: true,
+    requiresNewPin: true,
+    grantExpiresAt: null,
+  });
+  await assert.rejects(
+    () => auth.activateVisitTeacherTelegramSession(context.db, telegramRequest(), {
+      telegramUserId: validated.telegramUserId,
+      initDataHash: validated.initDataHash,
+      authDate: validated.authDate,
+      receiptExpiresAt: validated.expiresAt,
+      requestId: commandId(),
+      loginId: "",
+      code: "",
+      newPin: "5937",
+    }),
+    (error) => error.code === "invalid_teacher_credentials" && error.status === 401,
+  );
+  const activated = await auth.activateVisitTeacherTelegramSession(context.db, telegramRequest(), {
+    telegramUserId: validated.telegramUserId,
+    initDataHash: validated.initDataHash,
+    authDate: validated.authDate,
+    receiptExpiresAt: validated.expiresAt,
+    requestId: commandId(),
+    loginId: "",
+    code: issued.code,
+    newPin: "5937",
+  });
+  assert.equal(activated.identity.credentialVersion, 2);
+  assert.equal(activated.identity.mustChangePin, false);
+  assert.equal(context.sqlite.prepare(`SELECT status FROM telegram_connections
+    WHERE user_id='USR-T1'`).get().status, "active");
+  context.sqlite.close();
 });
 
 test("Telegram session exchange rolls back if the connection changes after lookup", async () => {

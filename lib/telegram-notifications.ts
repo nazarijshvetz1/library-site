@@ -21,6 +21,7 @@ export type TelegramNotificationCategory = "orders" | "visits" | "system";
 export type TelegramFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 const TELEGRAM_LINK_TOKEN_SECONDS = 10 * 60;
+const TELEGRAM_TEACHER_ACTIVATION_SECONDS = 30 * 60;
 const TELEGRAM_DELIVERY_LEASE_SECONDS = 45;
 const TELEGRAM_MAX_ATTEMPTS = 8;
 const TELEGRAM_DRAIN_LIMIT = 10;
@@ -221,6 +222,180 @@ export async function createTelegramLinkToken(
   };
 }
 
+export async function createTelegramTeacherActivationInvite(
+  db: TelegramDatabase,
+  actor: { id: string; email: string },
+  teacherUserId: string,
+  input: { requestId: string; expectedCredentialVersion: number },
+  options: { now?: Date; randomBytes?: Uint8Array } = {},
+): Promise<{ inviteId: string; teacher: { id: string; fullName: string }; linkUrl: string; expiresAt: string }> {
+  const configuration = requireLinkingConfiguration();
+  const nowDate = options.now ?? new Date();
+  const now = nowDate.toISOString();
+  const teacher = await db.prepare(`
+    SELECT u.id,u.full_name,c.version,c.status,c.locked_until
+    FROM users u
+    JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+    JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id
+    WHERE u.id=? AND u.status='active' LIMIT 1
+  `).bind(teacherUserId).first<{
+    id: string; full_name: string; version: number; status: string; locked_until: string | null;
+  }>();
+  if (!teacher) {
+    throw new TelegramIntegrationError(
+      "teacher_credential_required",
+      409,
+      "Спочатку створіть учителю тимчасовий код доступу.",
+      { permanent: true },
+    );
+  }
+  if (teacher.status !== "active") {
+    throw new TelegramIntegrationError("teacher_access_disabled", 409, "Доступ учителя вимкнено.", {
+      permanent: true,
+    });
+  }
+  if (teacher.locked_until && teacher.locked_until > now) {
+    throw new TelegramIntegrationError("teacher_access_locked", 409, "Спочатку розблокуйте доступ учителя.", {
+      permanent: true,
+    });
+  }
+  if (Number(teacher.version) !== input.expectedCredentialVersion) {
+    throw new TelegramIntegrationError(
+      "credential_version_conflict",
+      409,
+      "Доступ учителя вже змінився. Оновіть список.",
+      { permanent: true },
+    );
+  }
+  const bytes = options.randomBytes ?? crypto.getRandomValues(new Uint8Array(32));
+  if (bytes.byteLength < 32) {
+    throw new TelegramIntegrationError("randomness_unavailable", 503, "Не вдалося створити безпечне запрошення.");
+  }
+  const inviteId = `TGA-${crypto.randomUUID()}`;
+  const token = `ta_${base64Url(bytes)}`;
+  const tokenHash = await sha256Hex(token);
+  const expiresAt = new Date(nowDate.getTime() + TELEGRAM_TEACHER_ACTIVATION_SECONDS * 1000).toISOString();
+  try {
+    await db.batch([
+      db.prepare(`UPDATE telegram_teacher_activation_invites SET revoked_at=?,updated_at=?
+        WHERE teacher_user_id=? AND kind='personal' AND consumed_at IS NULL
+          AND revoked_at IS NULL`).bind(now, now, teacherUserId),
+      db.prepare(`
+        INSERT INTO telegram_teacher_activation_invites (
+          id,kind,teacher_user_id,credential_version,token_hash,issued_by_user_id,request_id,
+          bound_telegram_user_id,bound_chat_id,bound_username,bound_update_id,presented_at,
+          expires_at,consumed_init_data_hash,consumed_at,revoked_at,created_at,updated_at
+        )
+        SELECT ?,'personal',u.id,c.version,?,?,?,NULL,NULL,NULL,NULL,NULL,?,NULL,NULL,NULL,?,?
+        FROM users u
+        JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+        JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id
+        WHERE u.id=? AND u.status='active' AND c.status='active' AND c.version=?
+          AND (c.locked_until IS NULL OR c.locked_until<=?)
+          AND EXISTS (SELECT 1 FROM users actor WHERE actor.id=? AND actor.status='active'
+            AND actor.role IN ('admin','librarian'))
+      `).bind(
+        inviteId, tokenHash, actor.id, input.requestId, expiresAt, now, now,
+        teacherUserId, input.expectedCredentialVersion, now, actor.id,
+      ),
+      db.prepare(`INSERT INTO audit_events (
+        id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,
+        before_json,after_json,metadata_json,created_at
+      ) VALUES (?,?,?,'telegram.teacher_activation_invite.create',
+        'telegram_teacher_activation_invite',
+        CASE WHEN EXISTS (SELECT 1 FROM telegram_teacher_activation_invites i
+          WHERE i.id=? AND i.teacher_user_id=? AND i.request_id=?
+            AND i.revoked_at IS NULL AND i.consumed_at IS NULL) THEN ? ELSE NULL END,
+        ?,NULL,NULL,
+        json_object('teacherUserId',?,'credentialVersion',?,'expiresAt',?),?)`)
+        .bind(
+          `AUD-${crypto.randomUUID()}`,
+          actor.id,
+          actor.email.toLowerCase(),
+          inviteId,
+          teacherUserId,
+          input.requestId,
+          inviteId,
+          input.requestId,
+          teacherUserId,
+          input.expectedCredentialVersion,
+          expiresAt,
+          now,
+        ),
+    ]);
+  } catch {
+    throw new TelegramIntegrationError(
+      "activation_invite_conflict",
+      409,
+      "Запрошення не створено: доступ учителя вже змінився. Оновіть список.",
+      { permanent: true },
+    );
+  }
+  const inserted = await db.prepare(`SELECT id FROM telegram_teacher_activation_invites
+    WHERE id=? AND teacher_user_id=? AND token_hash=?
+      AND consumed_at IS NULL AND revoked_at IS NULL LIMIT 1`)
+    .bind(inviteId, teacherUserId, tokenHash).first<{ id: string }>();
+  if (!inserted) {
+    throw new TelegramIntegrationError(
+      "activation_invite_conflict",
+      409,
+      "Запрошення не створено: доступ учителя вже змінився. Оновіть список.",
+      { permanent: true },
+    );
+  }
+  return {
+    inviteId,
+    teacher: { id: teacher.id, fullName: teacher.full_name },
+    linkUrl: `https://t.me/${configuration.botUsername}?start=${token}`,
+    expiresAt,
+  };
+}
+
+export async function revokeTelegramTeacherActivationInvite(
+  db: TelegramDatabase,
+  actor: { id: string; email: string },
+  teacherUserId: string,
+  input: { requestId: string; inviteId: string },
+): Promise<{ inviteId: string; revoked: true }> {
+  const now = new Date().toISOString();
+  const existing = await db.prepare(`SELECT id FROM telegram_teacher_activation_invites
+    WHERE id=? AND teacher_user_id=? AND kind='personal' AND consumed_at IS NULL
+      AND revoked_at IS NULL LIMIT 1`).bind(input.inviteId, teacherUserId).first<{ id: string }>();
+  if (!existing) {
+    throw new TelegramIntegrationError("activation_invite_not_found", 404, "Активне запрошення не знайдено.", {
+      permanent: true,
+    });
+  }
+  await db.batch([
+    db.prepare(`UPDATE telegram_teacher_activation_invites SET revoked_at=?,updated_at=?
+      WHERE id=? AND teacher_user_id=? AND consumed_at IS NULL AND revoked_at IS NULL
+        AND EXISTS (SELECT 1 FROM users actor WHERE actor.id=? AND actor.status='active'
+          AND actor.role IN ('admin','librarian'))`)
+      .bind(now, now, input.inviteId, teacherUserId, actor.id),
+    db.prepare(`INSERT INTO audit_events (
+      id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,
+      before_json,after_json,metadata_json,created_at
+    ) SELECT ?,?,?,'telegram.teacher_activation_invite.revoke',
+      'telegram_teacher_activation_invite',i.id,?,NULL,NULL,
+      json_object('teacherUserId',i.teacher_user_id),?
+      FROM telegram_teacher_activation_invites i
+      WHERE i.id=? AND i.teacher_user_id=? AND i.revoked_at=?`)
+      .bind(
+        `AUD-${crypto.randomUUID()}`, actor.id, actor.email.toLowerCase(), input.requestId,
+        now, input.inviteId, teacherUserId, now,
+      ),
+  ]);
+  const revoked = await db.prepare(`SELECT id FROM telegram_teacher_activation_invites
+    WHERE id=? AND teacher_user_id=? AND revoked_at=? LIMIT 1`)
+    .bind(input.inviteId, teacherUserId, now).first<{ id: string }>();
+  if (!revoked) {
+    throw new TelegramIntegrationError("activation_invite_conflict", 409, "Запрошення вже змінилося.", {
+      permanent: true,
+    });
+  }
+  return { inviteId: input.inviteId, revoked: true };
+}
+
 export async function updateTelegramPreferences(
   db: TelegramDatabase,
   userId: string,
@@ -266,14 +441,46 @@ export async function disconnectTelegram(
     WHERE user_id=? AND status='active' AND version=? LIMIT 1
   `).bind(userId, expectedVersion).first<{ chat_id: string }>() : null;
   await db.batch([
+    db.prepare(`UPDATE visit_teacher_sessions SET revoked_at=?,last_seen_at=?
+      WHERE teacher_user_id=? AND revoked_at IS NULL
+        AND EXISTS (SELECT 1 FROM telegram_connections
+          WHERE user_id=? AND status='active' AND version=?)`)
+      .bind(now, now, userId, userId, expectedVersion),
+    db.prepare(`UPDATE telegram_teacher_activation_invites SET revoked_at=?,updated_at=?
+      WHERE consumed_at IS NULL AND revoked_at IS NULL
+        AND (teacher_user_id=? OR bound_telegram_user_id=(SELECT telegram_user_id
+          FROM telegram_connections WHERE user_id=? AND status='active' AND version=? LIMIT 1))
+        AND EXISTS (SELECT 1 FROM telegram_connections
+          WHERE user_id=? AND status='active' AND version=?)`)
+      .bind(now, now, userId, userId, expectedVersion, userId, expectedVersion),
+    db.prepare(`UPDATE telegram_link_tokens SET revoked_at=?
+      WHERE user_id=? AND consumed_at IS NULL AND revoked_at IS NULL
+        AND EXISTS (SELECT 1 FROM telegram_connections
+          WHERE user_id=? AND status='active' AND version=?)`)
+      .bind(now, userId, userId, expectedVersion),
     db.prepare(`
       UPDATE telegram_connections
       SET status='disabled',disabled_at=?,version=version+1,updated_at=?
       WHERE user_id=? AND status='active' AND version=?
         AND EXISTS (SELECT 1 FROM users WHERE id=? AND status='active')
     `).bind(now, now, userId, expectedVersion, userId),
-    db.prepare(`UPDATE telegram_link_tokens SET revoked_at=?
-      WHERE user_id=? AND consumed_at IS NULL AND revoked_at IS NULL`).bind(now, userId),
+    db.prepare(`INSERT INTO audit_events (
+      id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,
+      before_json,after_json,metadata_json,created_at
+    ) VALUES (?,?,'telegram-user@local.invalid','telegram.connection.disconnect',
+      'telegram_connection',CASE WHEN EXISTS (SELECT 1 FROM telegram_connections
+        WHERE user_id=? AND status='disabled' AND version=?) THEN ? ELSE NULL END,
+      NULL,NULL,NULL,json_object('previousVersion',?,'version',?),?)`)
+      .bind(
+        `AUD-${crypto.randomUUID()}`,
+        userId,
+        userId,
+        expectedVersion + 1,
+        userId,
+        expectedVersion,
+        expectedVersion + 1,
+        now,
+      ),
   ]);
   const status = await readTelegramConnectionStatus(db, userId);
   if (status.status !== "disabled" || status.version !== expectedVersion + 1) {
@@ -596,8 +803,20 @@ export async function processTelegramWebhookUpdate(
     const inserted = await insertWebhookReceipt(db, update.updateId, payloadHash, "ignored_non_private");
     return { outcome: "ignored_non_private", duplicate: !inserted };
   }
-  const command = telegramCommand(update.message.text);
+  const privateMessage = update.message;
+  const command = telegramCommand(privateMessage.text);
   if (command.kind === "start") {
+    if (command.token.startsWith("ta_")) {
+      return processTeacherActivationInviteStart(
+        db,
+        configuration,
+        { ...update, message: privateMessage },
+        payloadHash,
+        command.token,
+        siteOrigin,
+        fetcher,
+      );
+    }
     const tokenHash = await sha256Hex(command.token);
     const now = new Date().toISOString();
     const token = await db.prepare(`
@@ -707,6 +926,42 @@ export async function processTelegramWebhookUpdate(
       db.prepare(`INSERT INTO telegram_webhook_updates(update_id,payload_hash,outcome,processed_at)
         VALUES (?,?,'disconnected',?) ON CONFLICT(update_id) DO NOTHING`)
         .bind(update.updateId, payloadHash, now),
+      db.prepare(`UPDATE visit_teacher_sessions SET revoked_at=?,last_seen_at=?
+        WHERE teacher_user_id=(SELECT user_id FROM telegram_connections
+          WHERE chat_id=? AND telegram_user_id=? AND status='active' LIMIT 1)
+          AND revoked_at IS NULL
+          AND EXISTS (SELECT 1 FROM telegram_webhook_updates
+            WHERE update_id=? AND payload_hash=? AND outcome='disconnected')`)
+        .bind(
+          now,
+          now,
+          update.message.chatId,
+          update.message.telegramUserId,
+          update.updateId,
+          payloadHash,
+        ),
+      db.prepare(`UPDATE telegram_link_tokens SET revoked_at=?
+        WHERE user_id=(SELECT user_id FROM telegram_connections
+          WHERE chat_id=? AND telegram_user_id=? AND status='active' LIMIT 1)
+          AND consumed_at IS NULL AND revoked_at IS NULL
+          AND EXISTS (SELECT 1 FROM telegram_webhook_updates
+            WHERE update_id=? AND payload_hash=? AND outcome='disconnected')`)
+        .bind(now, update.message.chatId, update.message.telegramUserId, update.updateId, payloadHash),
+      db.prepare(`UPDATE telegram_teacher_activation_invites SET revoked_at=?,updated_at=?
+        WHERE consumed_at IS NULL AND revoked_at IS NULL
+          AND (bound_telegram_user_id=? OR teacher_user_id=(SELECT user_id FROM telegram_connections
+            WHERE chat_id=? AND telegram_user_id=? AND status='active' LIMIT 1))
+          AND EXISTS (SELECT 1 FROM telegram_webhook_updates
+            WHERE update_id=? AND payload_hash=? AND outcome='disconnected')`)
+        .bind(
+          now,
+          now,
+          update.message.telegramUserId,
+          update.message.chatId,
+          update.message.telegramUserId,
+          update.updateId,
+          payloadHash,
+        ),
       db.prepare(`
         UPDATE telegram_connections SET status='disabled',disabled_at=?,version=version+1,updated_at=?
         WHERE chat_id=? AND telegram_user_id=? AND status='active'
@@ -728,9 +983,9 @@ export async function processTelegramWebhookUpdate(
       update.message.chatId,
       update.message.telegramUserId,
     );
-    const inserted = await insertWebhookReceipt(db, update.updateId, payloadHash, profile ? "menu" : "menu_unlinked");
-    if (inserted) {
-      if (profile) {
+    if (profile) {
+      const inserted = await insertWebhookReceipt(db, update.updateId, payloadHash, "menu");
+      if (inserted) {
         await bestEffortConnectedMenu(
           configuration.botToken,
           update.message.chatId,
@@ -741,21 +996,264 @@ export async function processTelegramWebhookUpdate(
           false,
           fetcher,
         );
-      } else {
-        await bestEffortBotReply(
-          configuration.botToken,
-          update.message.chatId,
-          "Спочатку підключіть Telegram у кабінеті вчителя або бібліотекаря на сайті.",
-          fetcher,
-        );
       }
+      return { outcome: "menu", duplicate: !inserted };
     }
-    return { outcome: profile ? "menu" : "menu_unlinked", duplicate: !inserted };
+    const grant = await createGenericTeacherActivationGrant(
+      db,
+      update.updateId,
+      payloadHash,
+      update.message,
+    );
+    if (grant.inserted) {
+      await bestEffortTeacherOnboardingMenu(
+        configuration.botToken,
+        update.message.chatId,
+        siteOrigin,
+        grant.invitedTeacherName,
+        fetcher,
+      );
+    }
+    return { outcome: grant.outcome, duplicate: !grant.inserted };
   }
   const inserted = await insertWebhookReceipt(db, update.updateId, payloadHash, "ignored_command");
   if (inserted) await bestEffortBotReply(configuration.botToken, update.message.chatId,
     "Керуйте Telegram-сповіщеннями у своєму кабінеті на сайті «Єдина бібліотека».", fetcher);
   return { outcome: "ignored_command", duplicate: !inserted };
+}
+
+async function processTeacherActivationInviteStart(
+  db: TelegramDatabase,
+  configuration: TelegramConfiguration & { botToken: string; botUsername: string; webhookSecret: string },
+  update: {
+    updateId: string;
+    message: { chatId: string; telegramUserId: string; username: string | null; chatType: string; text: string };
+  },
+  payloadHash: string,
+  rawToken: string,
+  siteOrigin: string | undefined,
+  fetcher: TelegramFetcher,
+): Promise<{ outcome: string; duplicate: boolean }> {
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
+  const tokenHash = await sha256Hex(rawToken);
+  const invite = await db.prepare(`
+    SELECT i.id,i.teacher_user_id,u.full_name,i.credential_version,
+           i.bound_telegram_user_id,i.bound_chat_id
+    FROM telegram_teacher_activation_invites i
+    JOIN users u ON u.id=i.teacher_user_id AND u.status='active'
+    JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+    JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id
+    WHERE i.kind='personal' AND i.token_hash=? AND i.consumed_at IS NULL
+      AND i.revoked_at IS NULL AND i.expires_at>? AND c.status='active'
+      AND c.version=i.credential_version
+      AND (i.bound_telegram_user_id IS NULL OR i.bound_telegram_user_id=?)
+    LIMIT 1
+  `).bind(tokenHash, now, update.message.telegramUserId).first<{
+    id: string; teacher_user_id: string; full_name: string; credential_version: number;
+    bound_telegram_user_id: string | null; bound_chat_id: string | null;
+  }>();
+  if (!invite) {
+    const inserted = await insertWebhookReceipt(db, update.updateId, payloadHash, "activation_invite_invalid");
+    if (inserted) {
+      await bestEffortBotReply(
+        configuration.botToken,
+        update.message.chatId,
+        "Персональне запрошення недійсне, прострочене або вже використане. Попросіть бібліотекаря створити нове.",
+        fetcher,
+      );
+    }
+    return { outcome: "activation_invite_invalid", duplicate: !inserted };
+  }
+  const conflict = await db.prepare(`
+    SELECT user_id FROM telegram_connections
+    WHERE status='active' AND (
+      ((chat_id=? OR telegram_user_id=?) AND user_id!=?)
+      OR (user_id=? AND (chat_id!=? OR telegram_user_id!=?))
+    ) LIMIT 1
+  `).bind(
+    update.message.chatId,
+    update.message.telegramUserId,
+    invite.teacher_user_id,
+    invite.teacher_user_id,
+    update.message.chatId,
+    update.message.telegramUserId,
+  ).first<{ user_id: string }>();
+  if (conflict) {
+    const inserted = await insertWebhookReceipt(db, update.updateId, payloadHash, "activation_invite_conflict");
+    if (inserted) {
+      await bestEffortBotReply(
+        configuration.botToken,
+        update.message.chatId,
+        "Цей Telegram або картка вчителя вже мають інше активне підключення. Бібліотекар має спочатку захистити доступ зі старого телефона.",
+        fetcher,
+      );
+    }
+    return { outcome: "activation_invite_conflict", duplicate: !inserted };
+  }
+  let results;
+  try {
+    results = await db.batch([
+    db.prepare(`INSERT INTO telegram_webhook_updates(update_id,payload_hash,outcome,processed_at)
+      VALUES (?,?,'activation_invite_claimed',?) ON CONFLICT(update_id) DO NOTHING`)
+      .bind(update.updateId, payloadHash, now),
+    db.prepare(`UPDATE telegram_teacher_activation_invites SET revoked_at=?,updated_at=?
+      WHERE id!=? AND consumed_at IS NULL AND revoked_at IS NULL
+        AND bound_telegram_user_id=?
+        AND EXISTS (SELECT 1 FROM telegram_webhook_updates
+          WHERE update_id=? AND payload_hash=? AND outcome='activation_invite_claimed')`)
+      .bind(now, now, invite.id, update.message.telegramUserId, update.updateId, payloadHash),
+    db.prepare(`UPDATE telegram_teacher_activation_invites SET
+        bound_telegram_user_id=?,bound_chat_id=?,bound_username=?,bound_update_id=?,
+        presented_at=COALESCE(presented_at,?),updated_at=?
+      WHERE id=? AND token_hash=? AND consumed_at IS NULL AND revoked_at IS NULL
+        AND expires_at>? AND (bound_telegram_user_id IS NULL OR bound_telegram_user_id=?)
+        AND (bound_chat_id IS NULL OR bound_chat_id=?)
+        AND EXISTS (SELECT 1 FROM telegram_webhook_updates
+          WHERE update_id=? AND payload_hash=? AND outcome='activation_invite_claimed')`)
+      .bind(
+        update.message.telegramUserId,
+        update.message.chatId,
+        update.message.username,
+        update.updateId,
+        now,
+        now,
+        invite.id,
+        tokenHash,
+        now,
+        update.message.telegramUserId,
+        update.message.chatId,
+        update.updateId,
+        payloadHash,
+      ),
+      db.prepare(`INSERT INTO audit_events (
+        id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,
+        before_json,after_json,metadata_json,created_at
+      ) VALUES (?,NULL,'telegram-bot@local.invalid','telegram.teacher_activation_invite.claim',
+        'telegram_teacher_activation_invite',
+        CASE WHEN EXISTS (SELECT 1 FROM telegram_teacher_activation_invites
+          WHERE id=? AND bound_telegram_user_id=? AND bound_chat_id=?
+            AND bound_update_id=? AND consumed_at IS NULL AND revoked_at IS NULL
+            AND expires_at>?) THEN ? ELSE NULL END,
+        ?,NULL,NULL,json_object('telegramUserId',?),?)`)
+        .bind(
+          `AUD-${crypto.randomUUID()}`,
+          invite.id,
+          update.message.telegramUserId,
+          update.message.chatId,
+          update.updateId,
+          now,
+          invite.id,
+          update.updateId,
+          update.message.telegramUserId,
+          now,
+        ),
+    ]);
+  } catch {
+    await bestEffortBotReply(
+      configuration.botToken,
+      update.message.chatId,
+      "Запрошення вже змінилося. Попросіть бібліотекаря створити нове.",
+      fetcher,
+    );
+    return { outcome: "activation_invite_conflict", duplicate: false };
+  }
+  const inserted = Number(results[0]?.meta?.changes ?? 0) === 1;
+  if (!inserted) return { outcome: "activation_invite_claimed", duplicate: true };
+  const claimed = await db.prepare(`SELECT id FROM telegram_teacher_activation_invites
+    WHERE id=? AND bound_telegram_user_id=? AND bound_chat_id=? AND consumed_at IS NULL
+      AND revoked_at IS NULL AND expires_at>? LIMIT 1`)
+    .bind(invite.id, update.message.telegramUserId, update.message.chatId, now)
+    .first<{ id: string }>();
+  if (!claimed) {
+    await bestEffortBotReply(
+      configuration.botToken,
+      update.message.chatId,
+      "Запрошення вже змінилося. Попросіть бібліотекаря створити нове.",
+      fetcher,
+    );
+    return { outcome: "activation_invite_conflict", duplicate: false };
+  }
+  await bestEffortTeacherOnboardingMenu(
+    configuration.botToken,
+    update.message.chatId,
+    siteOrigin,
+    invite.full_name,
+    fetcher,
+  );
+  return { outcome: "activation_invite_claimed", duplicate: false };
+}
+
+async function createGenericTeacherActivationGrant(
+  db: TelegramDatabase,
+  updateId: string,
+  payloadHash: string,
+  message: { chatId: string; telegramUserId: string; username: string | null },
+): Promise<{ inserted: boolean; outcome: string; invitedTeacherName: string | null }> {
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
+  const existingPersonal = await db.prepare(`
+    SELECT u.full_name
+    FROM telegram_teacher_activation_invites i
+    JOIN users u ON u.id=i.teacher_user_id AND u.status='active'
+    JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+    JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id
+    WHERE i.kind='personal' AND i.bound_telegram_user_id=? AND i.bound_chat_id=?
+      AND i.consumed_at IS NULL AND i.revoked_at IS NULL AND i.expires_at>?
+      AND c.status='active' AND c.version=i.credential_version
+    ORDER BY i.presented_at DESC,i.created_at DESC LIMIT 1
+  `).bind(message.telegramUserId, message.chatId, now).first<{ full_name: string }>();
+  if (existingPersonal) {
+    const inserted = await insertWebhookReceipt(db, updateId, payloadHash, "activation_invite_resume");
+    return {
+      inserted,
+      outcome: "activation_invite_resume",
+      invitedTeacherName: existingPersonal.full_name,
+    };
+  }
+  const grantId = `TGA-${crypto.randomUUID()}`;
+  const expiresAt = new Date(nowDate.getTime() + TELEGRAM_TEACHER_ACTIVATION_SECONDS * 1000).toISOString();
+  const results = await db.batch([
+    db.prepare(`INSERT INTO telegram_webhook_updates(update_id,payload_hash,outcome,processed_at)
+      VALUES (?,?,'activation_started',?) ON CONFLICT(update_id) DO NOTHING`)
+      .bind(updateId, payloadHash, now),
+    db.prepare(`UPDATE telegram_teacher_activation_invites SET revoked_at=?,updated_at=?
+      WHERE kind='generic' AND bound_telegram_user_id=? AND consumed_at IS NULL
+        AND revoked_at IS NULL
+        AND EXISTS (SELECT 1 FROM telegram_webhook_updates
+          WHERE update_id=? AND payload_hash=? AND outcome='activation_started')
+        AND NOT EXISTS (SELECT 1 FROM telegram_teacher_activation_invites claimed
+          WHERE claimed.bound_update_id=?)`)
+      .bind(now, now, message.telegramUserId, updateId, payloadHash, updateId),
+    db.prepare(`INSERT INTO telegram_teacher_activation_invites (
+      id,kind,teacher_user_id,credential_version,token_hash,issued_by_user_id,request_id,
+      bound_telegram_user_id,bound_chat_id,bound_username,bound_update_id,presented_at,
+      expires_at,consumed_init_data_hash,consumed_at,revoked_at,created_at,updated_at
+    ) SELECT ?,'generic',NULL,NULL,NULL,NULL,NULL,?,?,?,?,?,?,NULL,NULL,NULL,?,?
+      WHERE EXISTS (SELECT 1 FROM telegram_webhook_updates
+        WHERE update_id=? AND payload_hash=? AND outcome='activation_started')
+        AND NOT EXISTS (SELECT 1 FROM telegram_teacher_activation_invites claimed
+          WHERE claimed.bound_update_id=?)`)
+      .bind(
+        grantId,
+        message.telegramUserId,
+        message.chatId,
+        message.username,
+        updateId,
+        now,
+        expiresAt,
+        now,
+        now,
+        updateId,
+        payloadHash,
+        updateId,
+      ),
+  ]);
+  return {
+    inserted: Number(results[0]?.meta?.changes ?? 0) === 1,
+    outcome: "activation_started",
+    invitedTeacherName: null,
+  };
 }
 
 export async function telegramWebhookSecretMatches(value: string | null): Promise<boolean> {
@@ -1014,6 +1512,49 @@ async function bestEffortBotReply(
     }, fetcher);
   } catch {
     // Linking state is authoritative in D1 even when Telegram cannot display the confirmation.
+  }
+}
+
+async function bestEffortTeacherOnboardingMenu(
+  botToken: string,
+  chatId: string,
+  siteOrigin: string | undefined,
+  invitedTeacherName: string | null,
+  fetcher: TelegramFetcher,
+): Promise<void> {
+  try {
+    const origin = siteOrigin ? trustedSiteOrigin(siteOrigin) : null;
+    const heading = invitedTeacherName
+      ? `Персональне запрошення для «${safePlainText(invitedTeacherName, 120)}» підтверджено.`
+      : "Вітаємо в «Єдиній бібліотеці»!";
+    const instructions = invitedTeacherName
+      ? "Відкрийте захищене вікно нижче та створіть PIN."
+      : "Щоб активувати кабінет або підключити Telegram, оберіть своє ім’я та введіть код бібліотекаря або чинний PIN.";
+    const warning = "Код і PIN вводьте лише в захищеному вікні — не надсилайте їх у чат.";
+    const keyboard = origin ? {
+      inline_keyboard: [
+        [{ text: "🔐 Активувати / увійти", web_app: { url: new URL("/teacher/telegram", origin).toString() } }],
+        [{ text: "📚 Переглянути каталог", url: "https://nazarijshvetz1.github.io/library-site/" }],
+        [{ text: "📅 Переглянути графік", url: new URL("/visits", origin).toString() }],
+      ],
+    } : undefined;
+    await telegramApiRequest(botToken, "sendMessage", {
+      chat_id: chatId,
+      text: `<b>${escapeHtml(heading)}</b>\n${escapeHtml(instructions)}\n\n${escapeHtml(warning)}`,
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+      ...(keyboard ? { reply_markup: keyboard } : {}),
+    }, fetcher);
+    if (origin) {
+      await bestEffortChatMenuButton(
+        botToken,
+        chatId,
+        new URL("/teacher/telegram?tab=overview", origin).toString(),
+        fetcher,
+      );
+    }
+  } catch {
+    // The short-lived D1 activation grant remains authoritative if Telegram cannot render the menu.
   }
 }
 

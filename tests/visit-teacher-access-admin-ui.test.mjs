@@ -93,3 +93,44 @@ test("teacher access table has accessible controls and a mobile layout", async (
   assert.match(css, /@media \(max-width: 760px\)/u);
   assert.match(css, /@media print/u);
 });
+
+test("librarian can issue local QR invitations and atomically protect a lost phone", async () => {
+  const [access, css, inviteRoute, lostPhoneRoute, auth, telegram] = await Promise.all([
+    read("app/librarian/visits/teacher-access-admin.tsx"),
+    read("app/librarian/visits/visit-access-admin.module.css"),
+    read("app/api/librarian/visits/teacher-access/[teacherId]/telegram-invite/route.ts"),
+    read("app/api/librarian/visits/teacher-access/[teacherId]/lost-phone/route.ts"),
+    read("lib/visit-teacher-auth.ts"),
+    read("lib/telegram-notifications.ts"),
+  ]);
+  assert.match(access, /QRCodeWriter/u);
+  assert.match(access, /BarcodeFormat\.QR_CODE/u);
+  assert.match(access, /QR-запрошення/u);
+  assert.match(access, /Копіювати посилання/u);
+  assert.match(access, /Завантажити QR/u);
+  assert.match(access, /Втрачено телефон/u);
+  assert.match(access, /<dialog/u);
+  assert.match(access, /dialog\.showModal\(\)/u);
+  assert.match(access, /onCancel=/u);
+  assert.match(access, /previousFocus\?\.focus\(\)/u);
+  assert.match(access, /role="status" aria-live="polite">\{copyNotice\}/u);
+  assert.match(access, /Тимчасові коди для входу/u);
+  assert.match(access, /expectedCredentialVersion: teacher\.credential\.version/u);
+  assert.match(access, /expectedTelegramVersion: teacher\.telegram\.version/u);
+  assert.doesNotMatch(access, /api\.qrserver|chart\.googleapis|localStorage|sessionStorage/u);
+  assert.match(css, /\.dialogBackdrop/u);
+  assert.match(css, /\.dialogBackdrop:not\(\[open\]\)/u);
+  assert.match(css, /\.qrCanvas/u);
+  for (const route of [inviteRoute, lostPhoneRoute]) {
+    assert.match(route, /authorizeVisitTeacherAccessApi\(request\)/u);
+    assert.match(route, /exactBodyKeys/u);
+    assert.match(route, /validRequestId/u);
+    assert.match(route, /resolveVisitLibrarianActor/u);
+  }
+  assert.match(inviteRoute, /createTelegramTeacherActivationInvite/u);
+  assert.match(inviteRoute, /revokeTelegramTeacherActivationInvite/u);
+  assert.match(lostPhoneRoute, /protectLostVisitTeacherPhone/u);
+  assert.match(auth, /code_hmac=\?,must_change_pin=1/u);
+  assert.match(auth, /telegram_connections SET status='disabled'/u);
+  assert.match(telegram, /tokenHash = await sha256Hex\(token\)/u);
+});

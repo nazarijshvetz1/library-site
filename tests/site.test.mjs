@@ -270,7 +270,8 @@ test("ships an accessible responsive public visit schedule and protected handoff
   assert.match(html, /href="#how-it-works"[^>]*data-primary-section="how-it-works"[^>]*>Як користуватися<\/a>/);
   assert.match(html, /Перевірте наявність/);
   assert.match(html, /Запишіться до бібліотеки/);
-  assert.match(html, /Підключіть Telegram/);
+  assert.match(html, /Почніть у Telegram/);
+  assert.match(html, /вперше активувати кабінет/);
   assert.match(html, /https:\/\/t\.me\/MAUP_Library_Bot/);
   assert.match(html, /id="visit-schedule" aria-labelledby="visit-schedule-title"/);
   assert.match(html, /Графік доступний усім без входу/);

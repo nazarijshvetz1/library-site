@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { BarcodeFormat, QRCodeWriter } from "@zxing/library";
 
 import { visitApi, VisitApiError } from "@/app/visits/visit-client";
 import { teacherCodesCsv } from "./teacher-code-csv";
@@ -23,6 +24,14 @@ type TeacherAccessRow = {
   fullName: string;
   status: "active" | "inactive";
   credential: TeacherCredential | null;
+  telegram: {
+    connected: boolean;
+    status: "active" | "disabled" | "blocked" | null;
+    version: number | null;
+    linkedAt: string | null;
+    activeInviteId: string | null;
+    activeInviteExpiresAt: string | null;
+  };
 };
 
 type TeacherAccessEnvelope = {
@@ -56,6 +65,27 @@ type ActionEnvelope = {
   credential: TeacherCredential;
 };
 
+type ActivationInvite = {
+  teacherId: string;
+  fullName: string;
+  inviteId: string;
+  linkUrl: string;
+  expiresAt: string;
+};
+
+type InviteEnvelope = {
+  success: true;
+  inviteId: string;
+  teacher: { id: string; fullName: string };
+  linkUrl: string;
+  expiresAt: string;
+};
+
+type LostPhoneEnvelope = ActionEnvelope & {
+  code: string;
+  telegram: { connected: false; status: "disabled"; version: number };
+};
+
 type NoticeTone = "success" | "error" | "info";
 
 const DIRECTORY_URL = "/api/librarian/visits/teacher-access";
@@ -77,6 +107,7 @@ export default function TeacherAccessAdmin({
   const [noticeTone, setNoticeTone] = useState<NoticeTone>("info");
   const [oneTimeCodes, setOneTimeCodes] = useState<OneTimeCode[]>([]);
   const [clipboardNotice, setClipboardNotice] = useState("");
+  const [activationInvite, setActivationInvite] = useState<ActivationInvite | null>(null);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -177,6 +208,95 @@ export default function TeacherAccessAdmin({
     }
   }
 
+  async function createTelegramInvite(teacher: TeacherAccessRow) {
+    if (!teacher.credential) return;
+    setBusyAction(`telegram-invite:${teacher.id}`);
+    setNotice("");
+    setClipboardNotice("");
+    try {
+      const result = await visitApi<InviteEnvelope>(
+        `${DIRECTORY_URL}/${encodeURIComponent(teacher.id)}/telegram-invite`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            requestId: crypto.randomUUID(),
+            expectedCredentialVersion: teacher.credential.version,
+          }),
+        },
+      );
+      setActivationInvite({
+        teacherId: result.teacher.id,
+        fullName: result.teacher.fullName,
+        inviteId: result.inviteId,
+        linkUrl: result.linkUrl,
+        expiresAt: result.expiresAt,
+      });
+      setNotice("Персональне Telegram-запрошення створено. Воно діє 30 хвилин і лише один раз.");
+      setNoticeTone("success");
+      await load(true);
+    } catch (error) {
+      setNotice(accessErrorMessage(error));
+      setNoticeTone("error");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function revokeTelegramInvite(teacher: TeacherAccessRow, inviteId = teacher.telegram.activeInviteId) {
+    if (!inviteId) return;
+    if (!window.confirm(`Відкликати персональне Telegram-запрошення для ${teacher.fullName}?`)) return;
+    setBusyAction(`telegram-revoke:${teacher.id}`);
+    setNotice("");
+    try {
+      await visitApi(`${DIRECTORY_URL}/${encodeURIComponent(teacher.id)}/telegram-invite`, {
+        method: "DELETE",
+        body: JSON.stringify({ requestId: crypto.randomUUID(), inviteId }),
+      });
+      setActivationInvite((current) => current?.inviteId === inviteId ? null : current);
+      setNotice(`Telegram-запрошення для ${teacher.fullName} відкликано.`);
+      setNoticeTone("success");
+      await load(true);
+    } catch (error) {
+      setNotice(accessErrorMessage(error));
+      setNoticeTone("error");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function protectLostPhone(teacher: TeacherAccessRow) {
+    if (!teacher.credential || !teacher.telegram.connected || teacher.telegram.version === null) return;
+    if (!window.confirm(
+      `Захистити картку ${teacher.fullName} після втрати телефона? Telegram буде від’єднано, усі сеанси завершено, попередній PIN анульовано, а новий тимчасовий код буде показано лише один раз. Якщо цей профіль також отримував сповіщення бібліотекаря, їх теж буде відключено.`,
+    )) return;
+    setBusyAction(`lost-phone:${teacher.id}`);
+    setNotice("");
+    setClipboardNotice("");
+    try {
+      const result = await visitApi<LostPhoneEnvelope>(
+        `${DIRECTORY_URL}/${encodeURIComponent(teacher.id)}/lost-phone`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            requestId: crypto.randomUUID(),
+            expectedCredentialVersion: teacher.credential.version,
+            expectedTelegramVersion: teacher.telegram.version,
+          }),
+        },
+      );
+      setActivationInvite(null);
+      setOneTimeCodes([{ teacherId: result.teacher.id, fullName: result.teacher.fullName, code: result.code }]);
+      setNotice("Старий телефон від’єднано, PIN анульовано. Передайте вчителю новий тимчасовий код.");
+      setNoticeTone("success");
+      await load(true);
+    } catch (error) {
+      setNotice(codeIssueErrorMessage(error));
+      setNoticeTone("error");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   async function bulkIssue() {
     if (missingCount === 0) return;
     if (!window.confirm(
@@ -265,12 +385,12 @@ export default function TeacherAccessAdmin({
           <div className={styles.codeRevealHeading}>
             <div>
               <span>Показується лише зараз</span>
-              <h3 id="one-time-code-title">Тимчасові коди для першого входу</h3>
+              <h3 id="one-time-code-title">Тимчасові коди для входу</h3>
             </div>
             <button className={styles.forgetButton} type="button" onClick={forgetCodes}>Закрити й забути</button>
           </div>
           <p className={styles.codeWarning} id="one-time-code-warning">
-            Сайт не зберігає ці коди у відкритому вигляді. Передайте код відповідному вчителю: після входу він створить власний PIN із 4 цифр.
+            Сайт не зберігає ці коди у відкритому вигляді. Передайте код відповідному вчителю: після першого або відновленого входу він створить власний PIN із 4 цифр.
           </p>
           <div className={styles.codeList} aria-describedby="one-time-code-warning">
             {oneTimeCodes.map((item) => (
@@ -288,6 +408,18 @@ export default function TeacherAccessAdmin({
           </div>
           <p className={styles.clipboardNotice} role="status" aria-live="polite">{clipboardNotice}</p>
         </section>
+      ) : null}
+
+      {activationInvite ? (
+        <TelegramInviteDialog
+          invite={activationInvite}
+          busy={Boolean(busyAction)}
+          onClose={() => setActivationInvite(null)}
+          onRevoke={() => {
+            const teacher = teachers.find((item) => item.id === activationInvite.teacherId);
+            if (teacher) void revokeTelegramInvite(teacher, activationInvite.inviteId);
+          }}
+        />
       ) : null}
 
       <div className={styles.summary} aria-label="Стан доступу вчителів">
@@ -334,13 +466,14 @@ export default function TeacherAccessAdmin({
         <div className={styles.tableRegion} role="region" aria-label="Коди доступу вчителів">
           <table className={styles.accessTable}>
             <thead>
-              <tr><th scope="col">Учитель</th><th scope="col">Стан</th><th scope="col">Останній вхід</th><th scope="col">Сеанси</th><th scope="col"><span className="sr-only">Дії</span></th></tr>
+              <tr><th scope="col">Учитель</th><th scope="col">Стан</th><th scope="col">Telegram</th><th scope="col">Останній вхід</th><th scope="col">Сеанси</th><th scope="col"><span className="sr-only">Дії</span></th></tr>
             </thead>
             <tbody>
               {filteredTeachers.map((teacher) => (
                 <tr key={teacher.id}>
                   <th scope="row">{teacher.fullName}</th>
                   <td data-label="Стан"><CredentialBadge credential={teacher.credential} /></td>
+                  <td data-label="Telegram"><TelegramBadge teacher={teacher} /></td>
                   <td data-label="Останній вхід">{teacher.credential?.lastLoginAt ? formatDateTime(teacher.credential.lastLoginAt) : "—"}</td>
                   <td data-label="Сеанси">{teacher.credential?.activeSessions ?? 0}</td>
                   <td className={styles.rowActions}>
@@ -361,6 +494,21 @@ export default function TeacherAccessAdmin({
                     ) : null}
                     {(teacher.credential?.activeSessions ?? 0) > 0 ? (
                       <button type="button" onClick={() => void updateCredential(teacher, "revoke_sessions")} disabled={!canWrite}>Завершити сеанси</button>
+                    ) : null}
+                    {teacher.credential && !teacher.telegram.connected && !teacher.telegram.activeInviteId ? (
+                      <button type="button" onClick={() => void createTelegramInvite(teacher)} disabled={!canWrite}>
+                        {busyAction === `telegram-invite:${teacher.id}` ? "Створюємо…" : "QR-запрошення"}
+                      </button>
+                    ) : null}
+                    {teacher.telegram.activeInviteId ? (
+                      <button type="button" onClick={() => void revokeTelegramInvite(teacher)} disabled={!canWrite}>
+                        {busyAction === `telegram-revoke:${teacher.id}` ? "Відкликаємо…" : "Відкликати QR"}
+                      </button>
+                    ) : null}
+                    {teacher.telegram.connected ? (
+                      <button className={styles.dangerButton} type="button" onClick={() => void protectLostPhone(teacher)} disabled={!canWrite}>
+                        {busyAction === `lost-phone:${teacher.id}` ? "Захищаємо…" : "Втрачено телефон"}
+                      </button>
                     ) : null}
                   </td>
                 </tr>
@@ -387,6 +535,109 @@ function CredentialBadge({ credential }: { credential: TeacherCredential | null 
       {label}
       {credential.status === "locked" && credential.lockedUntil ? <small>до {formatDateTime(credential.lockedUntil)}</small> : null}
     </span>
+  );
+}
+
+function TelegramBadge({ teacher }: { teacher: TeacherAccessRow }) {
+  if (teacher.telegram.connected) {
+    return (
+      <span className={`${styles.badge} ${styles.activeBadge}`}>
+        Підключено
+        {teacher.telegram.linkedAt ? <small>{formatDateTime(teacher.telegram.linkedAt)}</small> : null}
+      </span>
+    );
+  }
+  if (teacher.telegram.activeInviteId) {
+    return (
+      <span className={`${styles.badge} ${styles.inviteBadge}`}>
+        Запрошення активне
+        {teacher.telegram.activeInviteExpiresAt ? <small>до {formatDateTime(teacher.telegram.activeInviteExpiresAt)}</small> : null}
+      </span>
+    );
+  }
+  if (teacher.telegram.status === "blocked") {
+    return <span className={`${styles.badge} ${styles.disabledBadge}`}>Бот заблоковано</span>;
+  }
+  return <span className={`${styles.badge} ${styles.missingBadge}`}>Не підключено</span>;
+}
+
+function TelegramInviteDialog({
+  invite,
+  busy,
+  onClose,
+  onRevoke,
+}: {
+  invite: ActivationInvite;
+  busy: boolean;
+  onClose(): void;
+  onRevoke(): void;
+}) {
+  const canvasId = useId();
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const [copyNotice, setCopyNotice] = useState("");
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (!dialog) return;
+    dialog.showModal();
+    closeButtonRef.current?.focus();
+    return () => {
+      if (dialog.open) dialog.close();
+      previousFocus?.focus();
+    };
+  }, []);
+
+  useEffect(() => {
+    const canvas = document.getElementById(canvasId) as HTMLCanvasElement | null;
+    if (!canvas) return;
+    drawQrCode(canvas, invite.linkUrl);
+  }, [canvasId, invite.linkUrl]);
+
+  async function copyInvite() {
+    const copied = await copyTextWithFallback(invite.linkUrl);
+    setCopyNotice(copied
+      ? "Посилання Telegram скопійовано."
+      : "Браузер не дозволив копіювання. Скористайтеся QR-кодом або кнопкою Telegram.");
+  }
+
+  function downloadQr() {
+    const canvas = document.getElementById(canvasId) as HTMLCanvasElement | null;
+    if (!canvas) return;
+    const link = document.createElement("a");
+    link.href = canvas.toDataURL("image/png");
+    link.download = `telegram-запрошення-${safeFilePart(invite.fullName)}.png`;
+    link.click();
+  }
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className={styles.dialogBackdrop}
+      aria-labelledby={`${canvasId}-title`}
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!busy) onClose();
+      }}
+    >
+      <section className={styles.inviteDialog}>
+        <div className={styles.dialogHeading}>
+          <div><span>Одноразовий доступ</span><h3 id={`${canvasId}-title`}>Особисте запрошення</h3></div>
+          <button ref={closeButtonRef} type="button" onClick={onClose} disabled={busy} aria-label="Закрити">×</button>
+        </div>
+        <p>Для: <strong>{invite.fullName}</strong></p>
+        <canvas id={canvasId} className={styles.qrCanvas} width="280" height="280" aria-label="QR-код персонального Telegram-запрошення" />
+        <p className={styles.inviteWarning}>Діє до {formatDateTime(invite.expiresAt)}, лише один раз. Передайте QR або посилання тільки цьому вчителю.</p>
+        <div className={styles.dialogActions}>
+          <a href={invite.linkUrl} target="_blank" rel="noreferrer">Відкрити в Telegram</a>
+          <button type="button" onClick={() => void copyInvite()} disabled={busy}>Копіювати посилання</button>
+          <button type="button" onClick={downloadQr} disabled={busy}>Завантажити QR</button>
+          <button className={styles.dangerButton} type="button" onClick={onRevoke} disabled={busy}>Відкликати</button>
+        </div>
+        <p className={styles.clipboardNotice} role="status" aria-live="polite">{copyNotice}</p>
+      </section>
+    </dialog>
   );
 }
 
@@ -485,4 +736,23 @@ function todayInKyiv(): string {
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
+}
+
+function drawQrCode(canvas: HTMLCanvasElement, value: string): void {
+  const size = 280;
+  const matrix = new QRCodeWriter().encode(value, BarcodeFormat.QR_CODE, size, size, new Map());
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, size, size);
+  context.fillStyle = "#143f2c";
+  for (let y = 0; y < matrix.getHeight(); y += 1) {
+    for (let x = 0; x < matrix.getWidth(); x += 1) {
+      if (matrix.get(x, y)) context.fillRect(x, y, 1, 1);
+    }
+  }
+}
+
+function safeFilePart(value: string): string {
+  return value.normalize("NFKC").replace(/[\\/:*?"<>|]+/gu, "-").trim().slice(0, 80) || "вчитель";
 }

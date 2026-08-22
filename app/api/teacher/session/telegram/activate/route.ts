@@ -2,10 +2,16 @@ import { env } from "cloudflare:workers";
 
 import { isSameOriginRequest } from "@/lib/librarian-api";
 import { validateTelegramMiniAppInitData } from "@/lib/telegram-mini-app-auth";
-import { readVisitJson, teacherPortalGate, visitError, visitJson, visitStoreError } from "@/lib/visit-schedule-api";
+import {
+  readVisitJson,
+  teacherPortalGate,
+  visitError,
+  visitJson,
+  visitStoreError,
+} from "@/lib/visit-schedule-api";
 import type { VisitD1Database } from "@/lib/visit-schedule-store";
 import {
-  createVisitTeacherTelegramSession,
+  activateVisitTeacherTelegramSession,
   telegramTeacherSessionCookie,
 } from "@/lib/visit-teacher-auth";
 
@@ -17,13 +23,15 @@ export async function POST(request: Request): Promise<Response> {
     return visitError(403, "cross_origin_request", "Запит має надійти з цього самого сайту.");
   }
   const body = await readVisitJson(request); if (!body.ok) return body.response;
+  const expectedKeys = ["initData", "requestId", "loginId", "code", "newPin"];
   const keys = Object.keys(body.value);
-  if (keys.length !== 1 || keys[0] !== "initData" || typeof body.value.initData !== "string") {
-    return visitError(400, "validation_failed", "Telegram не передав дані для входу.");
+  if (keys.length !== expectedKeys.length || !expectedKeys.every((key) => keys.includes(key))
+    || expectedKeys.some((key) => typeof body.value[key] !== "string")) {
+    return visitError(400, "validation_failed", "Перевірте ім’я, код і новий PIN.");
   }
   try {
-    const telegram = await validateTelegramMiniAppInitData(body.value.initData);
-    const result = await createVisitTeacherTelegramSession(
+    const telegram = await validateTelegramMiniAppInitData(body.value.initData as string);
+    const result = await activateVisitTeacherTelegramSession(
       env.DB as unknown as VisitD1Database,
       request,
       {
@@ -31,35 +39,23 @@ export async function POST(request: Request): Promise<Response> {
         initDataHash: telegram.initDataHash,
         authDate: telegram.authDate,
         receiptExpiresAt: telegram.expiresAt,
+        requestId: body.value.requestId as string,
+        loginId: body.value.loginId as string,
+        code: body.value.code as string,
+        newPin: body.value.newPin as string,
       },
     );
-    if (result.kind === "activation") {
-      return visitJson({
-        schemaVersion: 2,
-        success: true,
-        onboardingRequired: true,
-        activation: {
-          mode: result.mode,
-          teacher: result.teacher,
-          requiresCode: result.requiresCode,
-          requiresNewPin: result.requiresNewPin,
-          grantExpiresAt: result.grantExpiresAt,
-        },
-      });
-    }
-    const responseOptions = result.token ? {
-      headers: { "Set-Cookie": telegramTeacherSessionCookie(result.token) },
-    } : undefined;
     return visitJson({
-      schemaVersion: 2,
+      schemaVersion: 1,
       success: true,
-      onboardingRequired: false,
       teacher: { fullName: result.identity.fullName },
       pendingScope: result.identity.pendingScope,
       expiresAt: result.identity.expiresAt,
-      mustChangePin: result.identity.mustChangePin,
-    }, responseOptions);
+      mustChangePin: false,
+    }, {
+      headers: { "Set-Cookie": telegramTeacherSessionCookie(result.token) },
+    });
   } catch (error) {
-    return visitStoreError(error, "telegram_teacher_session_unavailable");
+    return visitStoreError(error, "telegram_teacher_activation_unavailable");
   }
 }

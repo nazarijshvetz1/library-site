@@ -67,6 +67,7 @@ const migrations = [
   "0011_normalize_holding_conditions.sql", "0012_elite_victor_mancha.sql",
   "0013_strange_dark_beast.sql", "0014_rich_lionheart.sql", "0015_glamorous_namora.sql",
   "0016_busy_jane_foster.sql",
+  "0017_fresh_robbie_robertson.sql",
 ];
 
 async function database() {
@@ -85,6 +86,16 @@ async function database() {
   sqlite.prepare(`INSERT INTO teacher_profiles (teacher_user_id,created_at,updated_at) VALUES (?,?,?)`)
     .run("USR-TEACHER", now, now);
   return { sqlite, db: new TestD1(sqlite), now };
+}
+
+function addTeacherCredential(context, version = 1) {
+  context.sqlite.prepare(`INSERT INTO visit_teacher_credentials (
+    teacher_user_id,login_id,code_hmac,must_change_pin,status,version,failed_attempts,
+    failure_window_started_at,locked_until,last_login_at,code_rotated_at,last_access_command_id,
+    created_by_user_id,updated_by_user_id,created_at,updated_at
+  ) VALUES ('USR-TEACHER','teacher-login-id-0001',?,1,'active',?,0,
+    NULL,NULL,NULL,?,NULL,'USR-LIB','USR-LIB',?,?)`)
+    .run("a".repeat(64), version, context.now, context.now, context.now);
 }
 
 function telegramOk(messageId = 1) {
@@ -148,13 +159,111 @@ test("group start never consumes the token", async () => {
   context.sqlite.close();
 });
 
+test("personal teacher activation invite stores only a digest and binds to one private Telegram", async () => {
+  const context = await database();
+  addTeacherCredential(context);
+  const requestId = crypto.randomUUID();
+  const linkNow = new Date();
+  const created = await telegram.createTelegramTeacherActivationInvite(
+    context.db,
+    { id: "USR-LIB", email: "library@example.test" },
+    "USR-TEACHER",
+    { requestId, expectedCredentialVersion: 1 },
+    { now: linkNow, randomBytes: new Uint8Array(32).fill(9) },
+  );
+  const rawToken = new URL(created.linkUrl).searchParams.get("start");
+  assert.match(rawToken, /^ta_[A-Za-z0-9_-]{43}$/u);
+  assert.equal(created.teacher.fullName, "Шевченко Олена");
+  const stored = context.sqlite.prepare(`SELECT token_hash,request_id,bound_telegram_user_id
+    FROM telegram_teacher_activation_invites WHERE id=?`).get(created.inviteId);
+  assert.match(stored.token_hash, /^[0-9a-f]{64}$/u);
+  assert.notEqual(stored.token_hash, rawToken);
+  assert.equal(stored.request_id, requestId);
+  assert.equal(stored.bound_telegram_user_id, null);
+
+  const payload = {
+    update_id: 109,
+    message: { text: `/start ${rawToken}`, chat: { id: 7101, type: "private" }, from: { id: 7101, username: "olena" } },
+  };
+  const bodies = [];
+  const claimed = await telegram.processTelegramWebhookUpdate(
+    context.db,
+    JSON.stringify(payload),
+    payload,
+    async (_url, init) => { bodies.push(JSON.parse(init.body)); return telegramOk(71); },
+    "https://library.example.test",
+  );
+  assert.deepEqual(claimed, { outcome: "activation_invite_claimed", duplicate: false });
+  assert.deepEqual(
+    { ...context.sqlite.prepare(`SELECT bound_telegram_user_id,bound_chat_id,bound_username,bound_update_id
+      FROM telegram_teacher_activation_invites WHERE id=?`).get(created.inviteId) },
+    { bound_telegram_user_id: "7101", bound_chat_id: "7101", bound_username: "olena", bound_update_id: "109" },
+  );
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM telegram_connections").get().n, 0);
+  const message = bodies.find((body) => body.text);
+  assert.match(message.text, /Шевченко Олена/u);
+  assert.equal(message.reply_markup.inline_keyboard[0][0].web_app.url,
+    "https://library.example.test/teacher/telegram");
+  assert.deepEqual(await telegram.processTelegramWebhookUpdate(
+    context.db,
+    JSON.stringify(payload),
+    payload,
+    async () => telegramOk(72),
+    "https://library.example.test",
+  ), { outcome: "activation_invite_claimed", duplicate: true });
+
+  const second = await telegram.createTelegramTeacherActivationInvite(
+    context.db,
+    { id: "USR-LIB", email: "library@example.test" },
+    "USR-TEACHER",
+    { requestId: crypto.randomUUID(), expectedCredentialVersion: 1 },
+    { now: linkNow, randomBytes: new Uint8Array(32).fill(10) },
+  );
+  assert.ok(context.sqlite.prepare("SELECT revoked_at FROM telegram_teacher_activation_invites WHERE id=?")
+    .get(created.inviteId).revoked_at);
+  assert.deepEqual(await telegram.revokeTelegramTeacherActivationInvite(
+    context.db,
+    { id: "USR-LIB", email: "library@example.test" },
+    "USR-TEACHER",
+    { requestId: crypto.randomUUID(), inviteId: second.inviteId },
+  ), { inviteId: second.inviteId, revoked: true });
+  assert.ok(context.sqlite.prepare("SELECT revoked_at FROM telegram_teacher_activation_invites WHERE id=?")
+    .get(second.inviteId).revoked_at);
+  context.sqlite.close();
+});
+
 test("connected private chats receive role-aware menus and teacher Mini App buttons", async () => {
   const teacher = await database();
+  addTeacherCredential(teacher);
   teacher.sqlite.prepare(`INSERT INTO telegram_connections (
     user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
     linked_at,disabled_at,created_at,updated_at
   ) VALUES ('USR-TEACHER','7001','7001',NULL,'active',1,1,1,?,NULL,?,?)`)
     .run(teacher.now, teacher.now, teacher.now);
+  teacher.sqlite.prepare(`INSERT INTO visit_teacher_sessions (
+    token_hash,teacher_user_id,credential_version,pending_scope,ip_scope_hash,
+    expires_at,last_seen_at,revoked_at,created_at
+  ) VALUES (?,'USR-TEACHER',1,'pending-stop-session',?,
+    '2026-08-23T10:00:00.000Z',?,NULL,?)`)
+    .run("1".repeat(64), "2".repeat(64), teacher.now, teacher.now);
+  teacher.sqlite.prepare(`INSERT INTO telegram_link_tokens (
+    id,user_id,token_hash,expires_at,consumed_at,consumed_update_id,revoked_at,created_at
+  ) VALUES ('TGL-stop','USR-TEACHER',?,'2026-08-23T10:00:00.000Z',NULL,NULL,NULL,?)`)
+    .run("3".repeat(64), teacher.now);
+  teacher.sqlite.prepare(`INSERT INTO telegram_teacher_activation_invites (
+    id,kind,teacher_user_id,credential_version,token_hash,issued_by_user_id,request_id,
+    bound_telegram_user_id,bound_chat_id,bound_username,bound_update_id,presented_at,
+    expires_at,consumed_init_data_hash,consumed_at,revoked_at,created_at,updated_at
+  ) VALUES ('TGA-stop-personal','personal','USR-TEACHER',1,?,'USR-LIB',?,
+    NULL,NULL,NULL,NULL,NULL,'2026-08-23T10:00:00.000Z',NULL,NULL,NULL,?,?)`)
+    .run("4".repeat(64), crypto.randomUUID(), teacher.now, teacher.now);
+  teacher.sqlite.prepare(`INSERT INTO telegram_teacher_activation_invites (
+    id,kind,teacher_user_id,credential_version,token_hash,issued_by_user_id,request_id,
+    bound_telegram_user_id,bound_chat_id,bound_username,bound_update_id,presented_at,
+    expires_at,consumed_init_data_hash,consumed_at,revoked_at,created_at,updated_at
+  ) VALUES ('TGA-stop-generic','generic',NULL,NULL,NULL,NULL,NULL,
+    '7001','7001',NULL,'stop-generic-update',?,'2026-08-23T10:00:00.000Z',
+    NULL,NULL,NULL,?,?)`).run(teacher.now, teacher.now, teacher.now);
   const teacherPayload = {
     update_id: 93,
     message: { text: "/menu", chat: { id: 7001, type: "private" }, from: { id: 7001 } },
@@ -197,13 +306,20 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
     update_id: 95,
     message: { text: "/stop", chat: { id: 7001, type: "private" }, from: { id: 7001 } },
   };
-  await telegram.processTelegramWebhookUpdate(
+  assert.deepEqual(await telegram.processTelegramWebhookUpdate(
     teacher.db,
     JSON.stringify(stopPayload),
     stopPayload,
     async (_url, init) => { teacherBodies.push(JSON.parse(init.body)); return telegramOk(54); },
     "https://library.example.test",
-  );
+  ), { outcome: "disconnected", duplicate: false });
+  assert.ok(teacher.sqlite.prepare(`SELECT revoked_at FROM visit_teacher_sessions
+    WHERE token_hash=?`).get("1".repeat(64)).revoked_at);
+  assert.ok(teacher.sqlite.prepare("SELECT revoked_at FROM telegram_link_tokens WHERE id='TGL-stop'").get().revoked_at);
+  assert.ok(teacher.sqlite.prepare(`SELECT revoked_at FROM telegram_teacher_activation_invites
+    WHERE id='TGA-stop-personal'`).get().revoked_at);
+  assert.ok(teacher.sqlite.prepare(`SELECT revoked_at FROM telegram_teacher_activation_invites
+    WHERE id='TGA-stop-generic'`).get().revoked_at);
   const unlinkedPayload = {
     update_id: 96,
     message: { text: "/menu", chat: { id: 7001, type: "private" }, from: { id: 7001 } },
@@ -215,8 +331,20 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
     unlinkedPayload,
     async (_url, init) => { unlinkedBodies.push(JSON.parse(init.body)); return telegramOk(55); },
     "https://library.example.test",
-  ), { outcome: "menu_unlinked", duplicate: false });
-  assert.equal(unlinkedBodies[0].reply_markup, undefined);
+  ), { outcome: "activation_started", duplicate: false });
+  const onboardingMessage = unlinkedBodies.find((body) => body.text);
+  const onboardingMenu = unlinkedBodies.find((body) => body.menu_button);
+  assert.equal(onboardingMessage.reply_markup.inline_keyboard[0][0].text, "🔐 Активувати / увійти");
+  assert.equal(
+    onboardingMessage.reply_markup.inline_keyboard[0][0].web_app.url,
+    "https://library.example.test/teacher/telegram",
+  );
+  assert.equal(onboardingMenu.menu_button.web_app.url, "https://library.example.test/teacher/telegram?tab=overview");
+  assert.deepEqual(
+    { ...teacher.sqlite.prepare(`SELECT kind,teacher_user_id,bound_telegram_user_id,bound_chat_id
+      FROM telegram_teacher_activation_invites WHERE consumed_at IS NULL AND revoked_at IS NULL`).get() },
+    { kind: "generic", teacher_user_id: null, bound_telegram_user_id: "7001", bound_chat_id: "7001" },
+  );
 
   const librarian = await database();
   librarian.sqlite.prepare(`INSERT INTO telegram_connections (
@@ -410,11 +538,36 @@ test("repair fails closed when either command menu cannot be refreshed", async (
 
 test("site disconnect disables the connection and resets the private chat menu", async () => {
   const context = await database();
+  addTeacherCredential(context);
   context.sqlite.prepare(`INSERT INTO telegram_connections (
     user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
     linked_at,disabled_at,created_at,updated_at
   ) VALUES ('USR-TEACHER','7001','7001',NULL,'active',1,1,4,?,NULL,?,?)`)
     .run(context.now, context.now, context.now);
+  context.sqlite.prepare(`INSERT INTO visit_teacher_sessions (
+    token_hash,teacher_user_id,credential_version,pending_scope,ip_scope_hash,
+    expires_at,last_seen_at,revoked_at,created_at
+  ) VALUES (?,'USR-TEACHER',1,'pending-site-disconnect',?,
+    '2026-08-23T10:00:00.000Z',?,NULL,?)`)
+    .run("5".repeat(64), "6".repeat(64), context.now, context.now);
+  context.sqlite.prepare(`INSERT INTO telegram_link_tokens (
+    id,user_id,token_hash,expires_at,consumed_at,consumed_update_id,revoked_at,created_at
+  ) VALUES ('TGL-site-disconnect','USR-TEACHER',?,'2026-08-23T10:00:00.000Z',NULL,NULL,NULL,?)`)
+    .run("7".repeat(64), context.now);
+  context.sqlite.prepare(`INSERT INTO telegram_teacher_activation_invites (
+    id,kind,teacher_user_id,credential_version,token_hash,issued_by_user_id,request_id,
+    bound_telegram_user_id,bound_chat_id,bound_username,bound_update_id,presented_at,
+    expires_at,consumed_init_data_hash,consumed_at,revoked_at,created_at,updated_at
+  ) VALUES ('TGA-site-personal','personal','USR-TEACHER',1,?,'USR-LIB',?,
+    NULL,NULL,NULL,NULL,NULL,'2026-08-23T10:00:00.000Z',NULL,NULL,NULL,?,?)`)
+    .run("8".repeat(64), crypto.randomUUID(), context.now, context.now);
+  context.sqlite.prepare(`INSERT INTO telegram_teacher_activation_invites (
+    id,kind,teacher_user_id,credential_version,token_hash,issued_by_user_id,request_id,
+    bound_telegram_user_id,bound_chat_id,bound_username,bound_update_id,presented_at,
+    expires_at,consumed_init_data_hash,consumed_at,revoked_at,created_at,updated_at
+  ) VALUES ('TGA-site-generic','generic',NULL,NULL,NULL,NULL,NULL,
+    '7001','7001',NULL,'site-disconnect-update',?,'2026-08-23T10:00:00.000Z',
+    NULL,NULL,NULL,?,?)`).run(context.now, context.now, context.now);
   const requests = [];
   const status = await telegram.disconnectTelegram(
     context.db,
@@ -428,6 +581,14 @@ test("site disconnect disables the connection and resets the private chat menu",
   assert.match(requests[0].url, /\/setChatMenuButton$/u);
   assert.equal(requests[0].body.chat_id, 7001);
   assert.deepEqual(requests[0].body.menu_button, { type: "commands" });
+  assert.ok(context.sqlite.prepare(`SELECT revoked_at FROM visit_teacher_sessions
+    WHERE token_hash=?`).get("5".repeat(64)).revoked_at);
+  assert.ok(context.sqlite.prepare(`SELECT revoked_at FROM telegram_link_tokens
+    WHERE id='TGL-site-disconnect'`).get().revoked_at);
+  assert.ok(context.sqlite.prepare(`SELECT revoked_at FROM telegram_teacher_activation_invites
+    WHERE id='TGA-site-personal'`).get().revoked_at);
+  assert.ok(context.sqlite.prepare(`SELECT revoked_at FROM telegram_teacher_activation_invites
+    WHERE id='TGA-site-generic'`).get().revoked_at);
   context.sqlite.close();
 });
 
