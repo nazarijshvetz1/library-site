@@ -14,6 +14,7 @@ import {
   type TeacherMaterialRequestDatabase,
 } from "@/lib/teacher-material-request-store";
 import { validateMaterialRequestActionInput } from "@/lib/teacher-material-request-validation";
+import { scheduleTelegramOutboxDrain } from "@/lib/telegram-delivery-runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +59,7 @@ export async function PATCH(
         writesEnabled: true,
       });
     }
+    scheduleTelegramOutboxDrain(db, request.url);
     return materialRequestJson({
       schemaVersion: 1,
       success: true,

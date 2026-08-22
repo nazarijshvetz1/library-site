@@ -4,6 +4,7 @@ import { featureGate, readVisitJson, visitBookingEnabled, visitError, visitJson,
 import { createVisitBooking, readVisitSchedule, type VisitD1Database } from "@/lib/visit-schedule-store";
 import { requireVisitTeacherSession } from "@/lib/visit-teacher-auth";
 import { kyivLocalNow, parseVisitRange, validateVisitBookingCreateInput, VisitValidationError } from "@/lib/visit-schedule-validation";
+import { scheduleTelegramOutboxDrain } from "@/lib/telegram-delivery-runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const teacher = await requireVisitTeacherSession(db, request);
     const result = await createVisitBooking(db, teacher, validated.value);
+    scheduleTelegramOutboxDrain(db, request.url);
     return visitJson({ schemaVersion: 1, success: true, result, bookingEnabled: true }, { status: 201 });
   } catch (error) {
     return visitStoreError(error, "visit_booking_unavailable");

@@ -17,6 +17,7 @@ import { validateMaterialRequestCreateInput } from "@/lib/teacher-material-reque
 import { requireVisitTeacherSession } from "@/lib/visit-teacher-auth";
 import type { VisitD1Database } from "@/lib/visit-schedule-store";
 import { teacherPortalGate } from "@/lib/visit-schedule-api";
+import { scheduleTelegramOutboxDrain } from "@/lib/telegram-delivery-runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -76,6 +77,7 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
     const requestRecord = await createTeacherMaterialRequest(db, teacher, validated.value);
+    scheduleTelegramOutboxDrain(db, request.url);
     return materialRequestJson(
       { schemaVersion: 1, success: true, request: requestRecord },
       { status: 201 },

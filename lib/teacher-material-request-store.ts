@@ -1,6 +1,10 @@
 import type { ChatGPTUser } from "../app/chatgpt-auth.ts";
 import type { VisitTeacherIdentity } from "./visit-teacher-auth.ts";
 import { kyivToday } from "./visit-schedule-validation.ts";
+import {
+  queueTelegramForLibrariansStatement,
+  queueTelegramFromPortalNotificationStatement,
+} from "./telegram-outbox.ts";
 import type {
   MaterialRequestActionInput,
   MaterialRequestCancelInput,
@@ -486,6 +490,18 @@ export async function createTeacherMaterialRequest(
       JSON.stringify({ itemCount: snapshots.length }),
       createdAt,
     ),
+    queueTelegramForLibrariansStatement(db, {
+      dedupeKey: `material-request:${materialRequestId}:submitted:${input.requestId}`,
+      auditRequestId: input.requestId,
+      category: "orders",
+      type: "material_request_submitted",
+      title: "Нове замовлення вчителя",
+      message: `${teacher.fullName}: ${snapshots.length} позиц., ${snapshots.reduce((sum, item) => sum + item.qty, 0)} примірн.`,
+      targetPath: "/librarian/teachers",
+      entityType: "material_request",
+      entityId: materialRequestId,
+      createdAt,
+    }),
     completeCommandStatement(db, input.requestId, result, createdAt),
   ];
   try {
@@ -657,6 +673,18 @@ export async function cancelTeacherMaterialRequest(
       JSON.stringify(result),
       cancelledAt,
     ),
+    queueTelegramForLibrariansStatement(db, {
+      dedupeKey: `material-request:${materialRequestId}:cancelled:${input.requestId}`,
+      auditRequestId: input.requestId,
+      category: "orders",
+      type: "material_request_cancelled",
+      title: "Замовлення скасовано",
+      message: `${teacher.fullName} скасував(-ла) своє замовлення.${input.reason ? ` Причина: ${input.reason}` : ""}`,
+      targetPath: "/librarian/teachers",
+      entityType: "material_request",
+      entityId: materialRequestId,
+      createdAt: cancelledAt,
+    }),
     completeCommandStatement(db, input.requestId, result, cancelledAt),
   ];
   try {
@@ -1193,6 +1221,13 @@ async function transitionMaterialRequest(
       current.status,
       toStatus,
     ),
+    queueTelegramFromPortalNotificationStatement(
+      db,
+      notificationId,
+      "orders",
+      "/teacher?tab=notifications",
+      now,
+    ),
     requestAuditStatement(
       db,
       actor,
@@ -1543,6 +1578,13 @@ async function readyMaterialRequest(
       now,
       current.id,
       eventId,
+    ),
+    queueTelegramFromPortalNotificationStatement(
+      db,
+      notificationId,
+      "orders",
+      "/teacher?tab=notifications",
+      now,
     ),
   );
   if (reservationRows.length) {
@@ -2062,6 +2104,13 @@ async function issueMaterialRequest(
       current.id,
       eventId,
     ),
+    queueTelegramFromPortalNotificationStatement(
+      db,
+      notificationId,
+      "orders",
+      "/teacher?tab=notifications",
+      now,
+    ),
     rebuildStockTotalsBulkStatement(db, [...new Set(issueRows.map((row) => row.materialId))], now),
     requestAuditStatement(
       db,
@@ -2313,6 +2362,13 @@ async function releaseMaterialRequest(
       now,
       current.id,
       eventId,
+    ),
+    queueTelegramFromPortalNotificationStatement(
+      db,
+      notificationId,
+      "orders",
+      "/teacher?tab=notifications",
+      now,
     ),
     rebuildStockTotalsBulkStatement(db, [...new Set(releaseRows.map((row) => row.materialId))], now),
     requestAuditStatement(

@@ -112,6 +112,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .tabs button span { min-width: 20px; padding: 3px 6px; border-radius: 999px; background: rgba(255, 255, 255, .2); font-size: 10px; }
 .panel:focus { outline: none; }
 
+.overviewStack { display: grid; gap: 20px; }
 .overviewGrid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(320px, .6fr); gap: 20px; align-items: start; }
 .card {
   padding: clamp(20px, 3vw, 30px);
@@ -149,6 +150,26 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .attentionList li > span { display: grid; gap: 3px; }
 .attentionList small { color: var(--muted); font-size: 10px; }
 .attentionList button { min-width: 62px; min-height: 42px; padding: 0 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 0; border-radius: 10px; background: var(--green-100); color: var(--green-900); cursor: pointer; font-weight: 900; }
+
+.telegramPanel { overflow: hidden; }
+.telegramHeading { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: start; gap: 15px; }
+.telegramMark { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 14px; color: white; background: #2aabee; font-size: 23px; }
+.telegramHeading > div:nth-child(2) { min-width: 0; }
+.telegramHeading span { color: var(--green-700); font-size: 10px; font-weight: 850; letter-spacing: .12em; text-transform: uppercase; }
+.telegramHeading h2 { margin: 5px 0 8px; color: var(--green-950); font: 650 27px/1.05 Georgia, serif; }
+.telegramHeading p { max-width: 700px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.telegramHeading > strong { padding: 7px 10px; border-radius: 999px; color: #765616; background: #fff0ca; font-size: 9px; text-align: center; }
+.telegramHeading > strong[data-connected="true"] { color: #316536; background: #e4f2df; }
+.telegramPanel > .info, .telegramPanel > .success, .telegramPanel > .error { margin-top: 18px; }
+.telegramPreferenceGrid { margin-top: 20px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.telegramPreferenceGrid label { padding: 14px; display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 10px; border: 1px solid var(--line); border-radius: 12px; background: #fafcf8; cursor: pointer; }
+.telegramPreferenceGrid input { width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--green-900); }
+.telegramPreferenceGrid span { display: grid; gap: 4px; }
+.telegramPreferenceGrid strong { color: var(--green-950); font-size: 12px; }
+.telegramPreferenceGrid small { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.telegramActions { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 9px; }
+.telegramActions button { min-height: 42px; padding: 0 15px; border: 1px solid var(--line); border-radius: 10px; background: white; color: var(--green-900); cursor: pointer; font-weight: 800; }
+.telegramActions .telegramDanger { border-color: #e5b8b0; color: var(--danger); background: #fff3f0; }
 
 .directoryStack, .ordersStack { display: grid; gap: 20px; }
 .filters { margin-bottom: 20px; display: grid; grid-template-columns: minmax(280px, 1fr) 190px; gap: 12px; align-items: end; }
@@ -285,6 +306,10 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .cardHeading { display: grid; }
   .cardHeading > button, .cardHeading .secondaryLink { width: 100%; justify-content: center; }
   .visitList article { align-items: flex-start; }
+  .telegramHeading, .telegramPreferenceGrid { grid-template-columns: 1fr; }
+  .telegramHeading > strong { width: max-content; }
+  .telegramActions { display: grid; }
+  .telegramActions button { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

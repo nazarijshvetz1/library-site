@@ -17,6 +17,7 @@ import type {
   GuestVisitCreateInput,
   VisitBookingUpdateInput,
 } from "./visit-portal-validation.ts";
+import { queueTelegramForLibrariansStatement } from "./telegram-outbox.ts";
 
 export type GuestVisitBooking = {
   id: string;
@@ -158,6 +159,18 @@ export async function createGuestVisitBooking(
       ) THEN ? ELSE NULL END,NULL,? FROM json_each(?)`)
       .bind(id, guest.guestOwnerId, id, now, JSON.stringify(segments)),
     auditClaim(db, guest, input.requestId, id, result, segments.length, now, "visit.guest_booking.create"),
+    queueTelegramForLibrariansStatement(db, {
+      dedupeKey: `visit-booking:${id}:guest-created:${input.requestId}`,
+      auditRequestId: input.requestId,
+      category: "visits",
+      type: "visit_guest_booking_created",
+      title: "Новий гостьовий запис до бібліотеки",
+      message: `${teacher.fullName}: ${input.date}, ${input.startTime}–${input.endTime}${classYear?.class_name ? `, ${classYear.class_name}` : ""}.`,
+      targetPath: "/librarian/visits",
+      entityType: "visit_booking",
+      entityId: id,
+      createdAt: now,
+    }),
     completeCommand(db, input.requestId, result, now),
   ];
   try {
@@ -250,6 +263,18 @@ export async function updateGuestVisitBooking(
       .bind(bookingId, guest.guestOwnerId, result.version, input.requestId, input.date, input.startTime,
         input.endTime, bookingId, now, JSON.stringify(segments)),
     auditClaim(db, guest, input.requestId, bookingId, result, segments.length, now, "visit.guest_booking.update"),
+    queueTelegramForLibrariansStatement(db, {
+      dedupeKey: `visit-booking:${bookingId}:guest-updated:${input.requestId}`,
+      auditRequestId: input.requestId,
+      category: "visits",
+      type: "visit_guest_booking_updated",
+      title: "Гостьовий запис змінено",
+      message: `${row.surname}: ${input.date}, ${input.startTime}–${input.endTime}${classYear?.class_name ? `, ${classYear.class_name}` : ""}.`,
+      targetPath: "/librarian/visits",
+      entityType: "visit_booking",
+      entityId: bookingId,
+      createdAt: now,
+    }),
     completeCommand(db, input.requestId, result, now),
   ];
   try {
@@ -319,6 +344,18 @@ export async function cancelGuestVisitBooking(
       .bind(`AUD-${crypto.randomUUID()}`, bookingId, guest.guestOwnerId, result.version, now,
         input.requestId, guest.guestOwnerId, bookingId, bookingId, input.requestId, JSON.stringify(await mapGuestBooking(row)),
         JSON.stringify(result), now),
+    queueTelegramForLibrariansStatement(db, {
+      dedupeKey: `visit-booking:${bookingId}:guest-cancelled:${input.requestId}`,
+      auditRequestId: input.requestId,
+      category: "visits",
+      type: "visit_guest_booking_cancelled",
+      title: "Гостьовий запис скасовано",
+      message: `${row.surname}: ${row.visit_date}, ${row.start_time}–${row.end_time}.`,
+      targetPath: "/librarian/visits",
+      entityType: "visit_booking",
+      entityId: bookingId,
+      createdAt: now,
+    }),
     completeCommand(db, input.requestId, result, now),
   ];
   try {

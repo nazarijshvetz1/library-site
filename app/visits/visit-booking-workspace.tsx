@@ -1320,6 +1320,25 @@ type NotificationsEnvelope = {
   unreadCount: number;
 };
 
+type TelegramStatus = {
+  configured: boolean;
+  linkingEnabled: boolean;
+  notificationsEnabled: boolean;
+  botUsername: string | null;
+  connected: boolean;
+  status: "active" | "disabled" | "blocked" | null;
+  notifyOrders: boolean;
+  notifyVisits: boolean;
+  version: number | null;
+  linkedAt: string | null;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastErrorCode: string | null;
+};
+
+type TelegramStatusEnvelope = { success: true; telegram: TelegramStatus };
+type TelegramLinkEnvelope = { success: true; linkUrl: string; expiresAt: string };
+
 function teacherTabTitle(tab: TeacherTab): string {
   if (tab === "visits") return "Мої відвідування";
   if (tab === "orders") return "Замовлення матеріалів";
@@ -1834,7 +1853,9 @@ function TeacherNotificationsPanel({ pendingScope }: { pendingScope: string }) {
   }
 
   return (
-    <section className={styles.card} aria-labelledby="notifications-title">
+    <div className={styles.notificationStack}>
+      <TeacherTelegramSettings />
+      <section className={styles.card} aria-labelledby="notifications-title">
       <div className={styles.cardHeading}><div><span>{data?.unreadCount ?? 0} непрочитаних</span><h2 id="notifications-title">Повідомлення</h2></div><button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading || loadingMore || submitting}>↻ Оновити</button></div>
       {pending ? <div className={styles.pending} role="status"><span>Не вдалося підтвердити позначку «прочитано».</span><button type="button" onClick={() => void sendRead(pending)} disabled={submitting}>Перевірити результат</button></div> : null}
       {notice ? <div className={styles.error} role="alert">{notice}</div> : null}
@@ -1846,6 +1867,128 @@ function TeacherNotificationsPanel({ pendingScope }: { pendingScope: string }) {
         </article>
       ))}</div> : <p className={styles.empty}>Повідомлень ще немає.</p>}
       {data?.page.hasMore && data.page.nextCursor ? <button className={styles.loadMore} type="button" onClick={() => void load(false, data.page.nextCursor)} disabled={loading || loadingMore || submitting}>{loadingMore ? "Завантажуємо…" : "Завантажити ще"}</button> : null}
+      </section>
+    </div>
+  );
+}
+
+function TeacherTelegramSettings() {
+  const [telegram, setTelegram] = useState<TelegramStatus | null>(null);
+  const [notifyOrders, setNotifyOrders] = useState(true);
+  const [notifyVisits, setNotifyVisits] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<"link" | "save" | "test" | "disconnect" | null>(null);
+  const [notice, setNotice] = useState("");
+  const [noticeTone, setNoticeTone] = useState<"success" | "error" | "info">("info");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await visitApi<TelegramStatusEnvelope>("/api/teacher/telegram");
+      setTelegram(response.telegram);
+      setNotifyOrders(response.telegram.notifyOrders);
+      setNotifyVisits(response.telegram.notifyVisits);
+    } catch (error) {
+      setNotice(errorMessage(error));
+      setNoticeTone("error");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  async function connect() {
+    setBusy("link"); setNotice("");
+    try {
+      const response = await visitApi<TelegramLinkEnvelope>("/api/teacher/telegram/link", { method: "POST" });
+      window.location.assign(response.linkUrl);
+    } catch (error) {
+      setNotice(errorMessage(error)); setNoticeTone("error"); setBusy(null);
+    }
+  }
+
+  async function savePreferences() {
+    if (!telegram?.connected || telegram.version === null) return;
+    setBusy("save"); setNotice("");
+    try {
+      const response = await visitApi<TelegramStatusEnvelope>("/api/teacher/telegram", {
+        method: "PATCH",
+        body: JSON.stringify({ notifyOrders, notifyVisits, expectedVersion: telegram.version }),
+      });
+      setTelegram(response.telegram);
+      setNotifyOrders(response.telegram.notifyOrders);
+      setNotifyVisits(response.telegram.notifyVisits);
+      setNotice("Налаштування Telegram збережено."); setNoticeTone("success");
+    } catch (error) {
+      setNotice(errorMessage(error)); setNoticeTone("error");
+    } finally { setBusy(null); }
+  }
+
+  async function sendTest() {
+    setBusy("test"); setNotice("");
+    try {
+      await visitApi("/api/teacher/telegram/test", { method: "POST" });
+      setNotice("Тестове повідомлення надіслано в Telegram."); setNoticeTone("success");
+      await load();
+    } catch (error) {
+      setNotice(errorMessage(error)); setNoticeTone("error");
+    } finally { setBusy(null); }
+  }
+
+  async function disconnect() {
+    if (telegram?.version === null || telegram?.version === undefined) return;
+    setBusy("disconnect"); setNotice("");
+    try {
+      const response = await visitApi<TelegramStatusEnvelope>("/api/teacher/telegram/disconnect", {
+        method: "POST",
+        body: JSON.stringify({ expectedVersion: telegram.version }),
+      });
+      setTelegram(response.telegram);
+      setNotice("Telegram від’єднано від кабінету."); setNoticeTone("success");
+    } catch (error) {
+      setNotice(errorMessage(error)); setNoticeTone("error");
+    } finally { setBusy(null); }
+  }
+
+  const changed = Boolean(telegram?.connected)
+    && (notifyOrders !== telegram?.notifyOrders || notifyVisits !== telegram?.notifyVisits);
+  const statusLabel = telegram?.connected
+    ? "Підключено"
+    : telegram?.status === "blocked"
+      ? "Бот заблоковано в Telegram"
+      : "Не підключено";
+
+  return (
+    <section className={`${styles.card} ${styles.telegramPanel}`} aria-labelledby="teacher-telegram-title">
+      <div className={styles.cardHeading}>
+        <div><span>Дублювання повідомлень</span><h2 id="teacher-telegram-title">Telegram</h2></div>
+        <strong className={telegram?.connected ? styles.telegramConnected : styles.telegramDisconnected}>{loading ? "Перевіряємо…" : statusLabel}</strong>
+      </div>
+      <p className={styles.telegramIntro}>Підключіть особистий приватний чат із ботом. Повідомлення в кабінеті залишаться основними й не зникнуть.</p>
+      {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
+      {!loading && telegram && (!telegram.configured || !telegram.linkingEnabled) ? (
+        <div className={styles.info}>Telegram ще налаштовується бібліотекарем. Тут не потрібно вводити номер телефону чи email.</div>
+      ) : null}
+      {!loading && telegram?.connected ? (
+        <>
+          <div className={styles.telegramPreferences}>
+            <label htmlFor="teacher-telegram-orders"><input id="teacher-telegram-orders" aria-label="Сповіщення про замовлення" type="checkbox" checked={notifyOrders} onChange={(event) => setNotifyOrders(event.currentTarget.checked)} disabled={Boolean(busy)} /><span><strong>Замовлення</strong><small>Готовність, видача, відмова та інші зміни заявки</small></span></label>
+            <label htmlFor="teacher-telegram-visits"><input id="teacher-telegram-visits" aria-label="Сповіщення про відвідування" type="checkbox" checked={notifyVisits} onChange={(event) => setNotifyVisits(event.currentTarget.checked)} disabled={Boolean(busy)} /><span><strong>Відвідування</strong><small>Зміни або скасування запису бібліотекарем</small></span></label>
+          </div>
+          {!telegram.notificationsEnabled ? <div className={styles.info}>Підключення готове, але надсилання повідомлень ще не ввімкнено бібліотекарем.</div> : null}
+          <div className={styles.telegramActions}>
+            <button className={styles.primary} type="button" onClick={() => void savePreferences()} disabled={!changed || Boolean(busy)}>{busy === "save" ? "Зберігаємо…" : "Зберегти"}</button>
+            <button className={styles.quiet} type="button" onClick={() => void sendTest()} disabled={Boolean(busy) || !telegram.notificationsEnabled}>{busy === "test" ? "Надсилаємо…" : "Надіслати тест"}</button>
+            <button className={styles.danger} type="button" onClick={() => void disconnect()} disabled={Boolean(busy)}>{busy === "disconnect" ? "Від’єднуємо…" : "Від’єднати"}</button>
+          </div>
+        </>
+      ) : !loading && telegram?.linkingEnabled && telegram.configured ? (
+        <button className={styles.primary} type="button" onClick={() => void connect()} disabled={Boolean(busy)}>{busy === "link" ? "Створюємо посилання…" : telegram.status === "blocked" ? "Підключити повторно" : "Підключити Telegram"}</button>
+      ) : null}
     </section>
   );
 }

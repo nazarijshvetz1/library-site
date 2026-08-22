@@ -99,6 +99,13 @@
       "when": 1787254969686,
       "tag": "0013_strange_dark_beast",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1787390038066,
+      "tag": "0014_rich_lionheart",
+      "breakpoints": true
     }
   ]
 }

@@ -18,6 +18,7 @@ const migrationFiles = [
   "drizzle/0011_normalize_holding_conditions.sql",
   "drizzle/0012_elite_victor_mancha.sql",
   "drizzle/0013_strange_dark_beast.sql",
+  "drizzle/0014_rich_lionheart.sql",
 ];
 
 async function migratedDatabase() {
@@ -32,7 +33,7 @@ async function migratedDatabase() {
 async function databaseBeforeConditionNormalization() {
   const database = new DatabaseSync(":memory:");
   database.exec("PRAGMA foreign_keys = ON;");
-  for (const file of migrationFiles.slice(0, -3)) {
+  for (const file of migrationFiles.slice(0, migrationFiles.indexOf("drizzle/0011_normalize_holding_conditions.sql"))) {
     database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
   }
   return database;
@@ -250,6 +251,10 @@ test("core migration extends the existing draft database without recreating it",
     "migration_import_runs",
     "mutation_commands",
     "portal_notifications",
+    "telegram_connections",
+    "telegram_delivery_outbox",
+    "telegram_link_tokens",
+    "telegram_webhook_updates",
     "teacher_profiles",
     "material_request_reservations",
     "users",
@@ -457,7 +462,7 @@ test("loans, immutable inventory lines, commands and audit enforce invariants", 
 test("0013 preserves existing teacher credentials and requires first-login PIN setup", async () => {
   const database = new DatabaseSync(":memory:");
   database.exec("PRAGMA foreign_keys = ON;");
-  for (const file of migrationFiles.slice(0, -1)) {
+  for (const file of migrationFiles.slice(0, migrationFiles.indexOf("drizzle/0013_strange_dark_beast.sql"))) {
     database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
   }
   const now = "2026-08-20T10:00:00.000Z";

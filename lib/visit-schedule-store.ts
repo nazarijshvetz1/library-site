@@ -14,6 +14,10 @@ import {
   type VisitClosureCreateInput,
 } from "./visit-schedule-validation.ts";
 import type { VisitBookingUpdateInput } from "./visit-portal-validation.ts";
+import {
+  queueTelegramForLibrariansStatement,
+  queueTelegramFromPortalNotificationStatement,
+} from "./telegram-outbox.ts";
 
 type D1Value = string | number | null;
 type D1Result<T = Record<string, unknown>> = { results?: T[]; success?: boolean; meta?: { changes?: number } };
@@ -353,6 +357,18 @@ export async function createVisitBooking(
       requestId: input.requestId, before: null, after: result, metadata: null,
       createdAt: now, claimOwner: "booking", expectedClaimCount: segments.length,
     }),
+    queueTelegramForLibrariansStatement(db, {
+      dedupeKey: `visit-booking:${id}:created:${input.requestId}`,
+      auditRequestId: input.requestId,
+      category: "visits",
+      type: "visit_booking_created",
+      title: "Новий запис до бібліотеки",
+      message: `${teacher.fullName}: ${input.date}, ${input.startTime}–${input.endTime}${classYear?.class_name ? `, ${classYear.class_name}` : ""}.`,
+      targetPath: "/librarian/visits",
+      entityType: "visit_booking",
+      entityId: id,
+      createdAt: now,
+    }),
     completeVisitCommand(db, input.requestId, result, now),
   ];
 
@@ -482,6 +498,18 @@ export async function updateOwnVisitBooking(
       .bind(bookingId, teacher.teacherUserId, result.version, input.requestId,
         input.date, input.startTime, input.endTime, bookingId, now, JSON.stringify(segments)),
     auditRescheduleStatement(db, teacher, input.requestId, row, result, segments.length, now),
+    queueTelegramForLibrariansStatement(db, {
+      dedupeKey: `visit-booking:${bookingId}:updated:${input.requestId}`,
+      auditRequestId: input.requestId,
+      category: "visits",
+      type: "visit_booking_updated",
+      title: "Запис до бібліотеки змінено",
+      message: `${teacher.fullName}: ${input.date}, ${input.startTime}–${input.endTime}${classYear?.class_name ? `, ${classYear.class_name}` : ""}.`,
+      targetPath: "/librarian/visits",
+      entityType: "visit_booking",
+      entityId: bookingId,
+      createdAt: now,
+    }),
     completeVisitCommand(db, input.requestId, result, now),
   ];
   try {
@@ -585,6 +613,7 @@ async function cancelBooking(
       ];
   const ownerBindings: D1Value[] = teacher ? [teacher.teacherUserId] : [];
   const cancelledByUserId = actor?.id ?? teacher!.teacherUserId;
+  const notificationId = `NTF-${crypto.randomUUID()}`;
   const statements = [
     insertVisitCommand(
       db,
@@ -632,6 +661,50 @@ async function cancelBooking(
       expectedVersion: privateResult.version,
       cancelledAt: now,
     }),
+    ...(actor && row.owner_kind === "teacher" && row.owner_user_id ? [
+      db.prepare(`
+        INSERT INTO portal_notifications (
+          id,teacher_user_id,dedupe_key,type,title,message,entity_type,entity_id,
+          read_at,version,created_at,updated_at
+        )
+        SELECT ?,booking.owner_user_id,?,'visit_booking_cancelled',
+               'Відвідування скасовано бібліотекарем',?,
+               'visit_booking',booking.id,NULL,1,?,?
+        FROM visit_bookings booking
+        WHERE booking.id=? AND booking.owner_kind='teacher'
+          AND booking.owner_user_id=? AND booking.status='cancelled'
+          AND booking.version=? AND booking.cancelled_at=?
+      `).bind(
+        notificationId,
+        `visit-booking:${bookingId}:admin-cancel:${input.requestId}`,
+        `Запис на ${row.visit_date}, ${row.start_time}–${row.end_time} скасовано.${input.reason ? ` Причина: ${input.reason}` : ""}`,
+        now,
+        now,
+        bookingId,
+        row.owner_user_id,
+        privateResult.version,
+        now,
+      ),
+      queueTelegramFromPortalNotificationStatement(
+        db,
+        notificationId,
+        "visits",
+        "/teacher?tab=notifications",
+        now,
+      ),
+    ] : []),
+    ...(!actor ? [queueTelegramForLibrariansStatement(db, {
+      dedupeKey: `visit-booking:${bookingId}:cancelled:${input.requestId}`,
+      auditRequestId: input.requestId,
+      category: "visits",
+      type: "visit_booking_cancelled",
+      title: "Запис до бібліотеки скасовано",
+      message: `${row.surname}: ${row.visit_date}, ${row.start_time}–${row.end_time}.`,
+      targetPath: "/librarian/visits",
+      entityType: "visit_booking",
+      entityId: bookingId,
+      createdAt: now,
+    })] : []),
     completeVisitCommand(db, input.requestId, privateResult, now),
   ];
 

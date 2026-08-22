@@ -31,6 +31,24 @@ type MainTab = "overview" | "teachers" | "orders" | "visits";
 type DetailTab = "profile" | "orders" | "issued" | "visits";
 type DirectoryStatus = "active" | "inactive" | "all";
 
+type TelegramStatus = {
+  configured: boolean;
+  linkingEnabled: boolean;
+  notificationsEnabled: boolean;
+  botUsername: string | null;
+  connected: boolean;
+  status: "active" | "disabled" | "blocked" | null;
+  notifyOrders: boolean;
+  notifyVisits: boolean;
+  version: number | null;
+  linkedAt: string | null;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastErrorCode: string | null;
+};
+type LibrarianTelegramEnvelope = { success: true; telegram: TelegramStatus; writesEnabled: boolean };
+type TelegramLinkEnvelope = { success: true; linkUrl: string; expiresAt: string; writesEnabled: boolean };
+
 type Props = {
   pendingScope: string;
   displayName: string;
@@ -126,7 +144,7 @@ export default function TeacherManagementWorkspace({
 
         <div id="teacher-management-panel" className={styles.panel} tabIndex={-1}>
           {tab === "overview" ? (
-            <OverviewPanel data={directory} loading={loading} onOpen={openAttention} />
+            <OverviewPanel data={directory} loading={loading} onOpen={openAttention} writesEnabled={effectiveWrites} />
           ) : tab === "teachers" ? (
             <TeacherDirectoryPanel
               initialData={directory}
@@ -167,10 +185,12 @@ function OverviewPanel({
   data,
   loading,
   onOpen,
+  writesEnabled,
 }: {
   data: TeacherDirectoryEnvelope | null;
   loading: boolean;
   onOpen: (tab: MainTab) => void;
+  writesEnabled: boolean;
 }) {
   const summary = data?.counters ?? emptyTeacherCounters();
   const cards = [
@@ -187,8 +207,9 @@ function OverviewPanel({
   ];
 
   return (
-    <div className={styles.overviewGrid}>
-      <section className={styles.card} aria-labelledby="overview-title">
+    <div className={styles.overviewStack}>
+      <div className={styles.overviewGrid}>
+        <section className={styles.card} aria-labelledby="overview-title">
         <div className={styles.cardHeading}><div><span>Стан роботи</span><h2 id="overview-title">Огляд</h2></div></div>
         {loading ? <p className={styles.empty}>Збираємо актуальні показники…</p> : (
           <div className={styles.metricGrid}>
@@ -199,8 +220,8 @@ function OverviewPanel({
             ))}
           </div>
         )}
-      </section>
-      <section className={styles.card} aria-labelledby="attention-title">
+        </section>
+        <section className={styles.card} aria-labelledby="attention-title">
         <div className={styles.cardHeading}><div><span>Черга</span><h2 id="attention-title">Потребує уваги</h2></div></div>
         <ul className={styles.attentionList}>
           {attention.map((item) => (
@@ -212,8 +233,128 @@ function OverviewPanel({
             </li>
           ))}
         </ul>
-      </section>
+        </section>
+      </div>
+      <LibrarianTelegramPanel writesEnabled={writesEnabled} />
     </div>
+  );
+}
+
+function LibrarianTelegramPanel({ writesEnabled }: { writesEnabled: boolean }) {
+  const [telegram, setTelegram] = useState<TelegramStatus | null>(null);
+  const [apiWritesEnabled, setApiWritesEnabled] = useState(true);
+  const [notifyOrders, setNotifyOrders] = useState(true);
+  const [notifyVisits, setNotifyVisits] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<"link" | "save" | "test" | "disconnect" | null>(null);
+  const [notice, setNotice] = useState("");
+  const [noticeTone, setNoticeTone] = useState<"success" | "error" | "info">("info");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await visitApi<LibrarianTelegramEnvelope>("/api/librarian/telegram");
+      setTelegram(response.telegram);
+      setApiWritesEnabled(response.writesEnabled);
+      setNotifyOrders(response.telegram.notifyOrders);
+      setNotifyVisits(response.telegram.notifyVisits);
+    } catch (error) {
+      setNotice(errorMessage(error)); setNoticeTone("error");
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  async function connect() {
+    setBusy("link"); setNotice("");
+    try {
+      const response = await visitApi<TelegramLinkEnvelope>("/api/librarian/telegram/link", { method: "POST" });
+      window.location.assign(response.linkUrl);
+    } catch (error) {
+      setNotice(errorMessage(error)); setNoticeTone("error"); setBusy(null);
+    }
+  }
+
+  async function savePreferences() {
+    if (!telegram?.connected || telegram.version === null) return;
+    setBusy("save"); setNotice("");
+    try {
+      const response = await visitApi<LibrarianTelegramEnvelope>("/api/librarian/telegram", {
+        method: "PATCH",
+        body: JSON.stringify({ notifyOrders, notifyVisits, expectedVersion: telegram.version }),
+      });
+      setTelegram(response.telegram); setApiWritesEnabled(response.writesEnabled);
+      setNotifyOrders(response.telegram.notifyOrders); setNotifyVisits(response.telegram.notifyVisits);
+      setNotice("Налаштування Telegram збережено."); setNoticeTone("success");
+    } catch (error) {
+      setNotice(errorMessage(error)); setNoticeTone("error");
+    } finally { setBusy(null); }
+  }
+
+  async function sendTest() {
+    setBusy("test"); setNotice("");
+    try {
+      await visitApi("/api/librarian/telegram/test", { method: "POST" });
+      setNotice("Тестове повідомлення надіслано в Telegram."); setNoticeTone("success");
+      await load();
+    } catch (error) {
+      setNotice(errorMessage(error)); setNoticeTone("error");
+    } finally { setBusy(null); }
+  }
+
+  async function disconnect() {
+    if (telegram?.version === null || telegram?.version === undefined) return;
+    setBusy("disconnect"); setNotice("");
+    try {
+      const response = await visitApi<LibrarianTelegramEnvelope>("/api/librarian/telegram/disconnect", {
+        method: "POST",
+        body: JSON.stringify({ expectedVersion: telegram.version }),
+      });
+      setTelegram(response.telegram); setApiWritesEnabled(response.writesEnabled);
+      setNotice("Telegram від’єднано від кабінету бібліотекаря."); setNoticeTone("success");
+    } catch (error) {
+      setNotice(errorMessage(error)); setNoticeTone("error");
+    } finally { setBusy(null); }
+  }
+
+  const canWrite = writesEnabled && apiWritesEnabled;
+  const changed = Boolean(telegram?.connected)
+    && (notifyOrders !== telegram?.notifyOrders || notifyVisits !== telegram?.notifyVisits);
+  const statusLabel = telegram?.connected
+    ? "Підключено"
+    : telegram?.status === "blocked"
+      ? "Бот заблоковано"
+      : "Не підключено";
+
+  return (
+    <section className={`${styles.card} ${styles.telegramPanel}`} aria-labelledby="librarian-telegram-title">
+      <div className={styles.telegramHeading}>
+        <div className={styles.telegramMark} aria-hidden="true">➤</div>
+        <div><span>Оперативні сповіщення</span><h2 id="librarian-telegram-title">Telegram бібліотекаря</h2><p>Бот дублюватиме нові замовлення та записи до бібліотеки. Дані залишаються і в цьому кабінеті.</p></div>
+        <strong data-connected={telegram?.connected || undefined}>{loading ? "Перевіряємо…" : statusLabel}</strong>
+      </div>
+      {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
+      {!loading && telegram && (!telegram.configured || !telegram.linkingEnabled) ? <div className={styles.info}>Для запуску треба додати захищений токен бота й увімкнути Telegram у налаштуваннях сайту.</div> : null}
+      {!loading && telegram?.connected ? (
+        <>
+          <div className={styles.telegramPreferenceGrid}>
+            <label htmlFor="librarian-telegram-orders"><input id="librarian-telegram-orders" aria-label="Сповіщення про замовлення вчителів" type="checkbox" checked={notifyOrders} onChange={(event) => setNotifyOrders(event.currentTarget.checked)} disabled={!canWrite || Boolean(busy)} /><span><strong>Замовлення вчителів</strong><small>Нова заявка або її скасування вчителем</small></span></label>
+            <label htmlFor="librarian-telegram-visits"><input id="librarian-telegram-visits" aria-label="Сповіщення про відвідування" type="checkbox" checked={notifyVisits} onChange={(event) => setNotifyVisits(event.currentTarget.checked)} disabled={!canWrite || Boolean(busy)} /><span><strong>Відвідування</strong><small>Новий, змінений або скасований запис</small></span></label>
+          </div>
+          {!telegram.notificationsEnabled ? <div className={styles.info}>Бот підключено, але доставку повідомлень ще не ввімкнено в налаштуваннях сайту.</div> : null}
+          <div className={styles.telegramActions}>
+            <button className={styles.primaryButton} type="button" onClick={() => void savePreferences()} disabled={!canWrite || !changed || Boolean(busy)}>{busy === "save" ? "Зберігаємо…" : "Зберегти"}</button>
+            <button type="button" onClick={() => void sendTest()} disabled={!canWrite || Boolean(busy) || !telegram.notificationsEnabled}>{busy === "test" ? "Надсилаємо…" : "Надіслати тест"}</button>
+            <button className={styles.telegramDanger} type="button" onClick={() => void disconnect()} disabled={!canWrite || Boolean(busy)}>{busy === "disconnect" ? "Від’єднуємо…" : "Від’єднати"}</button>
+          </div>
+        </>
+      ) : !loading && telegram?.configured && telegram.linkingEnabled ? (
+        <button className={styles.primaryButton} type="button" onClick={() => void connect()} disabled={!canWrite || Boolean(busy)}>{busy === "link" ? "Створюємо посилання…" : telegram.status === "blocked" ? "Підключити повторно" : "Підключити Telegram"}</button>
+      ) : null}
+    </section>
   );
 }
 

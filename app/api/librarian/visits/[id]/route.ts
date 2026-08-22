@@ -3,6 +3,7 @@ import { authorizeLibrarianApi, librarianError } from "@/lib/librarian-api";
 import { featureGate, readVisitJson, safeResourceId, visitError, visitJson, visitStoreError } from "@/lib/visit-schedule-api";
 import { cancelAdminVisitBooking, type VisitD1Database } from "@/lib/visit-schedule-store";
 import { validateVisitCancelInput } from "@/lib/visit-schedule-validation";
+import { scheduleTelegramOutboxDrain } from "@/lib/telegram-delivery-runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,9 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   const validated = validateVisitCancelInput(body.value, true);
   if (!validated.ok) return visitError(400, "validation_failed", "Перевірте підтвердження скасування.", { fieldErrors: validated.fieldErrors });
   try {
-    const result = await cancelAdminVisitBooking(env.DB as unknown as VisitD1Database, authorization.value.user, id, validated.value);
+    const db = env.DB as unknown as VisitD1Database;
+    const result = await cancelAdminVisitBooking(db, authorization.value.user, id, validated.value);
+    scheduleTelegramOutboxDrain(db, request.url);
     return visitJson({ schemaVersion: 1, success: true, result, writesEnabled: true });
   } catch (error) {
     return visitStoreError(error, "visit_booking_unavailable");

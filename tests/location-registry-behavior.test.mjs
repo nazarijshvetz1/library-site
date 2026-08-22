@@ -12,6 +12,7 @@ const migrationFiles = [
   "0009_happy_silver_samurai.sql", "0010_shocking_cobalt_man.sql",
   "0011_normalize_holding_conditions.sql", "0012_elite_victor_mancha.sql",
   "0013_strange_dark_beast.sql",
+  "0014_rich_lionheart.sql",
 ];
 
 class PreparedStatement {

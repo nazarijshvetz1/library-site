@@ -1762,6 +1762,146 @@ export const portalNotifications = sqliteTable(
   ],
 );
 
+const telegramConnectionStatuses = ["active", "disabled", "blocked"] as const;
+const telegramDeliveryStatuses = ["pending", "processing", "retry", "sent", "dead"] as const;
+const telegramNotificationCategories = ["orders", "visits", "system"] as const;
+
+/** Private Telegram chats explicitly linked by a signed-in library user. */
+export const telegramConnections = sqliteTable(
+  "telegram_connections",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    telegramUserId: text("telegram_user_id").notNull(),
+    chatId: text("chat_id").notNull(),
+    username: text("username"),
+    status: text("status", { enum: telegramConnectionStatuses }).notNull().default("active"),
+    notifyOrders: integer("notify_orders", { mode: "boolean" }).notNull().default(true),
+    notifyVisits: integer("notify_visits", { mode: "boolean" }).notNull().default(true),
+    version: integer("version").notNull().default(1),
+    linkedAt: text("linked_at").notNull(),
+    disabledAt: text("disabled_at"),
+    lastSuccessAt: text("last_success_at"),
+    lastFailureAt: text("last_failure_at"),
+    lastErrorCode: text("last_error_code"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_telegram_connections_user").on(table.telegramUserId),
+    uniqueIndex("idx_telegram_connections_chat").on(table.chatId),
+    index("idx_telegram_connections_status_user").on(table.status, table.userId),
+    check("telegram_connections_user_id_not_blank", sql`length(trim(${table.telegramUserId})) > 0`),
+    check("telegram_connections_chat_id_not_blank", sql`length(trim(${table.chatId})) > 0`),
+    check("telegram_connections_status_valid", sql`${table.status} in ('active','disabled','blocked')`),
+    check("telegram_connections_version_positive", sql`${table.version} > 0`),
+    check(
+      "telegram_connections_disabled_fields_consistent",
+      sql`(${table.status}='active' and ${table.disabledAt} is null)
+        or (${table.status}!='active' and ${table.disabledAt} is not null)`,
+    ),
+  ],
+);
+
+/** Short-lived, one-use Telegram deep-link tokens. Only their SHA-256 digest is stored. */
+export const telegramLinkTokens = sqliteTable(
+  "telegram_link_tokens",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    consumedAt: text("consumed_at"),
+    consumedUpdateId: text("consumed_update_id"),
+    revokedAt: text("revoked_at"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_telegram_link_tokens_hash").on(table.tokenHash),
+    index("idx_telegram_link_tokens_user_expiry").on(table.userId, table.expiresAt),
+    check(
+      "telegram_link_tokens_hash_valid",
+      sql`length(${table.tokenHash}) = 64 and lower(${table.tokenHash}) not glob '*[^0-9a-f]*'`,
+    ),
+    check(
+      "telegram_link_tokens_terminal_state",
+      sql`not (${table.consumedAt} is not null and ${table.revokedAt} is not null)`,
+    ),
+    check(
+      "telegram_link_tokens_consumption_consistent",
+      sql`(${table.consumedAt} is null and ${table.consumedUpdateId} is null)
+        or (${table.consumedAt} is not null and ${table.consumedUpdateId} is not null)`,
+    ),
+  ],
+);
+
+/** Durable at-least-once delivery queue for Telegram mirrors of site events. */
+export const telegramDeliveryOutbox = sqliteTable(
+  "telegram_delivery_outbox",
+  {
+    id: text("id").primaryKey(),
+    recipientUserId: text("recipient_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    dedupeKey: text("dedupe_key").notNull(),
+    category: text("category", { enum: telegramNotificationCategories }).notNull(),
+    type: text("type").notNull(),
+    title: text("title").notNull(),
+    message: text("message").notNull(),
+    targetPath: text("target_path").notNull().default(""),
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    status: text("status", { enum: telegramDeliveryStatuses }).notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: text("next_attempt_at").notNull(),
+    leaseToken: text("lease_token"),
+    leaseExpiresAt: text("lease_expires_at"),
+    telegramMessageId: text("telegram_message_id"),
+    lastErrorCode: text("last_error_code"),
+    lastErrorMessage: text("last_error_message"),
+    sentAt: text("sent_at"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_telegram_delivery_outbox_dedupe").on(table.dedupeKey),
+    index("idx_telegram_delivery_outbox_due").on(table.status, table.nextAttemptAt, table.createdAt),
+    index("idx_telegram_delivery_outbox_recipient_created").on(table.recipientUserId, table.createdAt),
+    check("telegram_delivery_outbox_dedupe_not_blank", sql`length(trim(${table.dedupeKey})) > 0`),
+    check("telegram_delivery_outbox_category_valid", sql`${table.category} in ('orders','visits','system')`),
+    check("telegram_delivery_outbox_status_valid", sql`${table.status} in ('pending','processing','retry','sent','dead')`),
+    check("telegram_delivery_outbox_attempts_valid", sql`${table.attempts} >= 0 and ${table.attempts} <= 20`),
+    check("telegram_delivery_outbox_target_safe", sql`${table.targetPath}='' or ${table.targetPath} glob '/*'`),
+    check(
+      "telegram_delivery_outbox_lease_consistent",
+      sql`(${table.leaseToken} is null and ${table.leaseExpiresAt} is null)
+        or (${table.leaseToken} is not null and ${table.leaseExpiresAt} is not null)`,
+    ),
+  ],
+);
+
+/** Idempotency receipts for Telegram webhook updates. */
+export const telegramWebhookUpdates = sqliteTable(
+  "telegram_webhook_updates",
+  {
+    updateId: text("update_id").primaryKey(),
+    payloadHash: text("payload_hash").notNull(),
+    outcome: text("outcome").notNull(),
+    processedAt: text("processed_at").notNull(),
+  },
+  (table) => [
+    check("telegram_webhook_updates_id_not_blank", sql`length(trim(${table.updateId})) > 0`),
+    check(
+      "telegram_webhook_updates_hash_valid",
+      sql`length(${table.payloadHash}) = 64 and lower(${table.payloadHash}) not glob '*[^0-9a-f]*'`,
+    ),
+    check("telegram_webhook_updates_outcome_not_blank", sql`length(trim(${table.outcome})) > 0`),
+  ],
+);
+
 const migrationImportStatuses = [
   "uploaded",
   "preflighted",

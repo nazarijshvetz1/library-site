@@ -6,6 +6,7 @@ import { cancelGuestVisitBooking, safeVisitResourceId, updateGuestVisitBooking }
 import { validateGuestVisitCancelInput, validateVisitBookingUpdateInput } from "@/lib/visit-portal-validation";
 import { guestFeatureGate, readVisitJson, visitError, visitJson, visitStoreError } from "@/lib/visit-schedule-api";
 import type { VisitD1Database } from "@/lib/visit-schedule-store";
+import { scheduleTelegramOutboxDrain } from "@/lib/telegram-delivery-runtime";
 
 export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ id: string }> };
@@ -35,6 +36,7 @@ async function mutate(request: Request, context: Context, kind: "update" | "canc
     const result = kind === "update"
       ? await updateGuestVisitBooking(db, guest, id, validated.value as ReturnType<typeof validateVisitBookingUpdateInput> extends { value: infer T } ? T : never)
       : await cancelGuestVisitBooking(db, guest, id, validated.value as ReturnType<typeof validateGuestVisitCancelInput> extends { value: infer T } ? T : never);
+    scheduleTelegramOutboxDrain(db, request.url);
     return visitJson({ schemaVersion: 1, success: true, result });
   } catch (error) { return visitStoreError(error, "visit_booking_unavailable"); }
 }

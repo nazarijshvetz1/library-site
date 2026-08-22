@@ -5,6 +5,7 @@ import { cancelOwnVisitBooking, updateOwnVisitBooking, type VisitD1Database } fr
 import { requireVisitTeacherSession } from "@/lib/visit-teacher-auth";
 import { validateVisitCancelInput } from "@/lib/visit-schedule-validation";
 import { validateVisitBookingUpdateInput } from "@/lib/visit-portal-validation";
+import { scheduleTelegramOutboxDrain } from "@/lib/telegram-delivery-runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try {
     const teacher = await requireVisitTeacherSession(db, request);
     const result = await updateOwnVisitBooking(db, teacher, id, validated.value);
+    scheduleTelegramOutboxDrain(db, request.url);
     return visitJson({ schemaVersion: 1, success: true, result });
   } catch (error) {
     return visitStoreError(error, "visit_booking_unavailable");
@@ -43,6 +45,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   try {
     const teacher = await requireVisitTeacherSession(db, request);
     const result = await cancelOwnVisitBooking(db, teacher, id, validated.value);
+    scheduleTelegramOutboxDrain(db, request.url);
     return visitJson({ schemaVersion: 1, success: true, result, bookingEnabled: true });
   } catch (error) {
     return visitStoreError(error, "visit_booking_unavailable");
