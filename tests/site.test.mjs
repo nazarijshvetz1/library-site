@@ -219,10 +219,16 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
     readFile(new URL("../source/styles.css", import.meta.url), "utf8"),
   ]);
   assert.match(html, /id="collectionGrid"/);
+  assert.match(html, /href="#contacts"[^>]*>Контакти<\/a>/u);
+  assert.match(html, /id="contacts"/u);
+  assert.match(html, /id="contactsGrid" hidden/u);
+  assert.match(app, /normalizeContactsApiUrl/u);
+  assert.match(app, /textContent = value/u);
+  assert.doesNotMatch(app, /contactsGrid\.innerHTML/u);
   assert.match(html, /id="titleSuggestions" role="listbox"/);
   assert.match(html, /<option value="">Усі<\/option>/);
-  assert.match(html, /href="\/styles\.css\?v=20260822-2"/);
-  assert.match(html, /type="module" src="\/app\.js\?v=20260822-2"/);
+  assert.match(html, /href="\/styles\.css\?v=20260823-1"/);
+  assert.match(html, /type="module" src="\/app\.js\?v=20260823-1"/);
   assert.match(html, /href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/librarian"/);
   assert.match(html, /rel="noopener noreferrer"/);
   assert.doesNotMatch(app, /librarianButton|Режим бібліотекаря підключимо/);

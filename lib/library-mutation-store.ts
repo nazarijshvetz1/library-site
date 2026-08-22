@@ -3758,10 +3758,11 @@ async function resolveMutationActor(
     SELECT id, email
     FROM users
     WHERE status = 'active' AND role IN ('admin', 'librarian')
-      AND (auth_user_id = ? OR lower(email) = lower(?))
-    ORDER BY CASE WHEN auth_user_id = ? THEN 0 ELSE 1 END, id
+      AND ((? IS NOT NULL AND id=?)
+        OR (? IS NULL AND (auth_user_id = ? OR lower(email) = lower(?))))
+    ORDER BY id
     LIMIT 2
-  `).bind(user.userId, user.email, user.userId).all<{
+  `).bind(user.d1UserId ?? null, user.d1UserId ?? null, user.d1UserId ?? null, user.userId, user.email).all<{
     id: string;
     email: string | null;
   }>();

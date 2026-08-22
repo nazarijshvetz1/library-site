@@ -1,8 +1,15 @@
+import { env } from "cloudflare:workers";
+
 import { getChatGPTUser, type ChatGPTUser } from "@/app/chatgpt-auth";
 import {
   getLibrarianAccess,
   type LibrarianAccess,
 } from "@/lib/librarian-access";
+import {
+  readLibrarianTelegramUser,
+  resolveD1LibrarianUser,
+} from "@/lib/librarian-telegram-auth";
+import type { VisitD1Database } from "@/lib/visit-schedule-store";
 
 export const MAX_DRAFT_BODY_BYTES = 48 * 1024;
 
@@ -26,7 +33,19 @@ type JsonBodyResult =
   | { ok: false; response: Response };
 
 export async function authorizeLibrarianApi(): Promise<AuthorizationResult> {
-  const user = await getChatGPTUser();
+  const chatGPTUser = await getChatGPTUser();
+  const db = (env as unknown as { DB?: VisitD1Database }).DB;
+  let resolved: { user: ChatGPTUser; role: "admin" | "librarian" } | null = null;
+  try {
+    if (db && chatGPTUser) resolved = await resolveD1LibrarianUser(db, chatGPTUser);
+    if (db && !chatGPTUser) resolved = await readLibrarianTelegramUser(db);
+  } catch {
+    return {
+      ok: false,
+      response: librarianError(503, "authorization_unavailable", "Не вдалося перевірити доступ бібліотекаря.", false),
+    };
+  }
+  const user = resolved?.user ?? chatGPTUser;
   const access = getLibrarianAccess(user);
 
   if (!user) {
@@ -41,7 +60,7 @@ export async function authorizeLibrarianApi(): Promise<AuthorizationResult> {
     };
   }
 
-  if (!access.allowed) {
+  if (!access.allowed || !resolved) {
     return {
       ok: false,
       response: librarianError(
@@ -61,7 +80,7 @@ export async function authorizeLibrarianApi(): Promise<AuthorizationResult> {
     ok: true,
     value: {
       user,
-      access: { ...access, allowed: true },
+      access: { ...access, allowed: true, role: resolved.role },
     },
   };
 }

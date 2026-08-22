@@ -130,10 +130,11 @@ export async function resolveLibrarianTelegramUserId(
   const rows = await db.prepare(`
     SELECT id FROM users
     WHERE status='active' AND role IN ('admin','librarian')
-      AND (auth_user_id=? OR lower(email)=lower(?))
-    ORDER BY CASE WHEN auth_user_id=? THEN 0 ELSE 1 END,id
+      AND ((? IS NOT NULL AND id=?)
+        OR (? IS NULL AND (auth_user_id=? OR lower(email)=lower(?))))
+    ORDER BY id
     LIMIT 2
-  `).bind(user.userId, user.email, user.userId).all<{ id: string }>();
+  `).bind(user.d1UserId ?? null, user.d1UserId ?? null, user.d1UserId ?? null, user.userId, user.email).all<{ id: string }>();
   if ((rows.results ?? []).length !== 1) {
     throw new TelegramIntegrationError(
       "actor_not_mapped",
@@ -441,6 +442,11 @@ export async function disconnectTelegram(
     WHERE user_id=? AND status='active' AND version=? LIMIT 1
   `).bind(userId, expectedVersion).first<{ chat_id: string }>() : null;
   await db.batch([
+    db.prepare(`UPDATE telegram_librarian_sessions SET revoked_at=?,last_seen_at=?
+      WHERE user_id=? AND revoked_at IS NULL
+        AND EXISTS (SELECT 1 FROM telegram_connections
+          WHERE user_id=? AND status='active' AND version=?)`)
+      .bind(now, now, userId, userId, expectedVersion),
     db.prepare(`UPDATE visit_teacher_sessions SET revoked_at=?,last_seen_at=?
       WHERE teacher_user_id=? AND revoked_at IS NULL
         AND EXISTS (SELECT 1 FROM telegram_connections
@@ -710,6 +716,10 @@ export async function drainTelegramOutbox(
     JOIN telegram_connections c ON c.user_id=o.recipient_user_id AND c.status='active'
     JOIN users u ON u.id=o.recipient_user_id AND u.status='active'
     WHERE o.status IN ('pending','retry') AND o.next_attempt_at<=?
+      AND ((o.target_path GLOB '/librarian*' AND u.role IN ('admin','librarian'))
+        OR (o.target_path NOT GLOB '/librarian*' AND EXISTS (
+          SELECT 1 FROM teacher_profiles p WHERE p.teacher_user_id=u.id AND p.closed_at IS NULL
+        )))
       AND NOT EXISTS (
         SELECT 1 FROM telegram_delivery_outbox earlier
         WHERE earlier.recipient_user_id=o.recipient_user_id
@@ -928,6 +938,20 @@ export async function processTelegramWebhookUpdate(
         .bind(update.updateId, payloadHash, now),
       db.prepare(`UPDATE visit_teacher_sessions SET revoked_at=?,last_seen_at=?
         WHERE teacher_user_id=(SELECT user_id FROM telegram_connections
+          WHERE chat_id=? AND telegram_user_id=? AND status='active' LIMIT 1)
+          AND revoked_at IS NULL
+          AND EXISTS (SELECT 1 FROM telegram_webhook_updates
+            WHERE update_id=? AND payload_hash=? AND outcome='disconnected')`)
+        .bind(
+          now,
+          now,
+          update.message.chatId,
+          update.message.telegramUserId,
+          update.updateId,
+          payloadHash,
+        ),
+      db.prepare(`UPDATE telegram_librarian_sessions SET revoked_at=?,last_seen_at=?
+        WHERE user_id=(SELECT user_id FROM telegram_connections
           WHERE chat_id=? AND telegram_user_id=? AND status='active' LIMIT 1)
           AND revoked_at IS NULL
           AND EXISTS (SELECT 1 FROM telegram_webhook_updates
@@ -1549,7 +1573,7 @@ async function bestEffortTeacherOnboardingMenu(
       await bestEffortChatMenuButton(
         botToken,
         chatId,
-        new URL("/teacher/telegram?tab=overview", origin).toString(),
+        { text: "Кабінет учителя", url: new URL("/teacher/telegram?tab=overview", origin).toString() },
         fetcher,
       );
     }
@@ -1605,11 +1629,18 @@ async function bestEffortConnectedMenu(
       link_preview_options: { is_disabled: true },
       ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
     }, fetcher);
-    if (teacherCapability && origin && configuration.miniAppEnabled) {
+    if ((role === "admin" || role === "librarian") && origin && configuration.miniAppEnabled) {
       await bestEffortChatMenuButton(
         botToken,
         chatId,
-        new URL("/teacher/telegram?tab=overview", origin).toString(),
+        { text: "Кабінет бібліотекаря", url: new URL("/librarian/telegram?target=home", origin).toString() },
+        fetcher,
+      );
+    } else if (teacherCapability && origin && configuration.miniAppEnabled) {
+      await bestEffortChatMenuButton(
+        botToken,
+        chatId,
+        { text: "Кабінет учителя", url: new URL("/teacher/telegram?tab=overview", origin).toString() },
         fetcher,
       );
     } else if (origin) {
@@ -1641,12 +1672,16 @@ function telegramRoleKeyboard(
     }));
   }
   if (role === "admin" || role === "librarian") {
-    keyboard.push(
-      [{ text: "🆕 Замовлення вчителів", url: new URL("/librarian/visits#request-inbox-title", siteOrigin).toString() }],
-      [{ text: "📅 Відвідування", url: new URL("/librarian/visits", siteOrigin).toString() }],
-      [{ text: "👩‍🏫 Вчителі", url: new URL("/librarian/teachers", siteOrigin).toString() }],
-      [{ text: "🏠 Кабінет бібліотекаря", url: new URL("/librarian", siteOrigin).toString() }],
-    );
+    const buttons = [
+      ["🆕 Замовлення вчителів", "/librarian/telegram?target=visits", "/librarian/visits#request-inbox-title"],
+      ["📅 Відвідування", "/librarian/telegram?target=visits", "/librarian/visits"],
+      ["👩‍🏫 Вчителі", "/librarian/telegram?target=teachers", "/librarian/teachers"],
+      ["🏠 Кабінет бібліотекаря", "/librarian/telegram?target=home", "/librarian"],
+    ] as const;
+    keyboard.push(...buttons.map(([text, miniPath, webPath]) => {
+      const url = new URL(miniAppEnabled ? miniPath : webPath, siteOrigin).toString();
+      return [{ text, ...(miniAppEnabled ? { web_app: { url } } : { url }) }];
+    }));
   }
   return keyboard;
 }
@@ -1654,7 +1689,7 @@ function telegramRoleKeyboard(
 async function bestEffortChatMenuButton(
   botToken: string,
   chatId: string,
-  miniAppUrl: string | null,
+  miniApp: { text: string; url: string } | null,
   fetcher: TelegramFetcher,
 ): Promise<void> {
   const numericChatId = Number(chatId);
@@ -1662,8 +1697,8 @@ async function bestEffortChatMenuButton(
   try {
     await telegramApiRequest(botToken, "setChatMenuButton", {
       chat_id: numericChatId,
-      menu_button: miniAppUrl
-        ? { type: "web_app", text: "Кабінет учителя", web_app: { url: miniAppUrl } }
+      menu_button: miniApp
+        ? { type: "web_app", text: miniApp.text, web_app: { url: miniApp.url } }
         : { type: "commands" },
     }, fetcher);
   } catch {
@@ -1705,7 +1740,15 @@ async function recordConnectionFailure(
   error: TelegramIntegrationError,
   now: string,
 ): Promise<void> {
-  await db.batch([connectionFailureStatement(db, userId, error, now)]);
+  await db.batch([
+    ...(error.code === "telegram_blocked" ? [
+      db.prepare(`UPDATE telegram_librarian_sessions SET revoked_at=?,last_seen_at=?
+        WHERE user_id=? AND revoked_at IS NULL`).bind(now, now, userId),
+      db.prepare(`UPDATE visit_teacher_sessions SET revoked_at=?,last_seen_at=?
+        WHERE teacher_user_id=? AND revoked_at IS NULL`).bind(now, now, userId),
+    ] : []),
+    connectionFailureStatement(db, userId, error, now),
+  ]);
 }
 
 function exponentialRetrySeconds(attempt: number): number {

@@ -149,7 +149,8 @@ export type PortalPendingIntent = {
 
 const STORAGE_PREFIX = "library.visit.pending.v1";
 
-export const TEMPORARY_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+export const TEMPORARY_CODE_ALPHABET = "0123456789";
+const LEGACY_TEMPORARY_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 
 export type TeacherPinStrength = {
   complete: boolean;
@@ -165,14 +166,15 @@ export function normalizedTeacherAccessCode(value: string): string {
 
 export function formatTeacherAccessCode(value: string): string {
   const normalized = normalizedTeacherAccessCode(value);
-  if (/^\d{4}$/u.test(normalized)) return normalized;
-  return normalized.length > 5 ? `${normalized.slice(0, 5)}-${normalized.slice(5)}` : normalized;
+  return normalized.length > 5 && !/^\d{4}$/u.test(normalized)
+    ? `${normalized.slice(0, 5)}-${normalized.slice(5)}`
+    : normalized;
 }
 
 export function teacherAccessCodeComplete(value: string): boolean {
   const normalized = normalizedTeacherAccessCode(value);
-  return /^\d{4}$/u.test(normalized)
-    || new RegExp(`^[${TEMPORARY_CODE_ALPHABET}]{10}$`, "u").test(normalized);
+  return new RegExp(`^[${TEMPORARY_CODE_ALPHABET}]{4}$`, "u").test(normalized)
+    || new RegExp(`^[${LEGACY_TEMPORARY_CODE_ALPHABET}]{10}$`, "u").test(normalized);
 }
 
 export function normalizedTeacherPin(value: string): string {
@@ -443,12 +445,13 @@ export function isUncertainVisitFailure(error: unknown): boolean {
 export async function visitApi<T>(url: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
+    const multipart = typeof FormData !== "undefined" && init.body instanceof FormData;
     response = await fetch(url, {
       ...init,
       credentials: "same-origin",
       headers: {
         accept: "application/json",
-        ...(init.body ? { "content-type": "application/json" } : {}),
+        ...(init.body && !multipart ? { "content-type": "application/json" } : {}),
         ...(init.headers || {}),
       },
     });

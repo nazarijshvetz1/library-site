@@ -5,6 +5,7 @@ import type {
   TeacherUpdateInput,
 } from "./teacher-registry-validation.ts";
 import { normalizeTeacherName, teacherSortName } from "./teacher-registry-validation.ts";
+import { teacherPhotoUrl } from "./teacher-profile-store.ts";
 
 type D1Value = string | number | null;
 type D1Result<T = unknown> = { results?: T[]; success?: boolean; meta?: { changes?: number } };
@@ -56,6 +57,9 @@ type TeacherBaseRow = {
   location_name: string | null;
   service_contact: string | null;
   librarian_note: string | null;
+  photo_storage_key: string | null;
+  photo_version: number | null;
+  photo_updated_at: string | null;
   version: number | null;
   closed_at: string | null;
   created_at: string;
@@ -343,7 +347,8 @@ function teacherSelectSql() {
   return `SELECT u.id,u.full_name,u.role AS account_role,
     CASE WHEN u.status='active' AND p.closed_at IS NULL THEN 'active' ELSE 'inactive' END AS user_status,
     p.subject_position,p.primary_location_id,
-    loc.name AS location_name,p.service_contact,p.librarian_note,p.version,p.closed_at,
+    loc.name AS location_name,p.service_contact,p.librarian_note,
+    p.photo_storage_key,p.photo_version,p.photo_updated_at,p.version,p.closed_at,
     u.created_at,COALESCE(p.updated_at,u.updated_at) AS updated_at,
     c.status AS credential_status,c.version AS credential_version,c.last_login_at,c.locked_until,
     (SELECT COUNT(*) FROM visit_teacher_sessions s WHERE s.teacher_user_id=u.id AND s.revoked_at IS NULL AND s.expires_at>?) AS active_sessions,
@@ -373,6 +378,9 @@ function projectTeacher(row: TeacherBaseRow, now: string, includePrivate: boolea
       ? { id: row.primary_location_id, name: row.location_name }
       : null,
     serviceContact: row.service_contact ?? "",
+    photoUrl: row.photo_storage_key
+      ? teacherPhotoUrl("librarian", row.id, Number(row.photo_version ?? 0), row.photo_updated_at)
+      : null,
     ...(includePrivate ? { librarianNote: row.librarian_note ?? "", closedAt: row.closed_at } : {}),
     version,
     access: {
@@ -679,7 +687,8 @@ async function ensureLocation(db: TeacherRegistryDatabase, locationId: string | 
 
 async function resolveActor(db: TeacherRegistryDatabase, user: ChatGPTUser) {
   const rows = await db.prepare(`SELECT id FROM users WHERE status='active' AND role IN ('admin','librarian')
-    AND (auth_user_id=? OR lower(email)=lower(?)) ORDER BY id LIMIT 2`).bind(user.userId, user.email).all<{ id: string }>();
+    AND ((? IS NOT NULL AND id=?) OR (? IS NULL AND (auth_user_id=? OR lower(email)=lower(?))))
+    ORDER BY id LIMIT 2`).bind(user.d1UserId ?? null, user.d1UserId ?? null, user.d1UserId ?? null, user.userId, user.email).all<{ id: string }>();
   if ((rows.results ?? []).length !== 1) throw new TeacherRegistryError("actor_not_mapped", 403, "Обліковий запис не прив’язаний до одного активного бібліотекаря.");
   return { id: rows.results![0].id, email: user.email };
 }

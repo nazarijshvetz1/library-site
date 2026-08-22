@@ -68,6 +68,7 @@ const migrations = [
   "0013_strange_dark_beast.sql", "0014_rich_lionheart.sql", "0015_glamorous_namora.sql",
   "0016_busy_jane_foster.sql",
   "0017_fresh_robbie_robertson.sql",
+  "0018_yielding_skaar.sql",
 ];
 
 async function database() {
@@ -366,9 +367,9 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
   );
   assert.deepEqual(librarianResult, { outcome: "menu", duplicate: false });
   const librarianMessage = librarianBodies.find((body) => body.text);
-  assert.equal(librarianMessage.reply_markup.inline_keyboard[0][0].url,
-    "https://library.example.test/librarian/visits#request-inbox-title");
-  assert.equal(librarianMessage.reply_markup.inline_keyboard.some((row) => row[0].web_app), false);
+  assert.equal(librarianMessage.reply_markup.inline_keyboard[0][0].web_app.url,
+    "https://library.example.test/librarian/telegram?target=visits");
+  assert.equal(librarianMessage.reply_markup.inline_keyboard.some((row) => row[0].web_app), true);
 
   const dualRole = await database();
   dualRole.sqlite.prepare(`INSERT INTO users
@@ -399,8 +400,8 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
   assert.equal(dualMessage.reply_markup.inline_keyboard.length, 8);
   assert.equal(dualMessage.reply_markup.inline_keyboard[0][0].web_app.url,
     "https://library.example.test/teacher/telegram?tab=orders");
-  assert.equal(dualMessage.reply_markup.inline_keyboard[7][0].url,
-    "https://library.example.test/librarian");
+  assert.equal(dualMessage.reply_markup.inline_keyboard[7][0].web_app.url,
+    "https://library.example.test/librarian/telegram?target=home");
   assert.equal(dualMenuButton.menu_button.type, "web_app");
   teacher.sqlite.close();
   librarian.sqlite.close();

@@ -70,8 +70,9 @@ export async function visitTeacherCodeImportBody(request: Request) {
 
 export async function resolveVisitLibrarianActor(db: VisitD1Database, user: ChatGPTUser) {
   const rows = await db.prepare(`SELECT id FROM users WHERE status='active'
-    AND role IN ('admin','librarian') AND (auth_user_id=? OR lower(email)=lower(?))
-    ORDER BY id LIMIT 2`).bind(user.userId, user.email).all<{ id: string }>();
+    AND role IN ('admin','librarian')
+    AND ((? IS NOT NULL AND id=?) OR (? IS NULL AND (auth_user_id=? OR lower(email)=lower(?))))
+    ORDER BY id LIMIT 2`).bind(user.d1UserId ?? null, user.d1UserId ?? null, user.d1UserId ?? null, user.userId, user.email).all<{ id: string }>();
   if ((rows.results ?? []).length !== 1) {
     throw new VisitScheduleError("actor_not_mapped", 403, "Обліковий запис не прив’язаний до одного активного бібліотекаря.");
   }

@@ -20,6 +20,10 @@ function configuredEmails(): Set<string> {
   );
 }
 
+export function isLibrarianEmailAllowed(email: string | null | undefined): boolean {
+  return Boolean(email && configuredEmails().has(email.trim().toLowerCase()));
+}
+
 export function getLibrarianAccess(
   user: ChatGPTUser | null,
 ): LibrarianAccess {
@@ -33,9 +37,7 @@ export function getLibrarianAccess(
     };
   }
 
-  const allowed = Boolean(
-    user && emails.has(user.email.trim().toLowerCase()),
-  );
+  const allowed = Boolean(user && emails.has(user.email.trim().toLowerCase()));
 
   return {
     allowed,

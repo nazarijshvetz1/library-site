@@ -67,6 +67,7 @@ export default function TelegramTeacherLaunch({
     enabled ? "Перевіряємо безпечний вхід…" : "Кабінет у Telegram ще не ввімкнено.",
   );
   const [activation, setActivation] = useState<ActivationState | null>(null);
+  const [forceNewPin, setForceNewPin] = useState(false);
   const [initData, setInitData] = useState("");
   const targetUrl = useMemo(
     () => `/teacher/telegram/cabinet?tab=${encodeURIComponent(targetTab)}`,
@@ -80,6 +81,7 @@ export default function TelegramTeacherLaunch({
     async function start() {
       setPhase("checking");
       setActivation(null);
+      setForceNewPin(false);
       setInitData("");
       setMessage("Перевіряємо безпечний вхід…");
       try {
@@ -147,6 +149,9 @@ export default function TelegramTeacherLaunch({
       window.location.replace(targetUrl);
     } catch (error) {
       setPhase("activation");
+      if (error instanceof VisitApiError && error.code === "new_pin_required") {
+        setForceNewPin(true);
+      }
       setMessage(error instanceof VisitApiError
         ? error.message
         : "Не вдалося активувати кабінет. Спробуйте ще раз.");
@@ -171,6 +176,7 @@ export default function TelegramTeacherLaunch({
         {activation && (phase === "activation" || phase === "submitting") ? (
           <TelegramTeacherActivationForm
             activation={activation}
+            forceNewPin={forceNewPin}
             busy={phase === "submitting"}
             onActivate={activate}
           />
@@ -191,10 +197,12 @@ export default function TelegramTeacherLaunch({
 
 function TelegramTeacherActivationForm({
   activation,
+  forceNewPin,
   busy,
   onActivate,
 }: {
   activation: ActivationState;
+  forceNewPin: boolean;
   busy: boolean;
   onActivate(input: { loginId: string; code: string; newPin: string }): Promise<void>;
 }) {
@@ -211,8 +219,7 @@ function TelegramTeacherActivationForm({
   const [validationNotice, setValidationNotice] = useState("");
   const generic = activation.mode === "generic";
   const normalizedCode = normalizedTeacherAccessCode(code);
-  const codeIsTemporary = /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{10}$/u.test(normalizedCode);
-  const needsNewPin = generic ? codeIsTemporary : activation.requiresNewPin;
+  const needsNewPin = forceNewPin || activation.requiresNewPin;
   const pinStatus = teacherPinStrength(pin);
   const normalizedQuery = query.trim();
 
@@ -272,7 +279,7 @@ function TelegramTeacherActivationForm({
       return;
     }
     if (activation.requiresCode && !teacherAccessCodeComplete(code)) {
-      setValidationNotice("Введіть 4-значний PIN або повний тимчасовий код бібліотекаря.");
+      setValidationNotice("Введіть 4 цифри тимчасового коду або особистого PIN.");
       return;
     }
     if (needsNewPin && (!pinStatus.strong || normalizedTeacherPin(pinConfirmation) !== normalizedTeacherPin(pin))) {
@@ -346,7 +353,7 @@ function TelegramTeacherActivationForm({
               setCode(formatTeacherAccessCode(event.currentTarget.value));
               setValidationNotice("");
             }}
-            placeholder="4 цифри або XXXXX-XXXXX"
+            placeholder="4 цифри"
             disabled={busy}
           />
         </div>

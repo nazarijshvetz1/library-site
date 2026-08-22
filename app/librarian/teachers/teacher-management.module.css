@@ -208,6 +208,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .avatar, .largeAvatar { display: grid; place-items: center; border-radius: 50%; background: var(--green-100); color: var(--green-900); font-weight: 900; }
 .avatar { width: 43px; height: 43px; font-size: 12px; }
 .largeAvatar { width: 58px; height: 58px; font-size: 16px; }
+.teacherPhoto { object-fit: cover; border: 2px solid rgba(255,255,255,.9); box-shadow: 0 5px 16px rgba(23,53,34,.13); }
 .teacherIdentity { min-width: 0; display: grid; gap: 4px; }
 .teacherIdentity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .teacherIdentity small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }

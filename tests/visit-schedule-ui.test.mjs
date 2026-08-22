@@ -46,7 +46,7 @@ test("teacher booking UI selects canonical identity, authenticates with a person
   assert.match(source, /error\.status >= 500/u);
   assert.match(source, /Не вдалося увійти\. Перевірте обране ім’я та особистий код/u);
   assert.match(source, /autoComplete="one-time-code"/u);
-  assert.match(source, /placeholder="4 цифри або XXXXX-XXXXX"/u);
+  assert.match(source, /placeholder="4 цифри"/u);
   const client = await read("app/visits/visit-client.ts");
   assert.match(client, /teacherAccessCodeComplete/u);
   assert.match(client, /\^\\d\{4\}\$/u);
@@ -146,7 +146,7 @@ test("site entry points link to protected booking and librarian schedule", async
     read("app/librarian/d1-workspace.tsx"),
   ]);
   assert.match(home, /href="\/teacher"/u);
-  assert.match(workspace, /href="\/librarian\/visits"/u);
+  assert.match(workspace, /telegramMiniApp \? "\/librarian\/telegram\/cabinet\?target=visits" : "\/librarian\/visits"/u);
 });
 
 test("public app preserves only bounded date and time deep-link values", async () => {

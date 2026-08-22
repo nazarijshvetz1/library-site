@@ -22,6 +22,7 @@ const migrationFiles = [
   "drizzle/0015_glamorous_namora.sql",
   "drizzle/0016_busy_jane_foster.sql",
   "drizzle/0017_fresh_robbie_robertson.sql",
+  "drizzle/0018_yielding_skaar.sql",
 ];
 
 async function migratedDatabase() {
@@ -336,8 +337,10 @@ test("core migration extends the existing draft database without recreating it",
     "migration_import_runs",
     "mutation_commands",
     "portal_notifications",
+    "public_library_profile",
     "telegram_connections",
     "telegram_delivery_outbox",
+    "telegram_librarian_sessions",
     "telegram_link_tokens",
     "telegram_mini_app_auth_receipts",
     "telegram_teacher_activation_invites",
@@ -359,6 +362,21 @@ test("core migration extends the existing draft database without recreating it",
   ]) {
     assert.ok(tableNames.includes(name), `missing table ${name}`);
   }
+
+  assert.deepEqual(
+    { ...database.prepare(`SELECT id,version FROM public_library_profile WHERE id='primary'`).get() },
+    { id: "primary", version: 1 },
+  );
+  assert.equal(
+    database.prepare("PRAGMA table_info('teacher_profiles')").all()
+      .some((column) => column.name === "photo_storage_key"),
+    true,
+  );
+  assert.equal(
+    database.prepare("PRAGMA table_info('visit_teacher_credentials')").all()
+      .some((column) => column.name === "code_expires_at"),
+    true,
+  );
 
   const phaseOneSql = await readFile(
     new URL("../drizzle/0003_odd_the_order.sql", import.meta.url),

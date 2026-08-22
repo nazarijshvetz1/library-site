@@ -28,6 +28,7 @@ export type TeacherDirectoryRow = {
   subjectPosition: string;
   primaryLocation: { id: string; name: string } | null;
   serviceContact: string;
+  photoUrl: string | null;
   librarianNote?: string;
   closedAt?: string | null;
   version: number;

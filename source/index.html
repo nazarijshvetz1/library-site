@@ -15,7 +15,7 @@
     <meta name="twitter:image" content="{{SITE_ORIGIN}}/og.png" />
     <title>Бібліотека Міжнародного ліцею МАУП</title>
     <link rel="icon" type="image/png" href="/library-logo.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260822-2" />
+    <link rel="stylesheet" href="/styles.css?v=20260823-1" />
     <link rel="stylesheet" href="/brand.css" />
   </head>
   <body>
@@ -36,6 +36,7 @@
         <a class="nav-secondary" href="#visit-schedule" data-primary-section="visit-schedule">Графік</a>
         <a class="nav-secondary" href="#collections">Добірки</a>
         <a class="nav-secondary" href="#how-it-works" data-primary-section="how-it-works">Як користуватися</a>
+        <a class="nav-secondary" href="#contacts" data-primary-section="contacts">Контакти</a>
       </nav>
       <a
         class="librarian-button"
@@ -228,6 +229,29 @@
           <li><span>06</span><strong>Почніть у Telegram</strong><p>Натисніть Start у боті: там можна вперше активувати кабінет, переглядати матеріали, робити замовлення, записуватися й отримувати сповіщення.</p><a href="https://t.me/MAUP_Library_Bot" target="_blank" rel="noopener noreferrer">Відкрити Telegram-бот <span aria-hidden="true">↗</span></a></li>
         </ol>
       </section>
+
+      <section class="contacts-section" id="contacts" aria-labelledby="contacts-title">
+        <div class="contacts-heading">
+          <p class="eyebrow dark"><span></span> Контакти</p>
+          <h2 id="contacts-title">Зв’язок із бібліотекою</h2>
+          <p>Актуальну інформацію бібліотекар публікує безпосередньо зі свого кабінету.</p>
+        </div>
+        <div class="contacts-status" id="contactsStatus" role="status" aria-live="polite">Завантажуємо контакти…</div>
+        <div class="contacts-grid" id="contactsGrid" hidden>
+          <article class="contact-card" id="librarianContact">
+            <span class="contact-role">Бібліотекар</span>
+            <h3 data-contact-name></h3>
+            <p data-contact-description></p>
+            <div class="contact-actions"><a data-contact-phone hidden></a><a data-contact-email hidden></a></div>
+          </article>
+          <article class="contact-card contact-assistant" id="assistantContact" hidden>
+            <span class="contact-role">Помічник бібліотекаря</span>
+            <h3 data-contact-name></h3>
+            <p data-contact-description></p>
+            <div class="contact-actions"><a data-contact-phone hidden></a><a data-contact-email hidden></a></div>
+          </article>
+        </div>
+      </section>
     </main>
 
     <footer>
@@ -243,6 +267,6 @@
     <script src="/config.js"></script>
     <script src="/catalog-data.js"></script>
     <script src="/balance-data.js"></script>
-    <script type="module" src="/app.js?v=20260822-2"></script>
+    <script type="module" src="/app.js?v=20260823-1"></script>
   </body>
 </html>

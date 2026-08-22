@@ -3,12 +3,14 @@ import { VisitScheduleError, type VisitD1Database } from "./visit-schedule-store
 
 export const VISIT_TEACHER_COOKIE = "__Host-visit_teacher";
 export const VISIT_TEACHER_TELEGRAM_COOKIE = "__Host-visit_teacher_telegram";
-export const VISIT_TEACHER_CODE_LENGTH = 10;
+export const VISIT_TEACHER_CODE_LENGTH = 4;
 export const VISIT_TEACHER_PIN_LENGTH = 4;
 export const VISIT_TEACHER_SESSION_SECONDS = 12 * 60 * 60;
 export const VISIT_TEACHER_BULK_LIMIT = 100;
 
-const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+const CODE_ALPHABET = "0123456789";
+const LEGACY_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+const TEMPORARY_CODE_TTL_MS = 48 * 60 * 60 * 1000;
 const LOGIN_IP_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_PAIR_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_TEACHER_WINDOW_MS = 60 * 60 * 1000;
@@ -29,6 +31,7 @@ type CredentialRow = {
   failed_attempts: number;
   failure_window_started_at: string | null;
   locked_until: string | null;
+  code_expires_at?: string | null;
 };
 
 export type VisitTeacherIdentity = {
@@ -194,7 +197,7 @@ export async function createVisitTeacherSession(
     ? await db.prepare(`
         SELECT c.teacher_user_id, u.full_name, c.login_id, c.code_hmac, c.status,
                c.must_change_pin, c.version, c.failed_attempts,
-               c.failure_window_started_at, c.locked_until
+               c.failure_window_started_at, c.locked_until, c.code_expires_at
         FROM visit_teacher_credentials c
         JOIN users u ON u.id = c.teacher_user_id
         WHERE c.login_id = ? AND u.status = 'active'
@@ -209,6 +212,7 @@ export async function createVisitTeacherSession(
     : await hmacHex(pepper, `code:unknown:${code}`);
   const allowed = codeShapeValid && credential?.status === "active"
     && (!credential.locked_until || credential.locked_until <= now)
+    && (!credential.must_change_pin || !credential.code_expires_at || credential.code_expires_at > now)
     && constantTimeHexEqual(presented, credential.code_hmac);
 
   if (!allowed || !credential) {
@@ -247,13 +251,14 @@ export async function createVisitTeacherSession(
       WHERE c.teacher_user_id = ? AND c.login_id = ? AND c.code_hmac = ?
         AND c.status = 'active' AND c.version = ?
         AND (c.locked_until IS NULL OR c.locked_until <= ?)
+        AND (c.must_change_pin=0 OR c.code_expires_at IS NULL OR c.code_expires_at>?)
         AND u.status = 'active'
         AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL)
         AND NOT EXISTS (SELECT 1 FROM visit_teacher_login_limits
           WHERE scope_hash IN (?,?) AND blocked_until IS NOT NULL AND blocked_until>?)
     `).bind(
       tokenHash, pendingScope, sessionIpScopeHash, expiresAt, now, now,
-      credential.teacher_user_id, loginId, presented, credential.version, now,
+      credential.teacher_user_id, loginId, presented, credential.version, now, now,
       ipRateScopeHash, pairRateScopeHash, now,
     ),
     db.prepare(`
@@ -262,6 +267,14 @@ export async function createVisitTeacherSession(
           last_login_at = ?, updated_at = ?
       WHERE teacher_user_id = ? AND version = ? AND status = 'active' AND code_hmac = ?
     `).bind(now, now, credential.teacher_user_id, credential.version, presented),
+    db.prepare(`UPDATE visit_teacher_credentials SET code_expires_at=?,updated_at=?
+      WHERE teacher_user_id=? AND version=? AND status='active' AND must_change_pin=1
+        AND code_hmac=? AND (code_expires_at IS NULL OR code_expires_at>?)
+        AND EXISTS (SELECT 1 FROM visit_teacher_sessions
+          WHERE token_hash=? AND teacher_user_id=? AND credential_version=?
+            AND revoked_at IS NULL AND expires_at>?)`)
+      .bind(now, now, credential.teacher_user_id, credential.version, presented, now,
+        tokenHash, credential.teacher_user_id, credential.version, now),
     db.prepare(`INSERT INTO audit_events (
       id, actor_user_id, actor_email, action, entity_type, entity_id,
       request_id, before_json, after_json, metadata_json, created_at
@@ -393,7 +406,8 @@ export async function createVisitTeacherTelegramSession(
     throw new VisitScheduleError("teacher_locked", 423, "Вхід тимчасово заблоковано. Спробуйте пізніше.");
   }
   const replay = await db.prepare(`SELECT init_data_hash FROM telegram_mini_app_auth_receipts
-    WHERE init_data_hash=? LIMIT 1`).bind(input.initDataHash).first<{ init_data_hash: string }>();
+    WHERE init_data_hash=? UNION ALL SELECT init_data_hash FROM telegram_librarian_sessions
+    WHERE init_data_hash=? LIMIT 1`).bind(input.initDataHash, input.initDataHash).first<{ init_data_hash: string }>();
   if (replay) {
     throw new VisitScheduleError(
       "telegram_auth_replayed",
@@ -431,6 +445,7 @@ export async function createVisitTeacherTelegramSession(
         AND v.status='active' AND v.version=? AND v.must_change_pin=0
         AND (v.locked_until IS NULL OR v.locked_until<=?)
         AND NOT EXISTS (SELECT 1 FROM telegram_mini_app_auth_receipts WHERE init_data_hash=?)
+        AND NOT EXISTS (SELECT 1 FROM telegram_librarian_sessions WHERE init_data_hash=?)
     `).bind(
       input.initDataHash,
       tokenHash,
@@ -442,6 +457,7 @@ export async function createVisitTeacherTelegramSession(
       credential.teacher_user_id,
       credential.version,
       now,
+      input.initDataHash,
       input.initDataHash,
     ),
     db.prepare(`
@@ -575,7 +591,8 @@ export async function activateVisitTeacherTelegramSession(
     throw new VisitScheduleError("rate_limited", 429, "Забагато спроб активації. Спробуйте пізніше.");
   }
   const replay = await db.prepare(`SELECT init_data_hash FROM telegram_mini_app_auth_receipts
-    WHERE init_data_hash=? LIMIT 1`).bind(input.initDataHash).first<{ init_data_hash: string }>();
+    WHERE init_data_hash=? UNION ALL SELECT init_data_hash FROM telegram_librarian_sessions
+    WHERE init_data_hash=? LIMIT 1`).bind(input.initDataHash, input.initDataHash).first<{ init_data_hash: string }>();
   if (replay) {
     throw new VisitScheduleError(
       "telegram_auth_replayed",
@@ -654,7 +671,8 @@ export async function activateVisitTeacherTelegramSession(
   const credential = grant.fixedTeacherUserId
     ? await db.prepare(`
         SELECT c.teacher_user_id,u.full_name,c.login_id,c.code_hmac,c.status,
-          c.must_change_pin,c.version,c.failed_attempts,c.failure_window_started_at,c.locked_until
+          c.must_change_pin,c.version,c.failed_attempts,c.failure_window_started_at,c.locked_until,
+          c.code_expires_at
         FROM visit_teacher_credentials c JOIN users u ON u.id=c.teacher_user_id
         WHERE c.teacher_user_id=? AND u.status='active'
           AND EXISTS (SELECT 1 FROM teacher_profiles p
@@ -663,7 +681,8 @@ export async function activateVisitTeacherTelegramSession(
     : safeLoginId
       ? await db.prepare(`
           SELECT c.teacher_user_id,u.full_name,c.login_id,c.code_hmac,c.status,
-            c.must_change_pin,c.version,c.failed_attempts,c.failure_window_started_at,c.locked_until
+            c.must_change_pin,c.version,c.failed_attempts,c.failure_window_started_at,c.locked_until,
+            c.code_expires_at
           FROM visit_teacher_credentials c JOIN users u ON u.id=c.teacher_user_id
           WHERE c.login_id=? AND u.status='active'
             AND EXISTS (SELECT 1 FROM teacher_profiles p
@@ -698,6 +717,7 @@ export async function activateVisitTeacherTelegramSession(
     credential
       && credential.status === "active"
       && (!credential.locked_until || credential.locked_until <= now)
+      && (!credential.must_change_pin || !credential.code_expires_at || credential.code_expires_at > now)
       && (grant.fixedTeacherUserId === null || grant.fixedTeacherUserId === credential.teacher_user_id),
   );
   if (!credentialAllowed || !codeAllowed || !credential) {
@@ -722,7 +742,7 @@ export async function activateVisitTeacherTelegramSession(
     throw new VisitScheduleError("weak_new_pin", 400, "PIN надто простий. Оберіть інші 4 цифри.");
   }
   if (requiresRotation && !newPin) {
-    throw new VisitScheduleError("validation_failed", 400, "Створіть новий PIN із 4 цифр.");
+    throw new VisitScheduleError("new_pin_required", 400, "Тимчасовий код підтверджено. Створіть власний PIN із 4 цифр.");
   }
   const conflict = await db.prepare(`
     SELECT user_id FROM telegram_connections
@@ -749,6 +769,9 @@ export async function activateVisitTeacherTelegramSession(
   const newHmac = requiresRotation
     ? await hmacHex(pepper, `code:${credential.teacher_user_id}:${newPin!}`)
     : credential.code_hmac;
+  if (requiresRotation && constantTimeHexEqual(newHmac, credential.code_hmac)) {
+    throw new VisitScheduleError("new_code_unchanged", 400, "Новий PIN має відрізнятися від тимчасового коду.");
+  }
   const nextCredentialVersion = credential.version + (requiresRotation ? 1 : 0);
   const token = randomOpaque(32);
   const tokenHash = await sha256Hex(token);
@@ -771,6 +794,7 @@ export async function activateVisitTeacherTelegramSession(
         AND c.must_change_pin=? AND (c.locked_until IS NULL OR c.locked_until<=?)
         AND (?=0 OR c.code_hmac=?)
         AND NOT EXISTS (SELECT 1 FROM telegram_mini_app_auth_receipts WHERE init_data_hash=?)
+        AND NOT EXISTS (SELECT 1 FROM telegram_librarian_sessions WHERE init_data_hash=?)
         AND NOT EXISTS (SELECT 1 FROM visit_teacher_login_limits
           WHERE scope_hash IN (?,?,?) AND blocked_until IS NOT NULL AND blocked_until>?)
         AND NOT EXISTS (SELECT 1 FROM telegram_connections x WHERE x.status='active' AND (
@@ -803,6 +827,7 @@ export async function activateVisitTeacherTelegramSession(
       requiresCode ? 1 : 0,
       presentedHmac,
       input.initDataHash,
+      input.initDataHash,
       ipRateScopeHash,
       telegramRateScopeHash,
       pairRateScopeHash,
@@ -823,7 +848,7 @@ export async function activateVisitTeacherTelegramSession(
   ];
   if (requiresRotation) {
     statements.push(db.prepare(`UPDATE visit_teacher_credentials SET
-        code_hmac=?,must_change_pin=0,version=version+1,failed_attempts=0,
+        code_hmac=?,must_change_pin=0,code_expires_at=NULL,version=version+1,failed_attempts=0,
         failure_window_started_at=NULL,locked_until=NULL,last_login_at=?,code_rotated_at=?,
         last_access_command_id=?,updated_by_user_id=?,updated_at=?
       WHERE teacher_user_id=? AND version=? AND status='active' AND must_change_pin=1
@@ -1223,7 +1248,7 @@ export async function rotateVisitTeacherCode(
       id,owner_auth_user_id,kind,request_hash,status,target_id,result_json,created_at,updated_at,completed_at
     ) VALUES (?,?, 'teacher_code_rotate',?,'processing',?,NULL,?,?,NULL)`)
       .bind(input.requestId, ownerKey, requestHash, teacher.teacherUserId, now, now),
-    db.prepare(`UPDATE visit_teacher_credentials SET code_hmac=?,must_change_pin=0,version=version+1,
+    db.prepare(`UPDATE visit_teacher_credentials SET code_hmac=?,must_change_pin=0,code_expires_at=NULL,version=version+1,
         failed_attempts=0,failure_window_started_at=NULL,locked_until=NULL,last_login_at=?,
         code_rotated_at=?,last_access_command_id=?,updated_by_user_id=?,updated_at=?
       WHERE teacher_user_id=? AND status='active' AND version=? AND code_hmac=?
@@ -1530,6 +1555,7 @@ export async function issueVisitTeacherCode(
   const codeHmac = await hmacHex(teacherAuthPepper(), `code:${teacherUserId}:${code}`);
   const nextVersion = currentVersion + 1;
   const now = new Date().toISOString();
+  const codeExpiresAt = new Date(Date.now() + TEMPORARY_CODE_TTL_MS).toISOString();
   const publicCredential = {
     status: "active" as const,
     version: nextVersion,
@@ -1543,21 +1569,22 @@ export async function issueVisitTeacherCode(
     db.prepare(`
       INSERT INTO visit_teacher_credentials (
         teacher_user_id, login_id, code_hmac, must_change_pin, status, version, failed_attempts,
-        locked_until, last_login_at, code_rotated_at, last_access_command_id, created_by_user_id,
+        locked_until, last_login_at, code_rotated_at, code_expires_at, last_access_command_id, created_by_user_id,
         updated_by_user_id, created_at, updated_at
       )
-      SELECT u.id, ?, ?, 1, 'active', 1, 0, NULL, NULL, ?, ?, ?, ?, ?, ?
+      SELECT u.id, ?, ?, 1, 'active', 1, 0, NULL, NULL, ?, ?, ?, ?, ?, ?, ?
       FROM users u WHERE u.id = ? AND u.status = 'active'
         AND EXISTS (SELECT 1 FROM teacher_profiles cap WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL)
       ON CONFLICT(teacher_user_id) DO UPDATE SET
         code_hmac = excluded.code_hmac, must_change_pin = 1, status = 'active', version = visit_teacher_credentials.version + 1,
         failed_attempts = 0, locked_until = NULL, last_login_at = NULL,
-        code_rotated_at = excluded.code_rotated_at, updated_by_user_id = excluded.updated_by_user_id,
+        code_rotated_at = excluded.code_rotated_at, code_expires_at = excluded.code_expires_at,
+        updated_by_user_id = excluded.updated_by_user_id,
         last_access_command_id = excluded.last_access_command_id,
         failure_window_started_at = NULL,
         updated_at = excluded.updated_at
       WHERE visit_teacher_credentials.version = ?
-    `).bind(loginId, codeHmac, now, input.requestId, actor.id, actor.id, now, now, teacherUserId, currentVersion),
+    `).bind(loginId, codeHmac, now, codeExpiresAt, input.requestId, actor.id, actor.id, now, now, teacherUserId, currentVersion),
     db.prepare(`UPDATE visit_teacher_sessions SET revoked_at = ?
       WHERE teacher_user_id = ? AND revoked_at IS NULL AND ? > 0`).bind(now, teacherUserId, currentVersion),
     db.prepare(`UPDATE telegram_link_tokens SET revoked_at=?
@@ -1583,6 +1610,7 @@ export async function issueVisitTeacherCode(
     teacher: { id: teacher.id, fullName: teacher.full_name },
     credential: publicCredential,
     code: formatTeacherCode(code),
+    codeExpiresAt,
   };
 }
 
@@ -1643,6 +1671,7 @@ export async function protectLostVisitTeacherPhone(
   const code = randomTeacherCode();
   const codeHmac = await hmacHex(teacherAuthPepper(), `code:${teacherUserId}:${code}`);
   const now = new Date().toISOString();
+  const codeExpiresAt = new Date(Date.now() + TEMPORARY_CODE_TTL_MS).toISOString();
   const nextCredentialVersion = input.expectedCredentialVersion + 1;
   const nextTelegramVersion = input.expectedTelegramVersion + 1;
   const credential: VisitTeacherCredentialProjection = {
@@ -1660,14 +1689,17 @@ export async function protectLostVisitTeacherPhone(
   };
   const statements = [
     insertAccessCommand(db, input.requestId, actor.id, "sessions.revoke", teacherUserId, requestHash, now),
+    db.prepare(`UPDATE telegram_librarian_sessions SET revoked_at=?,last_seen_at=?
+      WHERE user_id=? AND revoked_at IS NULL`).bind(now, now, teacherUserId),
     db.prepare(`UPDATE visit_teacher_credentials SET
         code_hmac=?,must_change_pin=1,version=version+1,failed_attempts=0,
         failure_window_started_at=NULL,locked_until=NULL,last_login_at=NULL,
-        code_rotated_at=?,last_access_command_id=?,updated_by_user_id=?,updated_at=?
+        code_rotated_at=?,code_expires_at=?,last_access_command_id=?,updated_by_user_id=?,updated_at=?
       WHERE teacher_user_id=? AND version=? AND status='active'`)
       .bind(
         codeHmac,
         now,
+        codeExpiresAt,
         input.requestId,
         actor.id,
         now,
@@ -1736,7 +1768,7 @@ export async function protectLostVisitTeacherPhone(
       "Доступ або Telegram уже змінилися. Оновіть список.",
     );
   }
-  return { ...safeResult, code: formatTeacherCode(code) };
+  return { ...safeResult, code: formatTeacherCode(code), codeExpiresAt };
 }
 
 export async function bulkIssueVisitTeacherCodes(
@@ -1763,6 +1795,7 @@ export async function bulkIssueVisitTeacherCodes(
   }
   const pepper = teacherAuthPepper();
   const now = new Date().toISOString();
+  const codeExpiresAt = new Date(Date.now() + TEMPORARY_CODE_TTL_MS).toISOString();
   const issued = await Promise.all(teachers.map(async (teacher) => {
     const code = randomTeacherCode();
     return {
@@ -1783,18 +1816,18 @@ export async function bulkIssueVisitTeacherCodes(
     db.prepare(`
       INSERT INTO visit_teacher_credentials (
         teacher_user_id, login_id, code_hmac, must_change_pin, status, version, failed_attempts,
-        locked_until, last_login_at, code_rotated_at, last_access_command_id, created_by_user_id,
+        locked_until, last_login_at, code_rotated_at, code_expires_at, last_access_command_id, created_by_user_id,
         updated_by_user_id, created_at, updated_at
       )
       SELECT json_extract(value,'$.teacherUserId'), json_extract(value,'$.loginId'),
-             json_extract(value,'$.codeHmac'), 1, 'active', 1, 0, NULL, NULL, ?, ?, ?, ?, ?, ?
+             json_extract(value,'$.codeHmac'), 1, 'active', 1, 0, NULL, NULL, ?, ?, ?, ?, ?, ?, ?
       FROM json_each(?) j
       WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = json_extract(j.value,'$.teacherUserId')
         AND u.status='active' AND EXISTS (SELECT 1 FROM teacher_profiles cap
           WHERE cap.teacher_user_id=u.id AND cap.closed_at IS NULL))
         AND NOT EXISTS (SELECT 1 FROM visit_teacher_credentials c
           WHERE c.teacher_user_id = json_extract(j.value,'$.teacherUserId'))
-    `).bind(now, input.requestId, actor.id, actor.id, now, now, JSON.stringify(credentialRows)),
+    `).bind(now, codeExpiresAt, input.requestId, actor.id, actor.id, now, now, JSON.stringify(credentialRows)),
     db.prepare(`
       INSERT INTO audit_events (
         id, actor_user_id, actor_email, action, entity_type, entity_id,
@@ -1837,7 +1870,7 @@ export async function bulkIssueVisitTeacherCodes(
     throw new VisitScheduleError("teacher_access_update_failed", 409, "Список учителів змінився. Оновіть сторінку.");
   }
   return {
-    issued: issued.map(({ teacherUserId, fullName, code, version }) => ({ teacherUserId, fullName, code: formatTeacherCode(code), version })),
+    issued: issued.map(({ teacherUserId, fullName, code, version }) => ({ teacherUserId, fullName, code: formatTeacherCode(code), version, codeExpiresAt })),
     skippedExisting: 0,
     statementCount: statements.length,
   };
@@ -1950,6 +1983,7 @@ export async function importVisitTeacherCodes(
   }
 
   const now = new Date().toISOString();
+  const codeExpiresAt = new Date(Date.now() + TEMPORARY_CODE_TTL_MS).toISOString();
   const prepared = await Promise.all(canonical.map(async (row) => ({
     teacherUserId: row.teacherUserId,
     fullName: row.fullName,
@@ -1964,18 +1998,18 @@ export async function importVisitTeacherCodes(
     db.prepare(`
       INSERT INTO visit_teacher_credentials (
         teacher_user_id,login_id,code_hmac,must_change_pin,status,version,failed_attempts,
-        locked_until,last_login_at,code_rotated_at,last_access_command_id,created_by_user_id,
+        locked_until,last_login_at,code_rotated_at,code_expires_at,last_access_command_id,created_by_user_id,
         updated_by_user_id,created_at,updated_at
       )
       SELECT json_extract(j.value,'$.teacherUserId'),json_extract(j.value,'$.loginId'),
-        json_extract(j.value,'$.codeHmac'),1,'active',1,0,NULL,NULL,?,?,?,?,?,?
+        json_extract(j.value,'$.codeHmac'),1,'active',1,0,NULL,NULL,?,?,?,?,?,?,?
       FROM json_each(?) j
       JOIN users u ON u.id=json_extract(j.value,'$.teacherUserId')
       LEFT JOIN teacher_profiles p ON p.teacher_user_id=u.id
       WHERE u.status='active' AND u.full_name=json_extract(j.value,'$.fullName')
         AND p.teacher_user_id IS NOT NULL AND p.closed_at IS NULL
         AND NOT EXISTS (SELECT 1 FROM visit_teacher_credentials c WHERE c.teacher_user_id=u.id)
-    `).bind(now, input.requestId, actor.id, actor.id, now, now, rowsJson),
+    `).bind(now, codeExpiresAt, input.requestId, actor.id, actor.id, now, now, rowsJson),
     db.prepare(`
       INSERT INTO audit_events (
         id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,
@@ -2091,6 +2125,9 @@ export async function updateVisitTeacherAccess(
     db.prepare(`UPDATE telegram_connections SET status='disabled',disabled_at=?,
         version=version+1,updated_at=?
       WHERE user_id=? AND status='active' AND ?='disable'`)
+      .bind(now, now, teacherUserId, input.action),
+    db.prepare(`UPDATE telegram_librarian_sessions SET revoked_at=?,last_seen_at=?
+      WHERE user_id=? AND revoked_at IS NULL AND ?='disable'`)
       .bind(now, now, teacherUserId, input.action),
     guardedAccessAudit(db, {
       actor, requestId: input.requestId, action: `visit.teacher_access.${input.action}`,
@@ -2374,7 +2411,8 @@ function strictTeacherPin(value: string): string | null {
 }
 
 function temporaryCodeShape(value: string): boolean {
-  return new RegExp(`^[${CODE_ALPHABET}]{${VISIT_TEACHER_CODE_LENGTH}}$`, "u").test(value);
+  return new RegExp(`^[${CODE_ALPHABET}]{${VISIT_TEACHER_CODE_LENGTH}}$`, "u").test(value)
+    || new RegExp(`^[${LEGACY_CODE_ALPHABET}]{10}$`, "u").test(value);
 }
 
 function pinShape(value: string): boolean {
@@ -2394,7 +2432,7 @@ function strongTeacherPin(value: string): boolean {
 }
 
 function formatTeacherCode(value: string): string {
-  return `${value.slice(0, 5)}-${value.slice(5)}`;
+  return value;
 }
 
 function randomTeacherCode(): string {

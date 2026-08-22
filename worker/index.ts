@@ -42,7 +42,10 @@ const worker = {
 
     const response = await handler.fetch(request, env, ctx);
     const headers = new Headers(response.headers);
-    const isTelegramMiniApp = url.pathname === "/teacher/telegram" || url.pathname.startsWith("/teacher/telegram/");
+    const isTelegramMiniApp = url.pathname === "/teacher/telegram"
+      || url.pathname.startsWith("/teacher/telegram/")
+      || url.pathname === "/librarian/telegram"
+      || url.pathname.startsWith("/librarian/telegram/");
     headers.set(
       "Content-Security-Policy",
       isTelegramMiniApp
@@ -55,7 +58,7 @@ const worker = {
     headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
     headers.set(
       "Permissions-Policy",
-      url.pathname.startsWith("/librarian")
+      url.pathname.startsWith("/librarian") || url.pathname.startsWith("/teacher")
         ? "camera=(self), microphone=(), geolocation=()"
         : "camera=(), microphone=(), geolocation=()",
     );

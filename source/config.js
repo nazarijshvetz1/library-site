@@ -6,5 +6,7 @@ window.LIBRARY_CONFIG = Object.freeze({
   // Заявки створюються лише після переходу до захищеного кабінету.
   visitsBookingUrl: "https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/teacher",
   teacherPortalUrl: "https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/teacher",
+  // Контакти бібліотеки редагуються в кабінеті бібліотекаря.
+  contactsApiUrl: "https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/api/public/contacts",
   refreshMinutes: 10,
 });

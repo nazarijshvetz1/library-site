@@ -56,6 +56,7 @@ type Tool =
   | "class-issue"
   | "class-return"
   | "locations"
+  | "contacts"
   | AcademicTool;
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -377,6 +378,7 @@ type LibrarianWorkspaceProps = {
   role: string;
   writesEnabled: boolean;
   signOutHref: string;
+  telegramMiniApp?: boolean;
 };
 
 const PUBLIC_CATALOG_URL = "https://nazarijshvetz1.github.io/library-site/";
@@ -427,10 +429,12 @@ const TOOLS: Array<{ id: Tool; icon: string; label: string; hint: string }> = [
   { id: "class-issue", icon: "⇥", label: "Видача класу", hint: "Кілька матеріалів класу" },
   { id: "class-return", icon: "⇤", label: "Повернення класу", hint: "Частково або повністю" },
   { id: "locations", icon: "⌂", label: "Кабінети", hint: "Додати, змінити або закрити" },
+  { id: "contacts", icon: "☎", label: "Контакти", hint: "Дані для публічного сайту" },
   { id: "academic-year", icon: "▣", label: "Новий навчальний рік", hint: "Створити період" },
   { id: "class-create", icon: "+", label: "Відкрити клас", hint: "Додати до року" },
   { id: "class-update", icon: "↻", label: "Змінити клас", hint: "Керівник і кабінет" },
   { id: "class-close", icon: "×", label: "Закрити клас", hint: "Зберегти історію" },
+  { id: "class-reopen", icon: "↺", label: "Поновити клас", hint: "Виправити помилкове закриття" },
   { id: "rollover", icon: "⇢", label: "Перехід на новий рік", hint: "Перевести всі класи" },
 ];
 
@@ -439,6 +443,7 @@ export default function D1LibrarianWorkspace({
   role,
   writesEnabled,
   signOutHref,
+  telegramMiniApp = false,
 }: LibrarianWorkspaceProps) {
   const [tool, setTool] = useState<Tool>("catalog");
   const [filters, setFilters] = useState(EMPTY_FILTERS);
@@ -613,7 +618,11 @@ export default function D1LibrarianWorkspace({
     window.queueMicrotask(() => workspaceTitleRef.current?.focus());
   }
 
-  const showCatalogSearch = !isAcademicTool(tool) && tool !== "return" && tool !== "class-return" && tool !== "locations";
+  const showCatalogSearch = !isAcademicTool(tool)
+    && tool !== "return"
+    && tool !== "class-return"
+    && tool !== "locations"
+    && tool !== "contacts";
 
   return (
     <main className={styles.shell}>
@@ -636,22 +645,22 @@ export default function D1LibrarianWorkspace({
             <span className={styles.catalogLinkLabel}>Публічний каталог</span>{" "}
             <span aria-hidden="true">↗</span>
           </a>
-          <a href="/librarian/visits" className={styles.catalogLink}>
+          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=visits" : "/librarian/visits"} className={styles.catalogLink}>
             <span className={styles.catalogLinkLabel}>Відвідування</span>{" "}
             <span aria-hidden="true">▣</span>
           </a>
-          <a href="/librarian/teachers" className={styles.catalogLink}>
+          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=teachers" : "/librarian/teachers"} className={styles.catalogLink}>
             <span className={styles.catalogLinkLabel}>Вчителі</span>{" "}
             <span aria-hidden="true">●</span>
           </a>
-          <a href="/librarian/export" className={styles.catalogLink}>
+          {!telegramMiniApp ? <a href="/librarian/export" className={styles.catalogLink}>
             <span className={styles.catalogLinkLabel}>Експорт в Excel</span>{" "}
             <span aria-hidden="true">⇩</span>
-          </a>
-          <a href="/librarian/import" className={styles.catalogLink}>
+          </a> : null}
+          {!telegramMiniApp ? <a href="/librarian/import" className={styles.catalogLink}>
             <span className={styles.catalogLinkLabel}>Імпорт з Excel</span>{" "}
             <span aria-hidden="true">⇧</span>
-          </a>
+          </a> : null}
           <span>
             <strong>{displayName}</strong>
             <small>{role === "admin" ? "Адміністратор" : "Бібліотекар"}</small>
@@ -897,6 +906,9 @@ export default function D1LibrarianWorkspace({
               ) : null}
               {tool === "locations" ? (
                 <LocationManagementPanel writesEnabled={writesEnabled} />
+              ) : null}
+              {tool === "contacts" ? (
+                <ContactsManagementPanel writesEnabled={writesEnabled} />
               ) : null}
               {isAcademicTool(tool) ? (
                 <AcademicWorkspace
@@ -5546,6 +5558,172 @@ function LocationManagementPanel({ writesEnabled }: { writesEnabled: boolean }) 
   );
 }
 
+type ContactProfileDraft = {
+  librarianName: string;
+  librarianDescription: string;
+  librarianPhone: string;
+  librarianEmail: string;
+  assistantName: string;
+  assistantDescription: string;
+  assistantPhone: string;
+  assistantEmail: string;
+};
+
+const EMPTY_CONTACT_PROFILE: ContactProfileDraft = {
+  librarianName: "",
+  librarianDescription: "",
+  librarianPhone: "",
+  librarianEmail: "",
+  assistantName: "",
+  assistantDescription: "",
+  assistantPhone: "",
+  assistantEmail: "",
+};
+
+function ContactsManagementPanel({ writesEnabled }: { writesEnabled: boolean }) {
+  const [draft, setDraft] = useState<ContactProfileDraft>(EMPTY_CONTACT_PROFILE);
+  const [version, setVersion] = useState(0);
+  const [state, setState] = useState<LoadState>("loading");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [success, setSuccess] = useState(false);
+
+  const load = useCallback(async () => {
+    setState("loading");
+    setMessage("");
+    try {
+      const response = await apiJson<{
+        success: true;
+        profile: {
+          librarian: { name: string; description: string; phone: string; email: string };
+          assistant: { name: string; description: string; phone: string; email: string } | null;
+          version: number;
+        };
+      }>("/api/librarian/contacts");
+      setDraft({
+        librarianName: response.profile.librarian.name,
+        librarianDescription: response.profile.librarian.description,
+        librarianPhone: response.profile.librarian.phone,
+        librarianEmail: response.profile.librarian.email,
+        assistantName: response.profile.assistant?.name ?? "",
+        assistantDescription: response.profile.assistant?.description ?? "",
+        assistantPhone: response.profile.assistant?.phone ?? "",
+        assistantEmail: response.profile.assistant?.email ?? "",
+      });
+      setVersion(response.profile.version);
+      setState("ready");
+    } catch (error) {
+      setMessage(errorMessage(error));
+      setSuccess(false);
+      setState("error");
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  function update<K extends keyof ContactProfileDraft>(key: K, value: ContactProfileDraft[K]) {
+    setDraft((current) => ({ ...current, [key]: value }));
+    setMessage("");
+  }
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!writesEnabled || version < 1) return;
+    setSaving(true);
+    setMessage("");
+    try {
+      const response = await apiJson<{
+        success: true;
+        profile: { version: number };
+      }>("/api/librarian/contacts", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          requestId: crypto.randomUUID(),
+          expectedVersion: version,
+          changes: draft,
+        }),
+      });
+      setVersion(response.profile.version);
+      setMessage("Контакти збережено й опубліковано на відкритому сайті.");
+      setSuccess(true);
+      setState("ready");
+    } catch (error) {
+      setMessage(errorMessage(error));
+      setSuccess(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (state === "loading") return <PanelLoading />;
+
+  return (
+    <form className={styles.createCard} onSubmit={save} aria-busy={saving}>
+      <div className={styles.formHeading}>
+        <div>
+          <p>Публічна інформація</p>
+          <h2>Контакти бібліотеки</h2>
+          <small>Після збереження ці дані бачать усі у вкладці «Контакти». Не додавайте приватну інформацію, яку не хочете публікувати.</small>
+        </div>
+        <button type="button" title="Оновити" onClick={() => void load()} disabled={state === "loading" || saving}>↻</button>
+      </div>
+      {message ? <InlineMessage tone={success ? "success" : "error"}>{message}</InlineMessage> : null}
+      {state === "error" ? (
+        <div className={styles.formActions}>
+          <span>Не вдалося відкрити форму.</span>
+          <button className={styles.secondaryButton} type="button" onClick={() => void load()}>Спробувати ще раз</button>
+        </div>
+      ) : (
+        <>
+          <div className={styles.formGrid}>
+            <EditField label="ПІБ бібліотекаря" wide>
+              <input value={draft.librarianName} maxLength={160} onChange={(event) => update("librarianName", event.target.value)} placeholder="Прізвище, ім’я та по батькові" />
+            </EditField>
+            <EditField label="Телефон">
+              <input type="tel" value={draft.librarianPhone} maxLength={80} onChange={(event) => update("librarianPhone", event.target.value)} placeholder="+380 …" />
+            </EditField>
+            <EditField label="Електронна пошта">
+              <input type="email" value={draft.librarianEmail} maxLength={254} onChange={(event) => update("librarianEmail", event.target.value)} placeholder="library@example.com" />
+            </EditField>
+            <EditField label="Інформація про бібліотекаря" wide>
+              <textarea rows={5} value={draft.librarianDescription} maxLength={2000} onChange={(event) => update("librarianDescription", event.target.value)} placeholder="Напишіть години роботи, як звернутися та іншу корисну інформацію." />
+            </EditField>
+          </div>
+          <div className={styles.formHeading}>
+            <div>
+              <p>Необов’язково</p>
+              <h2>Помічник бібліотекаря</h2>
+              <small>Залиште всі поля порожніми, доки помічника немає. Тоді цей блок не показуватиметься на сайті.</small>
+            </div>
+          </div>
+          <div className={styles.formGrid}>
+            <EditField label="ПІБ помічника" wide>
+              <input value={draft.assistantName} maxLength={160} onChange={(event) => update("assistantName", event.target.value)} placeholder="Прізвище, ім’я та по батькові" />
+            </EditField>
+            <EditField label="Телефон помічника">
+              <input type="tel" value={draft.assistantPhone} maxLength={80} onChange={(event) => update("assistantPhone", event.target.value)} />
+            </EditField>
+            <EditField label="Електронна пошта помічника">
+              <input type="email" value={draft.assistantEmail} maxLength={254} onChange={(event) => update("assistantEmail", event.target.value)} />
+            </EditField>
+            <EditField label="Інформація про помічника" wide>
+              <textarea rows={4} value={draft.assistantDescription} maxLength={2000} onChange={(event) => update("assistantDescription", event.target.value)} />
+            </EditField>
+          </div>
+          <div className={styles.formActions}>
+            <span>Версія даних: {version || "—"}</span>
+            <button className={styles.primaryButton} type="submit" disabled={!writesEnabled || saving || version < 1}>{saving ? "Зберігаємо…" : "Зберегти й опублікувати"}</button>
+          </div>
+        </>
+      )}
+    </form>
+  );
+}
+
 function ConditionSelect({ value, onValue }: { value: string; onValue: (value: string) => void }) {
   return (
     <select value={value} onChange={(event) => onValue(event.target.value)}>
@@ -5792,10 +5970,12 @@ function toolTitle(tool: Tool): string {
   if (tool === "class-issue") return "Видача підручників класу";
   if (tool === "class-return") return "Повернення підручників класу";
   if (tool === "locations") return "Кабінети";
+  if (tool === "contacts") return "Контакти";
   if (tool === "academic-year") return "Новий навчальний рік";
   if (tool === "class-create") return "Відкрити клас";
   if (tool === "class-update") return "Змінити клас";
   if (tool === "class-close") return "Закрити клас";
+  if (tool === "class-reopen") return "Поновити клас";
   if (tool === "rollover") return "Перехід на новий рік";
   return "Каталог матеріалів";
 }
@@ -5811,10 +5991,12 @@ function toolDescription(tool: Tool): string {
   if (tool === "class-issue") return "Зберіть кілька матеріалів і видайте їх активному класу однією операцією.";
   if (tool === "class-return") return "Прийміть повне або часткове повернення комплектів від класу.";
   if (tool === "locations") return "Додавайте, перейменовуйте, закривайте або безпечно видаляйте порожні кабінети.";
+  if (tool === "contacts") return "Редагуйте інформацію про бібліотекаря та майбутнього помічника для відкритого сайту.";
   if (tool === "academic-year") return "Підготуйте наступний навчальний період напряму в D1.";
   if (tool === "class-create") return "Створіть клас у навчальному році та призначте керівника й кабінет.";
   if (tool === "class-update") return "Оновіть назву, керівника, кабінет або примітку без чернетки.";
   if (tool === "class-close") return "Завершіть клас без видалення його історії.";
+  if (tool === "class-reopen") return "Поверніть помилково закритий клас до активного навчального року з повним аудитом.";
   if (tool === "rollover") return "Завершіть поточний рік і перенесіть усі класи контрольованою операцією.";
   return "Швидкий пошук, усі посилання, примірники та пряме редагування.";
 }

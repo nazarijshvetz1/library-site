@@ -119,6 +119,6 @@ test("librarian navigation exposes teacher management from both workspaces", asy
     read("app/librarian/d1-workspace.tsx"),
     read("app/librarian/visits/visit-admin-workspace.tsx"),
   ]);
-  assert.match(main, /href="\/librarian\/teachers"/u);
-  assert.match(visits, /href="\/librarian\/teachers"/u);
+  assert.match(main, /"\/librarian\/teachers"/u);
+  assert.match(visits, /telegramMiniApp \? "\/librarian\/telegram\/cabinet\?target=teachers" : "\/librarian\/teachers"/u);
 });

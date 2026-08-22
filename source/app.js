@@ -179,6 +179,10 @@ export function normalizeVisitsBookingUrl(value, baseUrl = "https://catalog.inva
     || normalizedVisitEndpoint(value, "/visits", baseUrl);
 }
 
+export function normalizeContactsApiUrl(value, baseUrl = "https://catalog.invalid/") {
+  return normalizedVisitEndpoint(value, "/api/public/contacts", baseUrl);
+}
+
 export function visitsPublicApiUrl(value, from, to, baseUrl = "https://catalog.invalid/") {
   const endpoint = normalizeVisitsApiUrl(value, baseUrl);
   const firstDate = isoDateValue(from);
@@ -463,6 +467,8 @@ const elements = {
   visitRetry: document.querySelector("#visitScheduleRetry"), visitWeekLabel: document.querySelector("#visitWeekLabel"),
   visitPrevWeek: document.querySelector("#visitPrevWeek"), visitNextWeek: document.querySelector("#visitNextWeek"),
   visitThisWeek: document.querySelector("#visitThisWeek"),
+  contactsStatus: document.querySelector("#contactsStatus"), contactsGrid: document.querySelector("#contactsGrid"),
+  librarianContact: document.querySelector("#librarianContact"), assistantContact: document.querySelector("#assistantContact"),
 };
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#039;", '"': "&quot;" })[character]);
@@ -497,6 +503,84 @@ function safePublicLinkUrl(value) {
     return url.toString();
   } catch {
     return "";
+  }
+}
+
+function normalizedContact(value) {
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    name: cleanText(source.name, 160),
+    description: cleanText(source.description, 2000),
+    phone: cleanText(source.phone, 80),
+    email: cleanText(source.email, 254).toLocaleLowerCase("uk"),
+  };
+}
+
+function safePhoneHref(value) {
+  const phone = cleanText(value, 80);
+  if (!phone || !/^[+()\d\s.-]{5,80}$/u.test(phone)) return "";
+  const normalizedPhone = phone.replace(/[^+\d]/gu, "");
+  return /^\+?\d{5,20}$/u.test(normalizedPhone) ? `tel:${normalizedPhone}` : "";
+}
+
+function safeEmailHref(value) {
+  const email = cleanText(value, 254).toLocaleLowerCase("uk");
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email) ? `mailto:${email}` : "";
+}
+
+function renderContactCard(card, value) {
+  if (!(card instanceof HTMLElement)) return false;
+  const contact = normalizedContact(value);
+  const visible = Object.values(contact).some(Boolean);
+  card.hidden = !visible;
+  if (!visible) return false;
+  const name = card.querySelector("[data-contact-name]");
+  const description = card.querySelector("[data-contact-description]");
+  const phone = card.querySelector("[data-contact-phone]");
+  const email = card.querySelector("[data-contact-email]");
+  if (name) name.textContent = contact.name || "Інформацію буде додано";
+  if (description) {
+    description.textContent = contact.description;
+    description.hidden = !contact.description;
+  }
+  const phoneHref = safePhoneHref(contact.phone);
+  if (phone instanceof HTMLAnchorElement) {
+    phone.hidden = !phoneHref;
+    phone.href = phoneHref || "#";
+    phone.textContent = contact.phone;
+  }
+  const emailHref = safeEmailHref(contact.email);
+  if (email instanceof HTMLAnchorElement) {
+    email.hidden = !emailHref;
+    email.href = emailHref || "#";
+    email.textContent = contact.email;
+  }
+  return true;
+}
+
+async function synchronizeContacts() {
+  if (!elements.contactsStatus || !elements.contactsGrid) return;
+  const apiUrl = normalizeContactsApiUrl(config.contactsApiUrl, window.location.href);
+  if (!apiUrl) {
+    elements.contactsStatus.textContent = "Контакти ще не опубліковано.";
+    elements.contactsGrid.hidden = true;
+    return;
+  }
+  elements.contactsStatus.textContent = "Завантажуємо контакти…";
+  try {
+    const response = await fetch(apiUrl, { headers: { Accept: "application/json" }, cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const body = await response.json();
+    if (!body || body.success !== true || !body.profile) throw new Error("invalid contacts");
+    const librarianVisible = renderContactCard(elements.librarianContact, body.profile.librarian);
+    const assistantVisible = renderContactCard(elements.assistantContact, body.profile.assistant);
+    elements.contactsGrid.hidden = !librarianVisible && !assistantVisible;
+    elements.contactsStatus.textContent = librarianVisible || assistantVisible
+      ? "Контактні дані оновлюються бібліотекарем."
+      : "Контакти ще не опубліковано.";
+  } catch {
+    elements.contactsGrid.hidden = true;
+    elements.contactsStatus.textContent = "Контакти тимчасово недоступні. Спробуйте пізніше.";
   }
 }
 
@@ -1124,7 +1208,9 @@ function updatePrimaryNavigation() {
     ? "visit-schedule"
     : hash === "#how-it-works"
       ? "how-it-works"
-      : "catalog";
+      : hash === "#contacts"
+        ? "contacts"
+        : "catalog";
   document.querySelectorAll("[data-primary-section]").forEach((link) => {
     const active = link.dataset.primarySection === activeId;
     link.classList.toggle("nav-active", active);
@@ -1287,8 +1373,10 @@ synchronizeCatalog();
 visitState.weekStart = startOfVisitWeek(localVisitDate());
 updatePrimaryNavigation();
 synchronizeVisitSchedule();
+synchronizeContacts();
 const refreshMinutes = Math.min(60, Math.max(5, nonNegativeInteger(config.refreshMinutes) || 10));
 if (normalizeCatalogApiUrl(config.catalogApiUrl, window.location.href)) window.setInterval(synchronizeCatalog, refreshMinutes * 60 * 1000);
 if (normalizeVisitsApiUrl(config.visitsApiUrl, window.location.href)) window.setInterval(synchronizeVisitSchedule, refreshMinutes * 60 * 1000);
+if (normalizeContactsApiUrl(config.contactsApiUrl, window.location.href)) window.setInterval(synchronizeContacts, refreshMinutes * 60 * 1000);
 window.setInterval(() => { if (visitState.schedule) renderVisitSchedule(); }, 60 * 1000);
 }

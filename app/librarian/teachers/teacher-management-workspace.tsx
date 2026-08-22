@@ -56,6 +56,7 @@ type Props = {
   role: "admin" | "librarian";
   writesEnabled: boolean;
   signOutHref: string;
+  telegramMiniApp?: boolean;
 };
 
 export default function TeacherManagementWorkspace({
@@ -64,6 +65,7 @@ export default function TeacherManagementWorkspace({
   role,
   writesEnabled,
   signOutHref,
+  telegramMiniApp = false,
 }: Props) {
   const [tab, setTab] = useState<MainTab>("overview");
   const [directory, setDirectory] = useState<TeacherDirectoryEnvelope | null>(null);
@@ -103,19 +105,19 @@ export default function TeacherManagementWorkspace({
   return (
     <main className={styles.shell}>
       <header className={styles.header}>
-        <a className={styles.brand} href="/librarian">
+        <a className={styles.brand} href={telegramMiniApp ? "/librarian/telegram/cabinet?target=home" : "/librarian"}>
           <img src={LOGO_URL} alt="" width="48" height="48" />
           <span><strong>Єдина бібліотека</strong><small>Керування вчителями</small></span>
         </a>
         <nav className={styles.headerNav} aria-label="Розділи кабінету бібліотекаря">
-          <a href="/librarian">Каталог</a>
-          <a href="/librarian/visits">Розклад</a>
-          <a href="/librarian/export">Експорт в Excel</a>
-          <a href="/librarian/import">Імпорт з Excel</a>
+          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=home" : "/librarian"}>Каталог</a>
+          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=visits" : "/librarian/visits"}>Розклад</a>
+          {!telegramMiniApp ? <a href="/librarian/export">Експорт в Excel</a> : null}
+          {!telegramMiniApp ? <a href="/librarian/import">Імпорт з Excel</a> : null}
         </nav>
         <div className={styles.account}>
           <span><strong>{displayName}</strong><small>{role === "admin" ? "Адміністратор" : "Бібліотекар"}</small></span>
-          <a href={signOutHref}>Вийти</a>
+          <a href={signOutHref}>{telegramMiniApp ? "До бота" : "Вийти"}</a>
         </div>
       </header>
 
@@ -156,7 +158,7 @@ export default function TeacherManagementWorkspace({
           ) : tab === "orders" ? (
             <OrdersPanel pendingScope={pendingScope} writesEnabled={effectiveWrites} />
           ) : (
-            <VisitManagementPanel />
+            <VisitManagementPanel telegramMiniApp={telegramMiniApp} />
           )}
         </div>
       </section>
@@ -481,7 +483,7 @@ function TeacherDirectoryPanel({
             <div className={styles.teacherList} role="list" aria-label="Список учителів">
               {data.teachers.map((teacher) => (
                 <button type="button" key={teacher.id} data-selected={selectedId === teacher.id} onClick={() => void selectTeacher(teacher.id)}>
-                  <span className={styles.avatar} aria-hidden="true">{teacherInitials(teacher.fullName)}</span>
+                  <TeacherAvatar teacher={teacher} size="small" />
                   <span className={styles.teacherIdentity}><strong>{teacher.fullName}</strong><small>{[teacher.subjectPosition, teacher.primaryLocation?.name, accountRoleLabel(teacher.accountRole)].filter(Boolean).join(" · ") || "Дані ще не заповнено"}</small></span>
                   <span className={styles.badges}><StatusBadge teacher={teacher} />{teacher.attention.overdueLoans ? <em>{teacher.attention.overdueLoans} простроч.</em> : null}{teacher.attention.openRequests ? <em>{teacher.attention.openRequests} заяв.</em> : null}</span>
                 </button>
@@ -565,7 +567,7 @@ function TeacherDetailCard({
   return (
     <article className={styles.detailCard}>
       <header>
-        <span className={styles.largeAvatar} aria-hidden="true">{teacherInitials(teacher.fullName)}</span>
+        <TeacherAvatar teacher={teacher} size="large" />
         <div><p>{teacher.status === "active" ? "Активна картка" : "Картка закрита"}</p><h3>{teacher.fullName}</h3><small>{[teacher.subjectPosition || "Посаду або предмет не вказано", accountRoleLabel(teacher.accountRole)].join(" · ")}</small></div>
       </header>
       <nav className={styles.detailTabs} aria-label="Дані вчителя">
@@ -683,7 +685,7 @@ function OrdersPanel({ pendingScope, writesEnabled }: { pendingScope: string; wr
   );
 }
 
-function VisitManagementPanel() {
+function VisitManagementPanel({ telegramMiniApp }: { telegramMiniApp: boolean }) {
   const [date, setDate] = useState(() => todayInKyiv());
   const [status, setStatus] = useState("active");
   const [data, setData] = useState<VisitListEnvelope | null>(null);
@@ -710,7 +712,7 @@ function VisitManagementPanel() {
 
   return (
     <section className={styles.card} aria-labelledby="visits-title">
-      <div className={styles.cardHeading}><div><span>{data?.bookings.length ?? 0} записів</span><h2 id="visits-title">Відвідування бібліотеки</h2></div><a className={styles.secondaryLink} href="/librarian/visits">Повне керування розкладом →</a></div>
+      <div className={styles.cardHeading}><div><span>{data?.bookings.length ?? 0} записів</span><h2 id="visits-title">Відвідування бібліотеки</h2></div><a className={styles.secondaryLink} href={telegramMiniApp ? "/librarian/telegram/cabinet?target=visits" : "/librarian/visits"}>Повне керування розкладом →</a></div>
       <div className={styles.filters}><label>Дата<input type="date" value={date} onChange={(event) => setDate(event.currentTarget.value)} /></label><label>Стан<select value={status} onChange={(event) => setStatus(event.currentTarget.value)}><option value="active">Активні</option><option value="cancelled">Скасовані</option><option value="">Усі</option></select></label></div>
       {error ? <div className={styles.error} role="alert">{error}</div> : loading ? <p className={styles.empty}>Оновлюємо розклад…</p> : data?.bookings.length ? <div className={styles.visitList}>{data.bookings.map((booking) => <article key={booking.id}><time>{booking.startTime}–{booking.endTime}</time><span><strong>{booking.surname}</strong><small>{[booking.classLabel, booking.purpose].filter(Boolean).join(" · ") || "Без додаткових відомостей"}</small></span><StatusPill value={booking.status} /></article>)}</div> : <p className={styles.empty}>На цю дату записів немає.</p>}
     </section>
@@ -728,6 +730,13 @@ function StatusBadge({ teacher }: { teacher: TeacherDirectoryRow }) {
   if (teacher.access.status === "locked") return <span className={styles.warningBadge}>Заблоковано</span>;
   if (teacher.access.status === "disabled") return <span className={styles.closedBadge}>Доступ вимкнено</span>;
   return <span className={styles.activeBadge}>Активна</span>;
+}
+
+function TeacherAvatar({ teacher, size }: { teacher: TeacherDirectoryRow; size: "small" | "large" }) {
+  const className = size === "large" ? styles.largeAvatar : styles.avatar;
+  return teacher.photoUrl
+    ? <img className={`${className} ${styles.teacherPhoto}`} src={teacher.photoUrl} alt={`Фото ${teacher.fullName}`} />
+    : <span className={className} aria-hidden="true">{teacherInitials(teacher.fullName)}</span>;
 }
 
 function StatusPill({ value }: { value: string }) {

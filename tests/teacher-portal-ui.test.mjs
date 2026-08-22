@@ -271,7 +271,7 @@ test("Telegram Mini App launch is bounded, signed server-side and stays on its f
   ]);
   assert.match(page, /boundedTab\(params\?\.tab\)/u);
   assert.match(page, /robots: \{ index: false, follow: false \}/u);
-  assert.match(launch, /Telegram\.WebApp/u);
+  assert.match(launch, /window\.Telegram\?\.WebApp/u);
   assert.match(launch, /webApp\.initData/u);
   assert.doesNotMatch(launch, /initDataUnsafe/u);
   assert.doesNotMatch(launch, /fetch\("\/api\/teacher\/session"/u);
@@ -309,4 +309,59 @@ test("Telegram Mini App launch is bounded, signed server-side and stays on its f
   assert.match(workspace, /visibilitychange/u);
   assert.match(workspace, /Я вже підключив\(ла\) — перевірити/u);
   assert.match(workspace, /teacherEntryPath/u);
+});
+
+test("teacher profile shows assigned information and keeps photo access private and same-origin", async () => {
+  const [workspace, profileRoute, photoRoute, store, librarianRoute, librarianWorkspace] = await Promise.all([
+    read("app/visits/visit-booking-workspace.tsx"),
+    read("app/api/teacher/profile/route.ts"),
+    read("app/api/teacher/profile/photo/route.ts"),
+    read("lib/teacher-profile-store.ts"),
+    read("app/api/librarian/teachers/[id]/photo/route.ts"),
+    read("app/librarian/teachers/teacher-management-workspace.tsx"),
+  ]);
+  assert.match(workspace, /Підтверджений профіль/u);
+  assert.match(workspace, /Предмет \/ посада/u);
+  assert.match(workspace, /Куратор класу/u);
+  assert.match(workspace, /Зробити фото/u);
+  assert.match(workspace, /Обрати з галереї/u);
+  assert.match(workspace, /normalizeCoverPhotoForUpload/u);
+  assert.match(profileRoute, /requireVisitTeacherSession\(db, request\)/u);
+  assert.match(photoRoute, /requireVisitTeacherSession\(db, request\)/u);
+  assert.equal((photoRoute.match(/isSameOriginRequest\(request\)/gu) ?? []).length, 2);
+  assert.match(photoRoute, /"Cache-Control": "private/u);
+  assert.match(store, /WHERE u\.id=\? AND u\.status='active' AND p\.closed_at IS NULL/u);
+  assert.match(store, /teacher-photos\/\$\{safeTeacherKey/u);
+  assert.match(librarianRoute, /authorizeTeacherRegistryRead/u);
+  assert.match(librarianWorkspace, /teacher\.photoUrl/u);
+});
+
+test("librarian Telegram Mini App revalidates D1 role and keeps cabinet navigation in Mini App", async () => {
+  const [page, cabinet, launch, route, auth, api, visits, teachers, worker] = await Promise.all([
+    read("app/librarian/telegram/page.tsx"),
+    read("app/librarian/telegram/cabinet/page.tsx"),
+    read("app/librarian/telegram/telegram-librarian-launch.tsx"),
+    read("app/api/librarian/session/telegram/route.ts"),
+    read("lib/librarian-telegram-auth.ts"),
+    read("lib/librarian-api.ts"),
+    read("app/librarian/visits/visit-admin-workspace.tsx"),
+    read("app/librarian/teachers/teacher-management-workspace.tsx"),
+    read("worker/index.ts"),
+  ]);
+  assert.match(page, /boundedTarget\(params\?\.target\)/u);
+  assert.match(page, /robots: \{ index: false, follow: false \}/u);
+  assert.match(launch, /window\.Telegram\?\.WebApp/u);
+  assert.match(launch, /webApp\.initData/u);
+  assert.doesNotMatch(launch, /initDataUnsafe|localStorage|sessionStorage|console\./u);
+  assert.match(route, /validateTelegramMiniAppInitData/u);
+  assert.match(route, /isSameOriginRequest\(request\)/u);
+  assert.match(auth, /u\.role IN \('admin','librarian'\)/u);
+  assert.match(auth, /isLibrarianEmailAllowed/u);
+  assert.match(auth, /telegram_mini_app_auth_receipts/u);
+  assert.match(auth, /SameSite=None; Partitioned/u);
+  assert.match(api, /readLibrarianTelegramUser/u);
+  assert.equal((cabinet.match(/telegramMiniApp/gu) ?? []).length >= 3, true);
+  assert.match(visits, /target=teachers/u);
+  assert.match(teachers, /target=visits/u);
+  assert.match(worker, /url\.pathname\.startsWith\("\/librarian\/telegram\/"\)/u);
 });

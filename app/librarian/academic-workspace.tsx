@@ -15,6 +15,7 @@ export type AcademicTool =
   | "class-create"
   | "class-update"
   | "class-close"
+  | "class-reopen"
   | "rollover";
 
 type Curator = { id: string; fullName: string; role: "teacher" | "admin" | "librarian" };
@@ -73,6 +74,7 @@ export function isAcademicTool(tool: string): tool is AcademicTool {
     "class-create",
     "class-update",
     "class-close",
+    "class-reopen",
     "rollover",
   ]).has(tool);
 }
@@ -132,6 +134,7 @@ export default function AcademicWorkspace({
       {tool === "class-create" ? <ClassCreate key={`${tool}-${generatedAt}`} {...common} /> : null}
       {tool === "class-update" ? <ClassUpdate key={`${tool}-${generatedAt}`} {...common} /> : null}
       {tool === "class-close" ? <ClassClose key={`${tool}-${generatedAt}`} {...common} /> : null}
+      {tool === "class-reopen" ? <ClassReopen key={`${tool}-${generatedAt}`} {...common} /> : null}
       {tool === "rollover" ? <Rollover key={`${tool}-${generatedAt}`} {...common} /> : null}
     </>
   );
@@ -394,6 +397,54 @@ function ClassClose({ reference, writesEnabled, onSaved }: CommonProps) {
         </div>
       ) : <AcademicMessage tone="info">Відкритих класів немає.</AcademicMessage>}
       <MutationFooter form={form} writesEnabled={writesEnabled && Boolean(selected)} label="Закрити клас" pending="Закриваємо…" />
+    </form>
+  );
+}
+
+function ClassReopen({ reference, writesEnabled, onSaved }: CommonProps) {
+  const activeYearIds = new Set(reference.academicYears.filter((year) => year.status === "active").map((year) => year.id));
+  const classes = reference.classYears.filter((item) => item.status === "closed" && activeYearIds.has(item.academicYearId));
+  const [classId, setClassId] = useState(classes[0]?.id || "");
+  const selected = classes.find((item) => item.id === classId) ?? null;
+  const [reason, setReason] = useState("Помилкове закриття класу");
+  const [requestId, setRequestId] = useState(() => crypto.randomUUID());
+  const form = useAcademicMutation(onSaved);
+  const renew = () => setRequestId(crypto.randomUUID());
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected || reason.trim().length < 5) return;
+    if (!window.confirm(`Поновити клас ${selected.className} у ${selected.academicYearLabel}?`)) return;
+    await form.run(async () => {
+      const response = await academicApi<MutationEnvelope<{ className: string }>>(
+        `/api/librarian/class-years/${encodeURIComponent(selected.id)}/reopen`,
+        jsonPost({ requestId, expectedVersion: selected.version, reason: reason.trim() }),
+      );
+      setRequestId(crypto.randomUUID());
+      return `Клас ${response.result.className} знову відкрито.`;
+    });
+  }
+
+  return (
+    <form className={styles.createCard} onSubmit={submit} aria-busy={form.saving}>
+      <AcademicHeading
+        eyebrow={`${classes.length} закритих класів в активному році`}
+        title="Поновити закритий клас"
+        subtitle="Повертає клас до робочих списків без втрати історії. Якщо групу закрили разом із класом, вона теж буде поновлена."
+      />
+      {selected ? (
+        <div className={styles.formGrid}>
+          <AcademicField label="Закритий клас" required wide>
+            <select value={classId} onChange={(event) => { setClassId(event.target.value); renew(); }}>
+              {classes.map((item) => <option key={item.id} value={item.id}>{item.academicYearLabel} · {item.className}{item.actualClosedDate ? ` · закрито ${item.actualClosedDate}` : ""}</option>)}
+            </select>
+          </AcademicField>
+          <AcademicField label="Причина поновлення" required wide>
+            <textarea rows={3} minLength={5} maxLength={1000} value={reason} onChange={(event) => { setReason(event.target.value); renew(); }} required />
+          </AcademicField>
+        </div>
+      ) : <AcademicMessage tone="info">В активному навчальному році немає закритих класів для поновлення.</AcademicMessage>}
+      <MutationFooter form={form} writesEnabled={writesEnabled && Boolean(selected) && reason.trim().length >= 5} label="Поновити клас" pending="Поновлюємо…" />
     </form>
   );
 }

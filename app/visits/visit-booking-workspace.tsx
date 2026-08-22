@@ -57,6 +57,7 @@ import {
   writePortalPendingIntent,
   writeVisitPendingIntent,
 } from "./visit-client";
+import { normalizeCoverPhotoForUpload } from "@/lib/cover-client";
 import styles from "./visits.module.css";
 
 const LOGO_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
@@ -844,7 +845,7 @@ function TeacherSignIn({
               value={code}
               onChange={(event) => changeCode(event.currentTarget.value)}
               disabled={busy}
-              placeholder="4 цифри або XXXXX-XXXXX"
+              placeholder="4 цифри"
             />
             <small>Під час першого входу введіть код бібліотекаря. Після цього сайт запропонує створити власний 4-значний PIN.</small>
           </label>
@@ -1347,6 +1348,27 @@ type TelegramStatus = {
 type TelegramStatusEnvelope = { success: true; telegram: TelegramStatus };
 type TelegramLinkEnvelope = { success: true; linkUrl: string; expiresAt: string };
 
+type TeacherOwnProfile = {
+  id: string;
+  fullName: string;
+  subjectPosition: string;
+  serviceContact: string;
+  primaryLocation: { id: string; name: string } | null;
+  curatedClasses: Array<{
+    id: string;
+    className: string;
+    academicYearLabel: string;
+    status: string;
+    location: { id: string; name: string } | null;
+  }>;
+  photoUrl: string | null;
+  photoVersion: number;
+  profileVersion: number;
+  updatedAt: string;
+};
+
+type TeacherProfileEnvelope = { schemaVersion: 1; success: true; profile: TeacherOwnProfile };
+
 function teacherTabTitle(tab: TeacherTab): string {
   if (tab === "visits") return "Мої відвідування";
   if (tab === "orders") return "Замовлення матеріалів";
@@ -1371,12 +1393,109 @@ function TeacherOverview({
   onOpenLoans: () => void;
 }) {
   const nextBooking = bookings[0] ?? null;
+  const [profile, setProfile] = useState<TeacherOwnProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [profileNotice, setProfileNotice] = useState("");
+  const [profileNoticeTone, setProfileNoticeTone] = useState<"success" | "error">("success");
+
+  const loadProfile = useCallback(async () => {
+    setProfileLoading(true);
+    try {
+      const response = await visitApi<TeacherProfileEnvelope>("/api/teacher/profile");
+      setProfile(response.profile);
+    } catch (error) {
+      setProfileNotice(errorMessage(error));
+      setProfileNoticeTone("error");
+    } finally {
+      setProfileLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadProfile(), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadProfile]);
+
+  async function uploadPhoto(file: File | null) {
+    if (!file || !profile || photoBusy) return;
+    setPhotoBusy(true);
+    setProfileNotice("");
+    try {
+      const prepared = await normalizeCoverPhotoForUpload(file);
+      const form = new FormData();
+      form.set("photo", prepared, prepared.name);
+      form.set("requestId", crypto.randomUUID());
+      form.set("expectedVersion", String(profile.profileVersion));
+      await visitApi("/api/teacher/profile/photo", { method: "POST", body: form });
+      await loadProfile();
+      setProfileNotice("Фото профілю збережено.");
+      setProfileNoticeTone("success");
+    } catch (error) {
+      setProfileNotice(errorMessage(error));
+      setProfileNoticeTone("error");
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
+  async function deletePhoto() {
+    if (!profile?.photoUrl || photoBusy || !window.confirm("Видалити фото профілю?")) return;
+    setPhotoBusy(true);
+    setProfileNotice("");
+    try {
+      await visitApi("/api/teacher/profile/photo", {
+        method: "DELETE",
+        body: JSON.stringify({ requestId: crypto.randomUUID(), expectedVersion: profile.profileVersion }),
+      });
+      await loadProfile();
+      setProfileNotice("Фото профілю видалено.");
+      setProfileNoticeTone("success");
+    } catch (error) {
+      setProfileNotice(errorMessage(error));
+      setProfileNoticeTone("error");
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
   return (
     <section className={styles.overviewGrid} aria-label="Огляд кабінету">
       <article className={`${styles.card} ${styles.welcomeCard}`}>
-        <span>Підтверджений профіль</span>
-        <h2>{teacherName}</h2>
-        <p>Ім’я для записів і замовлень підставляється з бази даних, його не потрібно вводити вручну.</p>
+        <div className={styles.profileSummary}>
+          <div className={styles.profilePortrait}>
+            {profile?.photoUrl
+              ? <img src={profile.photoUrl} alt={`Фото ${teacherName}`} />
+              : <span aria-hidden="true">{teacherInitials(teacherName)}</span>}
+          </div>
+          <div className={styles.profileDetails}>
+            <span>Підтверджений профіль</span>
+            <h2>{teacherName}</h2>
+            {profileLoading ? <p>Оновлюємо відомості…</p> : profile ? (
+              <dl>
+                <div><dt>Предмет / посада</dt><dd>{profile.subjectPosition || "Не вказано"}</dd></div>
+                <div><dt>Основний кабінет</dt><dd>{profile.primaryLocation?.name || "Не вказано"}</dd></div>
+                <div><dt>Куратор класу</dt><dd>{profile.curatedClasses.length
+                  ? profile.curatedClasses.map((item) => `${item.className}${item.location?.name ? ` · ${item.location.name}` : ""}`).join(", ")
+                  : "Не призначено"}</dd></div>
+                {profile.serviceContact ? <div><dt>Службовий контакт</dt><dd>{profile.serviceContact}</dd></div> : null}
+              </dl>
+            ) : <p>Відомості профілю зараз недоступні.</p>}
+          </div>
+        </div>
+        <div className={styles.photoActions} aria-label="Фото профілю">
+          <label className={styles.quiet} aria-disabled={photoBusy || !profile}>
+            <input type="file" accept="image/jpeg,image/png,image/webp" capture="user" disabled={photoBusy || !profile} onChange={(event) => { const file = event.currentTarget.files?.[0] ?? null; event.currentTarget.value = ""; void uploadPhoto(file); }} />
+            Зробити фото
+          </label>
+          <label className={styles.quiet} aria-disabled={photoBusy || !profile}>
+            <input type="file" accept="image/jpeg,image/png,image/webp" disabled={photoBusy || !profile} onChange={(event) => { const file = event.currentTarget.files?.[0] ?? null; event.currentTarget.value = ""; void uploadPhoto(file); }} />
+            Обрати з галереї
+          </label>
+          {profile?.photoUrl ? <button className={styles.danger} type="button" disabled={photoBusy} onClick={() => void deletePhoto()}>Видалити фото</button> : null}
+        </div>
+        {profileNotice ? <div className={styles[profileNoticeTone]} role={profileNoticeTone === "error" ? "alert" : "status"}>{profileNotice}</div> : null}
+        <p className={styles.profilePrivacy}>Фото бачите ви та бібліотекар. Воно не публікується у відкритому каталозі чи графіку.</p>
       </article>
       <article className={styles.card}>
         <div className={styles.cardHeading}><div><span>Найближче</span><h2>Відвідування</h2></div></div>
@@ -1524,6 +1643,11 @@ function classLoanRoleLabel(relationship: TeacherClassLoan["relationship"]): str
   if (relationship.curator && relationship.responsible) return "Ви куратор і відповідальний за видачу";
   if (relationship.curator) return "Ви куратор класу";
   return "Ви відповідальний за видачу";
+}
+
+function teacherInitials(fullName: string): string {
+  return fullName.trim().split(/\s+/u).slice(0, 2)
+    .map((part) => part[0]?.toLocaleUpperCase("uk-UA") ?? "").join("") || "В";
 }
 
 function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope: string; initialMaterialId: string }) {
@@ -2118,7 +2242,7 @@ function TeacherSecurityPanel({
         {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
         <form onSubmit={submitRotation}>
           <div className={styles.fields}>
-            {initialCurrentCode && required ? <div className={`${styles.wide} ${styles.success}`} role="status">Тимчасовий код бібліотекаря підтверджено.</div> : <label className={styles.wide}>Поточний код або PIN *<input required type="password" inputMode="text" autoComplete="current-password" maxLength={11} value={currentCode} onChange={(event) => setCurrentCode(formatTeacherAccessCode(event.currentTarget.value))} placeholder="4 цифри або XXXXX-XXXXX" pattern="(?:[0-9]{4}|[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5})" disabled={submitting || rotated || Boolean(pendingRotation)} /></label>}
+            {initialCurrentCode && required ? <div className={`${styles.wide} ${styles.success}`} role="status">Тимчасовий код бібліотекаря підтверджено.</div> : <label className={styles.wide}>Поточний код або PIN *<input required type="password" inputMode="text" autoComplete="current-password" maxLength={11} value={currentCode} onChange={(event) => setCurrentCode(formatTeacherAccessCode(event.currentTarget.value))} placeholder="4 цифри" pattern="(?:[0-9]{4}|[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5})" disabled={submitting || rotated || Boolean(pendingRotation)} /></label>}
             <label className={styles.wide}>Новий PIN *
               <span className={styles.generatedCode}><input required type={showPin ? "text" : "password"} inputMode="numeric" autoComplete="new-password" maxLength={4} value={newPin} onChange={(event) => { setNewPin(normalizedTeacherPin(event.currentTarget.value)); setRotated(false); }} placeholder="••••" pattern="[0-9]{4}" aria-invalid={newPin.length > 0 && !strength.strong} aria-describedby="new-pin-help new-pin-rules" disabled={submitting || rotated || Boolean(pendingRotation)} /><button className={styles.quiet} type="button" onClick={() => setShowPin((value) => !value)} disabled={!newPin || submitting}>{showPin ? "Сховати" : "Показати"}</button></span>
               <small id="new-pin-help">Оберіть 4 цифри, які легко запам’ятати вам, але важко вгадати іншим.</small>

@@ -2673,10 +2673,11 @@ async function resolveLibrarianActor(
     SELECT id
     FROM users
     WHERE status='active' AND role IN ('admin','librarian')
-      AND (auth_user_id=? OR lower(email)=lower(?))
-    ORDER BY CASE WHEN auth_user_id=? THEN 0 ELSE 1 END, id
+      AND ((? IS NOT NULL AND id=?)
+        OR (? IS NULL AND (auth_user_id=? OR lower(email)=lower(?))))
+    ORDER BY id
     LIMIT 2
-  `).bind(user.userId, user.email, user.userId).all<{ id: string }>();
+  `).bind(user.d1UserId ?? null, user.d1UserId ?? null, user.d1UserId ?? null, user.userId, user.email).all<{ id: string }>();
   const rows = response.results ?? [];
   if (rows.length !== 1) {
     throw new TeacherMaterialRequestError(

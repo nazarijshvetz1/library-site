@@ -436,6 +436,10 @@ export const teacherProfiles = sqliteTable(
     }),
     serviceContact: text("service_contact").notNull().default(""),
     librarianNote: text("librarian_note").notNull().default(""),
+    photoStorageKey: text("photo_storage_key"),
+    photoMimeType: text("photo_mime_type"),
+    photoVersion: integer("photo_version").notNull().default(0),
+    photoUpdatedAt: text("photo_updated_at"),
     version: integer("version").notNull().default(1),
     lastMutationRequestId: text("last_mutation_request_id"),
     closedAt: text("closed_at"),
@@ -457,10 +461,19 @@ export const teacherProfiles = sqliteTable(
   (table) => [
     index("idx_teacher_profiles_location_teacher").on(table.primaryLocationId, table.teacherUserId),
     index("idx_teacher_profiles_updated").on(table.updatedAt, table.teacherUserId),
+    uniqueIndex("idx_teacher_profiles_photo_storage_key").on(table.photoStorageKey),
     check("teacher_profiles_subject_length", sql`length(${table.subjectPosition}) <= 160`),
     check("teacher_profiles_contact_length", sql`length(${table.serviceContact}) <= 200`),
     check("teacher_profiles_note_length", sql`length(${table.librarianNote}) <= 4000`),
     check("teacher_profiles_version_positive", sql`${table.version} > 0`),
+    check(
+      "teacher_profiles_photo_consistent",
+      sql`(${table.photoStorageKey} is null and ${table.photoMimeType} is null
+          and ${table.photoVersion} = 0 and ${table.photoUpdatedAt} is null)
+        or (${table.photoStorageKey} is not null and length(trim(${table.photoStorageKey})) > 0
+          and ${table.photoMimeType} in ('image/jpeg','image/png','image/webp')
+          and ${table.photoVersion} > 0 and ${table.photoUpdatedAt} is not null)`,
+    ),
     check(
       "teacher_profiles_closed_fields_consistent",
       sql`(${table.closedAt} is null and ${table.closedByUserId} is null)
@@ -486,6 +499,7 @@ export const visitTeacherCredentials = sqliteTable(
     lockedUntil: text("locked_until"),
     lastLoginAt: text("last_login_at"),
     codeRotatedAt: text("code_rotated_at").notNull(),
+    codeExpiresAt: text("code_expires_at"),
     lastAccessCommandId: text("last_access_command_id"),
     createdByUserId: text("created_by_user_id")
       .notNull()
@@ -505,6 +519,10 @@ export const visitTeacherCredentials = sqliteTable(
     check("visit_teacher_credentials_status_valid", sql`${table.status} in ('active', 'disabled')`),
     check("visit_teacher_credentials_version_positive", sql`${table.version} > 0`),
     check("visit_teacher_credentials_attempts_nonnegative", sql`${table.failedAttempts} >= 0`),
+    check(
+      "visit_teacher_credentials_expiry_consistent",
+      sql`${table.mustChangePin} = 1 or ${table.codeExpiresAt} is null`,
+    ),
     check(
       "visit_teacher_credentials_command_id_valid",
       sql`${table.lastAccessCommandId} is null or length(${table.lastAccessCommandId}) = 36`,
@@ -2019,6 +2037,82 @@ export const telegramMiniAppAuthReceipts = sqliteTable(
     ),
     check("telegram_mini_app_auth_user_not_blank", sql`length(trim(${table.telegramUserId})) > 0`),
     check("telegram_mini_app_auth_date_positive", sql`${table.authDate} > 0`),
+  ],
+);
+
+/** Short-lived sessions created only from a validated librarian Telegram Mini App launch. */
+export const telegramLibrarianSessions = sqliteTable(
+  "telegram_librarian_sessions",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    initDataHash: text("init_data_hash").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    telegramUserId: text("telegram_user_id").notNull(),
+    authDate: integer("auth_date").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    lastSeenAt: text("last_seen_at").notNull(),
+    revokedAt: text("revoked_at"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_telegram_librarian_sessions_init_data").on(table.initDataHash),
+    index("idx_telegram_librarian_sessions_user_active").on(
+      table.userId,
+      table.revokedAt,
+      table.expiresAt,
+    ),
+    index("idx_telegram_librarian_sessions_expires").on(table.expiresAt),
+    check(
+      "telegram_librarian_sessions_token_hash_valid",
+      sql`length(${table.tokenHash}) = 64 and lower(${table.tokenHash}) not glob '*[^0-9a-f]*'`,
+    ),
+    check(
+      "telegram_librarian_sessions_init_data_hash_valid",
+      sql`length(${table.initDataHash}) = 64 and lower(${table.initDataHash}) not glob '*[^0-9a-f]*'`,
+    ),
+    check(
+      "telegram_librarian_sessions_user_not_blank",
+      sql`length(trim(${table.telegramUserId})) > 0`,
+    ),
+    check("telegram_librarian_sessions_auth_date_positive", sql`${table.authDate} > 0`),
+  ],
+);
+
+/** Public contact card edited by the librarian and rendered in the public catalog. */
+export const publicLibraryProfile = sqliteTable(
+  "public_library_profile",
+  {
+    id: text("id").primaryKey().default("primary"),
+    librarianName: text("librarian_name").notNull().default(""),
+    librarianDescription: text("librarian_description").notNull().default(""),
+    librarianPhone: text("librarian_phone").notNull().default(""),
+    librarianEmail: text("librarian_email").notNull().default(""),
+    assistantName: text("assistant_name").notNull().default(""),
+    assistantDescription: text("assistant_description").notNull().default(""),
+    assistantPhone: text("assistant_phone").notNull().default(""),
+    assistantEmail: text("assistant_email").notNull().default(""),
+    version: integer("version").notNull().default(1),
+    lastMutationRequestId: text("last_mutation_request_id"),
+    updatedByUserId: text("updated_by_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    check("public_library_profile_singleton", sql`${table.id} = 'primary'`),
+    check("public_library_profile_version_positive", sql`${table.version} > 0`),
+    check("public_library_profile_librarian_name_length", sql`length(${table.librarianName}) <= 160`),
+    check("public_library_profile_librarian_description_length", sql`length(${table.librarianDescription}) <= 2000`),
+    check("public_library_profile_librarian_phone_length", sql`length(${table.librarianPhone}) <= 80`),
+    check("public_library_profile_librarian_email_length", sql`length(${table.librarianEmail}) <= 254`),
+    check("public_library_profile_assistant_name_length", sql`length(${table.assistantName}) <= 160`),
+    check("public_library_profile_assistant_description_length", sql`length(${table.assistantDescription}) <= 2000`),
+    check("public_library_profile_assistant_phone_length", sql`length(${table.assistantPhone}) <= 80`),
+    check("public_library_profile_assistant_email_length", sql`length(${table.assistantEmail}) <= 254`),
   ],
 );
 

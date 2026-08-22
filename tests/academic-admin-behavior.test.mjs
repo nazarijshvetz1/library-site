@@ -460,6 +460,43 @@ test("manual class close loses atomically to a concurrent open class loan", asyn
   assert.equal(sqlite.prepare("SELECT count(*) AS count FROM audit_events").get().count, 0);
 });
 
+test("a mistakenly closed class and cohort can be reopened with history preserved", async () => {
+  const { sqlite, d1 } = openDatabase();
+  seedRollover(sqlite);
+  const closed = await academic.closeClassYearDirect(actor, "CY-2026-001", {
+    requestId: request(41),
+    expectedVersion: 1,
+    actualClosedDate: "2026-09-02",
+    reason: "closed",
+    closeCohort: true,
+    notes: "Закрито помилково",
+  }, d1);
+  assert.equal(closed.status, "closed");
+  assert.equal(sqlite.prepare("SELECT status FROM cohorts WHERE id='COH-001'").get().status, "closed");
+
+  const reopened = await academic.reopenClassYearDirect(actor, "CY-2026-001", {
+    requestId: request(42),
+    expectedVersion: closed.version,
+    reason: "Виправлення помилкового закриття",
+  }, d1);
+  assert.equal(reopened.status, "active");
+  assert.deepEqual(
+    { ...sqlite.prepare("SELECT status,actual_closed_date,version,notes FROM class_years WHERE id='CY-2026-001'").get() },
+    { status: "active", actual_closed_date: null, version: 3, notes: "Закрито помилково" },
+  );
+  assert.equal(sqlite.prepare("SELECT status FROM cohorts WHERE id='COH-001'").get().status, "active");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action='class_year.reopened'").get().n, 1);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action='cohort.reopened'").get().n, 1);
+  assert.deepEqual(
+    await academic.reopenClassYearDirect(actor, "CY-2026-001", {
+      requestId: request(42),
+      expectedVersion: closed.version,
+      reason: "Виправлення помилкового закриття",
+    }, d1),
+    reopened,
+  );
+});
+
 test("rollover loses atomically to a concurrent open class loan", async () => {
   const { sqlite, d1 } = openDatabase();
   seedRollover(sqlite);
@@ -756,6 +793,7 @@ test("academic routes keep authentication, same-origin, write and bounded-body g
     "app/api/librarian/class-years/route.ts",
     "app/api/librarian/class-years/[id]/route.ts",
     "app/api/librarian/class-years/[id]/close/route.ts",
+    "app/api/librarian/class-years/[id]/reopen/route.ts",
     "app/api/librarian/academic-years/rollover/route.ts",
   ];
   for (const relative of routes) {

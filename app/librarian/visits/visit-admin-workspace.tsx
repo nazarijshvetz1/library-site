@@ -24,9 +24,21 @@ import MaterialRequestInbox from "./material-request-inbox";
 
 const LOGO_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
 
-type Props = { pendingScope: string; displayName: string; writesEnabled: boolean; signOutHref: string };
+type Props = {
+  pendingScope: string;
+  displayName: string;
+  writesEnabled: boolean;
+  signOutHref: string;
+  telegramMiniApp?: boolean;
+};
 
-export default function LibrarianVisitWorkspace({ pendingScope, displayName, writesEnabled, signOutHref }: Props) {
+export default function LibrarianVisitWorkspace({
+  pendingScope,
+  displayName,
+  writesEnabled,
+  signOutHref,
+  telegramMiniApp = false,
+}: Props) {
   const [data, setData] = useState<LibrarianVisitsEnvelope | null>(null);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
@@ -112,17 +124,17 @@ export default function LibrarianVisitWorkspace({ pendingScope, displayName, wri
   return (
     <main className={styles.shell}>
       <header className={styles.header}>
-        <a className={styles.brand} href="/librarian">
+        <a className={styles.brand} href={telegramMiniApp ? "/librarian/telegram/cabinet?target=home" : "/librarian"}>
           <img src={LOGO_URL} alt="" width="48" height="48" />
           <span><strong>Єдина бібліотека</strong><small>Розклад відвідувань</small></span>
         </a>
         <div className={styles.account}>
-          <a href="/librarian">Кабінет</a>
-          <a href="/librarian/teachers">Вчителі</a>
-          <a href="/librarian/export">Експорт в Excel</a>
-          <a href="/librarian/import">Імпорт з Excel</a>
+          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=home" : "/librarian"}>Кабінет</a>
+          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=teachers" : "/librarian/teachers"}>Вчителі</a>
+          {!telegramMiniApp ? <a href="/librarian/export">Експорт в Excel</a> : null}
+          {!telegramMiniApp ? <a href="/librarian/import">Імпорт з Excel</a> : null}
           <span><strong>{displayName}</strong><small>Бібліотекар</small></span>
-          <a href={signOutHref}>Вийти</a>
+          <a href={signOutHref}>{telegramMiniApp ? "До бота" : "Вийти"}</a>
         </div>
       </header>
 

@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 
 export type ChatGPTUser = {
   userId: string;
+  /** Exact app-owned D1 actor id for already-authorized non-ChatGPT sessions. */
+  d1UserId?: string;
   displayName: string;
   email: string;
   fullName: string | null;

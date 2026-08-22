@@ -44,6 +44,12 @@ export type ClassYearCloseInput = {
   notes: string;
 };
 
+export type ClassYearReopenInput = {
+  requestId: string;
+  expectedVersion: number;
+  reason: string;
+};
+
 export type AcademicRolloverClassInput = {
   sourceClassYearId: string;
   expectedVersion: number;
@@ -226,6 +232,19 @@ export function validateClassYearCloseInput(
     closeCohort,
     notes,
   });
+}
+
+export function validateClassYearReopenInput(
+  input: unknown,
+): ValidationResult<ClassYearReopenInput> {
+  const errors: Record<string, string> = {};
+  if (!isRecord(input)) return invalid("body", "Очікуються дані поновлення класу.");
+  exactKeys(input, ["requestId", "expectedVersion", "reason"], errors);
+  const requestId = readRequestId(input.requestId, errors);
+  const expectedVersion = readInteger(input.expectedVersion, "expectedVersion", 1, 2_147_483_647, errors);
+  const reason = readRequiredText(input.reason, "reason", 1_000, errors);
+  if (reason.length > 0 && reason.length < 5) errors.reason = "Коротко поясніть причину поновлення класу.";
+  return finish(errors, { requestId, expectedVersion, reason });
 }
 
 export function validateAcademicYearRolloverInput(

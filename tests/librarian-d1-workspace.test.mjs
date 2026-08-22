@@ -613,8 +613,8 @@ test("protected navigation uses full-page anchors so Vinext cannot swallow click
   for (const source of [catalog, visits, teachers]) {
     assert.doesNotMatch(source, /from "next\/link"/u);
   }
-  assert.match(catalog, /<a href="\/librarian\/visits" className=\{styles\.catalogLink\}>/u);
-  assert.match(catalog, /<a href="\/librarian\/teachers" className=\{styles\.catalogLink\}>/u);
-  assert.match(visits, /<a href="\/librarian\/teachers">Вчителі<\/a>/u);
-  assert.match(teachers, /<a href="\/librarian\/visits">Розклад<\/a>/u);
+  assert.match(catalog, /href=\{telegramMiniApp \? "\/librarian\/telegram\/cabinet\?target=visits" : "\/librarian\/visits"\}/u);
+  assert.match(catalog, /href=\{telegramMiniApp \? "\/librarian\/telegram\/cabinet\?target=teachers" : "\/librarian\/teachers"\}/u);
+  assert.match(visits, /telegramMiniApp \? "\/librarian\/telegram\/cabinet\?target=teachers" : "\/librarian\/teachers"/u);
+  assert.match(teachers, /telegramMiniApp \? "\/librarian\/telegram\/cabinet\?target=visits" : "\/librarian\/visits"/u);
 });

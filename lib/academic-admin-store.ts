@@ -4,6 +4,7 @@ import type {
   AcademicYearRolloverInput,
   ClassYearCloseInput,
   ClassYearCreateInput,
+  ClassYearReopenInput,
   ClassYearUpdateInput,
 } from "@/lib/academic-admin-validation";
 import { className } from "./academic-admin-validation.ts";
@@ -852,6 +853,160 @@ export async function closeClassYearDirect(
   }
 }
 
+export async function reopenClassYearDirect(
+  user: ChatGPTUser,
+  classYearId: string,
+  input: ClassYearReopenInput,
+  providedDb?: AcademicD1Database,
+): Promise<ClassYearMutationResult> {
+  const db = database(providedDb);
+  const actor = await resolveMutationActor(db, user);
+  const requestHash = await mutationHash({ kind: "class-year.reopen", actorUserId: actor.id, classYearId, input });
+  const replay = await replayCompletedCommand<ClassYearMutationResult>(db, input.requestId, requestHash);
+  if (replay) return replay;
+  const beforeRow = await requireClassYear(db, classYearId);
+  if (beforeRow.status !== "closed") {
+    throw new AcademicAdminError("class_year_not_closed", 409, "Поновити можна лише закритий клас.");
+  }
+  if (beforeRow.version !== input.expectedVersion) throw versionConflict(classYearId, beforeRow.version);
+  const academicYear = await requireAcademicYear(db, beforeRow.academic_year_id, true);
+  if (academicYear.status !== "active") {
+    throw new AcademicAdminError(
+      "academic_year_not_active",
+      409,
+      "Поновити клас можна лише в активному навчальному році.",
+    );
+  }
+  const cohort = await db.prepare(`
+    SELECT id, status, notes, created_at, updated_at
+    FROM cohorts WHERE id = ? LIMIT 1
+  `).bind(beforeRow.cohort_id).first<CohortRow>();
+  if (!cohort) throw new AcademicAdminError("cohort_not_found", 404, "Класну групу не знайдено.");
+  if (cohort.status === "graduated") {
+    throw new AcademicAdminError(
+      "cohort_graduated",
+      409,
+      "Випущену класну групу не можна поновити цим інструментом.",
+    );
+  }
+  const otherOpen = await db.prepare(`
+    SELECT id FROM class_years
+    WHERE cohort_id = ? AND id != ? AND status IN ('planned', 'active')
+    LIMIT 1
+  `).bind(beforeRow.cohort_id, classYearId).first<{ id: string }>();
+  if (otherOpen) {
+    throw new AcademicAdminError(
+      "cohort_still_open",
+      409,
+      "Ця класна група вже використовується іншим відкритим класом.",
+      { classYearId: otherOpen.id },
+    );
+  }
+  await assertClassCurator(db, beforeRow.teacher_user_id);
+  await assertClassLocation(db, beforeRow.location_id);
+
+  const before = classYearSnapshot(beforeRow);
+  const updatedAt = new Date().toISOString();
+  const after = {
+    ...before,
+    status: "active",
+    actualClosedDate: null,
+    version: beforeRow.version + 1,
+  };
+  const result: ClassYearMutationResult = {
+    classYearId,
+    academicYearId: beforeRow.academic_year_id,
+    cohortId: beforeRow.cohort_id,
+    className: beforeRow.class_name,
+    status: "active",
+    version: beforeRow.version + 1,
+    updatedAt,
+  };
+  const statements: D1Statement[] = [
+    insertCommandStatement(db, input.requestId, requestHash, actor.id, "class-year.reopen", "class_year", classYearId, updatedAt),
+  ];
+  if (cohort.status === "closed") {
+    statements.push(
+      db.prepare(`
+        UPDATE cohorts
+        SET status = 'active', updated_at = ?
+        WHERE id = ? AND status = 'closed'
+          AND NOT EXISTS (
+            SELECT 1 FROM class_years
+            WHERE cohort_id = ? AND id != ? AND status IN ('planned', 'active')
+          )
+      `).bind(updatedAt, cohort.id, cohort.id, classYearId),
+      auditGuardStatement(db, {
+        actor,
+        action: "cohort.reopened",
+        entityType: "cohort",
+        entityId: cohort.id,
+        requestId: input.requestId,
+        before: cohortSnapshot(cohort),
+        after: { ...cohortSnapshot(cohort), status: "active" },
+        metadata: { reason: input.reason, classYearId },
+        createdAt: updatedAt,
+        guardSql: "SELECT id FROM cohorts WHERE id = ? AND status = 'active' AND changes() = 1",
+        guardBindings: [cohort.id],
+      }),
+    );
+  }
+  statements.push(
+    db.prepare(`
+      UPDATE class_years
+      SET status = 'active', actual_closed_date = NULL,
+          version = version + 1, updated_at = ?
+      WHERE id = ? AND version = ? AND status = 'closed'
+        AND EXISTS (
+          SELECT 1 FROM academic_years
+          WHERE id = class_years.academic_year_id AND status = 'active'
+        )
+        AND EXISTS (
+          SELECT 1 FROM cohorts
+          WHERE id = class_years.cohort_id AND status = 'active'
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM class_years other
+          WHERE other.cohort_id = class_years.cohort_id
+            AND other.id != class_years.id
+            AND other.status IN ('planned', 'active')
+        )
+        AND (teacher_user_id IS NULL OR EXISTS (
+          SELECT 1 FROM users u JOIN teacher_profiles p
+            ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+          WHERE u.id = class_years.teacher_user_id AND u.status = 'active'
+        ))
+        AND (location_id IS NULL OR EXISTS (
+          SELECT 1 FROM locations
+          WHERE id = class_years.location_id AND status = 'active' AND type != 'service'
+        ))
+    `).bind(updatedAt, classYearId, input.expectedVersion),
+    auditGuardStatement(db, {
+      actor,
+      action: "class_year.reopened",
+      entityType: "class_year",
+      entityId: classYearId,
+      requestId: input.requestId,
+      before,
+      after,
+      metadata: { reason: input.reason, cohortReopened: cohort.status === "closed" },
+      createdAt: updatedAt,
+      guardSql: "SELECT id FROM class_years WHERE id = ? AND version = ? AND status = 'active' AND changes() = 1",
+      guardBindings: [classYearId, result.version],
+    }),
+    completeCommandStatement(db, input.requestId, result, updatedAt),
+  );
+  const replayed = await executeIdempotentBatch<ClassYearMutationResult>(
+    db,
+    statements,
+    input.requestId,
+    requestHash,
+    "class_year_reopen_conflict",
+    "Клас або група вже змінилися. Оновіть дані перед повторним поновленням.",
+  );
+  return replayed ?? result;
+}
+
 export async function rolloverAcademicYearDirect(
   user: ChatGPTUser,
   input: AcademicYearRolloverInput,
@@ -1168,10 +1323,11 @@ async function resolveMutationActor(
     SELECT id, email
     FROM users
     WHERE status = 'active' AND role IN ('admin', 'librarian')
-      AND (auth_user_id = ? OR lower(email) = lower(?))
-    ORDER BY CASE WHEN auth_user_id = ? THEN 0 ELSE 1 END, id
+      AND ((? IS NOT NULL AND id=?)
+        OR (? IS NULL AND (auth_user_id = ? OR lower(email) = lower(?))))
+    ORDER BY id
     LIMIT 2
-  `).bind(user.userId, user.email, user.userId).all<{ id: string; email: string | null }>();
+  `).bind(user.d1UserId ?? null, user.d1UserId ?? null, user.d1UserId ?? null, user.userId, user.email).all<{ id: string; email: string | null }>();
   const rows = response.results ?? [];
   if (rows.length !== 1) {
     throw new AcademicAdminError(

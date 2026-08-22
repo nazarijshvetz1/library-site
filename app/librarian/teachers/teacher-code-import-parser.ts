@@ -7,7 +7,7 @@ export const TEACHER_CODE_IMPORT_MAX_ROWS = 100;
 export const TEACHER_CODE_IMPORT_SHEET = "Коди вчителів";
 
 const HEADERS = ["USR-ID", "Прізвище та ім’я", "Тимчасовий код"] as const;
-const TEMPORARY_CODE_ALPHABET = /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{10}$/u;
+const TEMPORARY_CODE_ALPHABET = /^\d{4}$/u;
 
 export type TeacherCodeImportRow = {
   teacherUserId: string;
@@ -62,7 +62,7 @@ export async function parseTeacherCodeImport(file: File): Promise<TeacherCodeImp
       throw new Error(`Рядок ${sourceRow}: некоректне прізвище та ім’я.`);
     }
     if (!TEMPORARY_CODE_ALPHABET.test(code)) {
-      throw new Error(`Рядок ${sourceRow}: тимчасовий код має містити 10 дозволених символів без 0, 1, I, L та O.`);
+      throw new Error(`Рядок ${sourceRow}: тимчасовий код має містити рівно 4 цифри.`);
     }
     if (ids.has(teacherUserId)) throw new Error(`Рядок ${sourceRow}: USR-ID повторюється у файлі.`);
     if (codes.has(code)) throw new Error(`Рядок ${sourceRow}: тимчасовий код повторюється у файлі.`);
@@ -74,7 +74,7 @@ export async function parseTeacherCodeImport(file: File): Promise<TeacherCodeImp
 }
 
 export function normalizeTemporaryCode(value: string): string {
-  return clean(value).toUpperCase().replace(/[\s-]+/gu, "");
+  return clean(value);
 }
 
 function exactHeader(row: string[]): boolean {

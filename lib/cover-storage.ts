@@ -178,7 +178,7 @@ export async function deleteOwnedCoverAttachment(
   return true;
 }
 
-function jpegDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+export function jpegDimensions(bytes: Uint8Array): { width: number; height: number } | null {
   if (bytes.byteLength < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
   const startOfFrame = new Set([
     0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7,

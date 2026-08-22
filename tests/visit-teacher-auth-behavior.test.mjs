@@ -84,6 +84,7 @@ async function database() {
     "0015_glamorous_namora.sql",
     "0016_busy_jane_foster.sql",
     "0017_fresh_robbie_robertson.sql",
+    "0018_yielding_skaar.sql",
   ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
   const now = new Date().toISOString();
   insertUser(sqlite, "USR-LIB", "Бібліотекар", "library@example.test", "auth-library", "librarian", now);
@@ -194,7 +195,23 @@ async function issuedCredential(context, teacherUserId = "USR-T1") {
 function wrongCode(code) {
   const raw = code.replace("-", "");
   const last = raw.at(-1) === "2" ? "3" : "2";
+  if (raw.length === 4) return `${raw.slice(0, -1)}${last}`;
   return `${raw.slice(0, 5)}-${raw.slice(5, -1)}${last}`;
+}
+
+async function permanentPinCredential(context, ip = "203.0.113.30", pin = "4826") {
+  const issued = await issuedCredential(context);
+  const loginId = context.sqlite.prepare("SELECT login_id FROM visit_teacher_credentials").get().login_id;
+  const temporarySession = await auth.createVisitTeacherSession(
+    context.db, request(ip), { loginId, code: issued.code },
+  );
+  const rotated = await auth.rotateVisitTeacherCode(
+    context.db,
+    request(ip, temporarySession.token),
+    { requestId: commandId(), currentCode: issued.code, newPin: pin },
+  );
+  assert.ok(rotated.token);
+  return { issued, loginId, pin, session: rotated };
 }
 
 test("Excel code import is atomic, idempotent and never stores plaintext", async () => {
@@ -252,7 +269,7 @@ test("Excel code import is atomic, idempotent and never stores plaintext", async
 test("Excel code import rejects malformed, duplicate and stale rows without partial writes", async () => {
   assert.throws(() => auth.validateVisitTeacherCodeImportInput({
     requestId: commandId(), confirmation: "IMPORT_MISSING_TEACHER_CODES",
-    rows: [{ teacherUserId: "USR-T1", fullName: "Шевченко Олена", code: "1234" }],
+    rows: [{ teacherUserId: "USR-T1", fullName: "Шевченко Олена", code: "123" }],
   }), (error) => error.code === "validation_failed");
   assert.throws(() => auth.validateVisitTeacherCodeImportInput({
     requestId: commandId(), confirmation: "IMPORT_MISSING_TEACHER_CODES",
@@ -286,7 +303,7 @@ test("Excel code import rejects malformed, duplicate and stale rows without part
 test("one-time code, Ukrainian directory and opaque cookie session work without email", async () => {
   const context = await database();
   const issued = await issuedCredential(context);
-  assert.match(issued.code, /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}$/u);
+  assert.match(issued.code, /^\d{4}$/u);
   const directory = await auth.listVisitTeacherDirectory(context.db, "шев", request());
   assert.deepEqual(directory, [{ loginId: context.sqlite.prepare(
     "SELECT login_id FROM visit_teacher_credentials WHERE teacher_user_id='USR-T1'",
@@ -429,12 +446,11 @@ test("school-NAT login limit permits 30 cross-account failures and blocks failur
 
 test("fourth successful login keeps exactly three sessions by revoking the oldest", async () => {
   const context = await database();
-  const issued = await issuedCredential(context);
-  const loginId = context.sqlite.prepare("SELECT login_id FROM visit_teacher_credentials").get().login_id;
-  const sessions = [];
-  for (let index = 0; index < 4; index += 1) {
+  const credential = await permanentPinCredential(context);
+  const sessions = [credential.session];
+  for (let index = 0; index < 3; index += 1) {
     sessions.push(await auth.createVisitTeacherSession(
-      context.db, request("203.0.113.30"), { loginId, code: issued.code },
+      context.db, request("203.0.113.30"), { loginId: credential.loginId, code: credential.pin },
     ));
   }
   assert.equal(context.sqlite.prepare(`SELECT COUNT(*) AS n FROM visit_teacher_sessions
@@ -456,17 +472,16 @@ test("session login races fail closed and do not revoke an existing oldest sessi
     "UPDATE users SET status='inactive' WHERE id='USR-T1'",
   ]) {
     const context = await database();
-    const issued = await issuedCredential(context);
-    const loginId = context.sqlite.prepare("SELECT login_id FROM visit_teacher_credentials").get().login_id;
-    const previous = [];
-    for (let index = 0; index < 3; index += 1) {
+    const credential = await permanentPinCredential(context, "203.0.113.40");
+    const previous = [credential.session];
+    for (let index = 0; index < 2; index += 1) {
       previous.push(await auth.createVisitTeacherSession(
-        context.db, request(`203.0.113.${40 + index}`), { loginId, code: issued.code },
+        context.db, request(`203.0.113.${41 + index}`), { loginId: credential.loginId, code: credential.pin },
       ));
     }
     context.db.beforeBatch = () => context.sqlite.exec(mutation);
     await assert.rejects(
-      () => auth.createVisitTeacherSession(context.db, request("203.0.113.50"), { loginId, code: issued.code }),
+      () => auth.createVisitTeacherSession(context.db, request("203.0.113.50"), { loginId: credential.loginId, code: credential.pin }),
       (error) => error.code === "teacher_auth_unavailable",
     );
     assert.equal(context.sqlite.prepare(`SELECT COUNT(*) AS n FROM visit_teacher_sessions
@@ -478,19 +493,18 @@ test("session login races fail closed and do not revoke an existing oldest sessi
 
 test("session login reasserts rate limits inside the successful batch", async () => {
   const context = await database();
-  const issued = await issuedCredential(context);
-  const loginId = context.sqlite.prepare("SELECT login_id FROM visit_teacher_credentials").get().login_id;
-  const previous = [];
-  for (let index = 0; index < 3; index += 1) {
+  const credential = await permanentPinCredential(context, "203.0.113.60");
+  const previous = [credential.session];
+  for (let index = 0; index < 2; index += 1) {
     previous.push(await auth.createVisitTeacherSession(
       context.db,
-      request(`203.0.113.${60 + index}`),
-      { loginId, code: issued.code },
+      request(`203.0.113.${61 + index}`),
+      { loginId: credential.loginId, code: credential.pin },
     ));
   }
   const racedIp = "203.0.113.70";
   const pairScope = createHmac("sha256", globalThis.__VISIT_TEST_ENV.VISIT_TEACHER_AUTH_PEPPER)
-    .update(`pair:${racedIp}:${loginId}`)
+    .update(`pair:${racedIp}:${credential.loginId}`)
     .digest("hex");
   context.db.beforeBatch = () => context.sqlite.prepare(`INSERT INTO visit_teacher_login_limits (
     scope_hash,attempts,window_started_at,blocked_until,updated_at
@@ -501,7 +515,7 @@ test("session login reasserts rate limits inside the successful batch", async ()
     new Date().toISOString(),
   );
   await assert.rejects(
-    () => auth.createVisitTeacherSession(context.db, request(racedIp), { loginId, code: issued.code }),
+    () => auth.createVisitTeacherSession(context.db, request(racedIp), { loginId: credential.loginId, code: credential.pin }),
     (error) => error.code === "rate_limited" && error.status === 429,
   );
   assert.equal(context.sqlite.prepare(`SELECT COUNT(*) AS n FROM visit_teacher_sessions
@@ -930,7 +944,7 @@ test("lost-phone protection atomically disconnects Telegram and returns one repl
     "USR-T1",
     { requestId: commandId(), expectedCredentialVersion: 1, expectedTelegramVersion: 1 },
   );
-  assert.match(protectedAccess.code, /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}$/u);
+  assert.match(protectedAccess.code, /^\d{4}$/u);
   assert.deepEqual(protectedAccess.telegram, { connected: false, status: "disabled", version: 2 });
   assert.deepEqual(
     { ...context.sqlite.prepare(`SELECT version,must_change_pin,status,last_login_at
