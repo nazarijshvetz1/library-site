@@ -64,6 +64,9 @@ export default async function Home() {
             <a className="button button-secondary" href={PUBLIC_CATALOG_URL}>
               Переглянути каталог
             </a>
+            <a className="button button-secondary" href="/suggest-book">
+              Запропонувати книгу
+            </a>
           </div>
 
           <p className="privacy-note">

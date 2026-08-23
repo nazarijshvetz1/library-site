@@ -24,6 +24,6 @@ export default async function TelegramLibrarianPage({ searchParams }: PageProps)
   );
 }
 
-function boundedTarget(value: string | string[] | undefined): "home" | "visits" | "teachers" {
-  return value === "visits" || value === "teachers" ? value : "home";
+function boundedTarget(value: string | string[] | undefined): "home" | "visits" | "teachers" | "acquisitions" {
+  return value === "visits" || value === "teachers" || value === "acquisitions" ? value : "home";
 }

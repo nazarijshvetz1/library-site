@@ -9,6 +9,7 @@ const root = process.cwd();
 const generator = await import(pathToFileURL(path.join(root, "lib/library-excel-export.ts")).href);
 const store = await import(pathToFileURL(path.join(root, "lib/library-export-store.ts")).href);
 const codeTemplate = await import(pathToFileURL(path.join(root, "lib/teacher-code-import-excel.ts")).href);
+const acquisitionExcel = await import(pathToFileURL(path.join(root, "lib/acquisition-excel.ts")).href);
 
 class PreparedStatement {
   constructor(database, sql, bindings = []) { this.database = database; this.sql = sql; this.bindings = bindings; }
@@ -149,6 +150,23 @@ test("teacher-code Excel template is styled, bounded and contains no secret code
   assert.match(styles, /<name val="Times New Roman"\/>/u);
   assert.equal(workbook.rowCount, 2);
   assert.match(workbook.fileName, /^Шаблон кодів учителів — 2026-08-22\.xlsx$/u);
+});
+
+test("acquisition template and export keep the exact four-sheet contract without ISBN", () => {
+  for (const workbook of [
+    acquisitionExcel.createAcquisitionImportTemplate("2026-08-23T09:15:00.000Z"),
+    acquisitionExcel.createAcquisitionExport([], "2026-08-23T09:15:00.000Z"),
+  ]) {
+    const entries = unzipStored(workbook.bytes);
+    const workbookXml = new TextDecoder().decode(entries.get("xl/workbook.xml"));
+    const allXml = [...entries.values()].map((bytes) => new TextDecoder().decode(bytes)).join("\n");
+    assert.equal((workbookXml.match(/<sheet\s/gu) ?? []).length, 4);
+    for (const sheet of ["Дозамовлення", "Художня та наукова література", "Пропозиції учнів", "Довідники"]) {
+      assert.match(workbookXml, new RegExp(`name="${sheet}"`, "u"));
+    }
+    assert.doesNotMatch(workbookXml, /name="Стани"/u);
+    assert.doesNotMatch(allXml, /ISBN/iu);
+  }
 });
 
 test("protected export page and navigation expose one-click full Excel download", async () => {

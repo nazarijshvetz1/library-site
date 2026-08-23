@@ -2030,6 +2030,7 @@ function telegramRoleKeyboard(
     const buttons = [
       ["👤 Кабінет учителя", "/teacher/telegram?tab=overview"],
       ["📚 Каталог і замовлення", "/teacher/telegram?tab=orders"],
+      ["➕ Запропонувати придбання", "/teacher/telegram?tab=acquisition"],
       ["📅 Записатися / мої відвідування", "/teacher/telegram?tab=visits"],
       ["📖 Мої посібники", "/teacher/telegram?tab=loans"],
       ["🔔 Мої повідомлення", "/teacher/telegram?tab=notifications"],
@@ -2043,6 +2044,7 @@ function telegramRoleKeyboard(
   if (role === "admin" || role === "librarian") {
     const buttons = [
       ["🆕 Замовлення вчителів", "/librarian/telegram?target=visits", "/librarian/visits#request-inbox-title"],
+      ["➕ Комплектування фонду", "/librarian/telegram?target=acquisitions", "/librarian/acquisitions"],
       ["📅 Відвідування", "/librarian/telegram?target=visits", "/librarian/visits"],
       ["👩‍🏫 Вчителі", "/librarian/telegram?target=teachers", "/librarian/teachers"],
       ["🏠 Кабінет бібліотекаря", "/librarian/telegram?target=home", "/librarian"],

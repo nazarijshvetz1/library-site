@@ -169,6 +169,24 @@ const materialRequestStatuses = [
   "cancelled",
 ] as const;
 const materialRequestActorKinds = ["teacher", "librarian", "system"] as const;
+const acquisitionRequesterKinds = ["teacher", "student"] as const;
+const acquisitionCategories = ["educational", "literature"] as const;
+const acquisitionSourceKinds = ["catalog", "manual"] as const;
+const acquisitionLiteratureKinds = ["none", "fiction", "science", "popular_science", "other"] as const;
+const acquisitionRequestStatuses = [
+  "submitted",
+  "in_review",
+  "clarification",
+  "approved",
+  "planned",
+  "ordered",
+  "partially_received",
+  "received",
+  "rejected",
+  "cancelled",
+] as const;
+const acquisitionActorKinds = ["teacher", "student", "librarian", "import", "system"] as const;
+const acquisitionImportStatuses = ["completed"] as const;
 
 /**
  * Canonical bibliographic record. `id` is the durable CAT-ID while
@@ -1748,6 +1766,213 @@ export const materialRequestEvents = sqliteTable(
       or (${table.actorKind} in ('teacher','librarian') and ${table.actorUserId} is not null)`),
     check("material_request_events_kind_not_blank", sql`length(trim(${table.kind})) > 0`),
     check("material_request_events_metadata_valid", sql`${table.metadataJson} is null or json_valid(${table.metadataJson})`),
+  ],
+);
+
+/** Excel provenance for acquisition imports. The original workbook is not retained. */
+export const acquisitionImportBatches = sqliteTable(
+  "acquisition_import_batches",
+  {
+    id: text("id").primaryKey(),
+    workbookSha256: text("workbook_sha256").notNull(),
+    fileName: text("file_name").notNull(),
+    rowCount: integer("row_count").notNull(),
+    importedCount: integer("imported_count").notNull(),
+    status: text("status", { enum: acquisitionImportStatuses }).notNull().default("completed"),
+    resultJson: text("result_json").notNull(),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_acquisition_import_batches_sha256").on(table.workbookSha256),
+    index("idx_acquisition_import_batches_created").on(table.createdAt),
+    check("acquisition_import_batches_hash_valid", sql`length(${table.workbookSha256}) = 64`),
+    check("acquisition_import_batches_file_not_blank", sql`length(trim(${table.fileName})) > 0`),
+    check("acquisition_import_batches_counts_valid", sql`${table.rowCount} > 0 and ${table.importedCount} >= 0 and ${table.importedCount} <= ${table.rowCount}`),
+    check("acquisition_import_batches_status_valid", sql`${table.status} = 'completed'`),
+    check("acquisition_import_batches_result_valid", sql`json_valid(${table.resultJson})`),
+  ],
+);
+
+/** Requests to acquire new copies or new titles. This never reserves or issues current stock. */
+export const acquisitionRequests = sqliteTable(
+  "acquisition_requests",
+  {
+    id: text("id").primaryKey(),
+    publicNumber: text("public_number").notNull(),
+    submissionKey: text("submission_key").notNull(),
+    submissionHash: text("submission_hash").notNull(),
+    requesterKind: text("requester_kind", { enum: acquisitionRequesterKinds }).notNull(),
+    teacherUserId: text("teacher_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    requesterName: text("requester_name").notNull(),
+    requesterClassYearId: text("requester_class_year_id").references(() => classYears.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    requesterClassName: text("requester_class_name").notNull().default(""),
+    category: text("category", { enum: acquisitionCategories }).notNull(),
+    sourceKind: text("source_kind", { enum: acquisitionSourceKinds }).notNull(),
+    literatureKind: text("literature_kind", { enum: acquisitionLiteratureKinds }).notNull().default("none"),
+    materialId: text("material_id").references(() => materials.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    title: text("title").notNull(),
+    author: text("author").notNull(),
+    publicationYear: integer("publication_year").notNull(),
+    requestedQuantity: integer("requested_quantity").notNull(),
+    approvedQuantity: integer("approved_quantity"),
+    orderedQuantity: integer("ordered_quantity").notNull().default(0),
+    receivedQuantity: integer("received_quantity").notNull().default(0),
+    sourceUrl: text("source_url").notNull(),
+    subject: text("subject").notNull().default(""),
+    targetClass: text("target_class").notNull().default(""),
+    requesterNote: text("requester_note").notNull().default(""),
+    librarianNote: text("librarian_note").notNull().default(""),
+    clarificationMessage: text("clarification_message").notNull().default(""),
+    rejectionReason: text("rejection_reason").notNull().default(""),
+    status: text("status", { enum: acquisitionRequestStatuses }).notNull().default("submitted"),
+    duplicateKey: text("duplicate_key").notNull(),
+    academicYearId: text("academic_year_id")
+      .notNull()
+      .references(() => academicYears.id, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    academicYearLabel: text("academic_year_label").notNull().default(""),
+    importBatchId: text("import_batch_id").references(() => acquisitionImportBatches.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    sourceImportKey: text("source_import_key"),
+    reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    version: integer("version").notNull().default(1),
+    submittedAt: text("submitted_at").notNull(),
+    reviewedAt: text("reviewed_at"),
+    approvedAt: text("approved_at"),
+    orderedAt: text("ordered_at"),
+    receivedAt: text("received_at"),
+    rejectedAt: text("rejected_at"),
+    cancelledAt: text("cancelled_at"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_acquisition_requests_public_number").on(table.publicNumber),
+    uniqueIndex("idx_acquisition_requests_submission_key").on(table.submissionKey),
+    uniqueIndex("idx_acquisition_requests_source_import_key").on(table.sourceImportKey),
+    index("idx_acquisition_requests_teacher_created").on(table.teacherUserId, table.createdAt),
+    index("idx_acquisition_requests_status_created").on(table.status, table.createdAt),
+    index("idx_acquisition_requests_duplicate_status").on(table.academicYearId, table.duplicateKey, table.status),
+    index("idx_acquisition_requests_year_status").on(table.academicYearId, table.status),
+    check("acquisition_requests_requester_valid", sql`
+      (${table.requesterKind} = 'teacher' and ${table.teacherUserId} is not null and ${table.requesterClassYearId} is null)
+      or (${table.requesterKind} = 'student' and ${table.teacherUserId} is null and ${table.requesterClassYearId} is not null and length(trim(${table.requesterClassName})) > 0)`),
+    check("acquisition_requests_category_valid", sql`${table.category} in ('educational','literature')`),
+    check("acquisition_requests_source_valid", sql`${table.sourceKind} in ('catalog','manual') and (${table.sourceKind} != 'catalog' or ${table.materialId} is not null)`),
+    check("acquisition_requests_literature_valid", sql`
+      (${table.category} = 'educational' and ${table.literatureKind} = 'none')
+      or (${table.category} = 'literature' and ${table.literatureKind} in ('fiction','science','popular_science','other'))`),
+    check("acquisition_requests_student_literature", sql`${table.requesterKind} != 'student' or ${table.category} = 'literature'`),
+    check("acquisition_requests_text_valid", sql`
+      length(trim(${table.publicNumber})) > 0 and length(trim(${table.submissionKey})) > 0
+      and length(${table.submissionHash}) = 64 and length(trim(${table.requesterName})) > 0
+      and length(trim(${table.title})) > 0 and length(trim(${table.author})) > 0
+      and length(trim(${table.sourceUrl})) > 0 and length(trim(${table.duplicateKey})) > 0
+      and length(trim(${table.academicYearLabel})) > 0`),
+    check("acquisition_requests_year_valid", sql`${table.publicationYear} between 1000 and 2100`),
+    check("acquisition_requests_quantities_valid", sql`
+      ${table.requestedQuantity} between 1 and 1000
+      and (${table.approvedQuantity} is null or ${table.approvedQuantity} between 0 and 1000)
+      and ${table.orderedQuantity} between 0 and 1000
+      and ${table.receivedQuantity} between 0 and 1000
+      and ${table.orderedQuantity} <= coalesce(${table.approvedQuantity}, ${table.requestedQuantity})
+      and ${table.receivedQuantity} <= ${table.orderedQuantity}`),
+    check("acquisition_requests_status_valid", sql`${table.status} in ('submitted','in_review','clarification','approved','planned','ordered','partially_received','received','rejected','cancelled')`),
+    check("acquisition_requests_terminal_consistent", sql`
+      (${table.status} = 'received' and ${table.receivedAt} is not null and ${table.receivedQuantity} > 0)
+      or (${table.status} = 'rejected' and ${table.rejectedAt} is not null and length(trim(${table.rejectionReason})) > 0)
+      or (${table.status} = 'cancelled' and ${table.cancelledAt} is not null)
+      or (${table.status} not in ('received','rejected','cancelled') and ${table.receivedAt} is null and ${table.rejectedAt} is null and ${table.cancelledAt} is null)`),
+    check("acquisition_requests_version_positive", sql`${table.version} > 0`),
+  ],
+);
+
+/** Immutable history for every acquisition request. */
+export const acquisitionRequestEvents = sqliteTable(
+  "acquisition_request_events",
+  {
+    id: text("id").primaryKey(),
+    requestId: text("request_id")
+      .notNull()
+      .references(() => acquisitionRequests.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    actorUserId: text("actor_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    actorKind: text("actor_kind", { enum: acquisitionActorKinds }).notNull(),
+    kind: text("kind").notNull(),
+    fromStatus: text("from_status", { enum: acquisitionRequestStatuses }),
+    toStatus: text("to_status", { enum: acquisitionRequestStatuses }).notNull(),
+    metadataJson: text("metadata_json"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    index("idx_acquisition_request_events_request_created").on(table.requestId, table.createdAt),
+    check("acquisition_request_events_actor_valid", sql`${table.actorKind} in ('teacher','student','librarian','import','system')`),
+    check("acquisition_request_events_actor_consistent", sql`
+      (${table.actorKind} in ('student','system') and ${table.actorUserId} is null)
+      or (${table.actorKind} in ('teacher','librarian','import') and ${table.actorUserId} is not null)`),
+    check("acquisition_request_events_kind_not_blank", sql`length(trim(${table.kind})) > 0`),
+    check("acquisition_request_events_metadata_valid", sql`${table.metadataJson} is null or json_valid(${table.metadataJson})`),
+  ],
+);
+
+/** Receipt lines allocated to procurement requests. Stock is posted by the existing receipt workflow. */
+export const acquisitionReceiptAllocations = sqliteTable(
+  "acquisition_receipt_allocations",
+  {
+    id: text("id").primaryKey(),
+    requestId: text("request_id")
+      .notNull()
+      .references(() => acquisitionRequests.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    inventoryTransactionLineId: text("inventory_transaction_line_id")
+      .notNull()
+      .references(() => inventoryTransactionLines.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    allocatedQuantity: integer("allocated_quantity").notNull(),
+    actorUserId: text("actor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_acquisition_receipt_request_line").on(table.requestId, table.inventoryTransactionLineId),
+    index("idx_acquisition_receipt_line").on(table.inventoryTransactionLineId),
+    check("acquisition_receipt_allocated_positive", sql`${table.allocatedQuantity} > 0`),
+  ],
+);
+
+/** Privacy-preserving rate limit for anonymous student submissions. */
+export const acquisitionPublicRateLimits = sqliteTable(
+  "acquisition_public_rate_limits",
+  {
+    scopeHash: text("scope_hash").primaryKey(),
+    attempts: integer("attempts").notNull().default(0),
+    windowStartedAt: text("window_started_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("idx_acquisition_public_limits_updated").on(table.updatedAt),
+    check("acquisition_public_limits_hash_valid", sql`length(${table.scopeHash}) = 64`),
+    check("acquisition_public_limits_attempts_valid", sql`${table.attempts} >= 0`),
   ],
 );
 

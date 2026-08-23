@@ -131,6 +131,7 @@ export default function LibrarianVisitWorkspace({
         <div className={styles.account}>
           <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=home" : "/librarian"}>Кабінет</a>
           <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=teachers" : "/librarian/teachers"}>Вчителі</a>
+          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=acquisitions" : "/librarian/acquisitions"}>Комплектування</a>
           {!telegramMiniApp ? <a href="/librarian/export">Експорт в Excel</a> : null}
           {!telegramMiniApp ? <a href="/librarian/import">Імпорт з Excel</a> : null}
           <span><strong>{displayName}</strong><small>Бібліотекар</small></span>

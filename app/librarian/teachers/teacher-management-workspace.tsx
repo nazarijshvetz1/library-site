@@ -112,6 +112,7 @@ export default function TeacherManagementWorkspace({
         <nav className={styles.headerNav} aria-label="Розділи кабінету бібліотекаря">
           <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=home" : "/librarian"}>Каталог</a>
           <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=visits" : "/librarian/visits"}>Розклад</a>
+          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=acquisitions" : "/librarian/acquisitions"}>Комплектування</a>
           {!telegramMiniApp ? <a href="/librarian/export">Експорт в Excel</a> : null}
           {!telegramMiniApp ? <a href="/librarian/import">Імпорт з Excel</a> : null}
         </nav>

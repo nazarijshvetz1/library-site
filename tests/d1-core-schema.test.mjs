@@ -24,6 +24,7 @@ const migrationFiles = [
   "drizzle/0017_fresh_robbie_robertson.sql",
   "drizzle/0018_yielding_skaar.sql",
   "drizzle/0019_kindly_wolfsbane.sql",
+  "drizzle/0020_pretty_squadron_sinister.sql",
 ];
 
 async function migratedDatabase() {

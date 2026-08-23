@@ -32,8 +32,8 @@ function boundedMode(value: string | string[] | undefined): "login" | "activate"
   return value === "activate" ? "activate" : "login";
 }
 
-function boundedTab(value: string | string[] | undefined): "overview" | "visits" | "orders" | "loans" | "notifications" {
-  return value === "visits" || value === "orders" || value === "loans" || value === "notifications"
+function boundedTab(value: string | string[] | undefined): "overview" | "visits" | "orders" | "acquisition" | "loans" | "notifications" {
+  return value === "visits" || value === "orders" || value === "acquisition" || value === "loans" || value === "notifications"
     ? value
     : "overview";
 }

@@ -58,6 +58,7 @@ import {
   writeVisitPendingIntent,
 } from "./visit-client";
 import { normalizeCoverPhotoForUpload } from "@/lib/cover-client";
+import TeacherAcquisitionPanel from "@/app/teacher/acquisition/teacher-acquisition-panel";
 import styles from "./visits.module.css";
 
 const LOGO_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
@@ -67,7 +68,7 @@ type Props = {
   initialDate: string;
   initialStartTime: string;
   initialEndTime: string;
-  initialTab?: "overview" | "visits" | "orders" | "loans" | "notifications";
+  initialTab?: "overview" | "visits" | "orders" | "acquisition" | "loans" | "notifications";
   initialOrderMaterialId?: string;
   telegramMiniApp?: boolean;
 };
@@ -78,6 +79,7 @@ const TEACHER_TABS: Array<{ id: TeacherTab; label: string; icon: string }> = [
   { id: "overview", label: "Огляд", icon: "⌂" },
   { id: "visits", label: "Відвідування", icon: "◷" },
   { id: "orders", label: "Замовлення", icon: "▤" },
+  { id: "acquisition", label: "Запропонувати придбання", icon: "+" },
   { id: "loans", label: "Мої посібники", icon: "▥" },
   { id: "notifications", label: "Повідомлення", icon: "●" },
 ];
@@ -882,7 +884,7 @@ function VisitBookingPanel({
   initialDate: string;
   initialStartTime: string;
   initialEndTime: string;
-  initialTab: "overview" | "visits" | "orders" | "loans" | "notifications";
+  initialTab: "overview" | "visits" | "orders" | "acquisition" | "loans" | "notifications";
   initialOrderMaterialId: string;
   telegramMiniApp: boolean;
 }) {
@@ -1167,6 +1169,7 @@ function VisitBookingPanel({
             loading={loading}
             onOpenVisits={() => setActiveTab("visits")}
             onOpenOrders={() => setActiveTab("orders")}
+            onOpenAcquisition={() => setActiveTab("acquisition")}
             onOpenLoans={() => setActiveTab("loans")}
           />
         ) : null}
@@ -1244,6 +1247,7 @@ function VisitBookingPanel({
         </> : null}
 
         {activeTab === "orders" ? <TeacherOrdersPanel pendingScope={pendingScope} initialMaterialId={initialOrderMaterialId} /> : null}
+        {activeTab === "acquisition" ? <TeacherAcquisitionPanel /> : null}
         {activeTab === "loans" ? <TeacherLoansPanel /> : null}
         {activeTab === "notifications" ? <TeacherNotificationsPanel pendingScope={pendingScope} /> : null}
         {securityOpen ? <TeacherSecurityPanel pendingScope={pendingScope} onClose={() => setSecurityOpen(false)} onSessionRotated={onSessionRotated} /> : null}
@@ -1372,6 +1376,7 @@ type TeacherProfileEnvelope = { schemaVersion: 1; success: true; profile: Teache
 function teacherTabTitle(tab: TeacherTab): string {
   if (tab === "visits") return "Мої відвідування";
   if (tab === "orders") return "Замовлення матеріалів";
+  if (tab === "acquisition") return "Запропонувати придбання";
   if (tab === "loans") return "Мої посібники";
   if (tab === "notifications") return "Мої повідомлення";
   return "Вітаємо у вашому кабінеті";
@@ -1383,6 +1388,7 @@ function TeacherOverview({
   loading,
   onOpenVisits,
   onOpenOrders,
+  onOpenAcquisition,
   onOpenLoans,
 }: {
   teacherName: string;
@@ -1390,6 +1396,7 @@ function TeacherOverview({
   loading: boolean;
   onOpenVisits: () => void;
   onOpenOrders: () => void;
+  onOpenAcquisition: () => void;
   onOpenLoans: () => void;
 }) {
   const nextBooking = bookings[0] ?? null;
@@ -1508,6 +1515,11 @@ function TeacherOverview({
         <div className={styles.cardHeading}><div><span>Каталог</span><h2>Потрібні матеріали</h2></div></div>
         <p className={styles.empty}>Знайдіть підручники або інші матеріали й надішліть одне замовлення бібліотекарю.</p>
         <button className={styles.quiet} type="button" onClick={onOpenOrders}>Створити замовлення</button>
+      </article>
+      <article className={styles.card}>
+        <div className={styles.cardHeading}><div><span>Комплектування</span><h2>Запропонувати придбання</h2></div></div>
+        <p className={styles.empty}>Дозамовте примірники, яких бракує, або запропонуйте нове видання для фонду.</p>
+        <button className={styles.quiet} type="button" onClick={onOpenAcquisition}>Створити пропозицію</button>
       </article>
       <article className={styles.card}>
         <div className={styles.cardHeading}><div><span>Облік</span><h2>Видані посібники</h2></div></div>

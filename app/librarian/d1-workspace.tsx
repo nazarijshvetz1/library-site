@@ -59,6 +59,7 @@ type Tool =
   | "contacts"
   | AcademicTool;
 type LoadState = "idle" | "loading" | "ready" | "error";
+type AcquisitionMaterialPrefill = { title: string; author: string; publicationYear: string; subject: string; sourceUrl: string; quantity: string };
 
 type CatalogMaterial = {
   id: string;
@@ -471,6 +472,8 @@ export default function D1LibrarianWorkspace({
   const [locations, setLocations] = useState<LibraryLocation[]>([]);
   const [referenceState, setReferenceState] = useState<LoadState>("loading");
   const [referenceError, setReferenceError] = useState("");
+  const [acquisitionPrefill, setAcquisitionPrefill] = useState<AcquisitionMaterialPrefill | null>(null);
+  const [acquisitionReturnId, setAcquisitionReturnId] = useState("");
   const workspaceTitleRef = useRef<HTMLHeadingElement>(null);
 
   const loadDetail = useCallback(async (materialId: string) => {
@@ -568,6 +571,38 @@ export default function D1LibrarianWorkspace({
     [loadDetail],
   );
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      const requestedTool = params.get("tool");
+      if (requestedTool === "receipt") {
+        setAcquisitionReturnId((params.get("acquisition") ?? "").trim());
+        const materialId = (params.get("material") ?? "").trim().toUpperCase();
+        if (/^CAT-\d{4,}$/u.test(materialId)) {
+          setTool("receipt");
+          setFilters((current) => ({ ...current, q: materialId, available: false }));
+          selectMaterial(materialId);
+        }
+        return;
+      }
+      if (requestedTool === "create") {
+        const title = (params.get("title") ?? "").trim();
+        if (!title) return;
+        setTool("create");
+        setAcquisitionReturnId((params.get("acquisition") ?? "").trim());
+        setAcquisitionPrefill({
+          title,
+          author: (params.get("author") ?? "").trim(),
+          publicationYear: (params.get("year") ?? "").trim(),
+          subject: (params.get("subject") ?? "").trim(),
+          sourceUrl: (params.get("link") ?? "").trim(),
+          quantity: (params.get("quantity") ?? "").trim(),
+        });
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [selectMaterial]);
+
   async function loadMore() {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
@@ -652,6 +687,10 @@ export default function D1LibrarianWorkspace({
           <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=teachers" : "/librarian/teachers"} className={styles.catalogLink}>
             <span className={styles.catalogLinkLabel}>Вчителі</span>{" "}
             <span aria-hidden="true">●</span>
+          </a>
+          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=acquisitions" : "/librarian/acquisitions"} className={styles.catalogLink}>
+            <span className={styles.catalogLinkLabel}>Комплектування</span>{" "}
+            <span aria-hidden="true">＋</span>
           </a>
           {!telegramMiniApp ? <a href="/librarian/export" className={styles.catalogLink}>
             <span className={styles.catalogLinkLabel}>Експорт в Excel</span>{" "}
@@ -812,8 +851,16 @@ export default function D1LibrarianWorkspace({
                   subjects={subjects}
                   publicationTypes={publicationTypes}
                   facetsState={facetsState}
+                  initialPrefill={acquisitionPrefill}
                   onCreated={async (materialId) => {
                     setRefreshToken((value) => value + 1);
+                    if (acquisitionReturnId) {
+                      const returnBase = window.location.pathname.startsWith("/librarian/telegram/")
+                        ? "/librarian/telegram/cabinet?target=acquisitions&"
+                        : "/librarian/acquisitions?";
+                      window.location.assign(`${returnBase}linkRequest=${encodeURIComponent(acquisitionReturnId)}&material=${encodeURIComponent(materialId)}`);
+                      return;
+                    }
                     selectMaterial(materialId);
                   }}
                   onOpenExisting={(materialId) => {
@@ -832,7 +879,15 @@ export default function D1LibrarianWorkspace({
                   locations={locations}
                   referenceState={referenceState}
                   referenceError={referenceError}
-                  onSaved={refreshSelected}
+                  onSaved={async () => {
+                    await refreshSelected();
+                    if (acquisitionReturnId) {
+                      const returnBase = window.location.pathname.startsWith("/librarian/telegram/")
+                        ? "/librarian/telegram/cabinet?target=acquisitions&"
+                        : "/librarian/acquisitions?";
+                      window.location.assign(`${returnBase}receiptRequest=${encodeURIComponent(acquisitionReturnId)}`);
+                    }
+                  }}
                 />
               ) : null}
               {tool === "transfer" ? (
@@ -1991,6 +2046,7 @@ function MaterialCreatePanel({
   subjects,
   publicationTypes,
   facetsState,
+  initialPrefill,
   onCreated,
   onOpenExisting,
   onOpenMaterial,
@@ -2003,18 +2059,26 @@ function MaterialCreatePanel({
   subjects: string[];
   publicationTypes: string[];
   facetsState: LoadState;
+  initialPrefill: AcquisitionMaterialPrefill | null;
   onCreated: (materialId: string) => Promise<void>;
   onOpenExisting: (materialId: string) => void;
   onOpenMaterial: () => void;
 }) {
-  const [draft, setDraft] = useState<MaterialEditDraft>(emptyMaterialDraft);
-  const [links, setLinks] = useState<EditableLinkDraft[]>([]);
-  const [withReceipt, setWithReceipt] = useState(false);
+  const [draft, setDraft] = useState<MaterialEditDraft>(() => initialPrefill ? {
+    ...emptyMaterialDraft(), title: initialPrefill.title, author: initialPrefill.author,
+    publicationYear: initialPrefill.publicationYear, subject: initialPrefill.subject,
+  } : emptyMaterialDraft());
+  const [links, setLinks] = useState<EditableLinkDraft[]>(() => initialPrefill && /^https?:\/\//iu.test(initialPrefill.sourceUrl)
+    ? [{ key: crypto.randomUUID(), id: null, kind: "store", label: "Джерело пропозиції", url: initialPrefill.sourceUrl, isPublic: false }]
+    : []);
+  const parsedPrefillQuantity = Number(initialPrefill?.quantity ?? "");
+  const validPrefillQuantity = Number.isSafeInteger(parsedPrefillQuantity) && parsedPrefillQuantity > 0 && parsedPrefillQuantity <= 1_000;
+  const [withReceipt, setWithReceipt] = useState(validPrefillQuantity);
   const countableLocations = locations.filter((location) => location.type !== "service");
   const [locationId, setLocationId] = useState("");
   const effectiveLocationId = locationId || countableLocations[0]?.id || "";
   const [condition, setCondition] = useState("good");
-  const [quantity, setQuantity] = useState("1");
+  const [quantity, setQuantity] = useState(() => validPrefillQuantity ? String(parsedPrefillQuantity) : "1");
   const [occurredAt, setOccurredAt] = useState(() => todayInKyiv());
   const [documentNumber, setDocumentNumber] = useState("");
   const [receiptNotes, setReceiptNotes] = useState("");
