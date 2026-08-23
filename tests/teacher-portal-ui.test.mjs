@@ -15,6 +15,7 @@ import {
   visitHorizonEnd,
   writePortalPendingIntent,
 } from "../app/visits/visit-client.ts";
+import { finishTelegramLogin } from "../app/teacher/telegram/telegram-login-finish.ts";
 
 const root = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
@@ -295,13 +296,14 @@ test("public catalog navigation names the cabinet while preserving explicit sche
   assert.match(css, /a:not\(\.teacher-nav-link\)\{display:none\}/u);
 });
 
-test("Telegram Mini App launch is bounded, signed server-side and stays on its framed cabinet route", async () => {
-  const [page, cabinet, launch, route, activationRoute, validator, teacherAuth, workspace, telegramApi] = await Promise.all([
+test("Telegram Mini App launch is bounded, signed server-side and returns to chat after login", async () => {
+  const [page, cabinet, launch, route, activationRoute, menuRoute, validator, teacherAuth, workspace, telegramApi] = await Promise.all([
     read("app/teacher/telegram/page.tsx"),
     read("app/teacher/telegram/cabinet/page.tsx"),
     read("app/teacher/telegram/telegram-teacher-launch.tsx"),
     read("app/api/teacher/session/telegram/route.ts"),
     read("app/api/teacher/session/telegram/activate/route.ts"),
+    read("app/api/teacher/session/telegram/menu/route.ts"),
     read("lib/telegram-mini-app-auth.ts"),
     read("lib/visit-teacher-auth.ts"),
     read("app/visits/visit-booking-workspace.tsx"),
@@ -309,13 +311,18 @@ test("Telegram Mini App launch is bounded, signed server-side and stays on its f
   ]);
   assert.match(page, /boundedTab\(params\?\.tab\)/u);
   assert.match(page, /boundedMode\(params\?\.mode\)/u);
+  assert.match(page, /returnToChat=\{launchMode !== null\}/u);
   assert.match(page, /robots: \{ index: false, follow: false \}/u);
   assert.match(launch, /window\.Telegram\?\.WebApp/u);
   assert.match(launch, /webApp\.initData/u);
   assert.doesNotMatch(launch, /initDataUnsafe/u);
   assert.doesNotMatch(launch, /fetch\("\/api\/teacher\/session"/u);
   assert.match(launch, /credentials: "same-origin"/u);
-  assert.match(launch, /window\.location\.replace\(targetUrl\)/u);
+  assert.match(launch, /close\?\(\): void/u);
+  assert.match(launch, /refreshTelegramMenu\(\)/u);
+  assert.match(launch, /\/api\/teacher\/session\/telegram\/menu/u);
+  assert.match(launch, /finishTelegramLoginInBrowser/u);
+  assert.match(launch, /window\.location\.replace\(url\)/u);
   assert.match(launch, /payload\.onboardingRequired/u);
   assert.match(launch, /TelegramTeacherActivationForm/u);
   assert.match(launch, /teacherSearchUrl\(normalizedQuery\)/u);
@@ -334,6 +341,7 @@ test("Telegram Mini App launch is bounded, signed server-side and stays on its f
   assert.match(route, /readVisitJson\(request\)/u);
   assert.match(route, /validateTelegramMiniAppInitData/u);
   assert.match(route, /createVisitTeacherTelegramSession/u);
+  assert.doesNotMatch(route, /returnToChat|refreshConnectedTeacherTelegramMenu|menuRefreshed/u);
   assert.match(route, /onboardingRequired: true/u);
   assert.match(route, /onboardingRequired: false/u);
   assert.match(route, /isSameOriginRequest\(request\)/u);
@@ -345,7 +353,12 @@ test("Telegram Mini App launch is bounded, signed server-side and stays on its f
   assert.match(activationRoute, /body\.value\.intent !== "login"/u);
   assert.match(activationRoute, /validateTelegramMiniAppInitData/u);
   assert.match(activationRoute, /activateVisitTeacherTelegramSession/u);
+  assert.doesNotMatch(activationRoute, /refreshConnectedTeacherTelegramMenu|menuRefreshed/u);
   assert.match(activationRoute, /telegramTeacherSessionCookie\(result\.token\)/u);
+  assert.match(menuRoute, /requireVisitTeacherSession\(db, request\)/u);
+  assert.match(menuRoute, /refreshConnectedTeacherTelegramMenu/u);
+  assert.match(menuRoute, /menuMessageDelivered/u);
+  assert.match(menuRoute, /isSameOriginRequest\(request\)/u);
   assert.match(validator, /crypto\.subtle\.verify/u);
   assert.match(validator, /authTimeMs > nowMs/u);
   assert.match(validator, /nowMs - authTimeMs/u);
@@ -361,6 +374,43 @@ test("Telegram Mini App launch is bounded, signed server-side and stays on its f
   assert.match(telegramApi, /exactKeys\(value, \["confirmation", "expectedVersion"\]\)/u);
   assert.match(telegramApi, /value\.confirmation !== "disconnect_telegram"/u);
   assert.match(telegramApi, /confirmation: "disconnect_telegram"/u);
+});
+
+test("Telegram login close failures always fall back to an authenticated cabinet", () => {
+  const calls = [];
+  const scheduled = [];
+  const schedule = (callback, delayMs) => {
+    scheduled.push({ callback, delayMs });
+    return 41;
+  };
+  const cancel = (timerId) => calls.push(["cancel", timerId]);
+  const navigate = (url) => calls.push(["navigate", url]);
+
+  assert.equal(finishTelegramLogin(
+    { close: () => calls.push(["close"]) }, true, true, "/cabinet", navigate, schedule, cancel,
+  ), "closed");
+  assert.deepEqual(calls, [["close"]]);
+  assert.equal(scheduled[0].delayMs, 1_200);
+
+  calls.length = 0;
+  scheduled.length = 0;
+  assert.equal(finishTelegramLogin(
+    { close: () => { throw new Error("bridge unavailable"); } },
+    true, true, "/cabinet", navigate, schedule, cancel,
+  ), "navigated");
+  assert.deepEqual(calls, [["cancel", 41], ["navigate", "/cabinet"]]);
+
+  calls.length = 0;
+  assert.equal(finishTelegramLogin(
+    undefined, true, true, "/cabinet", navigate, schedule, cancel,
+  ), "navigated");
+  assert.deepEqual(calls, [["navigate", "/cabinet"]]);
+
+  calls.length = 0;
+  assert.equal(finishTelegramLogin(
+    { close: () => calls.push(["close"]) }, true, false, "/cabinet", navigate, schedule, cancel,
+  ), "navigated");
+  assert.deepEqual(calls, [["navigate", "/cabinet"]]);
 });
 
 test("teacher profile shows assigned information and keeps photo access private and same-origin", async () => {

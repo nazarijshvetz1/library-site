@@ -503,6 +503,90 @@ test("bare start restores recoverable Telegram connections but respects explicit
   disconnected.sqlite.close();
 });
 
+test("verified Mini App login refreshes only the exact connected teacher menu", async () => {
+  const context = await database();
+  addTeacherCredential(context);
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-TEACHER','7201','7201',NULL,'active',1,1,3,?,NULL,?,?)`)
+    .run(context.now, context.now, context.now);
+
+  const requests = [];
+  const refreshed = await telegram.refreshConnectedTeacherTelegramMenu(
+    context.db,
+    {
+      teacherUserId: "USR-TEACHER",
+      telegramUserId: "7201",
+      siteOrigin: "https://library.example.test",
+    },
+    async (url, init) => {
+      requests.push({ url: String(url), body: JSON.parse(init.body) });
+      return telegramOk(73);
+    },
+  );
+  assert.equal(refreshed, true);
+  const message = requests.find(({ url }) => url.endsWith("/sendMessage")).body;
+  const menuButton = requests.find(({ url }) => url.endsWith("/setChatMenuButton")).body;
+  assert.match(message.text, /Telegram підключено до профілю/u);
+  assert.equal(message.reply_markup.inline_keyboard.length, 7);
+  assert.equal(message.reply_markup.inline_keyboard[0][0].web_app.url,
+    "https://library.example.test/teacher/telegram?tab=overview");
+  assert.equal(message.reply_markup.inline_keyboard[6][0].callback_data, "telegram-notifications:off");
+  assert.equal(menuButton.chat_id, 7201);
+  assert.equal(menuButton.menu_button.web_app.url,
+    "https://library.example.test/teacher/telegram?tab=overview");
+
+  const beforeMismatch = requests.length;
+  assert.equal(await telegram.refreshConnectedTeacherTelegramMenu(
+    context.db,
+    {
+      teacherUserId: "USR-TEACHER",
+      telegramUserId: "7202",
+      siteOrigin: "https://library.example.test",
+    },
+    async () => { throw new Error("must not send"); },
+  ), false);
+  assert.equal(requests.length, beforeMismatch);
+
+  const sessionRefreshRequests = [];
+  assert.equal(await telegram.refreshConnectedTeacherTelegramMenu(
+    context.db,
+    {
+      teacherUserId: "USR-TEACHER",
+      siteOrigin: "https://library.example.test",
+    },
+    async (url, init) => {
+      sessionRefreshRequests.push({ url: String(url), body: JSON.parse(init.body) });
+      if (String(url).endsWith("/setChatMenuButton")) {
+        return new Response(JSON.stringify({ ok: false, description: "button unavailable" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return telegramOk(74);
+    },
+  ), true, "the rich inline menu controls chat return even if the persistent button fails");
+  assert.equal(sessionRefreshRequests.some(({ url }) => url.endsWith("/sendMessage")), true);
+  assert.equal(sessionRefreshRequests.some(({ url }) => url.endsWith("/setChatMenuButton")), true);
+
+  assert.equal(await telegram.refreshConnectedTeacherTelegramMenu(
+    context.db,
+    {
+      teacherUserId: "USR-TEACHER",
+      telegramUserId: "7201",
+      siteOrigin: "https://library.example.test",
+    },
+    async () => new Response(JSON.stringify({ ok: false, description: "temporary failure" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    }),
+  ), false);
+  assert.equal(context.sqlite.prepare("SELECT status FROM telegram_connections WHERE user_id='USR-TEACHER'").get().status,
+    "active");
+  context.sqlite.close();
+});
+
 test("one Telegram button toggles all notifications without disconnecting the profile", async () => {
   const context = await database();
   addTeacherCredential(context);

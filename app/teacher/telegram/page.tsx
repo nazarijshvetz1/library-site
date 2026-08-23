@@ -19,18 +19,20 @@ type PageProps = {
 export default async function TelegramTeacherPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const configuration = telegramMiniAppPublicConfiguration();
+  const launchMode = boundedMode(params?.mode);
   return (
     <TelegramTeacherLaunch
       targetTab={boundedTab(params?.tab)}
-      initialMode={boundedMode(params?.mode)}
+      initialMode={launchMode ?? "login"}
+      returnToChat={launchMode !== null}
       enabled={configuration.enabled}
       botUsername={configuration.botUsername}
     />
   );
 }
 
-function boundedMode(value: string | string[] | undefined): "login" | "activate" {
-  return value === "activate" ? "activate" : "login";
+function boundedMode(value: string | string[] | undefined): "login" | "activate" | null {
+  return value === "login" || value === "activate" ? value : null;
 }
 
 function boundedTab(value: string | string[] | undefined): TeacherPortalTab {

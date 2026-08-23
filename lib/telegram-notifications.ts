@@ -1977,6 +1977,54 @@ type ConnectedTelegramProfile = {
   notify_visits: number;
 };
 
+/**
+ * Refresh the private teacher menu after a verified Mini App login.
+ *
+ * The caller supplies the teacher id from an authenticated session. During
+ * activation it may additionally supply the Telegram id from signed initData.
+ * The authoritative private chat id is always read back from D1. A true result
+ * means the rich inline-menu message was delivered; the persistent menu button
+ * remains an independent best-effort enhancement.
+ */
+export async function refreshConnectedTeacherTelegramMenu(
+  db: TelegramDatabase,
+  input: { teacherUserId: string; telegramUserId?: string; siteOrigin: string },
+  fetcher: TelegramFetcher = fetch,
+): Promise<boolean> {
+  try {
+    const configuration = telegramConfiguration();
+    if (!configuration.linkingEnabled || !configuration.botToken) return false;
+    const connection = input.telegramUserId
+      ? await db.prepare(`
+          SELECT chat_id,telegram_user_id FROM telegram_connections
+          WHERE user_id=? AND telegram_user_id=? AND status='active'
+          LIMIT 1
+        `).bind(input.teacherUserId, input.telegramUserId)
+          .first<{ chat_id: string; telegram_user_id: string }>()
+      : await db.prepare(`
+          SELECT chat_id,telegram_user_id FROM telegram_connections
+          WHERE user_id=? AND status='active'
+          ORDER BY updated_at DESC LIMIT 1
+        `).bind(input.teacherUserId).first<{ chat_id: string; telegram_user_id: string }>();
+    if (!connection) return false;
+    const profile = await connectedTelegramProfile(db, connection.chat_id, connection.telegram_user_id);
+    if (!profile || profile.user_id !== input.teacherUserId || !profile.teacher_capability) return false;
+    return bestEffortConnectedMenu(
+      configuration.botToken,
+      connection.chat_id,
+      profile.role,
+      true,
+      profile.full_name,
+      notificationsMasterEnabled(profile),
+      input.siteOrigin,
+      true,
+      fetcher,
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function resumeRecoverableTelegramConnection(
   db: TelegramDatabase,
   updateId: string,
@@ -2105,7 +2153,7 @@ async function bestEffortConnectedMenu(
   siteOrigin: string | undefined,
   linked: boolean,
   fetcher: TelegramFetcher,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const origin = siteOrigin ? trustedSiteOrigin(siteOrigin) : null;
     const configuration = telegramConfiguration();
@@ -2115,32 +2163,36 @@ async function bestEffortConnectedMenu(
     const greeting = linked
       ? `Telegram підключено до профілю «${safePlainText(fullName, 120)}».`
       : `Профіль: «${safePlainText(fullName, 120)}».`;
-    await telegramApiRequest(botToken, "sendMessage", {
+    const messageDelivery = telegramApiRequest(botToken, "sendMessage", {
       chat_id: chatId,
       text: `<b>${escapeHtml(greeting)}</b>\nСповіщення: ${notificationsOn ? "увімкнено 🔔" : "вимкнено 🔕"}.\nОберіть потрібний розділ:`,
       parse_mode: "HTML",
       link_preview_options: { is_disabled: true },
       ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
-    }, fetcher);
+    }, fetcher).then(() => true, () => false);
+    let menuButtonDelivery: Promise<void> = Promise.resolve();
     if ((role === "admin" || role === "librarian") && origin && configuration.miniAppEnabled) {
-      await bestEffortChatMenuButton(
+      menuButtonDelivery = bestEffortChatMenuButton(
         botToken,
         chatId,
         { text: "Кабінет бібліотекаря", url: new URL("/librarian/telegram?target=home", origin).toString() },
         fetcher,
       );
     } else if (teacherCapability && origin && configuration.miniAppEnabled) {
-      await bestEffortChatMenuButton(
+      menuButtonDelivery = bestEffortChatMenuButton(
         botToken,
         chatId,
         { text: "Кабінет учителя", url: new URL("/teacher/telegram?tab=overview", origin).toString() },
         fetcher,
       );
     } else if (origin) {
-      await bestEffortChatMenuButton(botToken, chatId, null, fetcher);
+      menuButtonDelivery = bestEffortChatMenuButton(botToken, chatId, null, fetcher);
     }
+    const [messageDelivered] = await Promise.all([messageDelivery, menuButtonDelivery]);
+    return messageDelivered;
   } catch {
     // D1 remains authoritative even if Telegram cannot render the optional menu.
+    return false;
   }
 }
 

@@ -23,6 +23,7 @@ import {
   type VisitTeacher,
   type VisitTeacherSearchEnvelope,
 } from "@/app/visits/visit-client";
+import { finishTelegramLogin } from "./telegram-login-finish";
 import styles from "./telegram.module.css";
 
 const LOGO_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
@@ -34,6 +35,7 @@ type TelegramWebApp = {
   expand(): void;
   setHeaderColor?(color: string): void;
   setBackgroundColor?(color: string): void;
+  close?(): void;
 };
 
 type ActivationState = {
@@ -57,11 +59,13 @@ declare global {
 export default function TelegramTeacherLaunch({
   targetTab,
   initialMode,
+  returnToChat,
   enabled,
   botUsername,
 }: {
   targetTab: TeacherTab;
   initialMode: ActivationIntent;
+  returnToChat: boolean;
   enabled: boolean;
   botUsername: string | null;
 }) {
@@ -123,7 +127,9 @@ export default function TelegramTeacherLaunch({
           setMessage(activationIntro(payload.activation));
           return;
         }
-        window.location.replace(targetUrl);
+        if (returnToChat) setMessage("Вхід підтверджено. Оновлюємо меню бота…");
+        const menuMessageDelivered = returnToChat ? await refreshTelegramMenu() : false;
+        finishTelegramLoginInBrowser(webApp, returnToChat, menuMessageDelivered, targetUrl);
       } catch (error) {
         if (cancelled || controller.signal.aborted) return;
         setPhase("error");
@@ -135,30 +141,34 @@ export default function TelegramTeacherLaunch({
       cancelled = true;
       controller.abort();
     };
-  }, [attempt, enabled, initialMode, targetUrl]);
+  }, [attempt, enabled, initialMode, returnToChat, targetUrl]);
 
   async function activate(input: { intent: ActivationIntent; loginId: string; code: string; newPin: string }) {
     if (!activation || !initData) return;
     setPhase("submitting");
     setMessage(input.intent === "activate" ? "Захищено активуємо кабінет…" : "Захищено входимо до кабінету…");
     try {
-      await visitApi("/api/teacher/session/telegram/activate", {
-        method: "POST",
-        cache: "no-store",
-        body: JSON.stringify({
-          initData,
-          requestId: crypto.randomUUID(),
-          intent: input.intent,
-          loginId: input.loginId,
-          code: input.code,
-          newPin: input.newPin,
-        }),
-      });
+      await visitApi<{ success: true }>(
+        "/api/teacher/session/telegram/activate",
+        {
+          method: "POST",
+          cache: "no-store",
+          body: JSON.stringify({
+            initData,
+            requestId: crypto.randomUUID(),
+            intent: input.intent,
+            loginId: input.loginId,
+            code: input.code,
+            newPin: input.newPin,
+          }),
+        },
+      );
       setPhase("success");
       setMessage(input.intent === "activate"
         ? "Готово! Кабінет активовано, а Telegram підключено."
         : "Готово! Ви увійшли, а Telegram підключено.");
-      window.location.replace(targetUrl);
+      const menuMessageDelivered = returnToChat ? await refreshTelegramMenu() : false;
+      finishTelegramLoginInBrowser(window.Telegram?.WebApp, returnToChat, menuMessageDelivered, targetUrl);
     } catch (error) {
       setPhase("activation");
       setMessage(error instanceof VisitApiError
@@ -469,4 +479,38 @@ async function loadTelegramWebApp(): Promise<TelegramWebApp> {
   });
   if (!window.Telegram?.WebApp) throw new Error("Відкрийте цей кабінет безпосередньо з Telegram.");
   return window.Telegram.WebApp;
+}
+
+async function refreshTelegramMenu(): Promise<boolean> {
+  try {
+    const response = await fetch("/api/teacher/session/telegram/menu", {
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    const payload = await response.json().catch(() => null) as {
+      success?: boolean;
+      menuMessageDelivered?: boolean;
+    } | null;
+    return response.ok && payload?.success === true && payload.menuMessageDelivered === true;
+  } catch {
+    return false;
+  }
+}
+
+function finishTelegramLoginInBrowser(
+  webApp: TelegramWebApp | undefined,
+  returnToChat: boolean,
+  menuMessageDelivered: boolean,
+  targetUrl: string,
+): void {
+  finishTelegramLogin(
+    webApp,
+    returnToChat,
+    menuMessageDelivered,
+    targetUrl,
+    (url) => window.location.replace(url),
+    (callback, delayMs) => window.setTimeout(callback, delayMs),
+    (timerId) => window.clearTimeout(timerId),
+  );
 }
