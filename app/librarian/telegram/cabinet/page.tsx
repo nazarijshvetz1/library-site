@@ -46,6 +46,7 @@ export default async function TelegramLibrarianCabinetPage({ searchParams }: Pag
         writesEnabled={access.writesEnabled}
         signOutHref={botHref}
         telegramMiniApp
+        initialTab={boundedTeacherTab(params?.tab)}
       />
     );
   }
@@ -83,6 +84,10 @@ export default async function TelegramLibrarianCabinetPage({ searchParams }: Pag
 
 function boundedTarget(value: string | string[] | undefined): "home" | "visits" | "teachers" | "acquisitions" {
   return value === "visits" || value === "teachers" || value === "acquisitions" ? value : "home";
+}
+
+function boundedTeacherTab(value: string | string[] | undefined): "overview" | "teachers" | "orders" | "visits" | "telegram" {
+  return value === "teachers" || value === "orders" || value === "visits" || value === "telegram" ? value : "overview";
 }
 
 async function sessionPendingScope(value: string): Promise<string> {

@@ -80,6 +80,8 @@
 .catalogLink:hover {
   color: var(--green-700);
 }
+.telegramLink { padding: 7px 9px; border: 1px solid #b9dced; border-radius: 999px; color: #1679a6; background: #eaf7fd; }
+.telegramLink:hover { border-color: #229ed9; color: #0f668e; background: #dff3fc; }
 
 .signOut {
   width: 38px;

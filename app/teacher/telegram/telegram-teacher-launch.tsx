@@ -23,7 +23,7 @@ import {
 } from "@/app/visits/visit-client";
 import styles from "./telegram.module.css";
 
-type TeacherTab = "overview" | "visits" | "orders" | "acquisition" | "loans" | "notifications";
+type TeacherTab = "overview" | "visits" | "orders" | "acquisition" | "loans" | "notifications" | "telegram";
 type ActivationIntent = "login" | "activate";
 type TelegramWebApp = {
   initData: string;

@@ -688,6 +688,10 @@ export default function D1LibrarianWorkspace({
             <span className={styles.catalogLinkLabel}>Вчителі</span>{" "}
             <span aria-hidden="true">●</span>
           </a>
+          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=teachers&tab=telegram" : "/librarian/teachers?tab=telegram"} className={`${styles.catalogLink} ${styles.telegramLink}`}>
+            <span className={styles.catalogLinkLabel}>Telegram</span>{" "}
+            <span aria-hidden="true">➤</span>
+          </a>
           <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=acquisitions" : "/librarian/acquisitions"} className={styles.catalogLink}>
             <span className={styles.catalogLinkLabel}>Комплектування</span>{" "}
             <span aria-hidden="true">＋</span>

@@ -22,6 +22,8 @@
 .teacherTabs { margin: -8px 0 24px; padding: 6px; display: flex; gap: 5px; overflow-x: auto; border: 1px solid var(--line); border-radius: 15px; background: rgba(255,255,255,.72); }
 .teacherTabs button { min-height: 44px; padding: 0 15px; display: inline-flex; flex: 0 0 auto; align-items: center; gap: 8px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer; font-weight: 800; }
 .teacherTabs button[aria-current="page"] { background: var(--green-900); color: #fff; }
+.teacherTabs button[data-telegram="true"] { color: #1679a6; background: #eaf7fd; }
+.teacherTabs button[data-telegram="true"][aria-current="page"] { color: #fff; background: #229ed9; }
 .overviewGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
 .teacherLoans { display: grid; gap: 20px; }
 .loanCounters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
@@ -180,7 +182,10 @@
 .requestList .requestReason { color: var(--danger); }
 .notificationList { display: grid; gap: 9px; }
 .notificationStack { display: grid; gap: 20px; }
+.telegramSettingsStack { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.telegramGlobalNotice { grid-column: 1 / -1; margin-bottom: 0; }
 .telegramPanel { overflow: hidden; }
+.telegramConnectionCard { border-color: #b9dced; box-shadow: 0 16px 44px rgba(34,158,217,.1); }
 .telegramIntro { margin: -9px 0 20px; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .telegramConnected, .telegramDisconnected { padding: 7px 10px; border-radius: 999px; font-size: 9px; line-height: 1.3; text-align: center; }
 .telegramConnected { color: var(--green-900); background: var(--green-100); }
@@ -270,7 +275,7 @@
 .readyRows label { display: grid; gap: 4px; color: var(--muted); font-size: 9px; font-weight: 800; }
 .readyRows select, .readyRows input { width: 100%; min-height: 40px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 @media (max-width: 980px) { .accessModes { grid-template-columns: 1fr; } .accessModes .authPage { display: block; } .accessModes .authCard { width: 100%; } }
-@media (max-width: 900px) { .overviewGrid { grid-template-columns: 1fr 1fr; } .welcomeCard { grid-column: 1 / -1; } .orderLayout, .loanSections { grid-template-columns: 1fr; } .requestList { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .overviewGrid { grid-template-columns: 1fr 1fr; } .welcomeCard { grid-column: 1 / -1; } .orderLayout, .loanSections, .telegramSettingsStack { grid-template-columns: 1fr; } .requestList { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .teacherGrid { display: block; } .teacherGrid > * + * { margin-top: 16px; } .bookingTopbar { display: block; } .bookingTopbar .account { margin: -10px 0 24px; justify-content: space-between; } .bookingTopbar .account > span { display: grid; } .teacherTabs { margin-inline: -13px; border-right: 0; border-left: 0; border-radius: 0; } .page { width: min(100% - 26px, 1180px); padding-top: 34px; } .authPage { padding-top: 38px; } .publicSchedule .cardHeading { display: grid; } .weekControls { width: 100%; grid-template-columns: 40px 1fr 40px; } .publicDays { margin-inline: -20px; padding-inline: 20px; scroll-snap-type: x proximity; } .publicDays article { scroll-snap-align: start; } .fields { grid-template-columns: 1fr; } .fields .wide { grid-column: auto; } .bookingList article { align-items: flex-start; flex-direction: column; } .danger { width: 100%; } .adminTable, .adminTable tbody, .adminTable tr, .adminTable td { display: block; } .adminTable thead { display: none; } .adminTable tr { margin-bottom: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; } .adminTable td { border: 0; padding: 6px; } }
 @media (max-width: 580px) { .overviewGrid, .loanCounters, .telegramPreferences { grid-template-columns: 1fr; } .welcomeCard { grid-column: auto; } .profileSummary { grid-template-columns: 1fr; } .profilePortrait { width: 92px; height: 92px; } .profileDetails dl { grid-template-columns: 1fr; } .photoActions { display: grid; } .photoActions > * { width: 100%; } .guestActions { display: grid; } .sharedDeviceNote { align-items: stretch; flex-direction: column; } .sharedDeviceNote button { width: 100%; } .guestBookings article { align-items: flex-start; flex-direction: column; } .guestBookings article > div:last-child { width: 100%; } .guestBookings article > div:last-child button { flex: 1; } .catalogCards article { grid-template-columns: 46px minmax(0, 1fr); } .catalogCards button { grid-column: 1 / -1; } .orderCover, .orderCoverFallback { width: 46px; height: 67px; } .notificationList article { grid-template-columns: 8px minmax(0, 1fr); } .notificationList article > button, .notificationList article > small { grid-column: 2; justify-self: start; } .generatedCode { align-items: stretch; flex-direction: column; } .generatedCode button { width: 100%; } .telegramActions { display: grid; } .telegramActions button { width: 100%!important; } }
 @media (max-width: 620px) { .inboxList li { align-items: flex-start; flex-direction: column; } .inboxActions > button, .inboxActions > form { width: 100%; } .inboxActions > button { min-height: 44px; } .readyRows fieldset { grid-template-columns: 1fr; } }

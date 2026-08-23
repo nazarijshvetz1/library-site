@@ -68,7 +68,7 @@ type Props = {
   initialDate: string;
   initialStartTime: string;
   initialEndTime: string;
-  initialTab?: "overview" | "visits" | "orders" | "acquisition" | "loans" | "notifications";
+  initialTab?: "overview" | "visits" | "orders" | "acquisition" | "loans" | "notifications" | "telegram";
   initialOrderMaterialId?: string;
   telegramMiniApp?: boolean;
 };
@@ -82,6 +82,7 @@ const TEACHER_TABS: Array<{ id: TeacherTab; label: string; icon: string }> = [
   { id: "acquisition", label: "Запропонувати придбання", icon: "+" },
   { id: "loans", label: "Мої посібники", icon: "▥" },
   { id: "notifications", label: "Повідомлення", icon: "●" },
+  { id: "telegram", label: "Telegram", icon: "➤" },
 ];
 
 function clearTeacherPortalPendingStorage(storage: Storage, pendingScope: string): void {
@@ -884,7 +885,7 @@ function VisitBookingPanel({
   initialDate: string;
   initialStartTime: string;
   initialEndTime: string;
-  initialTab: "overview" | "visits" | "orders" | "acquisition" | "loans" | "notifications";
+  initialTab: "overview" | "visits" | "orders" | "acquisition" | "loans" | "notifications" | "telegram";
   initialOrderMaterialId: string;
   telegramMiniApp: boolean;
 }) {
@@ -1146,6 +1147,7 @@ function VisitBookingPanel({
               key={tab.id}
               type="button"
               aria-current={activeTab === tab.id ? "page" : undefined}
+              data-telegram={tab.id === "telegram" || undefined}
               onClick={() => setActiveTab(tab.id)}
             >
               <span aria-hidden="true">{tab.icon}</span>{tab.label}
@@ -1250,6 +1252,7 @@ function VisitBookingPanel({
         {activeTab === "acquisition" ? <TeacherAcquisitionPanel /> : null}
         {activeTab === "loans" ? <TeacherLoansPanel /> : null}
         {activeTab === "notifications" ? <TeacherNotificationsPanel pendingScope={pendingScope} /> : null}
+        {activeTab === "telegram" ? <TeacherTelegramSettings /> : null}
         {securityOpen ? <TeacherSecurityPanel pendingScope={pendingScope} onClose={() => setSecurityOpen(false)} onSessionRotated={onSessionRotated} /> : null}
       </section>
     </VisitShell>
@@ -1379,6 +1382,7 @@ function teacherTabTitle(tab: TeacherTab): string {
   if (tab === "acquisition") return "Запропонувати придбання";
   if (tab === "loans") return "Мої посібники";
   if (tab === "notifications") return "Мої повідомлення";
+  if (tab === "telegram") return "Підключення Telegram";
   return "Вітаємо у вашому кабінеті";
 }
 
@@ -1998,7 +2002,6 @@ function TeacherNotificationsPanel({ pendingScope }: { pendingScope: string }) {
 
   return (
     <div className={styles.notificationStack}>
-      <TeacherTelegramSettings />
       <section className={styles.card} aria-labelledby="notifications-title">
       <div className={styles.cardHeading}><div><span>{data?.unreadCount ?? 0} непрочитаних</span><h2 id="notifications-title">Повідомлення</h2></div><button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading || loadingMore || submitting}>↻ Оновити</button></div>
       {pending ? <div className={styles.pending} role="status"><span>Не вдалося підтвердити позначку «прочитано».</span><button type="button" onClick={() => void sendRead(pending)} disabled={submitting}>Перевірити результат</button></div> : null}
@@ -2126,35 +2129,50 @@ function TeacherTelegramSettings() {
       : "Не підключено";
 
   return (
-    <section className={`${styles.card} ${styles.telegramPanel}`} aria-labelledby="teacher-telegram-title">
-      <div className={styles.cardHeading}>
-        <div><span>Дублювання повідомлень</span><h2 id="teacher-telegram-title">Telegram</h2></div>
-        <strong className={telegram?.connected ? styles.telegramConnected : styles.telegramDisconnected}>{loading ? "Перевіряємо…" : statusLabel}</strong>
-      </div>
-      <p className={styles.telegramIntro}>Підключіть особистий приватний чат із ботом. Повідомлення в кабінеті залишаться основними й не зникнуть.</p>
-      {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
-      {!loading && telegram && (!telegram.configured || !telegram.linkingEnabled) ? (
-        <div className={styles.info}>Telegram ще налаштовується бібліотекарем. Тут не потрібно вводити номер телефону чи email.</div>
-      ) : null}
-      {!loading && telegram?.connected ? (
-        <>
-          {telegram.miniAppEnabled ? <div className={styles.info}>У боті доступна кнопка «Кабінет учителя»: каталог, замовлення, записи, посібники та повідомлення відкриваються прямо в Telegram.</div> : null}
-          <div className={styles.info}>Сповіщення про замовлення та відвідування: <strong>{notificationsOn ? "увімкнено 🔔" : "вимкнено 🔕"}</strong>. Бот і швидкий вхід залишаються підключеними в обох режимах.</div>
-          {!telegram.notificationsEnabled ? <div className={styles.info}>Підключення готове, але надсилання повідомлень ще не ввімкнено бібліотекарем.</div> : null}
-          <div className={styles.telegramActions}>
-            <button className={styles.primary} type="button" onClick={() => void toggleNotifications()} disabled={Boolean(busy)}>{busy === "toggle" ? "Змінюємо…" : notificationsOn ? "🔕 Вимкнути сповіщення" : "🔔 Увімкнути сповіщення"}</button>
-            <button className={styles.quiet} type="button" onClick={() => void sendTest()} disabled={Boolean(busy) || !telegram.notificationsEnabled || !notificationsOn}>{busy === "test" ? "Надсилаємо…" : "Надіслати тест"}</button>
-            <button className={styles.danger} type="button" onClick={() => setConfirmDisconnect(true)} disabled={Boolean(busy)}>Від’єднати Telegram</button>
-          </div>
-          {confirmDisconnect ? <div className={styles.info} role="alert"><p>Повне від’єднання вимкне автовхід через цього бота. Сповіщення можна лише вимкнути кнопкою вище.</p><div className={styles.telegramActions}><button className={styles.danger} type="button" onClick={() => void disconnect()} disabled={Boolean(busy)}>{busy === "disconnect" ? "Від’єднуємо…" : "Так, від’єднати"}</button><button className={styles.quiet} type="button" onClick={() => setConfirmDisconnect(false)} disabled={Boolean(busy)}>Скасувати</button></div></div> : null}
-        </>
-      ) : !loading && telegram?.linkingEnabled && telegram.configured ? (
-        <div className={styles.telegramActions}>
-          <button className={styles.primary} type="button" onClick={() => void connect()} disabled={Boolean(busy)}>{busy === "link" ? "Створюємо посилання…" : telegram.status === "blocked" ? "Підключити повторно" : "Підключити Telegram"}</button>
-          <button className={styles.quiet} type="button" onClick={() => void load()} disabled={Boolean(busy)}>Я вже підключив(ла) — перевірити</button>
+    <div className={styles.telegramSettingsStack}>
+      {notice ? <div className={`${styles[noticeTone]} ${styles.telegramGlobalNotice}`} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
+      <section className={`${styles.card} ${styles.telegramPanel} ${styles.telegramConnectionCard}`} aria-labelledby="teacher-telegram-connection-title">
+        <div className={styles.cardHeading}>
+          <div><span>Особистий чат із ботом</span><h2 id="teacher-telegram-connection-title">{telegram?.connected ? "Telegram підключено" : "Підключити Telegram"}</h2></div>
+          <strong role="status" aria-live="polite" className={telegram?.connected ? styles.telegramConnected : styles.telegramDisconnected}>{loading ? "Перевіряємо…" : statusLabel}</strong>
         </div>
-      ) : null}
-    </section>
+        <p className={styles.telegramIntro}>Підключення дає швидкий вхід до кабінету та приватний канал зв’язку з бібліотекою. Номер телефону й email вводити не потрібно.</p>
+        {!loading && telegram && (!telegram.configured || !telegram.linkingEnabled) ? <div className={styles.info}>Telegram ще налаштовується бібліотекарем.</div> : null}
+        {!loading && telegram?.connected ? (
+          <>
+            {telegram.miniAppEnabled ? <div className={styles.info}>У боті доступна кнопка «Кабінет учителя»: каталог, замовлення, записи, посібники та повідомлення відкриваються прямо в Telegram.</div> : null}
+            <div className={styles.telegramActions}>
+              <button className={styles.danger} type="button" onClick={() => setConfirmDisconnect(true)} disabled={Boolean(busy)}>Від’єднати Telegram</button>
+            </div>
+            {confirmDisconnect ? <div className={styles.info} role="alert"><p>Повне від’єднання вимкне автовхід через цього бота. Сповіщення можна лише вимкнути в окремому блоці нижче.</p><div className={styles.telegramActions}><button className={styles.danger} type="button" onClick={() => void disconnect()} disabled={Boolean(busy)}>{busy === "disconnect" ? "Від’єднуємо…" : "Так, від’єднати"}</button><button className={styles.quiet} type="button" onClick={() => setConfirmDisconnect(false)} disabled={Boolean(busy)}>Скасувати</button></div></div> : null}
+          </>
+        ) : !loading && telegram?.linkingEnabled && telegram.configured ? (
+          <div className={styles.telegramActions}>
+            <button className={styles.primary} type="button" onClick={() => void connect()} disabled={Boolean(busy)}>{busy === "link" ? "Створюємо посилання…" : telegram.status === "blocked" ? "Підключити повторно" : "Підключити Telegram"}</button>
+            <button className={styles.quiet} type="button" onClick={() => void load()} disabled={Boolean(busy)}>Я вже підключив(ла) — перевірити</button>
+          </div>
+        ) : null}
+      </section>
+
+      <section className={`${styles.card} ${styles.telegramPanel}`} aria-labelledby="teacher-telegram-notifications-title">
+        <div className={styles.cardHeading}>
+          <div><span>Після підключення</span><h2 id="teacher-telegram-notifications-title">Сповіщення Telegram</h2></div>
+          <strong className={telegram?.connected && notificationsOn ? styles.telegramConnected : styles.telegramDisconnected}>{loading ? "Перевіряємо…" : telegram?.connected ? notificationsOn ? "Увімкнено" : "Вимкнено" : "Спочатку підключіть"}</strong>
+        </div>
+        <p className={styles.telegramIntro}>Окремо вирішіть, чи надсилати в Telegram повідомлення про замовлення й відвідування. Повідомлення на сайті залишаються основними.</p>
+        {!loading && !telegram?.connected ? <div className={styles.info}>Спочатку скористайтеся кнопкою «Підключити Telegram» у блоці вище.</div> : null}
+        {!loading && telegram?.connected ? (
+          <>
+            <div className={styles.info}>Сповіщення про замовлення та відвідування: <strong>{notificationsOn ? "увімкнено 🔔" : "вимкнено 🔕"}</strong>. Бот і швидкий вхід залишаються підключеними в обох режимах.</div>
+            {!telegram.notificationsEnabled ? <div className={styles.info}>Підключення готове, але надсилання повідомлень ще не ввімкнено бібліотекарем.</div> : null}
+            <div className={styles.telegramActions}>
+              <button className={styles.primary} type="button" onClick={() => void toggleNotifications()} disabled={Boolean(busy)}>{busy === "toggle" ? "Змінюємо…" : notificationsOn ? "🔕 Вимкнути сповіщення" : "🔔 Увімкнути сповіщення"}</button>
+              <button className={styles.quiet} type="button" onClick={() => void sendTest()} disabled={Boolean(busy) || !telegram.notificationsEnabled || !notificationsOn}>{busy === "test" ? "Надсилаємо…" : "Надіслати тест"}</button>
+            </div>
+          </>
+        ) : null}
+      </section>
+    </div>
   );
 }
 

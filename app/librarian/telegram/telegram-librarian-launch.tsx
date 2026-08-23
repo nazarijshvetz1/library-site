@@ -18,17 +18,22 @@ declare global {
 
 export default function TelegramLibrarianLaunch({
   target,
+  teacherTab,
   enabled,
   botUsername,
 }: {
   target: "home" | "visits" | "teachers" | "acquisitions";
+  teacherTab: "overview" | "teachers" | "orders" | "visits" | "telegram";
   enabled: boolean;
   botUsername: string | null;
 }) {
   const [attempt, setAttempt] = useState(0);
   const [phase, setPhase] = useState<"checking" | "error" | "disabled">(enabled ? "checking" : "disabled");
   const [message, setMessage] = useState(enabled ? "Перевіряємо захищений вхід…" : "Кабінет у Telegram ще не ввімкнено.");
-  const targetUrl = useMemo(() => `/librarian/telegram/cabinet?target=${target}`, [target]);
+  const targetUrl = useMemo(() => {
+    const tab = target === "teachers" && teacherTab !== "overview" ? `&tab=${encodeURIComponent(teacherTab)}` : "";
+    return `/librarian/telegram/cabinet?target=${target}${tab}`;
+  }, [target, teacherTab]);
 
   useEffect(() => {
     if (!enabled) return;

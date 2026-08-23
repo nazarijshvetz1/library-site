@@ -13,8 +13,13 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default async function LibrarianTeachersPage() {
-  const user = await requireChatGPTUser("/librarian/teachers");
+type PageProps = { searchParams?: Promise<Record<string, string | string[] | undefined>> };
+
+export default async function LibrarianTeachersPage({ searchParams }: PageProps) {
+  const params = await searchParams;
+  const initialTab = boundedTab(params?.tab);
+  const returnTo = initialTab === "telegram" ? "/librarian/teachers?tab=telegram" : "/librarian/teachers";
+  const user = await requireChatGPTUser(returnTo);
   const access = getLibrarianAccess(user);
 
   if (!access.allowed) {
@@ -39,8 +44,13 @@ export default async function LibrarianTeachersPage() {
       role={access.role ?? "librarian"}
       writesEnabled={access.writesEnabled}
       signOutHref={chatGPTSignOutPath("/")}
+      initialTab={initialTab}
     />
   );
+}
+
+function boundedTab(value: string | string[] | undefined): "overview" | "teachers" | "orders" | "visits" | "telegram" {
+  return value === "teachers" || value === "orders" || value === "visits" || value === "telegram" ? value : "overview";
 }
 
 async function managementPendingScope(userId: string): Promise<string> {

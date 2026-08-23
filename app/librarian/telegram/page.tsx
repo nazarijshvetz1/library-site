@@ -18,6 +18,7 @@ export default async function TelegramLibrarianPage({ searchParams }: PageProps)
   return (
     <TelegramLibrarianLaunch
       target={boundedTarget(params?.target)}
+      teacherTab={boundedTeacherTab(params?.tab)}
       enabled={configuration.enabled}
       botUsername={configuration.botUsername}
     />
@@ -26,4 +27,8 @@ export default async function TelegramLibrarianPage({ searchParams }: PageProps)
 
 function boundedTarget(value: string | string[] | undefined): "home" | "visits" | "teachers" | "acquisitions" {
   return value === "visits" || value === "teachers" || value === "acquisitions" ? value : "home";
+}
+
+function boundedTeacherTab(value: string | string[] | undefined): "overview" | "teachers" | "orders" | "visits" | "telegram" {
+  return value === "teachers" || value === "orders" || value === "visits" || value === "telegram" ? value : "overview";
 }

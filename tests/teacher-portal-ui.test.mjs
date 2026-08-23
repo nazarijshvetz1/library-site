@@ -208,6 +208,29 @@ test("teacher orders and notifications page with the frozen opaque cursor", asyn
   assert.match(notifications, /Завантажити ще/u);
 });
 
+test("teacher cabinet exposes Telegram as a separate highlighted connection area", async () => {
+  const [page, miniPage, launch, workspace, css] = await Promise.all([
+    read("app/teacher/page.tsx"),
+    read("app/teacher/telegram/cabinet/page.tsx"),
+    read("app/teacher/telegram/telegram-teacher-launch.tsx"),
+    read("app/visits/visit-booking-workspace.tsx"),
+    read("app/visits/visits.module.css"),
+  ]);
+  assert.match(page, /value === "telegram"/u);
+  assert.match(miniPage, /value === "telegram"/u);
+  assert.match(launch, /type TeacherTab = [^;]*"telegram"/u);
+  assert.match(workspace, /id: "telegram", label: "Telegram", icon: "➤"/u);
+  assert.match(workspace, /activeTab === "telegram" \? <TeacherTelegramSettings \/>/u);
+  assert.match(workspace, /data-telegram=\{tab\.id === "telegram" \|\| undefined\}/u);
+  assert.match(workspace, /teacher-telegram-connection-title/u);
+  assert.match(workspace, /teacher-telegram-notifications-title/u);
+  assert.match(workspace, /Підключити Telegram/u);
+  assert.match(workspace, /Сповіщення Telegram/u);
+  assert.match(workspace, /role="status" aria-live="polite"/u);
+  assert.match(css, /teacherTabs button\[data-telegram="true"\]/u);
+  assert.match(css, /telegramSettingsStack/u);
+});
+
 test("teacher cabinet shows personal and responsible-class loans from the signed-in identity", async () => {
   const [page, workspace, route] = await Promise.all([
     read("app/teacher/page.tsx"),

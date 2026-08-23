@@ -7,18 +7,20 @@ import { teacherDirectoryUrl, teacherProfileDraft } from "../app/librarian/teach
 const root = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 
-test("protected librarian teacher management has four focused work areas", async () => {
+test("protected librarian teacher management has five focused work areas", async () => {
   const [page, workspace, css] = await Promise.all([
     read("app/librarian/teachers/page.tsx"),
     read("app/librarian/teachers/teacher-management-workspace.tsx"),
     read("app/librarian/teachers/teacher-management.module.css"),
   ]);
-  assert.match(page, /requireChatGPTUser\("\/librarian\/teachers"\)/u);
+  assert.match(page, /boundedTab\(params\?\.tab\)/u);
+  assert.match(page, /initialTab=\{initialTab\}/u);
   assert.match(page, /getLibrarianAccess/u);
   assert.match(workspace, />Огляд</u);
   assert.match(workspace, />Вчителі</u);
   assert.match(workspace, />Замовлення і видачі</u);
   assert.match(workspace, />Відвідування</u);
+  assert.match(workspace, /telegram>Telegram<\/TabButton>/u);
   assert.match(workspace, /Потребує уваги/u);
   assert.match(workspace, /const notificationsOn = Boolean\(telegram\?\.notifyOrders \|\| telegram\?\.notifyVisits\)/u);
   assert.match(workspace, /🔕 Вимкнути сповіщення/u);
@@ -27,6 +29,29 @@ test("protected librarian teacher management has four focused work areas", async
   assert.match(workspace, /Так, від’єднати/u);
   assert.doesNotMatch(workspace, /librarian-telegram-orders|librarian-telegram-visits/u);
   assert.match(css, /@media \(max-width: 700px\)/u);
+  assert.match(css, /tabs button\[data-telegram="true"\]/u);
+});
+
+test("librarian cabinet separates Telegram connection from notification controls", async () => {
+  const [workspace, main, launchPage, launch, cabinet] = await Promise.all([
+    read("app/librarian/teachers/teacher-management-workspace.tsx"),
+    read("app/librarian/d1-workspace.tsx"),
+    read("app/librarian/telegram/page.tsx"),
+    read("app/librarian/telegram/telegram-librarian-launch.tsx"),
+    read("app/librarian/telegram/cabinet/page.tsx"),
+  ]);
+  assert.match(workspace, /librarian-telegram-connection-title/u);
+  assert.match(workspace, /librarian-telegram-notifications-title/u);
+  assert.match(workspace, /Підключити Telegram/u);
+  assert.match(workspace, /Сповіщення Telegram/u);
+  assert.match(workspace, /role="status" aria-live="polite"/u);
+  assert.match(workspace, /initialTab\?: MainTab/u);
+  assert.match(main, /\/librarian\/teachers\?tab=telegram/u);
+  assert.match(main, />Telegram<\/span>/u);
+  assert.match(launchPage, /teacherTab=\{boundedTeacherTab\(params\?\.tab\)\}/u);
+  assert.match(launch, /target === "teachers" && teacherTab !== "overview"/u);
+  assert.match(launch, /&tab=\$\{encodeURIComponent\(teacherTab\)\}/u);
+  assert.match(cabinet, /initialTab=\{boundedTeacherTab\(params\?\.tab\)\}/u);
 });
 
 test("teacher directory uses frozen server paging, search and status contract", async () => {
@@ -126,5 +151,6 @@ test("librarian navigation exposes teacher management from both workspaces", asy
     read("app/librarian/visits/visit-admin-workspace.tsx"),
   ]);
   assert.match(main, /"\/librarian\/teachers"/u);
+  assert.match(main, /"\/librarian\/teachers\?tab=telegram"/u);
   assert.match(visits, /telegramMiniApp \? "\/librarian\/telegram\/cabinet\?target=teachers" : "\/librarian\/teachers"/u);
 });
