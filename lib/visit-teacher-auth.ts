@@ -387,10 +387,13 @@ export async function createVisitTeacherTelegramSession(
       kind: "activation",
       mode: grant.kind,
       teacher: grant.full_name ? { fullName: grant.full_name } : null,
-      requiresCode: grant.kind === "generic" || !grant.must_change_pin,
+      requiresCode: true,
       requiresNewPin: grant.kind === "generic" || Boolean(grant.must_change_pin),
       grantExpiresAt: grant.expires_at,
     };
+  }
+  if (credential.locked_until && credential.locked_until > now) {
+    throw new VisitScheduleError("teacher_locked", 423, "Вхід тимчасово заблоковано. Спробуйте пізніше.");
   }
   if (credential.must_change_pin) {
     return {
@@ -401,9 +404,6 @@ export async function createVisitTeacherTelegramSession(
       requiresNewPin: true,
       grantExpiresAt: null,
     };
-  }
-  if (credential.locked_until && credential.locked_until > now) {
-    throw new VisitScheduleError("teacher_locked", 423, "Вхід тимчасово заблоковано. Спробуйте пізніше.");
   }
   const replay = await db.prepare(`SELECT init_data_hash FROM telegram_mini_app_auth_receipts
     WHERE init_data_hash=? UNION ALL SELECT init_data_hash FROM telegram_librarian_sessions
@@ -568,13 +568,15 @@ export async function activateVisitTeacherTelegramSession(
     authDate: number;
     receiptExpiresAt: string;
     requestId: string;
+    intent: "login" | "activate";
     loginId: string;
     code: string;
     newPin: string;
   },
 ): Promise<{ token: string; identity: VisitTeacherIdentity }> {
   requireVisitTeacherCodeAuthEnabled();
-  if (!/^[1-9]\d{0,19}$/u.test(input.telegramUserId)
+  if ((input.intent !== "login" && input.intent !== "activate")
+    || !/^[1-9]\d{0,19}$/u.test(input.telegramUserId)
     || !/^[0-9a-f]{64}$/u.test(input.initDataHash)
     || !Number.isSafeInteger(input.authDate) || input.authDate <= 0
     || !validIsoTimestamp(input.receiptExpiresAt)
@@ -698,21 +700,21 @@ export async function activateVisitTeacherTelegramSession(
     throw new VisitScheduleError("rate_limited", 429, "Забагато спроб активації. Спробуйте пізніше.");
   }
   const requiresRotation = Boolean(credential?.must_change_pin);
-  const trustedPersonalSetup = Boolean(
-    credential && requiresRotation && grant.kind === "personal",
-  );
+  const modeAllowed = Boolean(credential) && (input.intent === "activate" ? requiresRotation : !requiresRotation);
   const currentCode = normalizeCode(input.code);
   const presentedHmac = credential
     ? await hmacHex(pepper, `code:${credential.teacher_user_id}:${currentCode}`)
     : await hmacHex(pepper, `code:unknown:${currentCode}`);
-  const requiresCode = !trustedPersonalSetup;
-  const codeAllowed = !requiresCode || Boolean(
+  const requiresCode = true;
+  const codeAllowed = Boolean(
     credential
       && credentialCodeShape(currentCode, requiresRotation)
       && constantTimeHexEqual(presentedHmac, credential.code_hmac),
   );
   const newPin = strictTeacherPin(input.newPin);
-  const pinAllowed = !requiresRotation || Boolean(newPin && strongTeacherPin(newPin));
+  const pinAllowed = input.intent === "activate"
+    ? Boolean(newPin && strongTeacherPin(newPin))
+    : input.newPin === "";
   const credentialAllowed = Boolean(
     credential
       && credential.status === "active"
@@ -720,7 +722,7 @@ export async function activateVisitTeacherTelegramSession(
       && (!credential.must_change_pin || !credential.code_expires_at || credential.code_expires_at > now)
       && (grant.fixedTeacherUserId === null || grant.fixedTeacherUserId === credential.teacher_user_id),
   );
-  if (!credentialAllowed || !codeAllowed || !credential) {
+  if (!credentialAllowed || !modeAllowed || !codeAllowed || !credential) {
     if (requiresCode) {
       await recordFailedLogin(
         db,
@@ -735,28 +737,30 @@ export async function activateVisitTeacherTelegramSession(
     throw new VisitScheduleError(
       "invalid_teacher_credentials",
       401,
-      "Не вдалося активувати кабінет. Перевірте ім’я та код.",
+      input.intent === "activate"
+        ? "Не вдалося активувати кабінет. Перевірте ім’я та тимчасовий код."
+        : "Не вдалося увійти. Перевірте ім’я та особистий PIN.",
     );
   }
-  if (!pinAllowed) {
-    throw new VisitScheduleError("weak_new_pin", 400, "PIN надто простий. Оберіть інші 4 цифри.");
-  }
-  if (requiresRotation && !newPin) {
+  if (input.intent === "activate" && !newPin) {
     throw new VisitScheduleError("new_pin_required", 400, "Тимчасовий код підтверджено. Створіть власний PIN із 4 цифр.");
+  }
+  if (!pinAllowed) {
+    throw new VisitScheduleError(
+      input.intent === "activate" ? "weak_new_pin" : "validation_failed",
+      400,
+      input.intent === "activate"
+        ? "PIN надто простий. Оберіть інші 4 цифри."
+        : "Для входу введіть лише чинний PIN.",
+    );
   }
   const conflict = await db.prepare(`
     SELECT user_id FROM telegram_connections
-    WHERE status='active' AND (
-      ((telegram_user_id=? OR chat_id=?) AND user_id!=?)
-      OR (user_id=? AND (telegram_user_id!=? OR chat_id!=?))
-    ) LIMIT 1
+    WHERE status='active' AND (telegram_user_id=? OR chat_id=?) AND user_id!=? LIMIT 1
   `).bind(
     input.telegramUserId,
     grant.chatId,
     credential.teacher_user_id,
-    credential.teacher_user_id,
-    input.telegramUserId,
-    grant.chatId,
   ).first<{ user_id: string }>();
   if (conflict) {
     throw new VisitScheduleError(
@@ -766,13 +770,13 @@ export async function activateVisitTeacherTelegramSession(
     );
   }
 
-  const newHmac = requiresRotation
+  const newHmac = input.intent === "activate"
     ? await hmacHex(pepper, `code:${credential.teacher_user_id}:${newPin!}`)
     : credential.code_hmac;
-  if (requiresRotation && constantTimeHexEqual(newHmac, credential.code_hmac)) {
+  if (input.intent === "activate" && constantTimeHexEqual(newHmac, credential.code_hmac)) {
     throw new VisitScheduleError("new_code_unchanged", 400, "Новий PIN має відрізнятися від тимчасового коду.");
   }
-  const nextCredentialVersion = credential.version + (requiresRotation ? 1 : 0);
+  const nextCredentialVersion = credential.version + (input.intent === "activate" ? 1 : 0);
   const token = randomOpaque(32);
   const tokenHash = await sha256Hex(token);
   const pendingScope = randomOpaque(18);
@@ -791,16 +795,16 @@ export async function activateVisitTeacherTelegramSession(
       JOIN users u ON u.id=c.teacher_user_id AND u.status='active'
       JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
       WHERE c.teacher_user_id=? AND c.status='active' AND c.version=?
-        AND c.must_change_pin=? AND (c.locked_until IS NULL OR c.locked_until<=?)
+        AND c.must_change_pin=?
+        AND (c.must_change_pin=0 OR c.code_expires_at IS NULL OR c.code_expires_at>?)
+        AND (c.locked_until IS NULL OR c.locked_until<=?)
         AND (?=0 OR c.code_hmac=?)
         AND NOT EXISTS (SELECT 1 FROM telegram_mini_app_auth_receipts WHERE init_data_hash=?)
         AND NOT EXISTS (SELECT 1 FROM telegram_librarian_sessions WHERE init_data_hash=?)
         AND NOT EXISTS (SELECT 1 FROM visit_teacher_login_limits
           WHERE scope_hash IN (?,?,?) AND blocked_until IS NOT NULL AND blocked_until>?)
-        AND NOT EXISTS (SELECT 1 FROM telegram_connections x WHERE x.status='active' AND (
-          ((x.telegram_user_id=? OR x.chat_id=?) AND x.user_id!=c.teacher_user_id)
-          OR (x.user_id=c.teacher_user_id AND (x.telegram_user_id!=? OR x.chat_id!=?))
-        ))
+        AND NOT EXISTS (SELECT 1 FROM telegram_connections x WHERE x.status='active'
+          AND (x.telegram_user_id=? OR x.chat_id=?) AND x.user_id!=c.teacher_user_id)
         AND (
           (?='connected' AND EXISTS (SELECT 1 FROM telegram_connections tc
             WHERE tc.user_id=c.teacher_user_id AND tc.telegram_user_id=? AND tc.chat_id=?
@@ -822,7 +826,8 @@ export async function activateVisitTeacherTelegramSession(
       now,
       credential.teacher_user_id,
       credential.version,
-      requiresRotation ? 1 : 0,
+      input.intent === "activate" ? 1 : 0,
+      now,
       now,
       requiresCode ? 1 : 0,
       presentedHmac,
@@ -832,8 +837,6 @@ export async function activateVisitTeacherTelegramSession(
       telegramRateScopeHash,
       pairRateScopeHash,
       now,
-      input.telegramUserId,
-      grant.chatId,
       input.telegramUserId,
       grant.chatId,
       grantKind,
@@ -846,7 +849,25 @@ export async function activateVisitTeacherTelegramSession(
       now,
     ),
   ];
-  if (requiresRotation) {
+  statements.push(db.prepare(`UPDATE telegram_librarian_sessions SET revoked_at=?,last_seen_at=?
+    WHERE user_id=? AND revoked_at IS NULL
+      AND EXISTS (SELECT 1 FROM telegram_mini_app_auth_receipts
+        WHERE init_data_hash=? AND teacher_user_id=? AND session_token_hash=?)
+      AND EXISTS (SELECT 1 FROM telegram_connections tc
+        WHERE tc.user_id=? AND tc.status='active'
+          AND (tc.telegram_user_id!=? OR tc.chat_id!=?))`)
+    .bind(
+      now,
+      now,
+      credential.teacher_user_id,
+      input.initDataHash,
+      credential.teacher_user_id,
+      tokenHash,
+      credential.teacher_user_id,
+      input.telegramUserId,
+      grant.chatId,
+    ));
+  if (input.intent === "activate") {
     statements.push(db.prepare(`UPDATE visit_teacher_credentials SET
         code_hmac=?,must_change_pin=0,code_expires_at=NULL,version=version+1,failed_attempts=0,
         failure_window_started_at=NULL,locked_until=NULL,last_login_at=?,code_rotated_at=?,
@@ -876,6 +897,24 @@ export async function activateVisitTeacherTelegramSession(
           WHERE teacher_user_id=? AND version=? AND code_hmac=?)`)
       .bind(now, now, credential.teacher_user_id, credential.teacher_user_id, nextCredentialVersion, newHmac));
   } else {
+    statements.push(db.prepare(`UPDATE visit_teacher_sessions SET revoked_at=?,last_seen_at=?
+      WHERE teacher_user_id=? AND revoked_at IS NULL
+        AND EXISTS (SELECT 1 FROM telegram_mini_app_auth_receipts
+          WHERE init_data_hash=? AND teacher_user_id=? AND session_token_hash=?)
+        AND EXISTS (SELECT 1 FROM telegram_connections tc
+          WHERE tc.user_id=? AND tc.status='active'
+            AND (tc.telegram_user_id!=? OR tc.chat_id!=?))`)
+      .bind(
+        now,
+        now,
+        credential.teacher_user_id,
+        input.initDataHash,
+        credential.teacher_user_id,
+        tokenHash,
+        credential.teacher_user_id,
+        input.telegramUserId,
+        grant.chatId,
+      ));
     statements.push(db.prepare(`UPDATE visit_teacher_sessions SET revoked_at=?,last_seen_at=?
       WHERE token_hash=(SELECT token_hash FROM visit_teacher_sessions
         WHERE teacher_user_id=? AND revoked_at IS NULL AND expires_at>?
@@ -934,11 +973,12 @@ export async function activateVisitTeacherTelegramSession(
       WHERE r.init_data_hash=? AND r.teacher_user_id=? AND r.session_token_hash=?
       ON CONFLICT(user_id) DO UPDATE SET telegram_user_id=excluded.telegram_user_id,
         chat_id=excluded.chat_id,username=excluded.username,status='active',disabled_at=NULL,
+        notify_orders=CASE WHEN telegram_connections.status='active'
+          THEN (telegram_connections.notify_orders OR telegram_connections.notify_visits) ELSE 1 END,
+        notify_visits=CASE WHEN telegram_connections.status='active'
+          THEN (telegram_connections.notify_orders OR telegram_connections.notify_visits) ELSE 1 END,
         linked_at=excluded.linked_at,last_error_code=NULL,
-        version=telegram_connections.version+1,updated_at=excluded.updated_at
-      WHERE telegram_connections.status!='active'
-        OR (telegram_connections.telegram_user_id=excluded.telegram_user_id
-          AND telegram_connections.chat_id=excluded.chat_id)`)
+        version=telegram_connections.version+1,updated_at=excluded.updated_at`)
       .bind(
         input.telegramUserId,
         grant.chatId,
@@ -996,6 +1036,11 @@ export async function activateVisitTeacherTelegramSession(
       ));
   }
   statements.push(
+    db.prepare(`UPDATE telegram_link_tokens SET revoked_at=?
+      WHERE user_id=? AND consumed_at IS NULL AND revoked_at IS NULL
+        AND EXISTS (SELECT 1 FROM visit_teacher_sessions
+          WHERE token_hash=? AND teacher_user_id=? AND revoked_at IS NULL)`)
+      .bind(now, credential.teacher_user_id, tokenHash, credential.teacher_user_id),
     db.prepare(`UPDATE telegram_teacher_activation_invites SET revoked_at=?,updated_at=?
       WHERE consumed_at IS NULL AND revoked_at IS NULL AND id!=COALESCE(?, '')
         AND (teacher_user_id=? OR bound_telegram_user_id=?)
@@ -1025,7 +1070,7 @@ export async function activateVisitTeacherTelegramSession(
         nextCredentialVersion,
         tokenHash,
         input.requestId,
-        JSON.stringify({ grantKind, pinCreated: requiresRotation }),
+        JSON.stringify({ grantKind, intent: input.intent, pinCreated: input.intent === "activate" }),
         now,
       ),
     db.prepare("DELETE FROM visit_teacher_login_limits WHERE scope_hash IN (?,?)")

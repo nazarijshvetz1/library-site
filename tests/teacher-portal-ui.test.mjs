@@ -259,7 +259,7 @@ test("public catalog navigation names the cabinet while preserving explicit sche
 });
 
 test("Telegram Mini App launch is bounded, signed server-side and stays on its framed cabinet route", async () => {
-  const [page, cabinet, launch, route, activationRoute, validator, teacherAuth, workspace] = await Promise.all([
+  const [page, cabinet, launch, route, activationRoute, validator, teacherAuth, workspace, telegramApi] = await Promise.all([
     read("app/teacher/telegram/page.tsx"),
     read("app/teacher/telegram/cabinet/page.tsx"),
     read("app/teacher/telegram/telegram-teacher-launch.tsx"),
@@ -268,8 +268,10 @@ test("Telegram Mini App launch is bounded, signed server-side and stays on its f
     read("lib/telegram-mini-app-auth.ts"),
     read("lib/visit-teacher-auth.ts"),
     read("app/visits/visit-booking-workspace.tsx"),
+    read("lib/telegram-api.ts"),
   ]);
   assert.match(page, /boundedTab\(params\?\.tab\)/u);
+  assert.match(page, /boundedMode\(params\?\.mode\)/u);
   assert.match(page, /robots: \{ index: false, follow: false \}/u);
   assert.match(launch, /window\.Telegram\?\.WebApp/u);
   assert.match(launch, /webApp\.initData/u);
@@ -282,6 +284,9 @@ test("Telegram Mini App launch is bounded, signed server-side and stays on its f
   assert.match(launch, /teacherSearchUrl\(normalizedQuery\)/u);
   assert.match(launch, /\/api\/teacher\/session\/telegram\/activate/u);
   assert.match(launch, /requestId: crypto\.randomUUID\(\)/u);
+  assert.match(launch, /intent: input\.intent/u);
+  assert.match(launch, /🔑 Увійти/u);
+  assert.match(launch, /✨ Активувати вперше/u);
   assert.match(launch, /Створіть власний 4-значний PIN/u);
   assert.match(launch, /Код і PIN вводьте лише/u);
   assert.match(launch, /activation\.mode === "connected" \? "Telegram підтверджено"/u);
@@ -299,7 +304,8 @@ test("Telegram Mini App launch is bounded, signed server-side and stays on its f
   assert.match(teacherAuth, /SameSite=None; Partitioned/u);
   assert.match(teacherAuth, /VISIT_TEACHER_TELEGRAM_COOKIE/u);
   assert.match(activationRoute, /isSameOriginRequest\(request\)/u);
-  assert.match(activationRoute, /expectedKeys = \["initData", "requestId", "loginId", "code", "newPin"\]/u);
+  assert.match(activationRoute, /expectedKeys = \["initData", "requestId", "intent", "loginId", "code", "newPin"\]/u);
+  assert.match(activationRoute, /body\.value\.intent !== "login"/u);
   assert.match(activationRoute, /validateTelegramMiniAppInitData/u);
   assert.match(activationRoute, /activateVisitTeacherTelegramSession/u);
   assert.match(activationRoute, /telegramTeacherSessionCookie\(result\.token\)/u);
@@ -308,7 +314,16 @@ test("Telegram Mini App launch is bounded, signed server-side and stays on its f
   assert.match(validator, /nowMs - authTimeMs/u);
   assert.match(workspace, /visibilitychange/u);
   assert.match(workspace, /Я вже підключив\(ла\) — перевірити/u);
+  assert.match(workspace, /const notificationsOn = Boolean\(telegram\?\.notifyOrders \|\| telegram\?\.notifyVisits\)/u);
+  assert.match(workspace, /🔕 Вимкнути сповіщення/u);
+  assert.match(workspace, /🔔 Увімкнути сповіщення/u);
+  assert.match(workspace, /confirmation: "disconnect_telegram"/u);
+  assert.match(workspace, /Так, від’єднати/u);
+  assert.doesNotMatch(workspace, /teacher-telegram-orders|teacher-telegram-visits/u);
   assert.match(workspace, /teacherEntryPath/u);
+  assert.match(telegramApi, /exactKeys\(value, \["confirmation", "expectedVersion"\]\)/u);
+  assert.match(telegramApi, /value\.confirmation !== "disconnect_telegram"/u);
+  assert.match(telegramApi, /confirmation: "disconnect_telegram"/u);
 });
 
 test("teacher profile shows assigned information and keeps photo access private and same-origin", async () => {

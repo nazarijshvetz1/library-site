@@ -246,10 +246,9 @@ function OverviewPanel({
 function LibrarianTelegramPanel({ writesEnabled }: { writesEnabled: boolean }) {
   const [telegram, setTelegram] = useState<TelegramStatus | null>(null);
   const [apiWritesEnabled, setApiWritesEnabled] = useState(true);
-  const [notifyOrders, setNotifyOrders] = useState(true);
-  const [notifyVisits, setNotifyVisits] = useState(true);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<"link" | "save" | "test" | "disconnect" | null>(null);
+  const [busy, setBusy] = useState<"link" | "toggle" | "test" | "disconnect" | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"success" | "error" | "info">("info");
 
@@ -259,8 +258,7 @@ function LibrarianTelegramPanel({ writesEnabled }: { writesEnabled: boolean }) {
       const response = await visitApi<LibrarianTelegramEnvelope>("/api/librarian/telegram");
       setTelegram(response.telegram);
       setApiWritesEnabled(response.writesEnabled);
-      setNotifyOrders(response.telegram.notifyOrders);
-      setNotifyVisits(response.telegram.notifyVisits);
+      setConfirmDisconnect(false);
     } catch (error) {
       setNotice(errorMessage(error)); setNoticeTone("error");
     } finally { setLoading(false); }
@@ -281,17 +279,22 @@ function LibrarianTelegramPanel({ writesEnabled }: { writesEnabled: boolean }) {
     }
   }
 
-  async function savePreferences() {
+  async function toggleNotifications() {
     if (!telegram?.connected || telegram.version === null) return;
-    setBusy("save"); setNotice("");
+    const nextEnabled = !(telegram.notifyOrders || telegram.notifyVisits);
+    setBusy("toggle"); setNotice("");
     try {
       const response = await visitApi<LibrarianTelegramEnvelope>("/api/librarian/telegram", {
         method: "PATCH",
-        body: JSON.stringify({ notifyOrders, notifyVisits, expectedVersion: telegram.version }),
+        body: JSON.stringify({
+          notifyOrders: nextEnabled,
+          notifyVisits: nextEnabled,
+          expectedVersion: telegram.version,
+        }),
       });
       setTelegram(response.telegram); setApiWritesEnabled(response.writesEnabled);
-      setNotifyOrders(response.telegram.notifyOrders); setNotifyVisits(response.telegram.notifyVisits);
-      setNotice("Налаштування Telegram збережено."); setNoticeTone("success");
+      setNotice(nextEnabled ? "Telegram-сповіщення увімкнено." : "Telegram-сповіщення вимкнено.");
+      setNoticeTone("success");
     } catch (error) {
       setNotice(errorMessage(error)); setNoticeTone("error");
     } finally { setBusy(null); }
@@ -314,9 +317,13 @@ function LibrarianTelegramPanel({ writesEnabled }: { writesEnabled: boolean }) {
     try {
       const response = await visitApi<LibrarianTelegramEnvelope>("/api/librarian/telegram/disconnect", {
         method: "POST",
-        body: JSON.stringify({ expectedVersion: telegram.version }),
+        body: JSON.stringify({
+          expectedVersion: telegram.version,
+          confirmation: "disconnect_telegram",
+        }),
       });
       setTelegram(response.telegram); setApiWritesEnabled(response.writesEnabled);
+      setConfirmDisconnect(false);
       setNotice("Telegram від’єднано від кабінету бібліотекаря."); setNoticeTone("success");
     } catch (error) {
       setNotice(errorMessage(error)); setNoticeTone("error");
@@ -324,8 +331,7 @@ function LibrarianTelegramPanel({ writesEnabled }: { writesEnabled: boolean }) {
   }
 
   const canWrite = writesEnabled && apiWritesEnabled;
-  const changed = Boolean(telegram?.connected)
-    && (notifyOrders !== telegram?.notifyOrders || notifyVisits !== telegram?.notifyVisits);
+  const notificationsOn = Boolean(telegram?.notifyOrders || telegram?.notifyVisits);
   const statusLabel = telegram?.connected
     ? "Підключено"
     : telegram?.status === "blocked"
@@ -343,16 +349,14 @@ function LibrarianTelegramPanel({ writesEnabled }: { writesEnabled: boolean }) {
       {!loading && telegram && (!telegram.configured || !telegram.linkingEnabled) ? <div className={styles.info}>Для запуску треба додати захищений токен бота й увімкнути Telegram у налаштуваннях сайту.</div> : null}
       {!loading && telegram?.connected ? (
         <>
-          <div className={styles.telegramPreferenceGrid}>
-            <label htmlFor="librarian-telegram-orders"><input id="librarian-telegram-orders" aria-label="Сповіщення про замовлення вчителів" type="checkbox" checked={notifyOrders} onChange={(event) => setNotifyOrders(event.currentTarget.checked)} disabled={!canWrite || Boolean(busy)} /><span><strong>Замовлення вчителів</strong><small>Нова заявка або її скасування вчителем</small></span></label>
-            <label htmlFor="librarian-telegram-visits"><input id="librarian-telegram-visits" aria-label="Сповіщення про відвідування" type="checkbox" checked={notifyVisits} onChange={(event) => setNotifyVisits(event.currentTarget.checked)} disabled={!canWrite || Boolean(busy)} /><span><strong>Відвідування</strong><small>Новий, змінений або скасований запис</small></span></label>
-          </div>
+          <div className={styles.info}>Сповіщення про замовлення та відвідування: <strong>{notificationsOn ? "увімкнено 🔔" : "вимкнено 🔕"}</strong>. Бот і режим бібліотекаря залишаються підключеними.</div>
           {!telegram.notificationsEnabled ? <div className={styles.info}>Бот підключено, але доставку повідомлень ще не ввімкнено в налаштуваннях сайту.</div> : null}
           <div className={styles.telegramActions}>
-            <button className={styles.primaryButton} type="button" onClick={() => void savePreferences()} disabled={!canWrite || !changed || Boolean(busy)}>{busy === "save" ? "Зберігаємо…" : "Зберегти"}</button>
-            <button type="button" onClick={() => void sendTest()} disabled={!canWrite || Boolean(busy) || !telegram.notificationsEnabled}>{busy === "test" ? "Надсилаємо…" : "Надіслати тест"}</button>
-            <button className={styles.telegramDanger} type="button" onClick={() => void disconnect()} disabled={!canWrite || Boolean(busy)}>{busy === "disconnect" ? "Від’єднуємо…" : "Від’єднати"}</button>
+            <button className={styles.primaryButton} type="button" onClick={() => void toggleNotifications()} disabled={!canWrite || Boolean(busy)}>{busy === "toggle" ? "Змінюємо…" : notificationsOn ? "🔕 Вимкнути сповіщення" : "🔔 Увімкнути сповіщення"}</button>
+            <button type="button" onClick={() => void sendTest()} disabled={!canWrite || Boolean(busy) || !telegram.notificationsEnabled || !notificationsOn}>{busy === "test" ? "Надсилаємо…" : "Надіслати тест"}</button>
+            <button className={styles.telegramDanger} type="button" onClick={() => setConfirmDisconnect(true)} disabled={!canWrite || Boolean(busy)}>Від’єднати Telegram</button>
           </div>
+          {confirmDisconnect ? <div className={styles.info} role="alert"><p>Повне від’єднання вимкне автовхід і режим бібліотекаря в боті. Для тиші достатньо вимкнути сповіщення кнопкою вище.</p><div className={styles.telegramActions}><button className={styles.telegramDanger} type="button" onClick={() => void disconnect()} disabled={!canWrite || Boolean(busy)}>{busy === "disconnect" ? "Від’єднуємо…" : "Так, від’єднати"}</button><button type="button" onClick={() => setConfirmDisconnect(false)} disabled={Boolean(busy)}>Скасувати</button></div></div> : null}
         </>
       ) : !loading && telegram?.configured && telegram.linkingEnabled ? (
         <button className={styles.primaryButton} type="button" onClick={() => void connect()} disabled={!canWrite || Boolean(busy)}>{busy === "link" ? "Створюємо посилання…" : telegram.status === "blocked" ? "Підключити повторно" : "Підключити Telegram"}</button>

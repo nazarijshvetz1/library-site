@@ -23,10 +23,11 @@ export async function POST(request: Request): Promise<Response> {
     return visitError(403, "cross_origin_request", "Запит має надійти з цього самого сайту.");
   }
   const body = await readVisitJson(request); if (!body.ok) return body.response;
-  const expectedKeys = ["initData", "requestId", "loginId", "code", "newPin"];
+  const expectedKeys = ["initData", "requestId", "intent", "loginId", "code", "newPin"];
   const keys = Object.keys(body.value);
   if (keys.length !== expectedKeys.length || !expectedKeys.every((key) => keys.includes(key))
-    || expectedKeys.some((key) => typeof body.value[key] !== "string")) {
+    || expectedKeys.some((key) => typeof body.value[key] !== "string")
+    || (body.value.intent !== "login" && body.value.intent !== "activate")) {
     return visitError(400, "validation_failed", "Перевірте ім’я, код і новий PIN.");
   }
   try {
@@ -40,6 +41,7 @@ export async function POST(request: Request): Promise<Response> {
         authDate: telegram.authDate,
         receiptExpiresAt: telegram.expiresAt,
         requestId: body.value.requestId as string,
+        intent: body.value.intent as "login" | "activate",
         loginId: body.value.loginId as string,
         code: body.value.code as string,
         newPin: body.value.newPin as string,

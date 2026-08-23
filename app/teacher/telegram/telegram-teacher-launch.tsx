@@ -24,6 +24,7 @@ import {
 import styles from "./telegram.module.css";
 
 type TeacherTab = "overview" | "visits" | "orders" | "loans" | "notifications";
+type ActivationIntent = "login" | "activate";
 type TelegramWebApp = {
   initData: string;
   ready(): void;
@@ -52,10 +53,12 @@ declare global {
 
 export default function TelegramTeacherLaunch({
   targetTab,
+  initialMode,
   enabled,
   botUsername,
 }: {
   targetTab: TeacherTab;
+  initialMode: ActivationIntent;
   enabled: boolean;
   botUsername: string | null;
 }) {
@@ -67,7 +70,7 @@ export default function TelegramTeacherLaunch({
     enabled ? "Перевіряємо безпечний вхід…" : "Кабінет у Telegram ще не ввімкнено.",
   );
   const [activation, setActivation] = useState<ActivationState | null>(null);
-  const [forceNewPin, setForceNewPin] = useState(false);
+  const [activationIntent, setActivationIntent] = useState<ActivationIntent>(initialMode);
   const [initData, setInitData] = useState("");
   const targetUrl = useMemo(
     () => `/teacher/telegram/cabinet?tab=${encodeURIComponent(targetTab)}`,
@@ -81,7 +84,7 @@ export default function TelegramTeacherLaunch({
     async function start() {
       setPhase("checking");
       setActivation(null);
-      setForceNewPin(false);
+      setActivationIntent(initialMode);
       setInitData("");
       setMessage("Перевіряємо безпечний вхід…");
       try {
@@ -110,6 +113,9 @@ export default function TelegramTeacherLaunch({
         if (payload.onboardingRequired) {
           setInitData(webApp.initData);
           setActivation(payload.activation);
+          setActivationIntent(payload.activation.mode === "generic"
+            ? initialMode
+            : payload.activation.requiresNewPin ? "activate" : "login");
           setPhase("activation");
           setMessage(activationIntro(payload.activation));
           return;
@@ -126,12 +132,12 @@ export default function TelegramTeacherLaunch({
       cancelled = true;
       controller.abort();
     };
-  }, [attempt, enabled, targetUrl]);
+  }, [attempt, enabled, initialMode, targetUrl]);
 
-  async function activate(input: { loginId: string; code: string; newPin: string }) {
+  async function activate(input: { intent: ActivationIntent; loginId: string; code: string; newPin: string }) {
     if (!activation || !initData) return;
     setPhase("submitting");
-    setMessage("Захищено активуємо кабінет…");
+    setMessage(input.intent === "activate" ? "Захищено активуємо кабінет…" : "Захищено входимо до кабінету…");
     try {
       await visitApi("/api/teacher/session/telegram/activate", {
         method: "POST",
@@ -139,22 +145,24 @@ export default function TelegramTeacherLaunch({
         body: JSON.stringify({
           initData,
           requestId: crypto.randomUUID(),
+          intent: input.intent,
           loginId: input.loginId,
           code: input.code,
           newPin: input.newPin,
         }),
       });
       setPhase("success");
-      setMessage("Готово! Кабінет активовано, а Telegram підключено.");
+      setMessage(input.intent === "activate"
+        ? "Готово! Кабінет активовано, а Telegram підключено."
+        : "Готово! Ви увійшли, а Telegram підключено.");
       window.location.replace(targetUrl);
     } catch (error) {
       setPhase("activation");
-      if (error instanceof VisitApiError && error.code === "new_pin_required") {
-        setForceNewPin(true);
-      }
       setMessage(error instanceof VisitApiError
         ? error.message
-        : "Не вдалося активувати кабінет. Спробуйте ще раз.");
+        : input.intent === "activate"
+          ? "Не вдалося активувати кабінет. Спробуйте ще раз."
+          : "Не вдалося увійти до кабінету. Спробуйте ще раз.");
     }
   }
 
@@ -165,7 +173,9 @@ export default function TelegramTeacherLaunch({
         <div className={styles.mark} aria-hidden="true">ЄБ</div>
         <p className={styles.eyebrow}>Єдина бібліотека</p>
         <h1 id="telegram-teacher-title">
-          {activation ? "Активувати кабінет учителя" : "Кабінет учителя"}
+          {activation
+            ? activationIntent === "activate" ? "Активувати кабінет уперше" : "Увійти до кабінету"
+            : "Кабінет учителя"}
         </h1>
         <p className={styles.message} role={phase === "error" ? "alert" : "status"} aria-live="polite">
           {message}
@@ -176,7 +186,8 @@ export default function TelegramTeacherLaunch({
         {activation && (phase === "activation" || phase === "submitting") ? (
           <TelegramTeacherActivationForm
             activation={activation}
-            forceNewPin={forceNewPin}
+            intent={activationIntent}
+            onIntentChange={setActivationIntent}
             busy={phase === "submitting"}
             onActivate={activate}
           />
@@ -197,14 +208,16 @@ export default function TelegramTeacherLaunch({
 
 function TelegramTeacherActivationForm({
   activation,
-  forceNewPin,
+  intent,
+  onIntentChange,
   busy,
   onActivate,
 }: {
   activation: ActivationState;
-  forceNewPin: boolean;
+  intent: ActivationIntent;
+  onIntentChange(intent: ActivationIntent): void;
   busy: boolean;
-  onActivate(input: { loginId: string; code: string; newPin: string }): Promise<void>;
+  onActivate(input: { intent: ActivationIntent; loginId: string; code: string; newPin: string }): Promise<void>;
 }) {
   const listId = useId();
   const searchRef = useRef<HTMLInputElement>(null);
@@ -219,7 +232,7 @@ function TelegramTeacherActivationForm({
   const [validationNotice, setValidationNotice] = useState("");
   const generic = activation.mode === "generic";
   const normalizedCode = normalizedTeacherAccessCode(code);
-  const needsNewPin = forceNewPin || activation.requiresNewPin;
+  const needsNewPin = intent === "activate";
   const pinStatus = teacherPinStrength(pin);
   const normalizedQuery = query.trim();
 
@@ -260,6 +273,14 @@ function TelegramTeacherActivationForm({
     setSearchNotice("");
   }
 
+  function changeIntent(next: ActivationIntent) {
+    setCode("");
+    setPin("");
+    setPinConfirmation("");
+    setValidationNotice("");
+    onIntentChange(next);
+  }
+
   function changeQuery(value: string) {
     setQuery(value);
     if (selected && value !== selected.fullName) setSelected(null);
@@ -278,8 +299,10 @@ function TelegramTeacherActivationForm({
       searchRef.current?.focus();
       return;
     }
-    if (activation.requiresCode && !teacherAccessCodeComplete(code)) {
-      setValidationNotice("Введіть 4 цифри тимчасового коду або особистого PIN.");
+    if (!teacherAccessCodeComplete(code)) {
+      setValidationNotice(intent === "activate"
+        ? "Введіть 4 цифри тимчасового коду або чинний старий код бібліотекаря."
+        : "Введіть свій чинний 4-значний PIN.");
       return;
     }
     if (needsNewPin && (!pinStatus.strong || normalizedTeacherPin(pinConfirmation) !== normalizedTeacherPin(pin))) {
@@ -289,19 +312,26 @@ function TelegramTeacherActivationForm({
       return;
     }
     void onActivate({
+      intent,
       loginId: chosen?.loginId ?? "",
-      code: activation.requiresCode ? normalizedCode : "",
+      code: normalizedCode,
       newPin: needsNewPin ? normalizedTeacherPin(pin) : "",
     });
   }
 
   const submitDisabled = busy
     || (generic && !selected)
-    || (activation.requiresCode && !teacherAccessCodeComplete(code))
+    || !teacherAccessCodeComplete(code)
     || (needsNewPin && (!pinStatus.strong || normalizedTeacherPin(pinConfirmation) !== normalizedTeacherPin(pin)));
 
   return (
     <form className={styles.activationForm} onSubmit={submit} aria-busy={busy}>
+      {generic ? (
+        <div className={styles.modeSwitch} aria-label="Режим входу">
+          <button type="button" aria-pressed={intent === "login"} onClick={() => changeIntent("login")} disabled={busy}>🔑 Увійти</button>
+          <button type="button" aria-pressed={intent === "activate"} onClick={() => changeIntent("activate")} disabled={busy}>✨ Активувати вперше</button>
+        </div>
+      ) : null}
       {generic ? (
         <div className={styles.fieldGroup}>
           <label htmlFor={`${listId}-search`}>Прізвище та ім’я *</label>
@@ -337,15 +367,14 @@ function TelegramTeacherActivationForm({
         </div>
       )}
 
-      {activation.requiresCode ? (
-        <div className={styles.fieldGroup}>
-          <label htmlFor={`${listId}-code`}>Тимчасовий код або PIN *</label>
+      <div className={styles.fieldGroup}>
+          <label htmlFor={`${listId}-code`}>{intent === "activate" ? "Тимчасовий код бібліотекаря *" : "Ваш особистий PIN *"}</label>
           <input
             id={`${listId}-code`}
             required
             type="password"
-            inputMode="text"
-            autoComplete="one-time-code"
+            inputMode={intent === "activate" ? "text" : "numeric"}
+            autoComplete={intent === "activate" ? "one-time-code" : "current-password"}
             autoCapitalize="characters"
             maxLength={11}
             value={code}
@@ -353,12 +382,10 @@ function TelegramTeacherActivationForm({
               setCode(formatTeacherAccessCode(event.currentTarget.value));
               setValidationNotice("");
             }}
-            placeholder="4 цифри"
+            placeholder={intent === "activate" ? "4 цифри або старий код" : "4 цифри"}
             disabled={busy}
           />
         </div>
-      ) : null}
-
       {needsNewPin ? (
         <>
           <div className={styles.fieldGroup}>
@@ -398,7 +425,7 @@ function TelegramTeacherActivationForm({
       ) : null}
       {validationNotice ? <p className={styles.formError} role="alert">{validationNotice}</p> : null}
       <button className={styles.primary} type="submit" disabled={submitDisabled}>
-        {busy ? "Активуємо…" : "Продовжити"}
+        {busy ? intent === "activate" ? "Активуємо…" : "Входимо…" : intent === "activate" ? "Активувати кабінет" : "Увійти"}
       </button>
     </form>
   );
@@ -406,12 +433,14 @@ function TelegramTeacherActivationForm({
 
 function activationIntro(activation: ActivationState): string {
   if (activation.mode === "personal") {
-    return `Запрошення підготовлено для ${activation.teacher?.fullName ?? "вчителя"}. Створіть PIN або підтвердьте чинний.`;
+    return activation.requiresNewPin
+      ? `Запрошення підготовлено для ${activation.teacher?.fullName ?? "вчителя"}. Введіть тимчасовий код і створіть PIN.`
+      : `Запрошення підготовлено для ${activation.teacher?.fullName ?? "вчителя"}. Увійдіть зі своїм PIN.`;
   }
   if (activation.mode === "connected") {
     return "Telegram уже підтверджено. Введіть тимчасовий код бібліотекаря та створіть новий особистий PIN.";
   }
-  return "Оберіть себе з бази та введіть тимчасовий код бібліотекаря або свій PIN.";
+  return "Оберіть «Увійти» з чинним PIN або «Активувати вперше» з тимчасовим кодом бібліотекаря.";
 }
 
 async function loadTelegramWebApp(): Promise<TelegramWebApp> {

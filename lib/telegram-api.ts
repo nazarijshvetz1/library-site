@@ -72,6 +72,7 @@ export function telegramPreferencesInput(value: Record<string, unknown>):
   | { ok: false; response: Response } {
   if (!exactKeys(value, ["notifyOrders", "notifyVisits", "expectedVersion"])
     || typeof value.notifyOrders !== "boolean" || typeof value.notifyVisits !== "boolean"
+    || value.notifyOrders !== value.notifyVisits
     || !positiveInteger(value.expectedVersion)) {
     return { ok: false, response: telegramError(400, "validation_failed", "Некоректні налаштування Telegram.") };
   }
@@ -85,13 +86,17 @@ export function telegramPreferencesInput(value: Record<string, unknown>):
   };
 }
 
-export function telegramVersionInput(value: Record<string, unknown>):
-  | { ok: true; value: { expectedVersion: number } }
+export function telegramDisconnectInput(value: Record<string, unknown>):
+  | { ok: true; value: { expectedVersion: number; confirmation: "disconnect_telegram" } }
   | { ok: false; response: Response } {
-  if (!exactKeys(value, ["expectedVersion"]) || !positiveInteger(value.expectedVersion)) {
-    return { ok: false, response: telegramError(400, "validation_failed", "Некоректна версія підключення.") };
+  if (!exactKeys(value, ["confirmation", "expectedVersion"])
+    || !positiveInteger(value.expectedVersion) || value.confirmation !== "disconnect_telegram") {
+    return { ok: false, response: telegramError(400, "validation_failed", "Підтвердіть повне від’єднання Telegram.") };
   }
-  return { ok: true, value: { expectedVersion: value.expectedVersion } };
+  return {
+    ok: true,
+    value: { expectedVersion: value.expectedVersion, confirmation: "disconnect_telegram" },
+  };
 }
 
 function exactKeys(value: Record<string, unknown>, keys: string[]): boolean {

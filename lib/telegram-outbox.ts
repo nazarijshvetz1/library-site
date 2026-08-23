@@ -35,7 +35,7 @@ export function queueTelegramForLibrariansStatement(
            'pending',0,?,NULL,NULL,NULL,NULL,NULL,NULL,?,?
     FROM users u JOIN telegram_connections c ON c.user_id=u.id
     WHERE u.status='active' AND u.role IN ('admin','librarian') AND c.status='active'
-      AND CASE ? WHEN 'orders' THEN c.notify_orders=1 WHEN 'visits' THEN c.notify_visits=1 ELSE 1 END
+      AND (c.notify_orders=1 OR c.notify_visits=1)
       AND EXISTS (
         SELECT 1 FROM audit_events audit
         WHERE audit.request_id=? AND audit.entity_type=? AND audit.entity_id=?
@@ -53,7 +53,6 @@ export function queueTelegramForLibrariansStatement(
     value.createdAt,
     value.createdAt,
     value.createdAt,
-    value.category,
     value.auditRequestId,
     value.entityType,
     value.entityId,
@@ -82,9 +81,9 @@ export function queueTelegramFromPortalNotificationStatement(
     JOIN users u ON u.id=pn.teacher_user_id AND u.status='active'
     JOIN telegram_connections c ON c.user_id=pn.teacher_user_id AND c.status='active'
     WHERE pn.id=?
-      AND CASE ? WHEN 'orders' THEN c.notify_orders=1 WHEN 'visits' THEN c.notify_visits=1 ELSE 1 END
+      AND (c.notify_orders=1 OR c.notify_visits=1)
     ON CONFLICT(dedupe_key) DO NOTHING
-  `).bind(category, path, createdAt, createdAt, createdAt, notificationId, category);
+  `).bind(category, path, createdAt, createdAt, createdAt, notificationId);
 }
 
 function normalizedQueueEvent(event: TelegramQueueEvent): TelegramQueueEvent {

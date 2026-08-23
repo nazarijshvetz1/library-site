@@ -28,6 +28,37 @@
   text-align: left;
 }
 
+.modeSwitch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 5px;
+  border: 1px solid #bfd0c2;
+  border-radius: 14px;
+  background: var(--tg-theme-secondary-bg-color, #eef2ea);
+}
+
+.modeSwitch button {
+  min-height: 44px;
+  padding: 9px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--tg-theme-text-color, #173f31);
+  font: 800 13px/1.25 Arial, sans-serif;
+  cursor: pointer;
+}
+
+.modeSwitch button[aria-pressed="true"] {
+  background: var(--tg-theme-bg-color, #fffdf8);
+  box-shadow: 0 3px 12px rgba(19, 55, 40, .12);
+}
+
+.modeSwitch button:disabled {
+  cursor: not-allowed;
+  opacity: .6;
+}
+
 .fieldGroup {
   position: relative;
   display: grid;

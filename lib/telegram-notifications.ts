@@ -90,6 +90,7 @@ type OutboxRow = {
   id: string;
   recipient_user_id: string;
   chat_id: string;
+  connection_version: number;
   title: string;
   message: string;
   target_path: string;
@@ -402,24 +403,53 @@ export async function updateTelegramPreferences(
   userId: string,
   input: { notifyOrders: boolean; notifyVisits: boolean; expectedVersion: number },
 ): Promise<TelegramConnectionStatus> {
+  if (input.notifyOrders !== input.notifyVisits) {
+    throw new TelegramIntegrationError(
+      "validation_failed",
+      400,
+      "Кнопка керує всіма Telegram-сповіщеннями одночасно.",
+      { permanent: true },
+    );
+  }
   const now = new Date().toISOString();
-  await db.batch([
+  const desired = input.notifyOrders ? 1 : 0;
+  const results = await db.batch([
     db.prepare(`
       UPDATE telegram_connections
       SET notify_orders=?,notify_visits=?,version=version+1,updated_at=?
       WHERE user_id=? AND status='active' AND version=?
         AND EXISTS (SELECT 1 FROM users WHERE id=? AND status='active')
     `).bind(
-      input.notifyOrders ? 1 : 0,
-      input.notifyVisits ? 1 : 0,
+      desired,
+      desired,
       now,
       userId,
       input.expectedVersion,
       userId,
     ),
+    db.prepare(`UPDATE telegram_delivery_outbox
+      SET status='dead',lease_token=NULL,lease_expires_at=NULL,
+        last_error_code='notifications_disabled',
+        last_error_message='Одержувач вимкнув Telegram-сповіщення.',updated_at=?
+      WHERE recipient_user_id=? AND status IN ('pending','processing','retry')
+        AND category IN ('orders','visits','system') AND ?=0
+        AND EXISTS (SELECT 1 FROM telegram_connections
+          WHERE user_id=? AND status='active' AND version=?
+            AND notify_orders=? AND notify_visits=?)`)
+      .bind(
+        now,
+        userId,
+        desired,
+        userId,
+        input.expectedVersion + 1,
+        desired,
+        desired,
+      ),
   ]);
   const status = await readTelegramConnectionStatus(db, userId);
-  if (!status.connected || status.version !== input.expectedVersion + 1) {
+  if (Number(results[0]?.meta?.changes ?? 0) !== 1
+    || !status.connected || status.version !== input.expectedVersion + 1
+    || status.notifyOrders !== input.notifyOrders || status.notifyVisits !== input.notifyVisits) {
     throw new TelegramIntegrationError(
       "connection_version_conflict",
       409,
@@ -461,6 +491,14 @@ export async function disconnectTelegram(
       .bind(now, now, userId, userId, expectedVersion, userId, expectedVersion),
     db.prepare(`UPDATE telegram_link_tokens SET revoked_at=?
       WHERE user_id=? AND consumed_at IS NULL AND revoked_at IS NULL
+        AND EXISTS (SELECT 1 FROM telegram_connections
+          WHERE user_id=? AND status='active' AND version=?)`)
+      .bind(now, userId, userId, expectedVersion),
+    db.prepare(`UPDATE telegram_delivery_outbox
+      SET status='dead',lease_token=NULL,lease_expires_at=NULL,
+        last_error_code='telegram_disconnected',
+        last_error_message='Telegram повністю від’єднано від профілю.',updated_at=?
+      WHERE recipient_user_id=? AND status IN ('pending','processing','retry')
         AND EXISTS (SELECT 1 FROM telegram_connections
           WHERE user_id=? AND status='active' AND version=?)`)
       .bind(now, userId, userId, expectedVersion),
@@ -546,13 +584,15 @@ export async function registerTelegramWebhook(
   await telegramApiRequest(configuration.botToken, "setWebhook", {
     url: webhookUrl,
     secret_token: configuration.webhookSecret,
-    allowed_updates: ["message"],
+    allowed_updates: ["message", "callback_query"],
     drop_pending_updates: false,
   }, fetcher);
   const commands = [
     { command: "start", description: "Підключити бота або відкрити меню" },
     { command: "menu", description: "Показати меню бібліотеки" },
+    { command: "notifications", description: "Керувати сповіщеннями" },
     { command: "stop", description: "Вимкнути Telegram-сповіщення" },
+    { command: "disconnect", description: "Від’єднати Telegram від профілю" },
   ];
   for (const languageCode of [null, "uk"] as const) {
     try {
@@ -598,7 +638,7 @@ export function queueTelegramForLibrariansStatement(
            'pending',0,?,NULL,NULL,NULL,NULL,NULL,NULL,?,?
     FROM users u JOIN telegram_connections c ON c.user_id=u.id
     WHERE u.status='active' AND u.role IN ('admin','librarian') AND c.status='active'
-      AND CASE ? WHEN 'orders' THEN c.notify_orders=1 WHEN 'visits' THEN c.notify_visits=1 ELSE 1 END
+      AND (c.notify_orders=1 OR c.notify_visits=1)
       AND EXISTS (
         SELECT 1 FROM audit_events audit
         WHERE audit.request_id=? AND audit.entity_type=? AND audit.entity_id=?
@@ -616,7 +656,6 @@ export function queueTelegramForLibrariansStatement(
     value.createdAt,
     value.createdAt,
     value.createdAt,
-    value.category,
     value.auditRequestId,
     value.entityType,
     value.entityId,
@@ -639,7 +678,7 @@ export function queueTelegramForUserStatement(
            'pending',0,?,NULL,NULL,NULL,NULL,NULL,NULL,?,?
     FROM users u JOIN telegram_connections c ON c.user_id=u.id
     WHERE u.id=? AND u.status='active' AND c.status='active'
-      AND CASE ? WHEN 'orders' THEN c.notify_orders=1 WHEN 'visits' THEN c.notify_visits=1 ELSE 1 END
+      AND (c.notify_orders=1 OR c.notify_visits=1)
     ON CONFLICT(dedupe_key) DO NOTHING
   `).bind(
     value.dedupeKey,
@@ -654,7 +693,6 @@ export function queueTelegramForUserStatement(
     value.createdAt,
     value.createdAt,
     recipientUserId,
-    value.category,
   );
 }
 
@@ -680,9 +718,9 @@ export function queueTelegramFromPortalNotificationStatement(
     JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
     JOIN telegram_connections c ON c.user_id=pn.teacher_user_id AND c.status='active'
     WHERE pn.id=?
-      AND CASE ? WHEN 'orders' THEN c.notify_orders=1 WHEN 'visits' THEN c.notify_visits=1 ELSE 1 END
+      AND (c.notify_orders=1 OR c.notify_visits=1)
     ON CONFLICT(dedupe_key) DO NOTHING
-  `).bind(category, path, createdAt, createdAt, createdAt, notificationId, category);
+  `).bind(category, path, createdAt, createdAt, createdAt, notificationId);
 }
 
 export async function drainTelegramOutbox(
@@ -711,11 +749,13 @@ export async function drainTelegramOutbox(
     `).bind(now, now, now),
   ]);
   const due = await db.prepare(`
-    SELECT o.id,o.recipient_user_id,c.chat_id,o.title,o.message,o.target_path,o.attempts,o.created_at
+    SELECT o.id,o.recipient_user_id,c.chat_id,c.version AS connection_version,
+      o.title,o.message,o.target_path,o.attempts,o.created_at
     FROM telegram_delivery_outbox o
     JOIN telegram_connections c ON c.user_id=o.recipient_user_id AND c.status='active'
     JOIN users u ON u.id=o.recipient_user_id AND u.status='active'
     WHERE o.status IN ('pending','retry') AND o.next_attempt_at<=?
+      AND (c.notify_orders=1 OR c.notify_visits=1)
       AND ((o.target_path GLOB '/librarian*' AND u.role IN ('admin','librarian'))
         OR (o.target_path NOT GLOB '/librarian*' AND EXISTS (
           SELECT 1 FROM teacher_profiles p WHERE p.teacher_user_id=u.id AND p.closed_at IS NULL
@@ -739,7 +779,11 @@ export async function drainTelegramOutbox(
         UPDATE telegram_delivery_outbox
         SET status='processing',attempts=attempts+1,lease_token=?,lease_expires_at=?,updated_at=?
         WHERE id=? AND status IN ('pending','retry') AND next_attempt_at<=?
-      `).bind(leaseToken, leaseExpiresAt, now, row.id, now),
+          AND EXISTS (SELECT 1 FROM telegram_connections c
+            WHERE c.user_id=telegram_delivery_outbox.recipient_user_id AND c.status='active'
+              AND c.chat_id=? AND c.version=?
+              AND (c.notify_orders=1 OR c.notify_visits=1))
+      `).bind(leaseToken, leaseExpiresAt, now, row.id, now, row.chat_id, row.connection_version),
     ]);
     if (Number(claim[0]?.meta?.changes ?? 0) !== 1) continue;
     attempted += 1;
@@ -807,7 +851,26 @@ export async function processTelegramWebhookUpdate(
         permanent: true,
       });
     }
+    if (update.callback) {
+      await bestEffortAnswerCallback(
+        configuration.botToken,
+        update.callback.callbackId,
+        "Стан уже оновлено.",
+        fetcher,
+      );
+    }
     return { outcome: existing.outcome, duplicate: true };
+  }
+  if (update.callback) {
+    return processTelegramNotificationCallback(
+      db,
+      configuration,
+      update.updateId,
+      payloadHash,
+      update.callback,
+      siteOrigin,
+      fetcher,
+    );
   }
   if (!update.message || update.message.chatType !== "private") {
     const inserted = await insertWebhookReceipt(db, update.updateId, payloadHash, "ignored_non_private");
@@ -815,6 +878,9 @@ export async function processTelegramWebhookUpdate(
   }
   const privateMessage = update.message;
   const command = telegramCommand(privateMessage.text);
+  if (siteOrigin && command.kind !== "other") {
+    await bestEffortRefreshWebhookSubscriptions(configuration, siteOrigin, fetcher);
+  }
   if (command.kind === "start") {
     if (command.token.startsWith("ta_")) {
       return processTeacherActivationInviteStart(
@@ -901,7 +967,8 @@ export async function processTelegramWebhookUpdate(
         ),?,?,?,'active',1,1,1,?,NULL,NULL,NULL,NULL,?,?)
         ON CONFLICT(user_id) DO UPDATE SET
           telegram_user_id=excluded.telegram_user_id,chat_id=excluded.chat_id,username=excluded.username,
-          status='active',disabled_at=NULL,linked_at=excluded.linked_at,last_error_code=NULL,
+          status='active',notify_orders=1,notify_visits=1,disabled_at=NULL,
+          linked_at=excluded.linked_at,last_error_code=NULL,
           version=telegram_connections.version+1,updated_at=excluded.updated_at
       `).bind(
         tokenHash,
@@ -924,6 +991,7 @@ export async function processTelegramWebhookUpdate(
       token.role,
       Boolean(token.teacher_capability),
       token.full_name,
+      true,
       siteOrigin,
       true,
       fetcher,
@@ -932,74 +1000,58 @@ export async function processTelegramWebhookUpdate(
   }
   if (command.kind === "stop") {
     const now = new Date().toISOString();
-    const results = await db.batch([
-      db.prepare(`INSERT INTO telegram_webhook_updates(update_id,payload_hash,outcome,processed_at)
-        VALUES (?,?,'disconnected',?) ON CONFLICT(update_id) DO NOTHING`)
-        .bind(update.updateId, payloadHash, now),
-      db.prepare(`UPDATE visit_teacher_sessions SET revoked_at=?,last_seen_at=?
-        WHERE teacher_user_id=(SELECT user_id FROM telegram_connections
-          WHERE chat_id=? AND telegram_user_id=? AND status='active' LIMIT 1)
-          AND revoked_at IS NULL
-          AND EXISTS (SELECT 1 FROM telegram_webhook_updates
-            WHERE update_id=? AND payload_hash=? AND outcome='disconnected')`)
-        .bind(
-          now,
-          now,
-          update.message.chatId,
-          update.message.telegramUserId,
-          update.updateId,
-          payloadHash,
-        ),
-      db.prepare(`UPDATE telegram_librarian_sessions SET revoked_at=?,last_seen_at=?
-        WHERE user_id=(SELECT user_id FROM telegram_connections
-          WHERE chat_id=? AND telegram_user_id=? AND status='active' LIMIT 1)
-          AND revoked_at IS NULL
-          AND EXISTS (SELECT 1 FROM telegram_webhook_updates
-            WHERE update_id=? AND payload_hash=? AND outcome='disconnected')`)
-        .bind(
-          now,
-          now,
-          update.message.chatId,
-          update.message.telegramUserId,
-          update.updateId,
-          payloadHash,
-        ),
-      db.prepare(`UPDATE telegram_link_tokens SET revoked_at=?
-        WHERE user_id=(SELECT user_id FROM telegram_connections
-          WHERE chat_id=? AND telegram_user_id=? AND status='active' LIMIT 1)
-          AND consumed_at IS NULL AND revoked_at IS NULL
-          AND EXISTS (SELECT 1 FROM telegram_webhook_updates
-            WHERE update_id=? AND payload_hash=? AND outcome='disconnected')`)
-        .bind(now, update.message.chatId, update.message.telegramUserId, update.updateId, payloadHash),
-      db.prepare(`UPDATE telegram_teacher_activation_invites SET revoked_at=?,updated_at=?
-        WHERE consumed_at IS NULL AND revoked_at IS NULL
-          AND (bound_telegram_user_id=? OR teacher_user_id=(SELECT user_id FROM telegram_connections
-            WHERE chat_id=? AND telegram_user_id=? AND status='active' LIMIT 1))
-          AND EXISTS (SELECT 1 FROM telegram_webhook_updates
-            WHERE update_id=? AND payload_hash=? AND outcome='disconnected')`)
-        .bind(
-          now,
-          now,
-          update.message.telegramUserId,
-          update.message.chatId,
-          update.message.telegramUserId,
-          update.updateId,
-          payloadHash,
-        ),
-      db.prepare(`
-        UPDATE telegram_connections SET status='disabled',disabled_at=?,version=version+1,updated_at=?
-        WHERE chat_id=? AND telegram_user_id=? AND status='active'
-          AND EXISTS (SELECT 1 FROM telegram_webhook_updates
-            WHERE update_id=? AND payload_hash=? AND outcome='disconnected')
-      `).bind(now, now, update.message.chatId, update.message.telegramUserId, update.updateId, payloadHash),
-    ]);
-    const inserted = Number(results[0]?.meta?.changes ?? 0) === 1;
+    const toggled = await setTelegramNotificationsFromWebhook(
+      db,
+      update.updateId,
+      payloadHash,
+      update.message.chatId,
+      update.message.telegramUserId,
+      false,
+      now,
+    );
+    const inserted = toggled.inserted;
     if (inserted) {
-      await bestEffortBotReply(configuration.botToken, update.message.chatId,
-        "Telegram-сповіщення вимкнено. Підключити їх знову можна у своєму кабінеті.", fetcher);
-      await bestEffortChatMenuButton(configuration.botToken, update.message.chatId, null, fetcher);
+      await bestEffortBotReply(
+        configuration.botToken,
+        update.message.chatId,
+        toggled.profile
+          ? "🔕 Сповіщення вимкнено. Бот і кабінет залишаються підключеними. Увімкнути сповіщення можна кнопкою в меню."
+          : "Telegram не прив’язаний до профілю. Натисніть Start, щоб увійти або активувати кабінет.",
+        fetcher,
+      );
+      if (toggled.profile) {
+        await bestEffortConnectedMenu(
+          configuration.botToken,
+          update.message.chatId,
+          toggled.profile.role,
+          Boolean(toggled.profile.teacher_capability),
+          toggled.profile.full_name,
+          false,
+          siteOrigin,
+          false,
+          fetcher,
+        );
+      }
     }
-    return { outcome: "disconnected", duplicate: !inserted };
+    return { outcome: "notifications_disabled", duplicate: !inserted };
+  }
+  if (command.kind === "disconnect") {
+    const profile = await connectedTelegramProfile(
+      db,
+      update.message.chatId,
+      update.message.telegramUserId,
+    );
+    const inserted = await insertWebhookReceipt(db, update.updateId, payloadHash, "disconnect_help");
+    if (inserted) {
+      await bestEffortDisconnectHelp(
+        configuration.botToken,
+        update.message.chatId,
+        profile,
+        siteOrigin,
+        fetcher,
+      );
+    }
+    return { outcome: "disconnect_help", duplicate: !inserted };
   }
   if (command.kind === "menu") {
     const profile = await connectedTelegramProfile(
@@ -1016,6 +1068,7 @@ export async function processTelegramWebhookUpdate(
           profile.role,
           Boolean(profile.teacher_capability),
           profile.full_name,
+          notificationsMasterEnabled(profile),
           siteOrigin,
           false,
           fetcher,
@@ -1035,6 +1088,7 @@ export async function processTelegramWebhookUpdate(
         update.message.chatId,
         siteOrigin,
         grant.invitedTeacherName,
+        grant.invitedRequiresNewPin,
         fetcher,
       );
     }
@@ -1062,7 +1116,7 @@ async function processTeacherActivationInviteStart(
   const now = nowDate.toISOString();
   const tokenHash = await sha256Hex(rawToken);
   const invite = await db.prepare(`
-    SELECT i.id,i.teacher_user_id,u.full_name,i.credential_version,
+    SELECT i.id,i.teacher_user_id,u.full_name,i.credential_version,c.must_change_pin,
            i.bound_telegram_user_id,i.bound_chat_id
     FROM telegram_teacher_activation_invites i
     JOIN users u ON u.id=i.teacher_user_id AND u.status='active'
@@ -1075,6 +1129,7 @@ async function processTeacherActivationInviteStart(
     LIMIT 1
   `).bind(tokenHash, now, update.message.telegramUserId).first<{
     id: string; teacher_user_id: string; full_name: string; credential_version: number;
+    must_change_pin: number;
     bound_telegram_user_id: string | null; bound_chat_id: string | null;
   }>();
   if (!invite) {
@@ -1203,6 +1258,7 @@ async function processTeacherActivationInviteStart(
     update.message.chatId,
     siteOrigin,
     invite.full_name,
+    Boolean(invite.must_change_pin),
     fetcher,
   );
   return { outcome: "activation_invite_claimed", duplicate: false };
@@ -1213,11 +1269,16 @@ async function createGenericTeacherActivationGrant(
   updateId: string,
   payloadHash: string,
   message: { chatId: string; telegramUserId: string; username: string | null },
-): Promise<{ inserted: boolean; outcome: string; invitedTeacherName: string | null }> {
+): Promise<{
+  inserted: boolean;
+  outcome: string;
+  invitedTeacherName: string | null;
+  invitedRequiresNewPin: boolean | null;
+}> {
   const nowDate = new Date();
   const now = nowDate.toISOString();
   const existingPersonal = await db.prepare(`
-    SELECT u.full_name
+    SELECT u.full_name,c.must_change_pin
     FROM telegram_teacher_activation_invites i
     JOIN users u ON u.id=i.teacher_user_id AND u.status='active'
     JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
@@ -1226,13 +1287,14 @@ async function createGenericTeacherActivationGrant(
       AND i.consumed_at IS NULL AND i.revoked_at IS NULL AND i.expires_at>?
       AND c.status='active' AND c.version=i.credential_version
     ORDER BY i.presented_at DESC,i.created_at DESC LIMIT 1
-  `).bind(message.telegramUserId, message.chatId, now).first<{ full_name: string }>();
+  `).bind(message.telegramUserId, message.chatId, now).first<{ full_name: string; must_change_pin: number }>();
   if (existingPersonal) {
     const inserted = await insertWebhookReceipt(db, updateId, payloadHash, "activation_invite_resume");
     return {
       inserted,
       outcome: "activation_invite_resume",
       invitedTeacherName: existingPersonal.full_name,
+      invitedRequiresNewPin: Boolean(existingPersonal.must_change_pin),
     };
   }
   const grantId = `TGA-${crypto.randomUUID()}`;
@@ -1277,6 +1339,7 @@ async function createGenericTeacherActivationGrant(
     inserted: Number(results[0]?.meta?.changes ?? 0) === 1,
     outcome: "activation_started",
     invitedTeacherName: null,
+    invitedRequiresNewPin: null,
   };
 }
 
@@ -1384,9 +1447,27 @@ function trustedSiteOrigin(value: string): string {
   return url.origin;
 }
 
+type TelegramWebhookMessage = {
+  chatId: string;
+  telegramUserId: string;
+  username: string | null;
+  chatType: string;
+  text: string;
+};
+
+type TelegramWebhookCallback = {
+  callbackId: string;
+  chatId: string;
+  messageId: string;
+  telegramUserId: string;
+  chatType: string;
+  data: string;
+};
+
 function telegramUpdate(value: unknown): {
   updateId: string;
-  message: { chatId: string; telegramUserId: string; username: string | null; chatType: string; text: string } | null;
+  message: TelegramWebhookMessage | null;
+  callback: TelegramWebhookCallback | null;
 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TelegramIntegrationError("webhook_payload_invalid", 400, "Некоректний Telegram update.", {
@@ -1395,18 +1476,54 @@ function telegramUpdate(value: unknown): {
   }
   const record = value as Record<string, unknown>;
   const updateId = integerText(record.update_id);
-  const message = record.message;
   if (!updateId) {
     throw new TelegramIntegrationError("webhook_payload_invalid", 400, "Некоректний номер Telegram update.", {
       permanent: true,
     });
   }
-  if (!message || typeof message !== "object" || Array.isArray(message)) return { updateId, message: null };
+  const callbackQuery = record.callback_query;
+  if (callbackQuery && typeof callbackQuery === "object" && !Array.isArray(callbackQuery)) {
+    const callbackRecord = callbackQuery as Record<string, unknown>;
+    const callbackId = typeof callbackRecord.id === "string" && callbackRecord.id.length <= 128
+      ? callbackRecord.id
+      : "";
+    const from = callbackRecord.from;
+    const callbackMessage = callbackRecord.message;
+    const data = typeof callbackRecord.data === "string" && callbackRecord.data.length <= 64
+      ? callbackRecord.data
+      : "";
+    if (callbackId && data && from && typeof from === "object" && !Array.isArray(from)
+      && callbackMessage && typeof callbackMessage === "object" && !Array.isArray(callbackMessage)) {
+      const fromRecord = from as Record<string, unknown>;
+      const callbackMessageRecord = callbackMessage as Record<string, unknown>;
+      const chat = callbackMessageRecord.chat;
+      if (chat && typeof chat === "object" && !Array.isArray(chat)) {
+        const chatRecord = chat as Record<string, unknown>;
+        const chatId = integerText(chatRecord.id);
+        const telegramUserId = integerText(fromRecord.id);
+        const messageId = integerText(callbackMessageRecord.message_id);
+        const chatType = typeof chatRecord.type === "string" ? chatRecord.type : "";
+        if (chatId && telegramUserId && messageId) {
+          return {
+            updateId,
+            message: null,
+            callback: { callbackId, chatId, messageId, telegramUserId, chatType, data },
+          };
+        }
+      }
+    }
+  }
+  const message = record.message;
+  if (!message || typeof message !== "object" || Array.isArray(message)) {
+    return { updateId, message: null, callback: null };
+  }
   const messageRecord = message as Record<string, unknown>;
   const chat = messageRecord.chat;
   const from = messageRecord.from;
   if (!chat || typeof chat !== "object" || Array.isArray(chat)
-    || !from || typeof from !== "object" || Array.isArray(from)) return { updateId, message: null };
+    || !from || typeof from !== "object" || Array.isArray(from)) {
+    return { updateId, message: null, callback: null };
+  }
   const chatRecord = chat as Record<string, unknown>;
   const fromRecord = from as Record<string, unknown>;
   const chatId = integerText(chatRecord.id);
@@ -1416,20 +1533,22 @@ function telegramUpdate(value: unknown): {
   const username = typeof fromRecord.username === "string" && /^[A-Za-z0-9_]{1,32}$/u.test(fromRecord.username)
     ? fromRecord.username
     : null;
-  if (!chatId || !telegramUserId) return { updateId, message: null };
-  return { updateId, message: { chatId, telegramUserId, username, chatType, text } };
+  if (!chatId || !telegramUserId) return { updateId, message: null, callback: null };
+  return { updateId, message: { chatId, telegramUserId, username, chatType, text }, callback: null };
 }
 
 function telegramCommand(text: string):
   | { kind: "start"; token: string }
   | { kind: "menu" }
   | { kind: "stop" }
+  | { kind: "disconnect" }
   | { kind: "other" } {
   const trimmed = text.trim();
   const start = trimmed.match(/^\/start(?:@[A-Za-z0-9_]+)?\s+([A-Za-z0-9_-]{40,64})$/u);
   if (start) return { kind: "start", token: start[1] };
-  if (/^\/(?:start|menu|cabinet|help)(?:@[A-Za-z0-9_]+)?$/u.test(trimmed)) return { kind: "menu" };
-  if (/^\/(?:stop|disconnect)(?:@[A-Za-z0-9_]+)?$/u.test(trimmed)) return { kind: "stop" };
+  if (/^\/(?:start|menu|cabinet|help|notifications)(?:@[A-Za-z0-9_]+)?$/u.test(trimmed)) return { kind: "menu" };
+  if (/^\/stop(?:@[A-Za-z0-9_]+)?$/u.test(trimmed)) return { kind: "stop" };
+  if (/^\/disconnect(?:@[A-Za-z0-9_]+)?$/u.test(trimmed)) return { kind: "disconnect" };
   return { kind: "other" };
 }
 
@@ -1445,6 +1564,123 @@ async function insertWebhookReceipt(
       VALUES (?,?,?,?) ON CONFLICT(update_id) DO NOTHING`).bind(updateId, payloadHash, outcome, now),
   ]);
   return Number(result[0]?.meta?.changes ?? 0) === 1;
+}
+
+async function setTelegramNotificationsFromWebhook(
+  db: TelegramDatabase,
+  updateId: string,
+  payloadHash: string,
+  chatId: string,
+  telegramUserId: string,
+  enabled: boolean,
+  now: string,
+): Promise<{ inserted: boolean; profile: ConnectedTelegramProfile | null }> {
+  const outcome = enabled ? "notifications_enabled" : "notifications_disabled";
+  const desired = enabled ? 1 : 0;
+  const results = await db.batch([
+    db.prepare(`INSERT INTO telegram_webhook_updates(update_id,payload_hash,outcome,processed_at)
+      VALUES (?,?,?,?) ON CONFLICT(update_id) DO NOTHING`)
+      .bind(updateId, payloadHash, outcome, now),
+    db.prepare(`UPDATE telegram_connections
+      SET notify_orders=?,notify_visits=?,version=version+1,updated_at=?
+      WHERE chat_id=? AND telegram_user_id=? AND status='active'
+        AND EXISTS (SELECT 1 FROM telegram_webhook_updates
+          WHERE update_id=? AND payload_hash=? AND outcome=? AND processed_at=?)
+        AND (notify_orders!=? OR notify_visits!=?)`)
+      .bind(
+        desired,
+        desired,
+        now,
+        chatId,
+        telegramUserId,
+        updateId,
+        payloadHash,
+        outcome,
+        now,
+        desired,
+        desired,
+      ),
+    db.prepare(`UPDATE telegram_delivery_outbox
+      SET status='dead',lease_token=NULL,lease_expires_at=NULL,
+        last_error_code='notifications_disabled',
+        last_error_message='Одержувач вимкнув Telegram-сповіщення.',updated_at=?
+      WHERE recipient_user_id=(SELECT user_id FROM telegram_connections
+          WHERE chat_id=? AND telegram_user_id=? AND status='active' LIMIT 1)
+        AND status IN ('pending','processing','retry') AND category IN ('orders','visits','system')
+        AND ?=0 AND EXISTS (SELECT 1 FROM telegram_webhook_updates
+          WHERE update_id=? AND payload_hash=? AND outcome=? AND processed_at=?)`)
+      .bind(now, chatId, telegramUserId, desired, updateId, payloadHash, outcome, now),
+  ]);
+  return {
+    inserted: Number(results[0]?.meta?.changes ?? 0) === 1,
+    profile: await connectedTelegramProfile(db, chatId, telegramUserId),
+  };
+}
+
+async function processTelegramNotificationCallback(
+  db: TelegramDatabase,
+  configuration: TelegramConfiguration & { botToken: string },
+  updateId: string,
+  payloadHash: string,
+  callback: TelegramWebhookCallback,
+  siteOrigin: string | undefined,
+  fetcher: TelegramFetcher,
+): Promise<{ outcome: string; duplicate: boolean }> {
+  if (callback.chatType !== "private") {
+    const inserted = await insertWebhookReceipt(db, updateId, payloadHash, "ignored_non_private");
+    return { outcome: "ignored_non_private", duplicate: !inserted };
+  }
+  const enabled = callback.data === "telegram-notifications:on"
+    ? true
+    : callback.data === "telegram-notifications:off"
+      ? false
+      : null;
+  if (enabled === null) {
+    const inserted = await insertWebhookReceipt(db, updateId, payloadHash, "ignored_callback");
+    if (inserted) {
+      await bestEffortAnswerCallback(configuration.botToken, callback.callbackId, "Кнопка вже неактуальна.", fetcher);
+    }
+    return { outcome: "ignored_callback", duplicate: !inserted };
+  }
+  const now = new Date().toISOString();
+  const toggled = await setTelegramNotificationsFromWebhook(
+    db,
+    updateId,
+    payloadHash,
+    callback.chatId,
+    callback.telegramUserId,
+    enabled,
+    now,
+  );
+  if (toggled.inserted) {
+    await bestEffortAnswerCallback(
+      configuration.botToken,
+      callback.callbackId,
+      toggled.profile
+        ? enabled ? "Сповіщення увімкнено 🔔" : "Сповіщення вимкнено 🔕"
+        : "Профіль не підключено.",
+      fetcher,
+    );
+    if (toggled.profile && siteOrigin) {
+      const origin = trustedSiteOrigin(siteOrigin);
+      await bestEffortEditMenuKeyboard(
+        configuration.botToken,
+        callback.chatId,
+        callback.messageId,
+        toggled.profile.full_name,
+        notificationsMasterEnabled(toggled.profile),
+        telegramRoleKeyboard(
+          toggled.profile.role,
+          Boolean(toggled.profile.teacher_capability),
+          origin,
+          configuration.miniAppEnabled,
+          notificationsMasterEnabled(toggled.profile),
+        ),
+        fetcher,
+      );
+    }
+  }
+  return { outcome: enabled ? "notifications_enabled" : "notifications_disabled", duplicate: !toggled.inserted };
 }
 
 async function telegramSendMessage(
@@ -1539,11 +1775,117 @@ async function bestEffortBotReply(
   }
 }
 
+async function bestEffortAnswerCallback(
+  botToken: string,
+  callbackId: string,
+  message: string,
+  fetcher: TelegramFetcher,
+): Promise<void> {
+  try {
+    await telegramApiRequest(botToken, "answerCallbackQuery", {
+      callback_query_id: callbackId,
+      text: safePlainText(message, 180),
+      show_alert: false,
+      cache_time: 0,
+    }, fetcher);
+  } catch {
+    // Preference state in D1 remains authoritative if Telegram cannot close the button spinner.
+  }
+}
+
+async function bestEffortRefreshWebhookSubscriptions(
+  configuration: TelegramConfiguration & { botToken: string; webhookSecret: string },
+  siteOrigin: string,
+  fetcher: TelegramFetcher,
+): Promise<void> {
+  try {
+    const webhookUrl = new URL("/api/telegram/webhook", trustedSiteOrigin(siteOrigin)).toString();
+    await telegramApiRequest(configuration.botToken, "setWebhook", {
+      url: webhookUrl,
+      secret_token: configuration.webhookSecret,
+      allowed_updates: ["message", "callback_query"],
+      drop_pending_updates: false,
+    }, fetcher);
+  } catch {
+    // The current update remains usable; another command or link request retries the subscription refresh.
+  }
+}
+
+async function bestEffortEditMenuKeyboard(
+  botToken: string,
+  chatId: string,
+  messageId: string,
+  fullName: string,
+  notificationsOn: boolean,
+  keyboard: Array<Array<Record<string, unknown>>>,
+  fetcher: TelegramFetcher,
+): Promise<void> {
+  try {
+    const greeting = `Профіль: «${safePlainText(fullName, 120)}».`;
+    await telegramApiRequest(botToken, "editMessageText", {
+      chat_id: chatId,
+      message_id: Number(messageId),
+      text: `<b>${escapeHtml(greeting)}</b>\nСповіщення: ${notificationsOn ? "увімкнено 🔔" : "вимкнено 🔕"}.\nОберіть потрібний розділ:`,
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+      reply_markup: { inline_keyboard: keyboard },
+    }, fetcher);
+  } catch {
+    // A fresh /menu always renders the authoritative state when an old message cannot be edited.
+  }
+}
+
+async function bestEffortDisconnectHelp(
+  botToken: string,
+  chatId: string,
+  profile: ConnectedTelegramProfile | null,
+  siteOrigin: string | undefined,
+  fetcher: TelegramFetcher,
+): Promise<void> {
+  if (!profile) {
+    await bestEffortBotReply(
+      botToken,
+      chatId,
+      "Telegram уже не прив’язаний до профілю. Для нового підключення натисніть Start.",
+      fetcher,
+    );
+    return;
+  }
+  try {
+    const origin = siteOrigin ? trustedSiteOrigin(siteOrigin) : null;
+    const configuration = telegramConfiguration();
+    const teacherPath = configuration.miniAppEnabled
+      ? "/teacher/telegram?tab=notifications"
+      : "/teacher?tab=notifications";
+    const librarianPath = configuration.miniAppEnabled
+      ? "/librarian/telegram?target=teachers"
+      : "/librarian/teachers#telegram-settings";
+    const targetPath = profile.role === "teacher" ? teacherPath : librarianPath;
+    const url = origin ? new URL(targetPath, origin).toString() : null;
+    await telegramApiRequest(botToken, "sendMessage", {
+      chat_id: chatId,
+      text: "Повне від’єднання вимикає автовхід і потребує підтвердження в налаштуваннях кабінету. Якщо потрібно лише припинити повідомлення, скористайтеся кнопкою «Вимкнути сповіщення».",
+      link_preview_options: { is_disabled: true },
+      ...(url ? {
+        reply_markup: {
+          inline_keyboard: [[{
+            text: "⚙️ Відкрити налаштування",
+            ...(configuration.miniAppEnabled ? { web_app: { url } } : { url }),
+          }]],
+        },
+      } : {}),
+    }, fetcher);
+  } catch {
+    // Full disconnect remains available from the cabinet even when Telegram cannot render guidance.
+  }
+}
+
 async function bestEffortTeacherOnboardingMenu(
   botToken: string,
   chatId: string,
   siteOrigin: string | undefined,
   invitedTeacherName: string | null,
+  invitedRequiresNewPin: boolean | null,
   fetcher: TelegramFetcher,
 ): Promise<void> {
   try {
@@ -1552,12 +1894,21 @@ async function bestEffortTeacherOnboardingMenu(
       ? `Персональне запрошення для «${safePlainText(invitedTeacherName, 120)}» підтверджено.`
       : "Вітаємо в «Єдиній бібліотеці»!";
     const instructions = invitedTeacherName
-      ? "Відкрийте захищене вікно нижче та створіть PIN."
-      : "Щоб активувати кабінет або підключити Telegram, оберіть своє ім’я та введіть код бібліотекаря або чинний PIN.";
+      ? invitedRequiresNewPin
+        ? "Відкрийте захищене вікно нижче, введіть тимчасовий код бібліотекаря та створіть PIN."
+        : "Відкрийте захищене вікно нижче та увійдіть зі своїм чинним PIN."
+      : "Якщо кабінет уже активовано — увійдіть зі своїм PIN. Для першого входу виберіть активацію та введіть тимчасовий код бібліотекаря.";
     const warning = "Код і PIN вводьте лише в захищеному вікні — не надсилайте їх у чат.";
     const keyboard = origin ? {
       inline_keyboard: [
-        [{ text: "🔐 Активувати / увійти", web_app: { url: new URL("/teacher/telegram", origin).toString() } }],
+        ...(invitedTeacherName
+          ? [[invitedRequiresNewPin
+              ? { text: "✨ Активувати вперше", web_app: { url: new URL("/teacher/telegram?mode=activate", origin).toString() } }
+              : { text: "🔑 Увійти", web_app: { url: new URL("/teacher/telegram?mode=login", origin).toString() } }]]
+          : [
+              [{ text: "🔑 Увійти", web_app: { url: new URL("/teacher/telegram?mode=login", origin).toString() } }],
+              [{ text: "✨ Активувати вперше", web_app: { url: new URL("/teacher/telegram?mode=activate", origin).toString() } }],
+            ]),
         [{ text: "📚 Переглянути каталог", url: "https://nazarijshvetz1.github.io/library-site/" }],
         [{ text: "📅 Переглянути графік", url: new URL("/visits", origin).toString() }],
       ],
@@ -1583,26 +1934,39 @@ async function bestEffortTeacherOnboardingMenu(
 }
 
 type ConnectedTelegramRole = "admin" | "librarian" | "teacher";
+type ConnectedTelegramProfile = {
+  user_id: string;
+  full_name: string;
+  role: ConnectedTelegramRole;
+  teacher_capability: number;
+  notify_orders: number;
+  notify_visits: number;
+};
 
 async function connectedTelegramProfile(
   db: TelegramDatabase,
   chatId: string,
   telegramUserId: string,
-): Promise<{ full_name: string; role: ConnectedTelegramRole; teacher_capability: number } | null> {
+): Promise<ConnectedTelegramProfile | null> {
   return db.prepare(`
-    SELECT u.full_name,u.role,
+    SELECT u.id AS user_id,u.full_name,u.role,c.notify_orders,c.notify_visits,
       EXISTS (SELECT 1 FROM teacher_profiles p
+        JOIN visit_teacher_credentials v ON v.teacher_user_id=p.teacher_user_id AND v.status='active'
         WHERE p.teacher_user_id=u.id AND p.closed_at IS NULL) AS teacher_capability
     FROM telegram_connections c JOIN users u ON u.id=c.user_id
     WHERE c.chat_id=? AND c.telegram_user_id=? AND c.status='active'
       AND u.status='active'
       AND (u.role IN ('admin','librarian') OR EXISTS (
-        SELECT 1 FROM teacher_profiles p WHERE p.teacher_user_id=u.id AND p.closed_at IS NULL
+        SELECT 1 FROM teacher_profiles p
+        JOIN visit_teacher_credentials v ON v.teacher_user_id=p.teacher_user_id AND v.status='active'
+        WHERE p.teacher_user_id=u.id AND p.closed_at IS NULL
       ))
     LIMIT 1
-  `).bind(chatId, telegramUserId).first<{
-    full_name: string; role: ConnectedTelegramRole; teacher_capability: number;
-  }>();
+  `).bind(chatId, telegramUserId).first<ConnectedTelegramProfile>();
+}
+
+function notificationsMasterEnabled(profile: ConnectedTelegramProfile): boolean {
+  return Boolean(profile.notify_orders) || Boolean(profile.notify_visits);
 }
 
 async function bestEffortConnectedMenu(
@@ -1611,6 +1975,7 @@ async function bestEffortConnectedMenu(
   role: ConnectedTelegramRole,
   teacherCapability: boolean,
   fullName: string,
+  notificationsOn: boolean,
   siteOrigin: string | undefined,
   linked: boolean,
   fetcher: TelegramFetcher,
@@ -1618,13 +1983,15 @@ async function bestEffortConnectedMenu(
   try {
     const origin = siteOrigin ? trustedSiteOrigin(siteOrigin) : null;
     const configuration = telegramConfiguration();
-    const keyboard = origin ? telegramRoleKeyboard(role, teacherCapability, origin, configuration.miniAppEnabled) : null;
+    const keyboard = origin
+      ? telegramRoleKeyboard(role, teacherCapability, origin, configuration.miniAppEnabled, notificationsOn)
+      : null;
     const greeting = linked
       ? `Telegram підключено до профілю «${safePlainText(fullName, 120)}».`
       : `Профіль: «${safePlainText(fullName, 120)}».`;
     await telegramApiRequest(botToken, "sendMessage", {
       chat_id: chatId,
-      text: `<b>${escapeHtml(greeting)}</b>\nОберіть потрібний розділ:`,
+      text: `<b>${escapeHtml(greeting)}</b>\nСповіщення: ${notificationsOn ? "увімкнено 🔔" : "вимкнено 🔕"}.\nОберіть потрібний розділ:`,
       parse_mode: "HTML",
       link_preview_options: { is_disabled: true },
       ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
@@ -1656,10 +2023,12 @@ function telegramRoleKeyboard(
   teacherCapability: boolean,
   siteOrigin: string,
   miniAppEnabled: boolean,
+  notificationsOn: boolean,
 ): Array<Array<Record<string, unknown>>> {
   const keyboard: Array<Array<Record<string, unknown>>> = [];
   if (teacherCapability) {
     const buttons = [
+      ["👤 Кабінет учителя", "/teacher/telegram?tab=overview"],
       ["📚 Каталог і замовлення", "/teacher/telegram?tab=orders"],
       ["📅 Записатися / мої відвідування", "/teacher/telegram?tab=visits"],
       ["📖 Мої посібники", "/teacher/telegram?tab=loans"],
@@ -1683,6 +2052,10 @@ function telegramRoleKeyboard(
       return [{ text, ...(miniAppEnabled ? { web_app: { url } } : { url }) }];
     }));
   }
+  keyboard.push([{
+    text: notificationsOn ? "🔕 Вимкнути сповіщення" : "🔔 Увімкнути сповіщення",
+    callback_data: notificationsOn ? "telegram-notifications:off" : "telegram-notifications:on",
+  }]);
   return keyboard;
 }
 

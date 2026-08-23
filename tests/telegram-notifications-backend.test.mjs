@@ -205,7 +205,7 @@ test("personal teacher activation invite stores only a digest and binds to one p
   const message = bodies.find((body) => body.text);
   assert.match(message.text, /Шевченко Олена/u);
   assert.equal(message.reply_markup.inline_keyboard[0][0].web_app.url,
-    "https://library.example.test/teacher/telegram");
+    "https://library.example.test/teacher/telegram?mode=activate");
   assert.deepEqual(await telegram.processTelegramWebhookUpdate(
     context.db,
     JSON.stringify(payload),
@@ -281,16 +281,18 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
   assert.deepEqual(teacherResult, { outcome: "menu", duplicate: false });
   const teacherMessage = teacherBodies.find((body) => body.text);
   const menuButton = teacherBodies.find((body) => body.menu_button);
-  assert.equal(teacherMessage.reply_markup.inline_keyboard.length, 4);
+  assert.equal(teacherMessage.reply_markup.inline_keyboard.length, 6);
   assert.deepEqual(
-    teacherMessage.reply_markup.inline_keyboard.map((row) => row[0].web_app.url),
+    teacherMessage.reply_markup.inline_keyboard.slice(0, 5).map((row) => row[0].web_app.url),
     [
+      "https://library.example.test/teacher/telegram?tab=overview",
       "https://library.example.test/teacher/telegram?tab=orders",
       "https://library.example.test/teacher/telegram?tab=visits",
       "https://library.example.test/teacher/telegram?tab=loans",
       "https://library.example.test/teacher/telegram?tab=notifications",
     ],
   );
+  assert.equal(teacherMessage.reply_markup.inline_keyboard[5][0].callback_data, "telegram-notifications:off");
   assert.equal(menuButton.menu_button.type, "web_app");
   assert.equal(menuButton.chat_id, 7001);
   assert.equal(menuButton.menu_button.web_app.url, "https://library.example.test/teacher/telegram?tab=overview");
@@ -314,14 +316,19 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
     stopPayload,
     async (_url, init) => { teacherBodies.push(JSON.parse(init.body)); return telegramOk(54); },
     "https://library.example.test",
-  ), { outcome: "disconnected", duplicate: false });
-  assert.ok(teacher.sqlite.prepare(`SELECT revoked_at FROM visit_teacher_sessions
-    WHERE token_hash=?`).get("1".repeat(64)).revoked_at);
-  assert.ok(teacher.sqlite.prepare("SELECT revoked_at FROM telegram_link_tokens WHERE id='TGL-stop'").get().revoked_at);
-  assert.ok(teacher.sqlite.prepare(`SELECT revoked_at FROM telegram_teacher_activation_invites
-    WHERE id='TGA-stop-personal'`).get().revoked_at);
-  assert.ok(teacher.sqlite.prepare(`SELECT revoked_at FROM telegram_teacher_activation_invites
-    WHERE id='TGA-stop-generic'`).get().revoked_at);
+  ), { outcome: "notifications_disabled", duplicate: false });
+  assert.equal(teacher.sqlite.prepare(`SELECT revoked_at FROM visit_teacher_sessions
+    WHERE token_hash=?`).get("1".repeat(64)).revoked_at, null);
+  assert.equal(teacher.sqlite.prepare("SELECT revoked_at FROM telegram_link_tokens WHERE id='TGL-stop'").get().revoked_at, null);
+  assert.equal(teacher.sqlite.prepare(`SELECT revoked_at FROM telegram_teacher_activation_invites
+    WHERE id='TGA-stop-personal'`).get().revoked_at, null);
+  assert.equal(teacher.sqlite.prepare(`SELECT revoked_at FROM telegram_teacher_activation_invites
+    WHERE id='TGA-stop-generic'`).get().revoked_at, null);
+  assert.deepEqual(
+    { ...teacher.sqlite.prepare(`SELECT status,notify_orders,notify_visits FROM telegram_connections
+      WHERE user_id='USR-TEACHER'`).get() },
+    { status: "active", notify_orders: 0, notify_visits: 0 },
+  );
   const unlinkedPayload = {
     update_id: 96,
     message: { text: "/menu", chat: { id: 7001, type: "private" }, from: { id: 7001 } },
@@ -333,19 +340,37 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
     unlinkedPayload,
     async (_url, init) => { unlinkedBodies.push(JSON.parse(init.body)); return telegramOk(55); },
     "https://library.example.test",
+  ), { outcome: "menu", duplicate: false });
+  const mutedMenu = unlinkedBodies.find((body) => body.text);
+  assert.match(mutedMenu.text, /вимкнено/u);
+  assert.equal(mutedMenu.reply_markup.inline_keyboard[5][0].callback_data, "telegram-notifications:on");
+
+  const newTeacherPayload = {
+    update_id: 98,
+    message: { text: "/start", chat: { id: 7002, type: "private" }, from: { id: 7002 } },
+  };
+  const onboardingBodies = [];
+  assert.deepEqual(await telegram.processTelegramWebhookUpdate(
+    teacher.db,
+    JSON.stringify(newTeacherPayload),
+    newTeacherPayload,
+    async (_url, init) => { onboardingBodies.push(JSON.parse(init.body)); return telegramOk(58); },
+    "https://library.example.test",
   ), { outcome: "activation_started", duplicate: false });
-  const onboardingMessage = unlinkedBodies.find((body) => body.text);
-  const onboardingMenu = unlinkedBodies.find((body) => body.menu_button);
-  assert.equal(onboardingMessage.reply_markup.inline_keyboard[0][0].text, "🔐 Активувати / увійти");
-  assert.equal(
-    onboardingMessage.reply_markup.inline_keyboard[0][0].web_app.url,
-    "https://library.example.test/teacher/telegram",
-  );
+  const onboardingMessage = onboardingBodies.find((body) => body.text);
+  const onboardingMenu = onboardingBodies.find((body) => body.menu_button);
+  assert.equal(onboardingMessage.reply_markup.inline_keyboard[0][0].text, "🔑 Увійти");
+  assert.equal(onboardingMessage.reply_markup.inline_keyboard[0][0].web_app.url,
+    "https://library.example.test/teacher/telegram?mode=login");
+  assert.equal(onboardingMessage.reply_markup.inline_keyboard[1][0].text, "✨ Активувати вперше");
+  assert.equal(onboardingMessage.reply_markup.inline_keyboard[1][0].web_app.url,
+    "https://library.example.test/teacher/telegram?mode=activate");
   assert.equal(onboardingMenu.menu_button.web_app.url, "https://library.example.test/teacher/telegram?tab=overview");
   assert.deepEqual(
     { ...teacher.sqlite.prepare(`SELECT kind,teacher_user_id,bound_telegram_user_id,bound_chat_id
-      FROM telegram_teacher_activation_invites WHERE consumed_at IS NULL AND revoked_at IS NULL`).get() },
-    { kind: "generic", teacher_user_id: null, bound_telegram_user_id: "7001", bound_chat_id: "7001" },
+      FROM telegram_teacher_activation_invites WHERE consumed_at IS NULL AND revoked_at IS NULL
+        AND bound_telegram_user_id='7002'`).get() },
+    { kind: "generic", teacher_user_id: null, bound_telegram_user_id: "7002", bound_chat_id: "7002" },
   );
 
   const librarian = await database();
@@ -379,6 +404,13 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
     .run(dualRole.now, dualRole.now);
   dualRole.sqlite.prepare(`INSERT INTO teacher_profiles (teacher_user_id,created_at,updated_at) VALUES ('USR-006',?,?)`)
     .run(dualRole.now, dualRole.now);
+  dualRole.sqlite.prepare(`INSERT INTO visit_teacher_credentials (
+    teacher_user_id,login_id,code_hmac,must_change_pin,status,version,failed_attempts,
+    failure_window_started_at,locked_until,last_login_at,code_rotated_at,last_access_command_id,
+    created_by_user_id,updated_by_user_id,created_at,updated_at
+  ) VALUES ('USR-006','dual-role-login-0001',?,0,'active',1,0,
+    NULL,NULL,NULL,?,NULL,'USR-LIB','USR-LIB',?,?)`)
+    .run("b".repeat(64), dualRole.now, dualRole.now, dualRole.now);
   dualRole.sqlite.prepare(`INSERT INTO telegram_connections (
     user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
     linked_at,disabled_at,created_at,updated_at
@@ -398,15 +430,124 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
   ), { outcome: "menu", duplicate: false });
   const dualMessage = dualBodies.find((body) => body.text);
   const dualMenuButton = dualBodies.find((body) => body.menu_button);
-  assert.equal(dualMessage.reply_markup.inline_keyboard.length, 8);
+  assert.equal(dualMessage.reply_markup.inline_keyboard.length, 10);
   assert.equal(dualMessage.reply_markup.inline_keyboard[0][0].web_app.url,
-    "https://library.example.test/teacher/telegram?tab=orders");
-  assert.equal(dualMessage.reply_markup.inline_keyboard[7][0].web_app.url,
+    "https://library.example.test/teacher/telegram?tab=overview");
+  assert.equal(dualMessage.reply_markup.inline_keyboard[8][0].web_app.url,
     "https://library.example.test/librarian/telegram?target=home");
+  assert.equal(dualMessage.reply_markup.inline_keyboard[9][0].callback_data, "telegram-notifications:off");
   assert.equal(dualMenuButton.menu_button.type, "web_app");
   teacher.sqlite.close();
   librarian.sqlite.close();
   dualRole.sqlite.close();
+});
+
+test("one Telegram button toggles all notifications without disconnecting the profile", async () => {
+  const context = await database();
+  addTeacherCredential(context);
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-TEACHER','7301','7301',NULL,'active',1,0,4,?,NULL,?,?)`)
+    .run(context.now, context.now, context.now);
+  const requests = [];
+  const callbackOff = {
+    update_id: 198,
+    callback_query: {
+      id: "callback-off-198",
+      from: { id: 7301 },
+      data: "telegram-notifications:off",
+      message: { message_id: 81, chat: { id: 7301, type: "private" } },
+    },
+  };
+  assert.deepEqual(await telegram.processTelegramWebhookUpdate(
+    context.db,
+    JSON.stringify(callbackOff),
+    callbackOff,
+    async (url, init) => {
+      requests.push({ url: String(url), body: JSON.parse(init.body) });
+      return telegramOk(81);
+    },
+    "https://library.example.test",
+  ), { outcome: "notifications_disabled", duplicate: false });
+  assert.deepEqual(
+    { ...context.sqlite.prepare(`SELECT status,notify_orders,notify_visits,version
+      FROM telegram_connections WHERE user_id='USR-TEACHER'`).get() },
+    { status: "active", notify_orders: 0, notify_visits: 0, version: 5 },
+  );
+  assert.match(requests[0].url, /\/answerCallbackQuery$/u);
+  assert.match(requests[1].url, /\/editMessageText$/u);
+  assert.match(requests[1].body.text, /вимкнено/u);
+  assert.equal(requests[1].body.reply_markup.inline_keyboard.at(-1)[0].callback_data,
+    "telegram-notifications:on");
+  const beforeReplay = requests.length;
+  assert.deepEqual(await telegram.processTelegramWebhookUpdate(
+    context.db,
+    JSON.stringify(callbackOff),
+    callbackOff,
+    async (url, init) => {
+      requests.push({ url: String(url), body: JSON.parse(init.body) });
+      return telegramOk(82);
+    },
+    "https://library.example.test",
+  ), { outcome: "notifications_disabled", duplicate: true });
+  assert.equal(requests.length, beforeReplay + 1);
+  assert.match(requests.at(-1).url, /\/answerCallbackQuery$/u);
+  assert.equal(requests.at(-1).body.callback_query_id, "callback-off-198");
+
+  const callbackOn = {
+    update_id: 199,
+    callback_query: {
+      id: "callback-on-199",
+      from: { id: 7301 },
+      data: "telegram-notifications:on",
+      message: { message_id: 81, chat: { id: 7301, type: "private" } },
+    },
+  };
+  assert.deepEqual(await telegram.processTelegramWebhookUpdate(
+    context.db,
+    JSON.stringify(callbackOn),
+    callbackOn,
+    async () => telegramOk(83),
+    "https://library.example.test",
+  ), { outcome: "notifications_enabled", duplicate: false });
+  assert.deepEqual(
+    { ...context.sqlite.prepare(`SELECT status,notify_orders,notify_visits,version
+      FROM telegram_connections WHERE user_id='USR-TEACHER'`).get() },
+    { status: "active", notify_orders: 1, notify_visits: 1, version: 6 },
+  );
+  context.sqlite.close();
+});
+
+test("disconnect command only opens confirmed cabinet settings", async () => {
+  const context = await database();
+  addTeacherCredential(context);
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-TEACHER','7401','7401',NULL,'active',1,1,1,?,NULL,?,?)`)
+    .run(context.now, context.now, context.now);
+  const payload = {
+    update_id: 201,
+    message: { text: "/disconnect", chat: { id: 7401, type: "private" }, from: { id: 7401 } },
+  };
+  const bodies = [];
+  assert.deepEqual(await telegram.processTelegramWebhookUpdate(
+    context.db,
+    JSON.stringify(payload),
+    payload,
+    async (_url, init) => { bodies.push(JSON.parse(init.body)); return telegramOk(84); },
+    "https://library.example.test",
+  ), { outcome: "disconnect_help", duplicate: false });
+  assert.equal(context.sqlite.prepare(`SELECT status FROM telegram_connections
+    WHERE user_id='USR-TEACHER'`).get().status, "active");
+  const refresh = bodies.find((body) => Array.isArray(body.allowed_updates));
+  const guidance = bodies.find((body) => typeof body.text === "string");
+  assert.deepEqual(refresh.allowed_updates, ["message", "callback_query"]);
+  assert.match(guidance.text, /потребує підтвердження/u);
+  assert.equal(guidance.reply_markup.inline_keyboard[0][0].web_app.url,
+    "https://library.example.test/teacher/telegram?tab=notifications");
+  context.sqlite.close();
 });
 
 test("webhook registration pins the canonical origin and publishes fallback plus Ukrainian commands", async () => {
@@ -419,10 +560,11 @@ test("webhook registration pins the canonical origin and publishes fallback plus
   assert.match(requests[0].url, /\/setWebhook$/u);
   assert.equal(requests[0].body.url, "https://library.example.test/api/telegram/webhook");
   assert.equal(requests[0].body.secret_token, "test_webhook_secret_123456789");
-  assert.deepEqual(requests[0].body.allowed_updates, ["message"]);
+  assert.deepEqual(requests[0].body.allowed_updates, ["message", "callback_query"]);
   assert.match(requests[1].url, /\/setMyCommands$/u);
   assert.equal(requests[1].body.language_code, undefined);
-  assert.deepEqual(requests[1].body.commands.map(({ command }) => command), ["start", "menu", "stop"]);
+  assert.deepEqual(requests[1].body.commands.map(({ command }) => command),
+    ["start", "menu", "notifications", "stop", "disconnect"]);
   assert.equal(requests[2].body.language_code, "uk");
 });
 
@@ -570,6 +712,15 @@ test("site disconnect disables the connection and resets the private chat menu",
   ) VALUES ('TGA-site-generic','generic',NULL,NULL,NULL,NULL,NULL,
     '7001','7001',NULL,'site-disconnect-update',?,'2026-08-23T10:00:00.000Z',
     NULL,NULL,NULL,?,?)`).run(context.now, context.now, context.now);
+  context.sqlite.prepare(`INSERT INTO telegram_delivery_outbox (
+    id,recipient_user_id,dedupe_key,category,type,title,message,target_path,
+    entity_type,entity_id,status,attempts,next_attempt_at,lease_token,lease_expires_at,
+    created_at,updated_at
+  ) VALUES ('TGO-site-disconnect','USR-TEACHER','site-disconnect:pending','system',
+    'system_notice','Старе повідомлення','Не доставляти після повторного входу',
+    '/teacher?tab=notifications','user','USR-TEACHER','processing',1,?,
+    'lease-before-disconnect','2026-08-23T10:00:00.000Z',?,?)`)
+    .run(context.now, context.now, context.now);
   const requests = [];
   const status = await telegram.disconnectTelegram(
     context.db,
@@ -591,6 +742,21 @@ test("site disconnect disables the connection and resets the private chat menu",
     WHERE id='TGA-site-personal'`).get().revoked_at);
   assert.ok(context.sqlite.prepare(`SELECT revoked_at FROM telegram_teacher_activation_invites
     WHERE id='TGA-site-generic'`).get().revoked_at);
+  assert.deepEqual(
+    { ...context.sqlite.prepare(`SELECT status,last_error_code FROM telegram_delivery_outbox
+      WHERE id='TGO-site-disconnect'`).get() },
+    { status: "dead", last_error_code: "telegram_disconnected" },
+  );
+  context.sqlite.prepare(`UPDATE telegram_connections SET
+    telegram_user_id='7002',chat_id='7002',status='active',notify_orders=1,notify_visits=1,
+    disabled_at=NULL,version=6,updated_at=? WHERE user_id='USR-TEACHER'`).run(context.now);
+  let deliveryFetches = 0;
+  assert.deepEqual(await telegram.drainTelegramOutbox(context.db, {
+    siteOrigin: "https://library.example.test",
+    now: new Date(context.now),
+    fetcher: async () => { deliveryFetches += 1; return telegramOk(62); },
+  }), { attempted: 0, sent: 0, failed: 0 });
+  assert.equal(deliveryFetches, 0);
   context.sqlite.close();
 });
 
@@ -633,6 +799,122 @@ test("audited outbox event is deduplicated and delivered with a safe site link",
   assert.equal(context.sqlite.prepare("SELECT status FROM telegram_delivery_outbox").get().status, "sent");
   assert.equal(requestBody.chat_id, "8001");
   assert.equal(requestBody.reply_markup.inline_keyboard[0][0].url, "https://library.example.test/librarian/visits");
+  context.sqlite.close();
+});
+
+test("master mute cancels queued delivery and blocks new system events until enabled", async () => {
+  const context = await queuedLibrarianContext();
+  context.sqlite.prepare(`UPDATE telegram_delivery_outbox SET status='processing',attempts=1,
+    lease_token='lease-before-mute',lease_expires_at='2026-08-23T10:00:00.000Z'
+    WHERE recipient_user_id='USR-LIB'`).run();
+  const muted = await telegram.updateTelegramPreferences(context.db, "USR-LIB", {
+    notifyOrders: false,
+    notifyVisits: false,
+    expectedVersion: 1,
+  });
+  assert.equal(muted.connected, true);
+  assert.equal(muted.version, 2);
+  assert.equal(muted.notifyOrders, false);
+  assert.equal(muted.notifyVisits, false);
+  assert.deepEqual(
+    { ...context.sqlite.prepare(`SELECT status,last_error_code FROM telegram_delivery_outbox`).get() },
+    { status: "dead", last_error_code: "notifications_disabled" },
+  );
+  let fetches = 0;
+  assert.deepEqual(await telegram.drainTelegramOutbox(context.db, {
+    siteOrigin: "https://library.example.test",
+    now: new Date(context.now),
+    fetcher: async () => { fetches += 1; return telegramOk(45); },
+  }), { attempted: 0, sent: 0, failed: 0 });
+  assert.equal(fetches, 0);
+  await context.db.batch([outbox.queueTelegramForLibrariansStatement(context.db, {
+    dedupeKey: "system:VIS-1:muted",
+    auditRequestId: "REQ-1",
+    category: "system",
+    type: "system_notice",
+    title: "Системне повідомлення",
+    message: "Це повідомлення не має бути поставлене в чергу.",
+    targetPath: "/librarian",
+    entityType: "visit_booking",
+    entityId: "VIS-1",
+    createdAt: context.now,
+  })]);
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM telegram_delivery_outbox").get().n, 1);
+
+  const enabled = await telegram.updateTelegramPreferences(context.db, "USR-LIB", {
+    notifyOrders: true,
+    notifyVisits: true,
+    expectedVersion: 2,
+  });
+  assert.equal(enabled.version, 3);
+  await context.db.batch([outbox.queueTelegramForLibrariansStatement(context.db, {
+    dedupeKey: "system:VIS-1:enabled",
+    auditRequestId: "REQ-1",
+    category: "system",
+    type: "system_notice",
+    title: "Системне повідомлення",
+    message: "Нове повідомлення після ввімкнення.",
+    targetPath: "/librarian",
+    entityType: "visit_booking",
+    entityId: "VIS-1",
+    createdAt: context.now,
+  })]);
+  assert.equal(context.sqlite.prepare(`SELECT COUNT(*) AS n FROM telegram_delivery_outbox
+    WHERE status='pending'`).get().n, 1);
+  assert.deepEqual(await telegram.drainTelegramOutbox(context.db, {
+    siteOrigin: "https://library.example.test",
+    now: new Date(context.now),
+    fetcher: async () => { fetches += 1; return telegramOk(46); },
+  }), { attempted: 1, sent: 1, failed: 0 });
+  assert.equal(fetches, 1);
+  context.sqlite.close();
+});
+
+test("stale opposite master toggle is rejected instead of reporting a false success", async () => {
+  const context = await queuedLibrarianContext();
+  await telegram.updateTelegramPreferences(context.db, "USR-LIB", {
+    notifyOrders: false,
+    notifyVisits: false,
+    expectedVersion: 1,
+  });
+  await assert.rejects(
+    () => telegram.updateTelegramPreferences(context.db, "USR-LIB", {
+      notifyOrders: true,
+      notifyVisits: true,
+      expectedVersion: 1,
+    }),
+    (error) => error.code === "connection_version_conflict" && error.status === 409,
+  );
+  assert.deepEqual(
+    { ...context.sqlite.prepare(`SELECT notify_orders,notify_visits,version
+      FROM telegram_connections WHERE user_id='USR-LIB'`).get() },
+    { notify_orders: 0, notify_visits: 0, version: 2 },
+  );
+  context.sqlite.close();
+});
+
+test("delivery claim refuses a stale chat snapshot after Telegram is rebound", async () => {
+  const context = await queuedLibrarianContext();
+  const originalBatch = context.db.batch.bind(context.db);
+  let rebound = false;
+  context.db.batch = async (statements) => {
+    if (!rebound && statements.some((statement) => statement.sql.includes("SET status='processing'"))) {
+      rebound = true;
+      context.sqlite.prepare(`UPDATE telegram_connections SET
+        telegram_user_id='8002',chat_id='8002',version=version+1,updated_at=?
+        WHERE user_id='USR-LIB'`).run(context.now);
+    }
+    return originalBatch(statements);
+  };
+  let fetches = 0;
+  assert.deepEqual(await telegram.drainTelegramOutbox(context.db, {
+    siteOrigin: "https://library.example.test",
+    now: new Date(context.now),
+    fetcher: async () => { fetches += 1; return telegramOk(47); },
+  }), { attempted: 0, sent: 0, failed: 0 });
+  assert.equal(rebound, true);
+  assert.equal(fetches, 0);
+  assert.equal(context.sqlite.prepare("SELECT status FROM telegram_delivery_outbox").get().status, "pending");
   context.sqlite.close();
 });
 

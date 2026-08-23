@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 
-import { readTelegramJson, telegramJson, telegramStoreError, telegramVersionInput } from "@/lib/telegram-api";
+import { isSameOriginRequest } from "@/lib/librarian-api";
+import { readTelegramJson, telegramDisconnectInput, telegramJson, telegramStoreError } from "@/lib/telegram-api";
 import { disconnectTelegram, type TelegramDatabase } from "@/lib/telegram-notifications";
 import { requireVisitTeacherSession } from "@/lib/visit-teacher-auth";
 import { teacherPortalGate } from "@/lib/visit-schedule-api";
@@ -10,8 +11,9 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request): Promise<Response> {
   const gate = teacherPortalGate(); if (gate) return gate;
+  if (!isSameOriginRequest(request)) return telegramJson({ schemaVersion: 1, success: false, code: "cross_origin_request", error: "Запит має надійти з цього самого сайту." }, { status: 403 });
   const body = await readTelegramJson(request); if (!body.ok) return body.response;
-  const input = telegramVersionInput(body.value); if (!input.ok) return input.response;
+  const input = telegramDisconnectInput(body.value); if (!input.ok) return input.response;
   const db = env.DB as unknown as TelegramDatabase & VisitD1Database;
   try {
     const teacher = await requireVisitTeacherSession(db, request);

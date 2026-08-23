@@ -20,6 +20,12 @@ test("protected librarian teacher management has four focused work areas", async
   assert.match(workspace, />Замовлення і видачі</u);
   assert.match(workspace, />Відвідування</u);
   assert.match(workspace, /Потребує уваги/u);
+  assert.match(workspace, /const notificationsOn = Boolean\(telegram\?\.notifyOrders \|\| telegram\?\.notifyVisits\)/u);
+  assert.match(workspace, /🔕 Вимкнути сповіщення/u);
+  assert.match(workspace, /🔔 Увімкнути сповіщення/u);
+  assert.match(workspace, /confirmation: "disconnect_telegram"/u);
+  assert.match(workspace, /Так, від’єднати/u);
+  assert.doesNotMatch(workspace, /librarian-telegram-orders|librarian-telegram-visits/u);
   assert.match(css, /@media \(max-width: 700px\)/u);
 });
 

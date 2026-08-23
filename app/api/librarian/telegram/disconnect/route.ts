@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 
-import { authorizeLibrarianApi } from "@/lib/librarian-api";
-import { readTelegramJson, telegramError, telegramJson, telegramStoreError, telegramVersionInput } from "@/lib/telegram-api";
+import { authorizeLibrarianApi, isSameOriginRequest } from "@/lib/librarian-api";
+import { readTelegramJson, telegramDisconnectInput, telegramError, telegramJson, telegramStoreError } from "@/lib/telegram-api";
 import {
   disconnectTelegram,
   resolveLibrarianTelegramUserId,
@@ -13,8 +13,9 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request): Promise<Response> {
   const authorization = await authorizeLibrarianApi(); if (!authorization.ok) return authorization.response;
   if (!authorization.value.access.writesEnabled) return telegramError(503, "writes_disabled", "Зміни тимчасово вимкнено.");
+  if (!isSameOriginRequest(request)) return telegramError(403, "cross_origin_request", "Запит має надійти з цього самого сайту.");
   const body = await readTelegramJson(request); if (!body.ok) return body.response;
-  const input = telegramVersionInput(body.value); if (!input.ok) return input.response;
+  const input = telegramDisconnectInput(body.value); if (!input.ok) return input.response;
   const db = env.DB as unknown as TelegramDatabase;
   try {
     const userId = await resolveLibrarianTelegramUserId(db, authorization.value.user);

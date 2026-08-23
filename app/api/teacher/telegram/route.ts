@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 
+import { isSameOriginRequest } from "@/lib/librarian-api";
 import { scheduleTelegramOutboxDrain } from "@/lib/telegram-delivery-runtime";
 import {
   readTelegramConnectionStatus,
@@ -33,6 +34,7 @@ export async function GET(request: Request): Promise<Response> {
 
 export async function PATCH(request: Request): Promise<Response> {
   const gate = teacherPortalGate(); if (gate) return gate;
+  if (!isSameOriginRequest(request)) return telegramJson({ schemaVersion: 1, success: false, code: "cross_origin_request", error: "Запит має надійти з цього самого сайту." }, { status: 403 });
   const body = await readTelegramJson(request); if (!body.ok) return body.response;
   const input = telegramPreferencesInput(body.value); if (!input.ok) return input.response;
   const db = env.DB as unknown as TelegramDatabase & VisitD1Database;

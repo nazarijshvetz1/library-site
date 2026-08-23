@@ -21,10 +21,15 @@ export default async function TelegramTeacherPage({ searchParams }: PageProps) {
   return (
     <TelegramTeacherLaunch
       targetTab={boundedTab(params?.tab)}
+      initialMode={boundedMode(params?.mode)}
       enabled={configuration.enabled}
       botUsername={configuration.botUsername}
     />
   );
+}
+
+function boundedMode(value: string | string[] | undefined): "login" | "activate" {
+  return value === "activate" ? "activate" : "login";
 }
 
 function boundedTab(value: string | string[] | undefined): "overview" | "visits" | "orders" | "loans" | "notifications" {

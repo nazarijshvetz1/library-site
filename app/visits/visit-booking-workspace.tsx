@@ -2006,10 +2006,9 @@ function TeacherNotificationsPanel({ pendingScope }: { pendingScope: string }) {
 
 function TeacherTelegramSettings() {
   const [telegram, setTelegram] = useState<TelegramStatus | null>(null);
-  const [notifyOrders, setNotifyOrders] = useState(true);
-  const [notifyVisits, setNotifyVisits] = useState(true);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<"link" | "save" | "test" | "disconnect" | null>(null);
+  const [busy, setBusy] = useState<"link" | "toggle" | "test" | "disconnect" | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"success" | "error" | "info">("info");
 
@@ -2018,8 +2017,7 @@ function TeacherTelegramSettings() {
     try {
       const response = await visitApi<TelegramStatusEnvelope>("/api/teacher/telegram");
       setTelegram(response.telegram);
-      setNotifyOrders(response.telegram.notifyOrders);
-      setNotifyVisits(response.telegram.notifyVisits);
+      setConfirmDisconnect(false);
     } catch (error) {
       setNotice(errorMessage(error));
       setNoticeTone("error");
@@ -2057,18 +2055,22 @@ function TeacherTelegramSettings() {
     }
   }
 
-  async function savePreferences() {
+  async function toggleNotifications() {
     if (!telegram?.connected || telegram.version === null) return;
-    setBusy("save"); setNotice("");
+    const nextEnabled = !(telegram.notifyOrders || telegram.notifyVisits);
+    setBusy("toggle"); setNotice("");
     try {
       const response = await visitApi<TelegramStatusEnvelope>("/api/teacher/telegram", {
         method: "PATCH",
-        body: JSON.stringify({ notifyOrders, notifyVisits, expectedVersion: telegram.version }),
+        body: JSON.stringify({
+          notifyOrders: nextEnabled,
+          notifyVisits: nextEnabled,
+          expectedVersion: telegram.version,
+        }),
       });
       setTelegram(response.telegram);
-      setNotifyOrders(response.telegram.notifyOrders);
-      setNotifyVisits(response.telegram.notifyVisits);
-      setNotice("Налаштування Telegram збережено."); setNoticeTone("success");
+      setNotice(nextEnabled ? "Telegram-сповіщення увімкнено." : "Telegram-сповіщення вимкнено.");
+      setNoticeTone("success");
     } catch (error) {
       setNotice(errorMessage(error)); setNoticeTone("error");
     } finally { setBusy(null); }
@@ -2091,17 +2093,20 @@ function TeacherTelegramSettings() {
     try {
       const response = await visitApi<TelegramStatusEnvelope>("/api/teacher/telegram/disconnect", {
         method: "POST",
-        body: JSON.stringify({ expectedVersion: telegram.version }),
+        body: JSON.stringify({
+          expectedVersion: telegram.version,
+          confirmation: "disconnect_telegram",
+        }),
       });
       setTelegram(response.telegram);
+      setConfirmDisconnect(false);
       setNotice("Telegram від’єднано від кабінету."); setNoticeTone("success");
     } catch (error) {
       setNotice(errorMessage(error)); setNoticeTone("error");
     } finally { setBusy(null); }
   }
 
-  const changed = Boolean(telegram?.connected)
-    && (notifyOrders !== telegram?.notifyOrders || notifyVisits !== telegram?.notifyVisits);
+  const notificationsOn = Boolean(telegram?.notifyOrders || telegram?.notifyVisits);
   const statusLabel = telegram?.connected
     ? "Підключено"
     : telegram?.status === "blocked"
@@ -2122,16 +2127,14 @@ function TeacherTelegramSettings() {
       {!loading && telegram?.connected ? (
         <>
           {telegram.miniAppEnabled ? <div className={styles.info}>У боті доступна кнопка «Кабінет учителя»: каталог, замовлення, записи, посібники та повідомлення відкриваються прямо в Telegram.</div> : null}
-          <div className={styles.telegramPreferences}>
-            <label htmlFor="teacher-telegram-orders"><input id="teacher-telegram-orders" aria-label="Сповіщення про замовлення" type="checkbox" checked={notifyOrders} onChange={(event) => setNotifyOrders(event.currentTarget.checked)} disabled={Boolean(busy)} /><span><strong>Замовлення</strong><small>Готовність, видача, відмова та інші зміни заявки</small></span></label>
-            <label htmlFor="teacher-telegram-visits"><input id="teacher-telegram-visits" aria-label="Сповіщення про відвідування" type="checkbox" checked={notifyVisits} onChange={(event) => setNotifyVisits(event.currentTarget.checked)} disabled={Boolean(busy)} /><span><strong>Відвідування</strong><small>Зміни або скасування запису бібліотекарем</small></span></label>
-          </div>
+          <div className={styles.info}>Сповіщення про замовлення та відвідування: <strong>{notificationsOn ? "увімкнено 🔔" : "вимкнено 🔕"}</strong>. Бот і швидкий вхід залишаються підключеними в обох режимах.</div>
           {!telegram.notificationsEnabled ? <div className={styles.info}>Підключення готове, але надсилання повідомлень ще не ввімкнено бібліотекарем.</div> : null}
           <div className={styles.telegramActions}>
-            <button className={styles.primary} type="button" onClick={() => void savePreferences()} disabled={!changed || Boolean(busy)}>{busy === "save" ? "Зберігаємо…" : "Зберегти"}</button>
-            <button className={styles.quiet} type="button" onClick={() => void sendTest()} disabled={Boolean(busy) || !telegram.notificationsEnabled}>{busy === "test" ? "Надсилаємо…" : "Надіслати тест"}</button>
-            <button className={styles.danger} type="button" onClick={() => void disconnect()} disabled={Boolean(busy)}>{busy === "disconnect" ? "Від’єднуємо…" : "Від’єднати"}</button>
+            <button className={styles.primary} type="button" onClick={() => void toggleNotifications()} disabled={Boolean(busy)}>{busy === "toggle" ? "Змінюємо…" : notificationsOn ? "🔕 Вимкнути сповіщення" : "🔔 Увімкнути сповіщення"}</button>
+            <button className={styles.quiet} type="button" onClick={() => void sendTest()} disabled={Boolean(busy) || !telegram.notificationsEnabled || !notificationsOn}>{busy === "test" ? "Надсилаємо…" : "Надіслати тест"}</button>
+            <button className={styles.danger} type="button" onClick={() => setConfirmDisconnect(true)} disabled={Boolean(busy)}>Від’єднати Telegram</button>
           </div>
+          {confirmDisconnect ? <div className={styles.info} role="alert"><p>Повне від’єднання вимкне автовхід через цього бота. Сповіщення можна лише вимкнути кнопкою вище.</p><div className={styles.telegramActions}><button className={styles.danger} type="button" onClick={() => void disconnect()} disabled={Boolean(busy)}>{busy === "disconnect" ? "Від’єднуємо…" : "Так, від’єднати"}</button><button className={styles.quiet} type="button" onClick={() => setConfirmDisconnect(false)} disabled={Boolean(busy)}>Скасувати</button></div></div> : null}
         </>
       ) : !loading && telegram?.linkingEnabled && telegram.configured ? (
         <div className={styles.telegramActions}>
