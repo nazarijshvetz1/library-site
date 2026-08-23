@@ -213,10 +213,11 @@ test("bounds public week navigation and API reads to the 90-day booking horizon"
 });
 
 test("wires teacher collections, sharing, error reporting, and mobile dialog safety", async () => {
-  const [html, app, css] = await Promise.all([
+  const [html, app, css, brand] = await Promise.all([
     readFile(new URL("../source/index.html", import.meta.url), "utf8"),
     readFile(new URL("../source/app.js", import.meta.url), "utf8"),
     readFile(new URL("../source/styles.css", import.meta.url), "utf8"),
+    readFile(new URL("../source/brand.css", import.meta.url), "utf8"),
   ]);
   assert.match(html, /id="collectionGrid"/);
   assert.match(html, /href="#contacts"[^>]*>Контакти<\/a>/u);
@@ -227,8 +228,9 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.doesNotMatch(app, /contactsGrid\.innerHTML/u);
   assert.match(html, /id="titleSuggestions" role="listbox"/);
   assert.match(html, /<option value="">Усі<\/option>/);
-  assert.match(html, /href="\/styles\.css\?v=20260823-1"/);
-  assert.match(html, /type="module" src="\/app\.js\?v=20260823-1"/);
+  assert.match(html, /href="\/styles\.css\?v=20260823-2"/);
+  assert.match(html, /href="\/brand\.css\?v=20260823-2"/);
+  assert.match(html, /type="module" src="\/app\.js\?v=20260823-2"/);
   assert.match(html, /href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/librarian"/);
   assert.match(html, /rel="noopener noreferrer"/);
   assert.doesNotMatch(app, /librarianButton|Режим бібліотекаря підключимо/);
@@ -261,6 +263,16 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(css, /\.card-stock\{display:flex;align-items:flex-end;gap:18px\}/u);
   assert.match(css, /\.available-quantity\.none strong\{color:#a05744\}/u);
   assert.match(css, /\.dialog-order/);
+  assert.match(html, /class="hero-assurances"/u);
+  assert.match(html, /class="suggestion-cta"/u);
+  assert.match(html, /href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/suggest-book"/u);
+  assert.match(html, /aria-labelledby="material-dialog-title" aria-describedby="material-dialog-note"/u);
+  assert.match(app, /id="material-dialog-title"/u);
+  assert.match(app, /id="material-dialog-note"/u);
+  assert.match(brand, /--gold: #cda252/u);
+  assert.match(brand, /\.suggestion-cta/u);
+  assert.match(brand, /env\(safe-area-inset-bottom\)/u);
+  assert.match(brand, /@media \(prefers-reduced-motion: reduce\)/u);
 });
 
 test("ships an accessible responsive public visit schedule and protected handoff", async () => {

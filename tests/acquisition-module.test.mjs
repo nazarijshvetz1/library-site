@@ -138,6 +138,10 @@ test("acquisition interfaces expose catalog metadata, optional student fields an
   assert.match(teacherUi,/setSourceUrl\(detail\.links\.find/u);assert.match(teacherUi,/required=\{!existingCatalogMaterial\}/u);
   assert.match(studentUi,/publicationYear:year\.trim\(\)\?Number\(year\):null/u);assert.match(studentUi,/requestedQuantity:quantity\.trim\(\)\?Number\(quantity\):null/u);
   assert.doesNotMatch(studentUi,/Автор \*<input/u);assert.doesNotMatch(studentUi,/Покликання на книгу \*<input/u);
+  assert.match(studentUi,/library-logo\.png/u);assert.match(studentUi,/referenceKey/u);assert.match(studentUi,/Спробувати ще раз/u);
+  assert.match(studentUi,/href="#suggestion-form"/u);assert.match(studentUi,/feedbackRef\.current\?\.focus\(\)/u);
+  assert.match(studentUi,/Object\.values\(body\.fieldErrors \?\? \{\}\)\[0\] \|\| body\.error/u);
+  assert.match(studentUi,/name="className"/u);assert.match(studentUi,/autoComplete="name"/u);assert.match(studentUi,/aria-describedby="class-help"/u);
   assert.match(librarianUi,/new URL\("\/suggest-book", window\.location\.origin\)/u);assert.match(librarianUi,/QRCodeWriter/u);
   assert.match(librarianUi,/Копіювати QR-код/u);assert.match(librarianUi,/Завантажити QR/u);assert.match(librarianUi,/Друкувати QR/u);
   assert.doesNotMatch(librarianUi,/api\.qrserver|chart\.googleapis/iu);assert.match(librarianCss,/acquisition-student-qr-print/u);assert.match(librarianCss,/@page\{size:A4 portrait/u);
