@@ -137,11 +137,7 @@ export default function TeacherAcquisitionPanel() {
   }
 
   return (
-    <section className={styles.workspace} aria-labelledby="acquisition-teacher-title">
-      <div className={styles.intro}>
-        <div><span>Комплектування фонду</span><h2 id="acquisition-teacher-title">Запропонувати придбання</h2></div>
-        <p>Дозамовте потрібні примірники або запропонуйте нову художню чи наукову літературу. Це не є бронюванням наявного фонду.</p>
-      </div>
+    <section className={styles.workspace} aria-label="Комплектування фонду">
       {error ? <div className={styles.error} role="alert">{error}</div> : null}
       {notice ? <div className={styles.success} role="status">{notice}</div> : null}
       <div className={styles.grid}>

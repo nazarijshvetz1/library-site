@@ -110,7 +110,11 @@ test("guest booking is explicitly unverified, canonical, controlled, and retry-s
 });
 
 test("authenticated teacher workflows use frozen routes and exact request fields", async () => {
-  const workspace = await read("app/visits/visit-booking-workspace.tsx");
+  const [workspace, acquisitionPanel, css] = await Promise.all([
+    read("app/visits/visit-booking-workspace.tsx"),
+    read("app/teacher/acquisition/teacher-acquisition-panel.tsx"),
+    read("app/visits/visits.module.css"),
+  ]);
   assert.match(workspace, /method: "PATCH"/u);
   assert.match(workspace, /expectedVersion: editingBooking\.version/u);
   assert.match(workspace, /\/api\/teacher\/material-requests/u);
@@ -130,6 +134,12 @@ test("authenticated teacher workflows use frozen routes and exact request fields
   assert.match(workspace, /results\.length === 1/u);
   assert.match(workspace, /Оберіть своє ім’я у списку під полем/u);
   assert.match(workspace, /clearTeacherPortalPendingStorage\(window\.sessionStorage, pendingScope\)/u);
+  assert.equal((workspace.match(/return "Запропонувати придбання"/gu) ?? []).length, 1);
+  assert.doesNotMatch(acquisitionPanel, /acquisition-teacher-title|<h2[^>]*>Запропонувати придбання<\/h2>/u);
+  assert.match(acquisitionPanel, /aria-label="Комплектування фонду"/u);
+  assert.match(css, /\.teacherPortalContent \.card\.overviewActionCard \{ min-height: 220px; padding-top: 72px; \}/u);
+  assert.match(css, /\.securityDialog \.generatedCode \{ display: grid; grid-template-columns: minmax\(0,1fr\) auto;/u);
+  assert.match(css, /\.securityDialog \.generatedCode input \{ min-height: 50px; height: 50px; flex: none; \}/u);
 });
 
 test("teacher can use a temporary code and choose a non-obvious four-digit PIN", () => {

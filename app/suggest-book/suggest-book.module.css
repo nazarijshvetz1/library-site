@@ -138,7 +138,7 @@
 
 .main {
   display: grid;
-  grid-template-columns: minmax(330px, .82fr) minmax(570px, 1.18fr);
+  grid-template-columns: minmax(430px, .95fr) minmax(560px, 1.05fr);
   width: min(1420px, calc(100% - 48px));
   margin: 46px auto 56px;
   overflow: hidden;
@@ -193,10 +193,10 @@
 .eyebrow span { width: 38px; height: 1px; background: currentColor; }
 
 .story h1 {
-  max-width: 690px;
+  max-width: 100%;
   margin: 0;
   font-family: var(--display);
-  font-size: clamp(50px, 5vw, 78px);
+  font-size: clamp(48px, 4.4vw, 68px);
   font-weight: 700;
   line-height: .98;
   letter-spacing: -2.6px;
@@ -558,11 +558,15 @@
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
-@media (max-width: 1080px) {
-  .main { grid-template-columns: minmax(290px, .78fr) minmax(480px, 1.22fr); }
-  .story { min-height: 930px; padding: 46px 36px; }
-  .story h1 { font-size: clamp(48px, 5.5vw, 64px); }
-  .formPanel { padding: 50px 38px; }
+@media (max-width: 1180px) {
+  .main { grid-template-columns: 1fr; }
+  .story { min-height: auto; padding: 54px 42px; }
+  .story h1 { max-width: 760px; font-size: clamp(50px, 7vw, 70px); }
+  .lead { max-width: 680px; }
+  .steps { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 44px; border: 0; }
+  .steps li { grid-template-columns: 1fr; gap: 11px; padding: 18px; border: 1px solid rgba(255, 255, 255, .12); border-radius: 16px; background: rgba(255, 255, 255, .035); }
+  .assurance { margin-top: 34px; }
+  .formPanel { padding: 54px 42px; }
 }
 
 @media (max-width: 840px) {

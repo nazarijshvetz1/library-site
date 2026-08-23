@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Запропонувати книгу бібліотеці",
-  description: "Запропонуйте видання для фонду Єдиної бібліотеки. Потрібні лише клас, ім’я та назва книги.",
+  description: "Запропонуйте видання для фонду Єдиної бібліотеки. Потрібні лише клас, ім’я, назва та автор книги.",
   robots: { index: true, follow: true },
   alternates: { canonical: "https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/suggest-book" },
   openGraph: {

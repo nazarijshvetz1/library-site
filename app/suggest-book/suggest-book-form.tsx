@@ -133,13 +133,13 @@ export default function SuggestBookForm() {
 
           <ol className={styles.steps} aria-label="Як це працює">
             <li><span>01</span><div><strong>Назвіть себе</strong><p>Оберіть клас і введіть прізвище та ім’я.</p></div></li>
-            <li><span>02</span><div><strong>Укажіть книгу</strong><p>Назва обов’язкова, решту даних можна додати за бажанням.</p></div></li>
+            <li><span>02</span><div><strong>Укажіть книгу</strong><p>Назва й автор обов’язкові. Рік, кількість і покликання можна додати за бажанням.</p></div></li>
             <li><span>03</span><div><strong>Надішліть пропозицію</strong><p>Вона потрапить безпосередньо до бібліотекаря.</p></div></li>
           </ol>
 
           <div className={styles.assurance}>
             <span aria-hidden="true">✓</span>
-            <p><strong>Потрібні лише 3 поля</strong>Клас, ім’я та назва книги. Телефон і електронна адреса не потрібні.</p>
+            <p><strong>Потрібні лише 4 поля</strong>Клас, ім’я, назва та автор книги. Телефон і електронна адреса не потрібні.</p>
           </div>
         </section>
 
@@ -189,8 +189,8 @@ export default function SuggestBookForm() {
                 <label className={styles.wide} htmlFor="suggest-title">Назва книги <em>*</em>
                   <input id="suggest-title" name="title" autoComplete="off" required minLength={2} maxLength={320} value={title} onChange={(event) => setTitle(event.currentTarget.value)} placeholder="Повна назва видання" />
                 </label>
-                <label htmlFor="suggest-author">Автор <small className={styles.optional}>необов’язково</small>
-                  <input id="suggest-author" name="author" autoComplete="off" maxLength={240} value={author} onChange={(event) => setAuthor(event.currentTarget.value)} placeholder="Ім’я автора" />
+                <label htmlFor="suggest-author">Автор <em>*</em>
+                  <input id="suggest-author" name="author" autoComplete="off" required minLength={2} maxLength={240} value={author} onChange={(event) => setAuthor(event.currentTarget.value)} placeholder="Ім’я автора" />
                 </label>
                 <label htmlFor="suggest-year">Рік видання <small className={styles.optional}>необов’язково</small>
                   <input id="suggest-year" name="publicationYear" type="number" inputMode="numeric" min="1000" max="2100" value={year} onChange={(event) => setYear(event.currentTarget.value)} placeholder="Наприклад, 2024" />

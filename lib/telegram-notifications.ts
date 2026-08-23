@@ -1054,11 +1054,44 @@ export async function processTelegramWebhookUpdate(
     return { outcome: "disconnect_help", duplicate: !inserted };
   }
   if (command.kind === "menu") {
-    const profile = await connectedTelegramProfile(
+    let profile = await connectedTelegramProfile(
       db,
       update.message.chatId,
       update.message.telegramUserId,
     );
+    if (!profile && command.resumeConnection) {
+      const resumed = await resumeRecoverableTelegramConnection(
+        db,
+        update.updateId,
+        payloadHash,
+        update.message.chatId,
+        update.message.telegramUserId,
+      );
+      if (resumed) {
+        profile = resumed.profile;
+        if (resumed.inserted && profile) {
+          await bestEffortConnectedMenu(
+            configuration.botToken,
+            update.message.chatId,
+            profile.role,
+            Boolean(profile.teacher_capability),
+            profile.full_name,
+            notificationsMasterEnabled(profile),
+            siteOrigin,
+            false,
+            fetcher,
+          );
+        } else if (resumed.inserted) {
+          await bestEffortBotReply(
+            configuration.botToken,
+            update.message.chatId,
+            "Підключення знайдено, але профіль зараз недоступний. Зверніться до бібліотекаря.",
+            fetcher,
+          );
+        }
+        return { outcome: "menu", duplicate: !resumed.inserted };
+      }
+    }
     if (profile) {
       const inserted = await insertWebhookReceipt(db, update.updateId, payloadHash, "menu");
       if (inserted) {
@@ -1539,14 +1572,15 @@ function telegramUpdate(value: unknown): {
 
 function telegramCommand(text: string):
   | { kind: "start"; token: string }
-  | { kind: "menu" }
+  | { kind: "menu"; resumeConnection: boolean }
   | { kind: "stop" }
   | { kind: "disconnect" }
   | { kind: "other" } {
   const trimmed = text.trim();
   const start = trimmed.match(/^\/start(?:@[A-Za-z0-9_]+)?\s+([A-Za-z0-9_-]{40,64})$/u);
   if (start) return { kind: "start", token: start[1] };
-  if (/^\/(?:start|menu|cabinet|help|notifications)(?:@[A-Za-z0-9_]+)?$/u.test(trimmed)) return { kind: "menu" };
+  if (/^\/start(?:@[A-Za-z0-9_]+)?$/u.test(trimmed)) return { kind: "menu", resumeConnection: true };
+  if (/^\/(?:menu|cabinet|help|notifications)(?:@[A-Za-z0-9_]+)?$/u.test(trimmed)) return { kind: "menu", resumeConnection: false };
   if (/^\/stop(?:@[A-Za-z0-9_]+)?$/u.test(trimmed)) return { kind: "stop" };
   if (/^\/disconnect(?:@[A-Za-z0-9_]+)?$/u.test(trimmed)) return { kind: "disconnect" };
   return { kind: "other" };
@@ -1942,6 +1976,98 @@ type ConnectedTelegramProfile = {
   notify_orders: number;
   notify_visits: number;
 };
+
+async function resumeRecoverableTelegramConnection(
+  db: TelegramDatabase,
+  updateId: string,
+  payloadHash: string,
+  chatId: string,
+  telegramUserId: string,
+): Promise<{ inserted: boolean; profile: ConnectedTelegramProfile | null } | null> {
+  const candidate = await db.prepare(`
+    SELECT c.user_id,c.status
+    FROM telegram_connections c JOIN users u ON u.id=c.user_id
+    WHERE c.chat_id=? AND c.telegram_user_id=?
+      AND u.status='active'
+      AND (
+        c.status='blocked'
+        OR (c.status='disabled' AND NOT EXISTS (
+          SELECT 1 FROM audit_events a
+          WHERE a.entity_type='telegram_connection' AND a.entity_id=c.user_id
+            AND a.action IN ('telegram.connection.disconnect','telegram.connection.lost_phone_protect')
+            AND a.created_at>=c.linked_at
+        ))
+      )
+      AND (u.role IN ('admin','librarian') OR EXISTS (
+        SELECT 1 FROM teacher_profiles p
+        JOIN visit_teacher_credentials v ON v.teacher_user_id=p.teacher_user_id AND v.status='active'
+        WHERE p.teacher_user_id=u.id AND p.closed_at IS NULL
+      ))
+    LIMIT 1
+  `).bind(chatId, telegramUserId).first<{ user_id: string; status: "blocked" | "disabled" }>();
+  if (!candidate) return null;
+
+  const now = new Date().toISOString();
+  const auditId = `AUD-${crypto.randomUUID()}`;
+  const results = await db.batch([
+    db.prepare(`INSERT INTO telegram_webhook_updates(update_id,payload_hash,outcome,processed_at)
+      VALUES (?,?, 'menu',?) ON CONFLICT(update_id) DO NOTHING`)
+      .bind(updateId, payloadHash, now),
+    db.prepare(`UPDATE telegram_connections
+      SET status='active',disabled_at=NULL,last_failure_at=NULL,last_error_code=NULL,
+          version=version+1,updated_at=?
+      WHERE user_id=? AND chat_id=? AND telegram_user_id=? AND status=?
+        AND EXISTS (
+          SELECT 1 FROM users u WHERE u.id=telegram_connections.user_id AND u.status='active'
+            AND (u.role IN ('admin','librarian') OR EXISTS (
+              SELECT 1 FROM teacher_profiles p
+              JOIN visit_teacher_credentials v ON v.teacher_user_id=p.teacher_user_id AND v.status='active'
+              WHERE p.teacher_user_id=u.id AND p.closed_at IS NULL
+            ))
+        )
+        AND (
+          status='blocked'
+          OR (status='disabled' AND NOT EXISTS (
+            SELECT 1 FROM audit_events a
+            WHERE a.entity_type='telegram_connection' AND a.entity_id=telegram_connections.user_id
+              AND a.action IN ('telegram.connection.disconnect','telegram.connection.lost_phone_protect')
+              AND a.created_at>=telegram_connections.linked_at
+          ))
+        )
+        AND EXISTS (SELECT 1 FROM telegram_webhook_updates
+          WHERE update_id=? AND payload_hash=? AND outcome='menu' AND processed_at=?)`)
+      .bind(now, candidate.user_id, chatId, telegramUserId, candidate.status, updateId, payloadHash, now),
+    db.prepare(`INSERT INTO audit_events (
+        id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,
+        before_json,after_json,metadata_json,created_at
+      ) SELECT ?,c.user_id,'telegram-bot@local.invalid','telegram.connection.resume',
+        'telegram_connection',c.user_id,NULL,json_object('status',?),json_object('status','active'),
+        json_object('source','start','telegramUserId',?),?
+      FROM telegram_connections c
+      WHERE c.user_id=? AND c.chat_id=? AND c.telegram_user_id=? AND c.status='active'
+        AND EXISTS (SELECT 1 FROM telegram_webhook_updates
+          WHERE update_id=? AND payload_hash=? AND outcome='menu' AND processed_at=?)`)
+      .bind(
+        auditId,
+        candidate.status,
+        telegramUserId,
+        now,
+        candidate.user_id,
+        chatId,
+        telegramUserId,
+        updateId,
+        payloadHash,
+        now,
+      ),
+  ]);
+  const inserted = Number(results[0]?.meta?.changes ?? 0) === 1;
+  return {
+    inserted,
+    profile: inserted
+      ? await connectedTelegramProfile(db, chatId, telegramUserId)
+      : null,
+  };
+}
 
 async function connectedTelegramProfile(
   db: TelegramDatabase,

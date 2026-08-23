@@ -268,7 +268,7 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
     NULL,NULL,NULL,?,?)`).run(teacher.now, teacher.now, teacher.now);
   const teacherPayload = {
     update_id: 93,
-    message: { text: "/menu", chat: { id: 7001, type: "private" }, from: { id: 7001 } },
+    message: { text: "/start", chat: { id: 7001, type: "private" }, from: { id: 7001 } },
   };
   const teacherBodies = [];
   const teacherResult = await telegram.processTelegramWebhookUpdate(
@@ -441,6 +441,66 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
   teacher.sqlite.close();
   librarian.sqlite.close();
   dualRole.sqlite.close();
+});
+
+test("bare start restores recoverable Telegram connections but respects explicit disconnects", async () => {
+  for (const scenario of [
+    { id: "7101", status: "blocked", explicitDisconnect: false },
+    { id: "7102", status: "disabled", explicitDisconnect: false },
+  ]) {
+    const context = await database();
+    addTeacherCredential(context);
+    context.sqlite.prepare(`INSERT INTO telegram_connections (
+      user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+      linked_at,disabled_at,last_error_code,created_at,updated_at
+    ) VALUES ('USR-TEACHER',?,?,NULL,?,1,1,2,?,?,?, ?,?)`)
+      .run(scenario.id, scenario.id, scenario.status, context.now, context.now,
+        scenario.status === "blocked" ? "telegram_blocked" : null, context.now, context.now);
+    const payload = {
+      update_id: Number(scenario.id),
+      message: { text: "/start", chat: { id: Number(scenario.id), type: "private" }, from: { id: Number(scenario.id) } },
+    };
+    const bodies = [];
+    assert.deepEqual(await telegram.processTelegramWebhookUpdate(
+      context.db,
+      JSON.stringify(payload),
+      payload,
+      async (_url, init) => { bodies.push(JSON.parse(init.body)); return telegramOk(71); },
+      "https://library.example.test",
+    ), { outcome: "menu", duplicate: false });
+    assert.equal(context.sqlite.prepare("SELECT status FROM telegram_connections WHERE user_id='USR-TEACHER'").get().status, "active");
+    assert.equal(context.sqlite.prepare("SELECT COUNT(*) n FROM audit_events WHERE action='telegram.connection.resume'").get().n, 1);
+    assert.equal(bodies.find((body) => body.text).reply_markup.inline_keyboard.length, 7);
+    context.sqlite.close();
+  }
+
+  const disconnected = await database();
+  addTeacherCredential(disconnected);
+  disconnected.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-TEACHER','7103','7103',NULL,'disabled',1,1,2,?,?,?,?)`)
+    .run(disconnected.now, disconnected.now, disconnected.now, disconnected.now);
+  disconnected.sqlite.prepare(`INSERT INTO audit_events (
+    id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,created_at
+  ) VALUES ('AUD-explicit-disconnect','USR-TEACHER','telegram-user@local.invalid',
+    'telegram.connection.disconnect','telegram_connection','USR-TEACHER',NULL,?)`)
+    .run(disconnected.now);
+  const payload = {
+    update_id: 7103,
+    message: { text: "/start", chat: { id: 7103, type: "private" }, from: { id: 7103 } },
+  };
+  const bodies = [];
+  assert.deepEqual(await telegram.processTelegramWebhookUpdate(
+    disconnected.db,
+    JSON.stringify(payload),
+    payload,
+    async (_url, init) => { bodies.push(JSON.parse(init.body)); return telegramOk(72); },
+    "https://library.example.test",
+  ), { outcome: "activation_started", duplicate: false });
+  assert.equal(disconnected.sqlite.prepare("SELECT status FROM telegram_connections WHERE user_id='USR-TEACHER'").get().status, "disabled");
+  assert.equal(bodies.find((body) => body.text).reply_markup.inline_keyboard[0][0].text, "🔑 Увійти");
+  disconnected.sqlite.close();
 });
 
 test("one Telegram button toggles all notifications without disconnecting the profile", async () => {

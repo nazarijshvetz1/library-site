@@ -65,8 +65,9 @@ test("acquisition validation has no ISBN and freezes exact request shapes",()=>{
   assert.equal(validation.validateAcquisitionCreateInput({...createInput(),category:"literature",literatureKind:"fiction",sourceUrl:""}).ok,false);
   assert.equal(validation.validateAcquisitionCreateInput({...createInput(),isbn:"123"}).ok,false);
   assert.equal(validation.validateStudentAcquisitionCreateInput({requestId:crypto.randomUUID(),fullName:"Іваненко Марія",className:"7-А",title:"Книга",author:"Автор",publicationYear:2024,requestedQuantity:1,sourceUrl:"https://example.test/book",note:"",website:"",startedAt:new Date(Date.now()-3000).toISOString()}).ok,true);
-  const optional=validation.validateStudentAcquisitionCreateInput({requestId:crypto.randomUUID(),fullName:"Іваненко Марія",className:"7-А",title:"Книга",note:"",website:"",startedAt:new Date(Date.now()-3000).toISOString()});
-  assert.equal(optional.ok,true);assert.equal(optional.value.author,"");assert.equal(optional.value.publicationYear,null);assert.equal(optional.value.requestedQuantity,1);assert.equal(optional.value.sourceUrl,"");
+  const optional=validation.validateStudentAcquisitionCreateInput({requestId:crypto.randomUUID(),fullName:"Іваненко Марія",className:"7-А",title:"Книга",author:"Автор",note:"",website:"",startedAt:new Date(Date.now()-3000).toISOString()});
+  assert.equal(optional.ok,true);assert.equal(optional.value.author,"Автор");assert.equal(optional.value.publicationYear,null);assert.equal(optional.value.requestedQuantity,1);assert.equal(optional.value.sourceUrl,"");
+  assert.equal(validation.validateStudentAcquisitionCreateInput({...optional.value,author:""}).ok,false);
   assert.equal(validation.validateStudentAcquisitionCreateInput({...optional.value,publicationYear:999}).ok,false);
   assert.equal(validation.validateStudentAcquisitionCreateInput({...optional.value,requestedQuantity:0}).ok,false);
   assert.equal(validation.validateStudentAcquisitionCreateInput({...optional.value,sourceUrl:"javascript:alert(1)"}).ok,false);
@@ -105,17 +106,17 @@ test("anonymous proposal validates the active class and records only a private r
   assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM acquisition_requests").get().n,5);
 });
 
-test("anonymous proposal persists omitted metadata without synthetic values",async()=>{
+test("anonymous proposal requires author and persists other omitted metadata without synthetic values",async()=>{
   const {sqlite,db}=context();
-  const validated=validation.validateStudentAcquisitionCreateInput({requestId:crypto.randomUUID(),fullName:"Петренко Андрій",className:"7-А",title:"Нова книга",note:"",website:"",startedAt:new Date(Date.now()-3000).toISOString()});
+  const validated=validation.validateStudentAcquisitionCreateInput({requestId:crypto.randomUUID(),fullName:"Петренко Андрій",className:"7-А",title:"Нова книга",author:"Письменник",note:"",website:"",startedAt:new Date(Date.now()-3000).toISOString()});
   assert.equal(validated.ok,true);
   const request=new Request("https://library.test/api/public/book-suggestions",{headers:{"user-agent":"test","CF-Connecting-IP":"203.0.113.20"}});
   const first=await store.createStudentAcquisitionRequest(db,request,validated.value,"s".repeat(40));
   const replay=await store.createStudentAcquisitionRequest(db,request,validated.value,"s".repeat(40));
   assert.equal(replay.replayed,true);assert.deepEqual(replay.request,first.request);
-  assert.equal(first.request.author,"");assert.equal(first.request.publicationYear,null);assert.equal(first.request.requestedQuantity,1);assert.equal(first.request.sourceUrl,"");
+  assert.equal(first.request.author,"Письменник");assert.equal(first.request.publicationYear,null);assert.equal(first.request.requestedQuantity,1);assert.equal(first.request.sourceUrl,"");
   const stored=sqlite.prepare("SELECT author,publication_year,requested_quantity,source_url FROM acquisition_requests WHERE id=?").get(first.request.id);
-  assert.equal(stored.author,"");assert.equal(stored.publication_year,null);assert.equal(stored.requested_quantity,1);assert.equal(stored.source_url,"");
+  assert.equal(stored.author,"Письменник");assert.equal(stored.publication_year,null);assert.equal(stored.requested_quantity,1);assert.equal(stored.source_url,"");
 });
 
 test("Excel preview resolves identities and repeated workbook commit is idempotent",async()=>{
@@ -137,7 +138,8 @@ test("acquisition interfaces expose catalog metadata, optional student fields an
   assert.match(teacherUi,/thumbnailUrl/u);assert.match(teacherUi,/classFrom/u);assert.match(teacherUi,/\/api\/catalog-v2\/\$\{encodeURIComponent\(item\.id\)\}/u);
   assert.match(teacherUi,/setSourceUrl\(detail\.links\.find/u);assert.match(teacherUi,/required=\{!existingCatalogMaterial\}/u);
   assert.match(studentUi,/publicationYear:year\.trim\(\)\?Number\(year\):null/u);assert.match(studentUi,/requestedQuantity:quantity\.trim\(\)\?Number\(quantity\):null/u);
-  assert.doesNotMatch(studentUi,/Автор \*<input/u);assert.doesNotMatch(studentUi,/Покликання на книгу \*<input/u);
+  assert.match(studentUi,/Автор <em>\*<\/em>[\s\S]*?name="author"[\s\S]*?required minLength=\{2\}/u);assert.doesNotMatch(studentUi,/Покликання на книгу \*<input/u);
+  assert.match(studentUi,/Потрібні лише 4 поля/u);
   assert.match(studentUi,/library-logo\.png/u);assert.match(studentUi,/referenceKey/u);assert.match(studentUi,/Спробувати ще раз/u);
   assert.match(studentUi,/href="#suggestion-form"/u);assert.match(studentUi,/feedbackRef\.current\?\.focus\(\)/u);
   assert.match(studentUi,/Object\.values\(body\.fieldErrors \?\? \{\}\)\[0\] \|\| body\.error/u);

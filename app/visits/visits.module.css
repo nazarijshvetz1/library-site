@@ -590,7 +590,10 @@
   .teacherPortalContent .profilePortrait { width: 96px; height: 96px; }
   .teacherPortalContent .profileDetails dl,
   .profileAssurance { grid-template-columns: 1fr; }
-  .teacherPortalContent .overviewActionCard { min-height: 220px; }
+  .teacherPortalContent .card.overviewActionCard { min-height: 220px; padding-top: 72px; }
+  .securityDialog .generatedCode { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; }
+  .securityDialog .generatedCode input { min-height: 50px; height: 50px; flex: none; }
+  .securityDialog .generatedCode button { width: auto; min-height: 50px; }
   .teacherPortalContent .loanCounters { grid-template-columns: 1fr; }
   .teacherPortalContent .catalogCards article { grid-template-columns: 54px minmax(0,1fr); }
   .teacherPortalContent .catalogCards button { grid-column: 1 / -1; }

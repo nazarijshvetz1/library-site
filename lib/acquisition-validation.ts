@@ -159,7 +159,7 @@ export function validateStudentAcquisitionCreateInput(input: unknown): Validatio
   const fullName = readText(input.fullName, "fullName", errors, 3, 160);
   const className = readText(input.className, "className", errors, 1, 80);
   const title = readText(input.title, "title", errors, 2, 320);
-  const author = readOptionalTextWithMin(input.author, "author", errors, 2, 240);
+  const author = readText(input.author, "author", errors, 2, 240);
   const publicationYear = readOptionalYear(input.publicationYear, "publicationYear", errors);
   const requestedQuantity = readOptionalInteger(input.requestedQuantity, "requestedQuantity", errors, 1, 50) ?? 1;
   const sourceUrl = readOptionalHttpUrl(input.sourceUrl, "sourceUrl", errors);
@@ -397,12 +397,6 @@ function readText(value: unknown, field: string, errors: Record<string, string>,
 function readOptionalText(value: unknown, field: string, errors: Record<string, string>, max: number): string {
   const result = clean(value);
   if (result.length > max) errors[field] = `Не більше ${max} символів.`;
-  return result;
-}
-
-function readOptionalTextWithMin(value: unknown, field: string, errors: Record<string, string>, min: number, max: number): string {
-  const result = clean(value);
-  if (result && (result.length < min || result.length > max)) errors[field] = `Введіть від ${min} до ${max} символів або залиште поле порожнім.`;
   return result;
 }
 
