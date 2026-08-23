@@ -3,21 +3,23 @@
   padding: max(28px, env(safe-area-inset-top)) 18px max(28px, env(safe-area-inset-bottom));
   display: grid;
   place-items: center;
-  background: var(--tg-theme-secondary-bg-color, #eef2ea);
+  background:
+    radial-gradient(circle at 85% 6%, rgba(220,174,61,.2), transparent 20rem),
+    var(--tg-theme-secondary-bg-color, #eef2ea);
   color: var(--tg-theme-text-color, #173f31);
   font-family: Arial, sans-serif;
 }
 
 .panel {
   width: min(100%, 440px);
-  padding: 34px 24px;
+  padding: 38px 26px;
   display: grid;
   justify-items: center;
   gap: 16px;
   border: 1px solid color-mix(in srgb, var(--tg-theme-text-color, #173f31) 14%, transparent);
-  border-radius: 24px;
+  border-radius: 28px;
   background: var(--tg-theme-bg-color, #fffdf8);
-  box-shadow: 0 18px 50px rgba(19, 55, 40, .12);
+  box-shadow: 0 24px 64px rgba(19, 55, 40, .15);
   text-align: center;
 }
 
@@ -50,7 +52,8 @@
 }
 
 .modeSwitch button[aria-pressed="true"] {
-  background: var(--tg-theme-bg-color, #fffdf8);
+  color: #fff;
+  background: var(--tg-theme-button-color, #23583b);
   box-shadow: 0 3px 12px rgba(19, 55, 40, .12);
 }
 
@@ -85,6 +88,14 @@
 .fieldGroup input:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--tg-theme-link-color, #174d38) 25%, transparent);
   outline-offset: 1px;
+}
+
+.modeSwitch button:focus-visible,
+.teacherResults button:focus-visible,
+.primary:focus-visible,
+.secondary:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--tg-theme-link-color, #23583b) 28%, transparent);
+  outline-offset: 2px;
 }
 
 .fieldGroup small {
@@ -156,14 +167,12 @@
 }
 
 .mark {
-  width: 64px;
-  height: 64px;
-  display: grid;
-  place-items: center;
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
   border-radius: 50%;
-  background: #174d38;
-  color: #fff;
-  font: 700 22px/1 Georgia, serif;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(19,55,40,.2);
 }
 
 .eyebrow {
@@ -177,14 +186,17 @@
 
 .panel h1 {
   margin: -6px 0 0;
-  font: 700 clamp(32px, 9vw, 46px)/1 Georgia, serif;
+  color: var(--tg-theme-text-color, #163e2a);
+  font: 700 clamp(34px, 9vw, 48px)/.98 Georgia, serif;
+  letter-spacing: -.035em;
 }
 
 .message {
   min-height: 44px;
   margin: 0;
   color: var(--tg-theme-hint-color, #607069);
-  line-height: 1.5;
+  font-size: 14px;
+  line-height: 1.6;
 }
 
 .spinner {
@@ -211,9 +223,10 @@
 
 .primary {
   border: 0;
-  background: var(--tg-theme-button-color, #174d38);
+  background: linear-gradient(135deg, var(--tg-theme-button-color, #23583b), #163e2a);
   color: var(--tg-theme-button-text-color, #fff);
   cursor: pointer;
+  box-shadow: 0 10px 24px rgba(22,62,42,.18);
 }
 
 .primary:disabled {

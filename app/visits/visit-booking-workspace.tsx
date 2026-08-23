@@ -59,6 +59,11 @@ import {
 } from "./visit-client";
 import { normalizeCoverPhotoForUpload } from "@/lib/cover-client";
 import TeacherAcquisitionPanel from "@/app/teacher/acquisition/teacher-acquisition-panel";
+import {
+  boundedTeacherTab,
+  teacherPortalHref,
+  type TeacherPortalTab,
+} from "@/app/teacher/_components/teacher-routes";
 import styles from "./visits.module.css";
 
 const LOGO_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
@@ -68,22 +73,33 @@ type Props = {
   initialDate: string;
   initialStartTime: string;
   initialEndTime: string;
-  initialTab?: "overview" | "visits" | "orders" | "acquisition" | "loans" | "notifications" | "telegram";
+  initialTab?: TeacherPortalTab;
   initialOrderMaterialId?: string;
   telegramMiniApp?: boolean;
 };
 
-type TeacherTab = NonNullable<Props["initialTab"]>;
+type TeacherTab = TeacherPortalTab;
 
-const TEACHER_TABS: Array<{ id: TeacherTab; label: string; icon: string }> = [
-  { id: "overview", label: "Огляд", icon: "⌂" },
-  { id: "visits", label: "Відвідування", icon: "◷" },
-  { id: "orders", label: "Замовлення", icon: "▤" },
-  { id: "acquisition", label: "Запропонувати придбання", icon: "+" },
-  { id: "loans", label: "Мої посібники", icon: "▥" },
-  { id: "notifications", label: "Повідомлення", icon: "●" },
-  { id: "telegram", label: "Telegram", icon: "➤" },
+type TeacherTabDefinition = {
+  id: TeacherTab;
+  label: string;
+  shortLabel: string;
+  icon: string;
+  eyebrow: string;
+  description: string;
+};
+
+const TEACHER_TABS: TeacherTabDefinition[] = [
+  { id: "overview", label: "Головна", shortLabel: "Головна", icon: "⌂", eyebrow: "Ваш простір", description: "Найважливіше про профіль, найближчий візит і бібліотечні справи — на одному екрані." },
+  { id: "visits", label: "Відвідування", shortLabel: "Графік", icon: "◷", eyebrow: "Планування", description: "Оберіть вільний час, запишіть клас і керуйте своїми майбутніми відвідуваннями." },
+  { id: "orders", label: "Замовлення", shortLabel: "Замовити", icon: "▤", eyebrow: "Матеріали", description: "Знайдіть потрібні видання, сформуйте кошик і стежте за виконанням замовлення." },
+  { id: "acquisition", label: "Запропонувати придбання", shortLabel: "Придбання", icon: "+", eyebrow: "Комплектування", description: "Повідомте бібліотекарю, яких навчальних матеріалів або книжок бракує фонду." },
+  { id: "loans", label: "Мої посібники", shortLabel: "Посібники", icon: "▥", eyebrow: "Облік", description: "Перегляньте матеріали, видані особисто вам і класам, за які ви відповідаєте." },
+  { id: "notifications", label: "Повідомлення", shortLabel: "Новини", icon: "●", eyebrow: "Оновлення", description: "Усі рішення бібліотекаря, зміни статусів і важливі повідомлення зібрані тут." },
+  { id: "telegram", label: "Telegram", shortLabel: "Telegram", icon: "➤", eyebrow: "Швидкий зв’язок", description: "Підключіть бота, керуйте сповіщеннями та відкривайте кабінет без зайвих кроків." },
 ];
+
+const TEACHER_MOBILE_TABS: TeacherTab[] = ["overview", "visits", "orders", "loans"];
 
 function clearTeacherPortalPendingStorage(storage: Storage, pendingScope: string): void {
   clearVisitPendingIntent(storage, visitPendingKey("teacher", pendingScope));
@@ -169,11 +185,24 @@ export default function VisitBookingWorkspace({
   if (!session) {
     return (
       <VisitShell telegramMiniApp={telegramMiniApp}>
-        <section className={styles.page}>
-          <div className={styles.intro}>
-            <p className={styles.eyebrow}>Кабінет учителя</p>
-            <h1>Бібліотека у вашому розкладі</h1>
-            <p>Перегляньте вільний час без входу. Для підтвердженого запису, замовлень і власної історії увійдіть за персональним кодом.</p>
+        <section className={`${styles.page} ${styles.teacherLandingPage}`}>
+          <div className={styles.teacherLandingHero}>
+            <div className={`${styles.intro} ${styles.teacherLandingCopy}`}>
+              <p className={styles.eyebrow}>Персональний кабінет учителя</p>
+              <h1>Бібліотека, що працює у вашому ритмі</h1>
+              <p>Плануйте відвідування, замовляйте матеріали та отримуйте відповіді бібліотекаря в одному спокійному й зрозумілому просторі.</p>
+              <ul className={styles.teacherLandingBenefits} aria-label="Можливості кабінету">
+                <li><span aria-hidden="true">01</span><strong>Вільний час без накладок</strong></li>
+                <li><span aria-hidden="true">02</span><strong>Замовлення в кілька кроків</strong></li>
+                <li><span aria-hidden="true">03</span><strong>Статуси й повідомлення</strong></li>
+              </ul>
+            </div>
+            <aside className={styles.teacherLandingNote} aria-label="Підказка для входу">
+              <span>Усе вже підготовлено</span>
+              <strong>Оберіть своє ім’я та введіть 4-значний PIN</strong>
+              <p>Email і складний пароль не потрібні. Якщо PIN забуто, бібліотекар видасть новий тимчасовий код.</p>
+              <a href="#teacher-access">Перейти до входу <span aria-hidden="true">↓</span></a>
+            </aside>
           </div>
           <PublicVisitSchedule
             initialDate={initialDate}
@@ -201,7 +230,7 @@ export default function VisitBookingWorkspace({
   if (session.mustChangePin) {
     return (
       <VisitShell telegramMiniApp={telegramMiniApp}>
-        <section className={styles.page}>
+        <section className={`${styles.page} ${styles.teacherOnboardingPage}`}>
           <div className={styles.intro}>
             <p className={styles.eyebrow}>Перший вхід</p>
             <h1>Створіть власний PIN</h1>
@@ -244,11 +273,14 @@ function VisitShell({ children, telegramMiniApp = false }: { children: React.Rea
   return (
     <main className={styles.shell}>
       <header className={styles.header}>
-        <a className={styles.brand} href={telegramMiniApp ? "/teacher/telegram/cabinet?tab=overview" : "/"}>
+        <a className={styles.brand} href={telegramMiniApp ? "/teacher/telegram/cabinet?tab=overview" : "/teacher?tab=overview"} aria-label="Перейти на головну Кабінету учителя">
           <img src={LOGO_URL} alt="" width="48" height="48" />
-          <span><strong>Єдина бібліотека</strong><small>Кабінет учителя</small></span>
+          <span><strong>Єдина бібліотека</strong><small>Простір учителя</small></span>
         </a>
-        <a className={styles.catalogLink} href={PUBLIC_CATALOG_URL}>Публічний каталог</a>
+        <div className={styles.headerActions}>
+          <a className={styles.scheduleLink} href={telegramMiniApp ? "/teacher/telegram/cabinet?tab=visits" : "/teacher?tab=visits"}>Графік</a>
+          <a className={styles.catalogLink} href={PUBLIC_CATALOG_URL} target="_blank" rel="noreferrer">Публічний каталог <span aria-hidden="true">↗</span></a>
+        </div>
       </header>
       {children}
     </main>
@@ -885,12 +917,15 @@ function VisitBookingPanel({
   initialDate: string;
   initialStartTime: string;
   initialEndTime: string;
-  initialTab: "overview" | "visits" | "orders" | "acquisition" | "loans" | "notifications" | "telegram";
+  initialTab: TeacherTab;
   initialOrderMaterialId: string;
   telegramMiniApp: boolean;
 }) {
   const storageKey = visitPendingKey("teacher", pendingScope);
   const [activeTab, setActiveTab] = useState(initialTab);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const mobileMenuRef = useRef<HTMLElement | null>(null);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const [securityOpen, setSecurityOpen] = useState(false);
   const [data, setData] = useState<TeacherVisitsEnvelope | null>(null);
   const [loading, setLoading] = useState(true);
@@ -929,6 +964,70 @@ function VisitBookingPanel({
     }, 0);
     return () => window.clearTimeout(timer);
   }, [load, storageKey]);
+
+  const selectTeacherTab = useCallback((tab: TeacherTab, historyMode: "push" | "replace" = "push") => {
+    setActiveTab(tab);
+    setMobileMenuOpen(false);
+    const href = teacherPortalHref(tab, telegramMiniApp, new URL(window.location.href));
+    window.history[historyMode === "replace" ? "replaceState" : "pushState"]({}, "", href);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [telegramMiniApp]);
+
+  useEffect(() => {
+    function syncTabFromHistory() {
+      const tab = boundedTeacherTab(new URL(window.location.href).searchParams.get("tab"));
+      setActiveTab(tab);
+      setMobileMenuOpen(false);
+    }
+    window.addEventListener("popstate", syncTabFromHistory);
+    return () => window.removeEventListener("popstate", syncTabFromHistory);
+  }, []);
+
+  useEffect(() => {
+    const desktopLayout = window.matchMedia("(min-width: 901px)");
+    function closeMobileMenuOnDesktop(event: MediaQueryListEvent) {
+      if (event.matches) setMobileMenuOpen(false);
+    }
+    desktopLayout.addEventListener("change", closeMobileMenuOnDesktop);
+    return () => desktopLayout.removeEventListener("change", closeMobileMenuOnDesktop);
+  }, []);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const panel = mobileMenuRef.current;
+    const triggerButton = mobileMenuButtonRef.current;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusableSelector = "button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+    const focusable = panel ? Array.from(panel.querySelectorAll<HTMLElement>(focusableSelector)) : [];
+    focusable[0]?.focus();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMobileMenuOpen(false);
+        return;
+      }
+      if (event.key !== "Tab" || !focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      (previousFocus ?? triggerButton)?.focus();
+    };
+  }, [mobileMenuOpen]);
 
   const selectedBusy = useMemo(
     () => (data?.busy ?? []).map(busyPeriodParts).filter((period) => period.date === date),
@@ -1124,60 +1223,76 @@ function VisitBookingPanel({
   }
 
   const bookingEnabled = data?.bookingEnabled === true;
+  const activeDefinition = teacherTabDefinition(activeTab);
+  const firstName = teacherFirstName(teacher.fullName);
+  const mobileMoreActive = !TEACHER_MOBILE_TABS.includes(activeTab);
 
   return (
     <VisitShell telegramMiniApp={telegramMiniApp}>
-      <section className={styles.page}>
-        <div className={styles.bookingTopbar}>
-          <div className={styles.intro}>
-            <p className={styles.eyebrow}>Кабінет учителя</p>
-            <h1>{teacherTabTitle(activeTab)}</h1>
-            <p>У відкритому графіку видно лише погоджені ім’я та час. Клас, мета, замовлення й повідомлення доступні лише вам і бібліотекарю.</p>
-          </div>
-          <div className={styles.account}>
-            <span><small>Ви увійшли як</small><strong>{teacher.fullName}</strong></span>
-            <button type="button" onClick={() => setSecurityOpen(true)} disabled={signingOut || submitting || Boolean(pending)}>Безпека</button>
-            <button type="button" onClick={() => void onSignOut()} disabled={signingOut || submitting || Boolean(pending)}>Вийти</button>
-          </div>
-        </div>
+      <section className={`${styles.page} ${styles.teacherPortalPage}`}>
+        <div className={styles.teacherPortalLayout}>
+          <aside className={styles.teacherSidebar} aria-label="Навігація Кабінету учителя">
+            <div className={styles.teacherSidebarProfile}>
+              <span className={styles.teacherSidebarAvatar} aria-hidden="true">{teacherInitials(teacher.fullName)}</span>
+              <span><small>Персональний кабінет</small><strong>{teacher.fullName}</strong></span>
+            </div>
+            <nav className={styles.teacherSidebarNav} aria-label="Розділи кабінету">
+              {TEACHER_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  aria-current={activeTab === tab.id ? "page" : undefined}
+                  data-telegram={tab.id === "telegram" || undefined}
+                  onClick={() => selectTeacherTab(tab.id)}
+                >
+                  <span className={styles.teacherNavIcon} aria-hidden="true">{tab.icon}</span>
+                  <span><strong>{tab.label}</strong><small>{tab.eyebrow}</small></span>
+                </button>
+              ))}
+            </nav>
+            <div className={styles.teacherSidebarUtilities}>
+              <button type="button" onClick={() => setSecurityOpen(true)} disabled={signingOut || submitting || Boolean(pending)}><span aria-hidden="true">◇</span> Безпека і PIN</button>
+              <a href={PUBLIC_CATALOG_URL} target="_blank" rel="noreferrer"><span aria-hidden="true">↗</span> Відкрити каталог</a>
+              <button type="button" className={styles.teacherSignOut} onClick={() => void onSignOut()} disabled={signingOut || submitting || Boolean(pending)}><span aria-hidden="true">→</span> {signingOut ? "Виходимо…" : "Вийти"}</button>
+            </div>
+          </aside>
 
-        <nav className={styles.teacherTabs} aria-label="Розділи кабінету">
-          {TEACHER_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              aria-current={activeTab === tab.id ? "page" : undefined}
-              data-telegram={tab.id === "telegram" || undefined}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              <span aria-hidden="true">{tab.icon}</span>{tab.label}
-            </button>
-          ))}
-        </nav>
+          <div className={styles.teacherPortalContent}>
+            <header className={styles.teacherPageHeader}>
+              <div>
+                <p className={styles.eyebrow}>{activeDefinition.eyebrow}</p>
+                <h1>{activeTab === "overview" ? `Вітаємо, ${firstName}` : teacherTabTitle(activeTab)}</h1>
+                <p>{activeDefinition.description}</p>
+              </div>
+              <div className={styles.teacherHeaderMeta}>
+                <span className={styles.teacherHeaderIdentity}><span aria-hidden="true">{teacherInitials(teacher.fullName)}</span><span><small>Ви увійшли як</small><strong>{teacher.fullName}</strong></span></span>
+                <span className={styles.teacherSessionBadge}>{telegramMiniApp ? "У Telegram" : "Особистий простір"}</span>
+              </div>
+            </header>
 
-        {pending ? (
-          <div className={styles.pending} role="status">
-            <span>Попередній запит міг бути прийнятий, але відповідь не надійшла.</span>
-            <button type="button" onClick={retryPending} disabled={submitting}>Перевірити результат</button>
-          </div>
-        ) : null}
-        {signOutNotice ? <div className={styles.error} role="alert">{signOutNotice}</div> : null}
-        {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
+            {pending ? (
+              <div className={styles.pending} role="status">
+                <span>Попередній запит міг бути прийнятий, але відповідь не надійшла.</span>
+                <button type="button" onClick={retryPending} disabled={submitting}>Перевірити результат</button>
+              </div>
+            ) : null}
+            {signOutNotice ? <div className={styles.error} role="alert">{signOutNotice}</div> : null}
+            {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
 
-        {activeTab === "overview" ? (
-          <TeacherOverview
-            teacherName={teacher.fullName}
-            bookings={activeBookings}
-            loading={loading}
-            onOpenVisits={() => setActiveTab("visits")}
-            onOpenOrders={() => setActiveTab("orders")}
-            onOpenAcquisition={() => setActiveTab("acquisition")}
-            onOpenLoans={() => setActiveTab("loans")}
-          />
-        ) : null}
+            {activeTab === "overview" ? (
+              <TeacherOverview
+                teacherName={teacher.fullName}
+                bookings={activeBookings}
+                loading={loading}
+                onOpenVisits={() => selectTeacherTab("visits")}
+                onOpenOrders={() => selectTeacherTab("orders")}
+                onOpenAcquisition={() => selectTeacherTab("acquisition")}
+                onOpenLoans={() => selectTeacherTab("loans")}
+              />
+            ) : null}
 
-        {activeTab === "visits" ? <>
-        <div className={styles.teacherGrid}>
+            {activeTab === "visits" ? <>
+            <div className={styles.teacherGrid}>
           <form className={styles.card} id="teacher-visit-form" onSubmit={submit} aria-busy={submitting}>
             <div className={styles.cardHeading}>
               <div><span>{editingBooking ? "Редагування запису" : "Новий запис"}</span><h2>{editingBooking ? "Новий час і деталі" : "Дані візиту"}</h2></div>
@@ -1235,9 +1350,9 @@ function VisitBookingPanel({
             ) : <p className={styles.empty}>На цю дату зайнятих проміжків немає.</p>}
             {data?.hours ? <p className={styles.hours}>Години запису: {(data.hours[weekdayKey(date)] ?? []).map((range) => `${range.startTime}–${range.endTime}`).join(", ") || "зачинено"}</p> : null}
           </aside>
-        </div>
+            </div>
 
-        <section className={`${styles.card} ${styles.bookings}`} aria-labelledby="my-bookings-title">
+            <section className={`${styles.card} ${styles.bookings}`} aria-labelledby="my-bookings-title">
           <div className={styles.cardHeading}><div><span>Лише для вас</span><h2 id="my-bookings-title">Мої майбутні записи</h2></div><button type="button" className={styles.quiet} onClick={() => void load()} disabled={loading}>↻ Оновити</button></div>
           {activeBookings.length ? <div className={styles.bookingList}>{activeBookings.map((booking) => (
             <article key={booking.id}>
@@ -1245,14 +1360,44 @@ function VisitBookingPanel({
               <div className={styles.bookingActions}><button type="button" className={styles.quiet} onClick={() => editBooking(booking)} disabled={!bookingEnabled || submitting || Boolean(pending)}>Редагувати</button><button type="button" className={styles.danger} onClick={() => cancelBooking(booking)} disabled={!bookingEnabled || submitting || Boolean(pending)}>Скасувати</button></div>
             </article>
           ))}</div> : <p className={styles.empty}>Майбутніх записів немає.</p>}
-        </section>
-        </> : null}
+            </section>
+            </> : null}
 
-        {activeTab === "orders" ? <TeacherOrdersPanel pendingScope={pendingScope} initialMaterialId={initialOrderMaterialId} /> : null}
-        {activeTab === "acquisition" ? <TeacherAcquisitionPanel /> : null}
-        {activeTab === "loans" ? <TeacherLoansPanel /> : null}
-        {activeTab === "notifications" ? <TeacherNotificationsPanel pendingScope={pendingScope} /> : null}
-        {activeTab === "telegram" ? <TeacherTelegramSettings /> : null}
+            {activeTab === "orders" ? <TeacherOrdersPanel pendingScope={pendingScope} initialMaterialId={initialOrderMaterialId} /> : null}
+            {activeTab === "acquisition" ? <TeacherAcquisitionPanel /> : null}
+            {activeTab === "loans" ? <TeacherLoansPanel /> : null}
+            {activeTab === "notifications" ? <TeacherNotificationsPanel pendingScope={pendingScope} /> : null}
+            {activeTab === "telegram" ? <TeacherTelegramSettings /> : null}
+          </div>
+        </div>
+
+        <nav className={styles.teacherMobileNav} aria-label="Основні розділи Кабінету учителя">
+          {TEACHER_TABS.filter((tab) => TEACHER_MOBILE_TABS.includes(tab.id)).map((tab) => (
+            <button key={tab.id} type="button" aria-current={activeTab === tab.id ? "page" : undefined} onClick={() => selectTeacherTab(tab.id)}>
+              <span aria-hidden="true">{tab.icon}</span><small>{tab.shortLabel}</small>
+            </button>
+          ))}
+          <button ref={mobileMenuButtonRef} type="button" aria-expanded={mobileMenuOpen} aria-haspopup="dialog" aria-controls="teacher-mobile-menu" aria-current={mobileMoreActive ? "page" : undefined} onClick={() => setMobileMenuOpen(true)}>
+            <span aria-hidden="true">•••</span><small>Ще</small>
+          </button>
+        </nav>
+
+        {mobileMenuOpen ? (
+          <div className={styles.teacherMobileMenuBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setMobileMenuOpen(false); }}>
+            <section id="teacher-mobile-menu" ref={mobileMenuRef} className={styles.teacherMobileMenu} role="dialog" aria-modal="true" aria-labelledby="teacher-mobile-menu-title">
+              <header><div><span>Кабінет учителя</span><h2 id="teacher-mobile-menu-title">Усі розділи</h2></div><button type="button" onClick={() => setMobileMenuOpen(false)} aria-label="Закрити меню">×</button></header>
+              <div className={styles.teacherMobileMenuIdentity}><span aria-hidden="true">{teacherInitials(teacher.fullName)}</span><div><small>Ви увійшли як</small><strong>{teacher.fullName}</strong></div></div>
+              <nav aria-label="Усі розділи">
+                {TEACHER_TABS.map((tab) => <button key={tab.id} type="button" aria-current={activeTab === tab.id ? "page" : undefined} data-telegram={tab.id === "telegram" || undefined} onClick={() => selectTeacherTab(tab.id)}><span aria-hidden="true">{tab.icon}</span><strong>{tab.label}</strong></button>)}
+              </nav>
+              <div className={styles.teacherMobileMenuUtilities}>
+                <button type="button" onClick={() => { setMobileMenuOpen(false); setSecurityOpen(true); }} disabled={signingOut || submitting || Boolean(pending)}>Безпека і PIN</button>
+                <a href={PUBLIC_CATALOG_URL} target="_blank" rel="noreferrer">Відкрити каталог ↗</a>
+                <button type="button" className={styles.teacherSignOut} onClick={() => void onSignOut()} disabled={signingOut || submitting || Boolean(pending)}>Вийти з кабінету</button>
+              </div>
+            </section>
+          </div>
+        ) : null}
         {securityOpen ? <TeacherSecurityPanel pendingScope={pendingScope} onClose={() => setSecurityOpen(false)} onSessionRotated={onSessionRotated} /> : null}
       </section>
     </VisitShell>
@@ -1386,6 +1531,15 @@ function teacherTabTitle(tab: TeacherTab): string {
   return "Вітаємо у вашому кабінеті";
 }
 
+function teacherTabDefinition(tab: TeacherTab): TeacherTabDefinition {
+  return TEACHER_TABS.find((item) => item.id === tab) ?? TEACHER_TABS[0];
+}
+
+function teacherFirstName(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/u).filter(Boolean);
+  return parts[1] ?? parts[0] ?? "колего";
+}
+
 function TeacherOverview({
   teacherName,
   bookings,
@@ -1506,29 +1660,37 @@ function TeacherOverview({
           {profile?.photoUrl ? <button className={styles.danger} type="button" disabled={photoBusy} onClick={() => void deletePhoto()}>Видалити фото</button> : null}
         </div>
         {profileNotice ? <div className={styles[profileNoticeTone]} role={profileNoticeTone === "error" ? "alert" : "status"}>{profileNotice}</div> : null}
-        <p className={styles.profilePrivacy}>Фото бачите ви та бібліотекар. Воно не публікується у відкритому каталозі чи графіку.</p>
+        <div className={styles.profileAssurance}>
+          <span><strong>Профіль підтверджено</strong><small>Дані беруться зі службової бази</small></span>
+          <span><strong>Фото приватне</strong><small>Його бачите ви та бібліотекар</small></span>
+        </div>
+        <p className={styles.profilePrivacy}>Фото не публікується у відкритому каталозі чи графіку.</p>
       </article>
-      <article className={styles.card}>
+      <article className={`${styles.card} ${styles.overviewActionCard}`}>
+        <span className={styles.overviewActionIcon} aria-hidden="true">◷</span>
         <div className={styles.cardHeading}><div><span>Найближче</span><h2>Відвідування</h2></div></div>
         {loading ? <p className={styles.empty}>Оновлюємо…</p> : nextBooking ? (
           <p className={styles.nextVisit}><strong>{formatVisitDateTime(`${nextBooking.date}T${nextBooking.startTime}`)}–{nextBooking.endTime}</strong><span>{nextBooking.classLabel || "Без класу"}</span></p>
         ) : <p className={styles.empty}>Майбутніх записів немає.</p>}
-        <button className={styles.quiet} type="button" onClick={onOpenVisits}>Відкрити графік</button>
+        <button className={styles.overviewActionLink} type="button" onClick={onOpenVisits}>Відкрити графік <span aria-hidden="true">→</span></button>
       </article>
-      <article className={styles.card}>
+      <article className={`${styles.card} ${styles.overviewActionCard}`}>
+        <span className={styles.overviewActionIcon} aria-hidden="true">▤</span>
         <div className={styles.cardHeading}><div><span>Каталог</span><h2>Потрібні матеріали</h2></div></div>
         <p className={styles.empty}>Знайдіть підручники або інші матеріали й надішліть одне замовлення бібліотекарю.</p>
-        <button className={styles.quiet} type="button" onClick={onOpenOrders}>Створити замовлення</button>
+        <button className={styles.overviewActionLink} type="button" onClick={onOpenOrders}>Створити замовлення <span aria-hidden="true">→</span></button>
       </article>
-      <article className={styles.card}>
+      <article className={`${styles.card} ${styles.overviewActionCard}`}>
+        <span className={styles.overviewActionIcon} aria-hidden="true">+</span>
         <div className={styles.cardHeading}><div><span>Комплектування</span><h2>Запропонувати придбання</h2></div></div>
         <p className={styles.empty}>Дозамовте примірники, яких бракує, або запропонуйте нове видання для фонду.</p>
-        <button className={styles.quiet} type="button" onClick={onOpenAcquisition}>Створити пропозицію</button>
+        <button className={styles.overviewActionLink} type="button" onClick={onOpenAcquisition}>Створити пропозицію <span aria-hidden="true">→</span></button>
       </article>
-      <article className={styles.card}>
+      <article className={`${styles.card} ${styles.overviewActionCard}`}>
+        <span className={styles.overviewActionIcon} aria-hidden="true">▥</span>
         <div className={styles.cardHeading}><div><span>Облік</span><h2>Видані посібники</h2></div></div>
         <p className={styles.empty}>Перегляньте все, що записано особисто на вас і на класи, за які ви відповідаєте.</p>
-        <button className={styles.quiet} type="button" onClick={onOpenLoans}>Переглянути посібники</button>
+        <button className={styles.overviewActionLink} type="button" onClick={onOpenLoans}>Переглянути посібники <span aria-hidden="true">→</span></button>
       </article>
     </section>
   );
@@ -2211,17 +2373,45 @@ function TeacherSecurityPanel({
   const [noticeTone, setNoticeTone] = useState<"success" | "error" | "info">("info");
   const [pendingRotation, setPendingRotation] = useState<CodeRotationIntent | null>(null);
   const [rotated, setRotated] = useState(false);
+  const dialogRef = useRef<HTMLElement | null>(null);
   const strength = teacherPinStrength(newPin);
   const confirmationComplete = normalizedTeacherPin(confirmPin).length === 4;
   const pinsMatch = confirmationComplete
     && normalizedTeacherPin(confirmPin) === normalizedTeacherPin(newPin);
 
   useEffect(() => {
-    function escape(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape" && !submitting && !required) onClose();
+    const dialog = dialogRef.current;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusableSelector = "button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+    const focusable = dialog ? Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector)) : [];
+    focusable[0]?.focus();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape" && !submitting && !required) {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab" || !focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     }
-    window.addEventListener("keydown", escape);
-    return () => window.removeEventListener("keydown", escape);
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
   }, [onClose, required, submitting]);
 
   async function sendRotation(intent: CodeRotationIntent) {
@@ -2269,7 +2459,7 @@ function TeacherSecurityPanel({
     <div className={styles.modalBackdrop} role="presentation" onMouseDown={(event) => {
       if (!required && event.target === event.currentTarget) onClose();
     }}>
-      <section className={`${styles.card} ${styles.securityDialog}`} role="dialog" aria-modal="true" aria-labelledby="security-title">
+      <section ref={dialogRef} className={`${styles.card} ${styles.securityDialog}`} role="dialog" aria-modal="true" aria-labelledby="security-title">
         <div className={styles.cardHeading}><div><span>{required ? "Перший вхід" : "Безпека"}</span><h2 id="security-title">{required ? "Створіть власний PIN" : "Змінити PIN"}</h2></div>{!required ? <button className={styles.quiet} type="button" onClick={onClose} aria-label="Закрити" disabled={submitting}>×</button> : null}</div>
         <p className={styles.empty}>PIN складається з 4 цифр. Після зміни попередній код і старі сеанси перестануть працювати.</p>
         {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}

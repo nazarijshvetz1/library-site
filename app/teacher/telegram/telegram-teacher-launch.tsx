@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element -- official library emblem is served by the public catalog. */
+
 import {
   type FormEvent,
   useEffect,
@@ -23,6 +25,7 @@ import {
 } from "@/app/visits/visit-client";
 import styles from "./telegram.module.css";
 
+const LOGO_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
 type TeacherTab = "overview" | "visits" | "orders" | "acquisition" | "loans" | "notifications" | "telegram";
 type ActivationIntent = "login" | "activate";
 type TelegramWebApp = {
@@ -170,7 +173,7 @@ export default function TelegramTeacherLaunch({
   return (
     <main className={styles.page}>
       <section className={styles.panel} aria-labelledby="telegram-teacher-title">
-        <div className={styles.mark} aria-hidden="true">ЄБ</div>
+        <img className={styles.mark} src={LOGO_URL} width="72" height="72" alt="" />
         <p className={styles.eyebrow}>Єдина бібліотека</p>
         <h1 id="telegram-teacher-title">
           {activation

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { telegramMiniAppPublicConfiguration } from "@/lib/telegram-mini-app-auth";
 import TelegramTeacherLaunch from "./telegram-teacher-launch";
+import { boundedTeacherTab, type TeacherPortalTab } from "@/app/teacher/_components/teacher-routes";
 
 export const dynamic = "force-dynamic";
 
@@ -32,8 +33,6 @@ function boundedMode(value: string | string[] | undefined): "login" | "activate"
   return value === "activate" ? "activate" : "login";
 }
 
-function boundedTab(value: string | string[] | undefined): "overview" | "visits" | "orders" | "acquisition" | "loans" | "notifications" | "telegram" {
-  return value === "visits" || value === "orders" || value === "acquisition" || value === "loans" || value === "notifications" || value === "telegram"
-    ? value
-    : "overview";
+function boundedTab(value: string | string[] | undefined): TeacherPortalTab {
+  return boundedTeacherTab(value);
 }

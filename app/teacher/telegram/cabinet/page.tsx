@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import VisitBookingWorkspace from "@/app/visits/visit-booking-workspace";
+import { boundedTeacherTab, type TeacherPortalTab } from "@/app/teacher/_components/teacher-routes";
 
 export const dynamic = "force-dynamic";
 
@@ -41,8 +42,6 @@ function boundedMaterialId(value: string | string[] | undefined): string {
   return /^CAT-\d{4,}$/u.test(candidate) ? candidate : "";
 }
 
-function boundedTab(value: string | string[] | undefined): "overview" | "visits" | "orders" | "acquisition" | "loans" | "notifications" | "telegram" {
-  return value === "visits" || value === "orders" || value === "acquisition" || value === "loans" || value === "notifications" || value === "telegram"
-    ? value
-    : "overview";
+function boundedTab(value: string | string[] | undefined): TeacherPortalTab {
+  return boundedTeacherTab(value);
 }

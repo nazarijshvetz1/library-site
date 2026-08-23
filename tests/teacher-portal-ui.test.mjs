@@ -209,17 +209,19 @@ test("teacher orders and notifications page with the frozen opaque cursor", asyn
 });
 
 test("teacher cabinet exposes Telegram as a separate highlighted connection area", async () => {
-  const [page, miniPage, launch, workspace, css] = await Promise.all([
+  const [page, miniPage, routes, launch, workspace, css] = await Promise.all([
     read("app/teacher/page.tsx"),
     read("app/teacher/telegram/cabinet/page.tsx"),
+    read("app/teacher/_components/teacher-routes.ts"),
     read("app/teacher/telegram/telegram-teacher-launch.tsx"),
     read("app/visits/visit-booking-workspace.tsx"),
     read("app/visits/visits.module.css"),
   ]);
-  assert.match(page, /value === "telegram"/u);
-  assert.match(miniPage, /value === "telegram"/u);
+  assert.match(page, /boundedTeacherTab\(value\)/u);
+  assert.match(miniPage, /boundedTeacherTab\(value\)/u);
+  assert.match(routes, /"telegram"/u);
   assert.match(launch, /type TeacherTab = [^;]*"telegram"/u);
-  assert.match(workspace, /id: "telegram", label: "Telegram", icon: "➤"/u);
+  assert.match(workspace, /id: "telegram", label: "Telegram", shortLabel: "Telegram", icon: "➤"/u);
   assert.match(workspace, /activeTab === "telegram" \? <TeacherTelegramSettings \/>/u);
   assert.match(workspace, /data-telegram=\{tab\.id === "telegram" \|\| undefined\}/u);
   assert.match(workspace, /teacher-telegram-connection-title/u);
@@ -232,12 +234,14 @@ test("teacher cabinet exposes Telegram as a separate highlighted connection area
 });
 
 test("teacher cabinet shows personal and responsible-class loans from the signed-in identity", async () => {
-  const [page, workspace, route] = await Promise.all([
+  const [page, routes, workspace, route] = await Promise.all([
     read("app/teacher/page.tsx"),
+    read("app/teacher/_components/teacher-routes.ts"),
     read("app/visits/visit-booking-workspace.tsx"),
     read("app/api/teacher/loans/route.ts"),
   ]);
-  assert.match(page, /value === "loans"/u);
+  assert.match(page, /boundedTeacherTab\(value\)/u);
+  assert.match(routes, /"loans"/u);
   assert.match(workspace, /id: "loans", label: "Мої посібники"/u);
   assert.match(workspace, /function TeacherLoansPanel/u);
   assert.match(workspace, /"\/api\/teacher\/loans"/u);
