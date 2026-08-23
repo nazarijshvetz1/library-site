@@ -1184,12 +1184,9 @@ export async function rotateVisitTeacherCode(
     mustChangePin: Boolean(presentedSession.must_change_pin),
   };
   const currentCode = normalizeCode(input.currentCode);
-  const newPin = normalizePin(input.newPin);
-  if ((!temporaryCodeShape(currentCode) && !pinShape(currentCode)) || !pinShape(newPin)) {
+  const newPin = strictTeacherPin(input.newPin);
+  if ((!temporaryCodeShape(currentCode) && !pinShape(currentCode)) || !newPin) {
     throw new VisitScheduleError("validation_failed", 400, "Введіть поточний код і новий PIN із 4 цифр.");
-  }
-  if (!strongTeacherPin(newPin)) {
-    throw new VisitScheduleError("weak_new_pin", 400, "PIN надто простий. Оберіть інші 4 цифри.");
   }
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(input.requestId)) {
     throw new VisitScheduleError("validation_failed", 400, "Некоректний requestId.");
@@ -2446,10 +2443,6 @@ function normalizeTeacherImportName(value: string): string {
   return value.normalize("NFKC").trim().replace(/\s+/gu, " ");
 }
 
-function normalizePin(value: string): string {
-  return value.normalize("NFKC").replace(/\D+/gu, "").slice(0, VISIT_TEACHER_PIN_LENGTH);
-}
-
 function strictTeacherPin(value: string): string | null {
   const normalized = value.normalize("NFKC").trim();
   return /^\d{4}$/u.test(normalized) ? normalized : null;
@@ -2469,11 +2462,7 @@ function credentialCodeShape(value: string, mustChangePin: boolean): boolean {
 }
 
 function strongTeacherPin(value: string): boolean {
-  if (!pinShape(value)) return false;
-  if (/^(\d)\1{3}$/u.test(value)) return false;
-  if (/^(\d{2})\1$/u.test(value)) return false;
-  if (["0123", "1234", "2345", "3456", "4567", "5678", "6789", "9876", "8765", "7654", "6543", "5432", "4321", "3210", "2580"].includes(value)) return false;
-  return true;
+  return pinShape(value);
 }
 
 function formatTeacherCode(value: string): string {

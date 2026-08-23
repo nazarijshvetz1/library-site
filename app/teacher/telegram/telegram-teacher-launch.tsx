@@ -320,7 +320,7 @@ function TelegramTeacherActivationForm({
     }
     if (needsNewPin && (!pinStatus.strong || normalizedTeacherPin(pinConfirmation) !== normalizedTeacherPin(pin))) {
       setValidationNotice(!pinStatus.strong
-        ? "Оберіть неочевидний PIN із 4 цифр без повторів і простих послідовностей."
+        ? "Новий PIN має складатися рівно з 4 цифр."
         : "Повторіть новий PIN однаково в обох полях.");
       return;
     }
@@ -416,7 +416,7 @@ function TelegramTeacherActivationForm({
               placeholder="••••"
               disabled={busy}
             />
-            <small>Не використовуйте 1111, 1234, дату народження чи іншу очевидну комбінацію.</small>
+            <small>Можна використати будь-яку комбінацію з 4 цифр.</small>
           </div>
           <div className={styles.fieldGroup}>
             <label htmlFor={`${listId}-pin-confirmation`}>Повторіть новий PIN *</label>

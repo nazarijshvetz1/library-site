@@ -856,6 +856,57 @@ test("first login changes the temporary code to a four-digit PIN and replay reco
     .map((row) => ({ ...row })), before);
 });
 
+test("teacher PIN accepts repeated digits, repeated pairs and simple sequences", async () => {
+  for (const [index, pin] of ["1111", "1212", "1122", "1234"].entries()) {
+    let context;
+    let issued;
+    do {
+      context = await database();
+      issued = await issuedCredential(context);
+    } while (issued.code === pin);
+
+    const loginId = context.sqlite.prepare("SELECT login_id FROM visit_teacher_credentials").get().login_id;
+    const ip = `203.0.113.${140 + index}`;
+    const temporarySession = await auth.createVisitTeacherSession(
+      context.db,
+      request(ip),
+      { loginId, code: issued.code },
+    );
+    const rotated = await auth.rotateVisitTeacherCode(
+      context.db,
+      request(ip, temporarySession.token),
+      { requestId: commandId(), currentCode: issued.code, newPin: pin },
+    );
+    assert.equal(rotated.identity.mustChangePin, false);
+
+    const pinLogin = await auth.createVisitTeacherSession(
+      context.db,
+      request(`203.0.113.${150 + index}`),
+      { loginId, code: pin },
+    );
+    assert.equal(pinLogin.identity.mustChangePin, false);
+  }
+
+  const invalidContext = await database();
+  const invalidIssued = await issuedCredential(invalidContext);
+  const invalidLoginId = invalidContext.sqlite.prepare(
+    "SELECT login_id FROM visit_teacher_credentials",
+  ).get().login_id;
+  const invalidSession = await auth.createVisitTeacherSession(
+    invalidContext.db,
+    request("203.0.113.160"),
+    { loginId: invalidLoginId, code: invalidIssued.code },
+  );
+  await assert.rejects(
+    () => auth.rotateVisitTeacherCode(
+      invalidContext.db,
+      request("203.0.113.160", invalidSession.token),
+      { requestId: commandId(), currentCode: invalidIssued.code, newPin: "12a34" },
+    ),
+    (error) => error.code === "validation_failed" && error.status === 400,
+  );
+});
+
 test("teacher PIN setup honors failed-attempt limits and an atomic credential lock", async () => {
   const context = await database();
   const issued = await issuedCredential(context);
@@ -1284,7 +1335,7 @@ test("Telegram generic onboarding activates an existing teacher and rotates the 
       intent: "activate",
       loginId: credentialBefore.login_id,
       code: issued.code,
-      newPin: "4826",
+      newPin: "1111",
     },
   );
   assert.equal(activated.identity.teacherUserId, "USR-T1");
@@ -1316,7 +1367,7 @@ test("Telegram generic onboarding activates an existing teacher and rotates the 
     grants: context.sqlite.prepare("SELECT * FROM telegram_teacher_activation_invites").all(),
     audits: context.sqlite.prepare("SELECT * FROM audit_events").all(),
   };
-  assertNoExactPlaintextSecrets(persisted, ["4826", issued.code]);
+  assertNoExactPlaintextSecrets(persisted, ["1111", issued.code]);
 });
 
 test("Telegram activation cannot reuse a temporary code consumed after precheck", async () => {

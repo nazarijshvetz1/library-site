@@ -129,6 +129,8 @@ test("authenticated teacher workflows use frozen routes and exact request fields
   assert.match(workspace, /setNewPin\(normalizedTeacherPin\(event\.currentTarget\.value\)\)/u);
   assert.match(workspace, /setConfirmPin\(normalizedTeacherPin\(event\.currentTarget\.value\)\)/u);
   assert.match(workspace, /!teacherAccessCodeComplete\(currentCode\) \|\| !strength\.strong \|\| !pinsMatch/u);
+  assert.match(workspace, /Можна використати будь-яку комбінацію з 4 цифр/u);
+  assert.doesNotMatch(workspace, /Не чотири однакові цифри|Не проста послідовність/u);
   assert.doesNotMatch(workspace, /localStorage/u);
   assert.match(workspace, /mustChangePin/u);
   assert.match(workspace, /firstLoginCode/u);
@@ -143,7 +145,7 @@ test("authenticated teacher workflows use frozen routes and exact request fields
   assert.match(css, /\.securityDialog \.generatedCode input \{ min-height: 50px; height: 50px; flex: none; \}/u);
 });
 
-test("teacher can use a temporary code and choose a non-obvious four-digit PIN", () => {
+test("teacher can use a temporary code and choose any four-digit PIN", () => {
   assert.equal(formatTeacherAccessCode("2a3b4c5d6e"), "2A3B4-C5D6E");
   assert.equal(normalizedTeacherAccessCode("2A3B4-C5D6E"), "2A3B4C5D6E");
   assert.equal(teacherAccessCodeComplete("2A3B4-C5D6E"), true);
@@ -151,8 +153,11 @@ test("teacher can use a temporary code and choose a non-obvious four-digit PIN",
   assert.equal(normalizedTeacherAccessCode("10 29"), "1029");
   assert.equal(normalizedTeacherPin("48-26"), "4826");
   assert.equal(teacherPinStrength("4826").strong, true);
-  assert.equal(teacherPinStrength("1111").strong, false);
-  assert.equal(teacherPinStrength("1234").strong, false);
+  assert.equal(teacherPinStrength("1111").strong, true);
+  assert.equal(teacherPinStrength("1212").strong, true);
+  assert.equal(teacherPinStrength("1122").strong, true);
+  assert.equal(teacherPinStrength("1234").strong, true);
+  assert.equal(teacherPinStrength("123").strong, false);
 });
 
 test("authoritative Sites suite includes teacher portal UI coverage", async () => {
@@ -332,6 +337,8 @@ test("Telegram Mini App launch is bounded, signed server-side and returns to cha
   assert.match(launch, /🔑 Увійти/u);
   assert.match(launch, /✨ Активувати вперше/u);
   assert.match(launch, /Створіть власний 4-значний PIN/u);
+  assert.match(launch, /Можна використати будь-яку комбінацію з 4 цифр/u);
+  assert.doesNotMatch(launch, /Не використовуйте 1111|без повторів і простих послідовностей/u);
   assert.match(launch, /Код і PIN вводьте лише/u);
   assert.match(launch, /activation\.mode === "connected" \? "Telegram підтверджено"/u);
   assert.doesNotMatch(launch, /role="option"[\s\S]{0,120}<button/u);

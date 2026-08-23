@@ -154,8 +154,6 @@ const LEGACY_TEMPORARY_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 
 export type TeacherPinStrength = {
   complete: boolean;
-  notRepeated: boolean;
-  notObvious: boolean;
   strong: boolean;
 };
 
@@ -184,13 +182,7 @@ export function normalizedTeacherPin(value: string): string {
 export function teacherPinStrength(value: string): TeacherPinStrength {
   const pin = normalizedTeacherPin(value);
   const complete = /^\d{4}$/u.test(pin);
-  const notRepeated = !/^(\d)\1{3}$/u.test(pin) && !/^(\d{2})\1$/u.test(pin);
-  const obvious = new Set([
-    "0123", "1234", "2345", "3456", "4567", "5678", "6789",
-    "9876", "8765", "7654", "6543", "5432", "4321", "3210", "2580",
-  ]);
-  const notObvious = !obvious.has(pin);
-  return { complete, notRepeated, notObvious, strong: complete && notRepeated && notObvious };
+  return { complete, strong: complete };
 }
 
 export class VisitApiError extends Error {
