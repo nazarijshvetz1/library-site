@@ -251,7 +251,7 @@ test("teacher cabinet shows personal and responsible-class loans from the signed
 
 test("librarian request inbox uses frozen ready fields and public active pickup locations", async () => {
   const [workspace, inbox] = await Promise.all([
-    read("app/librarian/visits/visit-admin-workspace.tsx"),
+    read("app/librarian/teachers/teacher-management-workspace.tsx"),
     read("app/librarian/visits/material-request-inbox.tsx"),
   ]);
   assert.match(workspace, /<MaterialRequestInbox pendingScope=\{pendingScope\} writesEnabled=\{writesEnabled\} \/>/u);
@@ -375,7 +375,7 @@ test("teacher profile shows assigned information and keeps photo access private 
 });
 
 test("librarian Telegram Mini App revalidates D1 role and keeps cabinet navigation in Mini App", async () => {
-  const [page, cabinet, launch, route, auth, api, visits, teachers, worker] = await Promise.all([
+  const [page, cabinet, launch, route, auth, api, visits, teachers, shell, routes, worker] = await Promise.all([
     read("app/librarian/telegram/page.tsx"),
     read("app/librarian/telegram/cabinet/page.tsx"),
     read("app/librarian/telegram/telegram-librarian-launch.tsx"),
@@ -384,6 +384,8 @@ test("librarian Telegram Mini App revalidates D1 role and keeps cabinet navigati
     read("lib/librarian-api.ts"),
     read("app/librarian/visits/visit-admin-workspace.tsx"),
     read("app/librarian/teachers/teacher-management-workspace.tsx"),
+    read("app/librarian/_components/librarian-shell.tsx"),
+    read("app/librarian/_components/librarian-routes.ts"),
     read("worker/index.ts"),
   ]);
   assert.match(page, /boundedTarget\(params\?\.target\)/u);
@@ -399,7 +401,10 @@ test("librarian Telegram Mini App revalidates D1 role and keeps cabinet navigati
   assert.match(auth, /SameSite=None; Partitioned/u);
   assert.match(api, /readLibrarianTelegramUser/u);
   assert.equal((cabinet.match(/telegramMiniApp/gu) ?? []).length >= 3, true);
-  assert.match(visits, /target=teachers/u);
-  assert.match(teachers, /target=visits/u);
+  assert.match(visits, /telegramMiniApp=\{telegramMiniApp\}/u);
+  assert.match(teachers, /telegramMiniApp=\{telegramMiniApp\}/u);
+  assert.match(shell, /librarianSectionHref\(item\.id, telegramMiniApp\)/u);
+  assert.match(routes, /teachers: "\/librarian\/telegram\/cabinet\?target=teachers"/u);
+  assert.match(routes, /visits: "\/librarian\/telegram\/cabinet\?target=visits"/u);
   assert.match(worker, /url\.pathname\.startsWith\("\/librarian\/telegram\/"\)/u);
 });

@@ -406,24 +406,23 @@ test("active D1 ISBN scanner keeps mobile camera access independent from native 
   assert.match(scanner, /Не вдалося запустити сканування/u);
 });
 
-test("new librarian route renders D1 workspace and keeps legacy workspace intact", async () => {
-  const [page, workspace, client, styles] = await Promise.all([
+test("new librarian route renders D1 workspace inside the shared branded shell", async () => {
+  const [page, workspace, shell, routes, client, styles] = await Promise.all([
     read("app/librarian/page.tsx"),
     read("app/librarian/d1-workspace.tsx"),
+    read("app/librarian/_components/librarian-shell.tsx"),
+    read("app/librarian/_components/librarian-routes.ts"),
     read("lib/librarian-d1-client.ts"),
     read("app/librarian/d1-workspace.module.css"),
   ]);
 
   assert.match(page, /import D1LibrarianWorkspace from "\.\/d1-workspace"/u);
   assert.match(page, /<D1LibrarianWorkspace/u);
-  assert.match(
-    workspace,
-    /const PUBLIC_CATALOG_URL = "https:\/\/nazarijshvetz1\.github\.io\/library-site\/";/u,
-  );
-  assert.match(workspace, /href=\{PUBLIC_CATALOG_URL\}/u);
-  assert.match(workspace, /target="_blank"/u);
-  assert.match(workspace, /rel="noopener noreferrer"/u);
-  assert.match(workspace, /aria-label="Відкрити публічний каталог у новій вкладці"/u);
+  assert.match(workspace, /<LibrarianShell/u);
+  assert.match(shell, /LIBRARY_EMBLEM_URL/u);
+  assert.match(shell, /target="_blank"/u);
+  assert.match(shell, /rel="noopener noreferrer"/u);
+  assert.match(routes, /PUBLIC_CATALOG_URL = "https:\/\/nazarijshvetz1\.github\.io\/library-site\/"/u);
   assert.doesNotMatch(
     workspace,
     /<Link href="\/" className=\{styles\.catalogLink\}>/u,
@@ -603,18 +602,62 @@ test("new librarian route renders D1 workspace and keeps legacy workspace intact
   assert.match(legacy, /revision\.count/u);
 });
 
+test("D1 workspace opens on a grouped accessible dashboard and keeps every tool in URL history", async () => {
+  const [workspace, styles] = await Promise.all([
+    read("app/librarian/d1-workspace.tsx"),
+    read("app/librarian/d1-workspace.module.css"),
+  ]);
+
+  assert.match(workspace, /\| "dashboard"/u);
+  assert.match(workspace, /useState<Tool>\("dashboard"\)/u);
+  assert.match(workspace, /const TOOL_GROUPS: ToolGroup\[\]/u);
+  for (const label of ["Фонд", "Видача й повернення", "Класи й навчальний рік", "Налаштування"]) {
+    assert.match(workspace, new RegExp(label, "u"));
+  }
+  assert.match(workspace, /function DashboardPanel/u);
+  assert.match(workspace, /Знайдіть матеріал або відскануйте ISBN/u);
+  assert.match(workspace, /"return",[\s\S]*?"issue",[\s\S]*?"class-issue",[\s\S]*?"receipt",[\s\S]*?"create",[\s\S]*?"count"/u);
+  assert.match(workspace, /<IsbnCameraScanner disabled=\{false\} onDetected=\{searchScannedIsbn\}/u);
+  assert.match(workspace, /aria-pressed=\{tool === item\.id\}/u);
+  assert.match(workspace, /<optgroup label=\{group\.label\}/u);
+
+  assert.match(workspace, /function parseTool\(value: string \| null\): Tool \| null/u);
+  assert.match(workspace, /new URL\(window\.location\.href\)/u);
+  assert.match(workspace, /url\.searchParams\.set\("tool", requestedTool\)/u);
+  assert.match(workspace, /window\.history\.replaceState/u);
+  assert.match(workspace, /window\.history\[method\]/u);
+  assert.match(workspace, /currentTool === nextTool \? "replaceState" : "pushState"/u);
+  assert.match(workspace, /window\.addEventListener\("popstate", applyToolFromLocation\)/u);
+  assert.match(workspace, /librarianSectionHref\("visits", telegramMiniApp\)/u);
+  assert.match(workspace, /librarianSectionHref\("orders", telegramMiniApp\)/u);
+  assert.match(workspace, /librarianSectionHref\("acquisitions", telegramMiniApp\)/u);
+  assert.match(workspace, /setAcquisitionReturnId\(\(url\.searchParams\.get\("acquisition"\)/u);
+  assert.match(workspace, /url\.searchParams\.get\("material"\)/u);
+
+  assert.match(styles, /\.dashboardHero/u);
+  assert.match(styles, /\.dashboardQuickGrid/u);
+  assert.match(styles, /\.toolGroup h2 \{[\s\S]*?font-size: 12px/u);
+  assert.match(styles, /\.tool small,[\s\S]*?font-size: 12px/u);
+  assert.match(styles, /\.mobileTools select \{[\s\S]*?font-size: 14px/u);
+  assert.doesNotMatch(styles, /\.mobileTools button \{[\s\S]*?font-size: 8px/u);
+});
+
 test("protected navigation uses full-page anchors so Vinext cannot swallow clicks", async () => {
-  const [catalog, visits, teachers] = await Promise.all([
+  const [catalog, visits, teachers, shell, routes] = await Promise.all([
     read("app/librarian/d1-workspace.tsx"),
     read("app/librarian/visits/visit-admin-workspace.tsx"),
     read("app/librarian/teachers/teacher-management-workspace.tsx"),
+    read("app/librarian/_components/librarian-shell.tsx"),
+    read("app/librarian/_components/librarian-routes.ts"),
   ]);
 
-  for (const source of [catalog, visits, teachers]) {
+  for (const source of [catalog, visits, teachers, shell]) {
     assert.doesNotMatch(source, /from "next\/link"/u);
   }
-  assert.match(catalog, /href=\{telegramMiniApp \? "\/librarian\/telegram\/cabinet\?target=visits" : "\/librarian\/visits"\}/u);
-  assert.match(catalog, /href=\{telegramMiniApp \? "\/librarian\/telegram\/cabinet\?target=teachers" : "\/librarian\/teachers"\}/u);
-  assert.match(visits, /telegramMiniApp \? "\/librarian\/telegram\/cabinet\?target=teachers" : "\/librarian\/teachers"/u);
-  assert.match(teachers, /telegramMiniApp \? "\/librarian\/telegram\/cabinet\?target=visits" : "\/librarian\/visits"/u);
+  for (const source of [catalog, visits, teachers]) assert.match(source, /<LibrarianShell/u);
+  assert.match(shell, /href=\{librarianSectionHref\(item\.id, telegramMiniApp\)\}/u);
+  assert.match(routes, /visits: "\/librarian\/visits"/u);
+  assert.match(routes, /teachers: "\/librarian\/teachers"/u);
+  assert.match(routes, /visits: "\/librarian\/telegram\/cabinet\?target=visits"/u);
+  assert.match(routes, /teachers: "\/librarian\/telegram\/cabinet\?target=teachers"/u);
 });

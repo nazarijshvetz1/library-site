@@ -170,13 +170,15 @@ test("acquisition template and export keep the exact four-sheet contract without
 });
 
 test("protected export page and navigation expose one-click full Excel download", async () => {
-  const [page, ui, route, workspace, teachers, visits] = await Promise.all([
+  const [page, ui, route, workspace, teachers, visits, shell, routes] = await Promise.all([
     fs.promises.readFile(path.join(root, "app/librarian/export/page.tsx"), "utf8"),
     fs.promises.readFile(path.join(root, "app/librarian/export/excel-export-workspace.tsx"), "utf8"),
     fs.promises.readFile(path.join(root, "app/api/librarian/excel-export/route.ts"), "utf8"),
     fs.promises.readFile(path.join(root, "app/librarian/d1-workspace.tsx"), "utf8"),
     fs.promises.readFile(path.join(root, "app/librarian/teachers/teacher-management-workspace.tsx"), "utf8"),
     fs.promises.readFile(path.join(root, "app/librarian/visits/visit-admin-workspace.tsx"), "utf8"),
+    fs.promises.readFile(path.join(root, "app/librarian/_components/librarian-shell.tsx"), "utf8"),
+    fs.promises.readFile(path.join(root, "app/librarian/_components/librarian-routes.ts"), "utf8"),
   ]);
   assert.match(page, /requireChatGPTUser\("\/librarian\/export"\)/u);
   assert.match(route, /authorizeLibrarianApi/u);
@@ -184,10 +186,10 @@ test("protected export page and navigation expose one-click full Excel download"
   assert.match(route, /application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet/u);
   assert.match(ui, /Сформувати й завантажити Excel/u);
   assert.match(ui, /Коди доступу не експортуються/u);
-  for (const source of [workspace, teachers, visits]) {
-    assert.match(source, /href="\/librarian\/export"/u);
-    assert.match(source, /Експорт в Excel/u);
-  }
+  for (const source of [workspace, teachers, visits, ui]) assert.match(source, /<LibrarianShell/u);
+  assert.match(shell, /librarianUtilityHref\("excelExport", telegramMiniApp\)/u);
+  assert.match(shell, /excelExportHref \? <a href=\{excelExportHref\}>Експорт/u);
+  assert.match(routes, /if \(utility === "excelExport"\) return telegramMiniApp \? null : "\/librarian\/export"/u);
 });
 
 function unzipStored(bytes) {

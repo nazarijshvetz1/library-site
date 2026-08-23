@@ -2,10 +2,21 @@
 
 import { useMemo, useRef, useState } from "react";
 
+import LibrarianShell from "../_components/librarian-shell";
 import { analyzeExcelWorkbook, MAX_EXCEL_BYTES, type WorkbookPreview } from "./excel-workbook-parser";
 import styles from "./staging-import.module.css";
 
-export default function ExcelImportWorkspace({ displayName, writesEnabled }: { displayName: string; writesEnabled: boolean }) {
+export default function ExcelImportWorkspace({
+  displayName,
+  roleLabel,
+  signOutHref,
+  writesEnabled,
+}: {
+  displayName: string;
+  roleLabel: string;
+  signOutHref: string;
+  writesEnabled: boolean;
+}) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<WorkbookPreview | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,15 +50,21 @@ export default function ExcelImportWorkspace({ displayName, writesEnabled }: { d
   }
 
   return (
-    <main className={styles.shell}>
-      <section className={styles.card} aria-labelledby="import-title">
-        <div className={styles.heading}>
-          <div>
-            <p>Захищений кабінет · {displayName}</p>
-            <h1 id="import-title">Імпорт з Excel</h1>
+    <LibrarianShell
+      activeSection="management"
+      displayName={displayName}
+      roleLabel={roleLabel}
+      signOutHref={signOutHref}
+      writesEnabled={writesEnabled}
+    >
+      <main className={styles.shell}>
+        <section className={styles.card} aria-labelledby="import-title">
+          <div className={styles.heading}>
+            <div>
+              <p>Захищений інструмент імпорту</p>
+              <h1 id="import-title">Імпорт з Excel</h1>
+            </div>
           </div>
-          <a href="/librarian">← Кабінет</a>
-        </div>
 
         <div className={styles.warning}>
           <strong>Спочатку — лише перевірка.</strong>
@@ -153,8 +170,9 @@ export default function ExcelImportWorkspace({ displayName, writesEnabled }: { d
             </section>
           </>
         ) : null}
-      </section>
-    </main>
+        </section>
+      </main>
+    </LibrarianShell>
   );
 }
 

@@ -33,9 +33,10 @@ test("protected librarian teacher management has five focused work areas", async
 });
 
 test("librarian cabinet separates Telegram connection from notification controls", async () => {
-  const [workspace, main, launchPage, launch, cabinet] = await Promise.all([
+  const [workspace, shell, routes, launchPage, launch, cabinet] = await Promise.all([
     read("app/librarian/teachers/teacher-management-workspace.tsx"),
-    read("app/librarian/d1-workspace.tsx"),
+    read("app/librarian/_components/librarian-shell.tsx"),
+    read("app/librarian/_components/librarian-routes.ts"),
     read("app/librarian/telegram/page.tsx"),
     read("app/librarian/telegram/telegram-librarian-launch.tsx"),
     read("app/librarian/telegram/cabinet/page.tsx"),
@@ -46,8 +47,8 @@ test("librarian cabinet separates Telegram connection from notification controls
   assert.match(workspace, /Сповіщення Telegram/u);
   assert.match(workspace, /role="status" aria-live="polite"/u);
   assert.match(workspace, /initialTab\?: MainTab/u);
-  assert.match(main, /\/librarian\/teachers\?tab=telegram/u);
-  assert.match(main, />Telegram<\/span>/u);
+  assert.match(shell, /telegramHref/u);
+  assert.match(routes, /"\/librarian\/teachers\?tab=telegram"/u);
   assert.match(launchPage, /teacherTab=\{boundedTeacherTab\(params\?\.tab\)\}/u);
   assert.match(launch, /target === "teachers" && teacherTab !== "overview"/u);
   assert.match(launch, /&tab=\$\{encodeURIComponent\(teacherTab\)\}/u);
@@ -145,12 +146,18 @@ test("material request inbox separates reservation, physical issue and uncollect
   assert.doesNotMatch(inbox, /Позначити готовим і створити видачу/u);
 });
 
-test("librarian navigation exposes teacher management from both workspaces", async () => {
-  const [main, visits] = await Promise.all([
+test("shared librarian navigation exposes teacher management from both workspaces", async () => {
+  const [main, visits, shell, routes] = await Promise.all([
     read("app/librarian/d1-workspace.tsx"),
     read("app/librarian/visits/visit-admin-workspace.tsx"),
+    read("app/librarian/_components/librarian-shell.tsx"),
+    read("app/librarian/_components/librarian-routes.ts"),
   ]);
-  assert.match(main, /"\/librarian\/teachers"/u);
-  assert.match(main, /"\/librarian\/teachers\?tab=telegram"/u);
-  assert.match(visits, /telegramMiniApp \? "\/librarian\/telegram\/cabinet\?target=teachers" : "\/librarian\/teachers"/u);
+  assert.match(main, /<LibrarianShell/u);
+  assert.match(visits, /<LibrarianShell/u);
+  assert.match(visits, /activeSection="visits"/u);
+  assert.match(shell, /SECONDARY_ITEMS/u);
+  assert.match(routes, /teachers: "\/librarian\/teachers"/u);
+  assert.match(routes, /teachers: "\/librarian\/telegram\/cabinet\?target=teachers"/u);
+  assert.match(routes, /"\/librarian\/teachers\?tab=telegram"/u);
 });

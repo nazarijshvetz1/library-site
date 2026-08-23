@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import LibrarianShell from "../_components/librarian-shell";
 import { STAGING_RESET_CONFIRMATION } from "@/lib/staging-reset-contract";
 import styles from "./staging-import.module.css";
 
@@ -20,9 +21,13 @@ type ApiResult = {
 
 export default function ImportConsole({
   displayName,
+  roleLabel,
+  signOutHref,
   target,
 }: {
   displayName: string;
+  roleLabel: string;
+  signOutHref: string;
   target: ImportTarget;
 }) {
   const [file, setFile] = useState<File | null>(null);
@@ -187,15 +192,20 @@ export default function ImportConsole({
   const production = target === "production";
 
   return (
-    <main className={styles.shell}>
-      <section className={styles.card} aria-labelledby="import-title">
-        <div className={styles.heading}>
-          <div>
-            <p>Внутрішній інструмент · {production ? "production cutover" : "staging"}</p>
-            <h1 id="import-title">Одноразовий імпорт до D1</h1>
+    <LibrarianShell
+      activeSection="management"
+      displayName={displayName}
+      roleLabel={roleLabel}
+      signOutHref={signOutHref}
+    >
+      <main className={styles.shell}>
+        <section className={styles.card} aria-labelledby="import-title">
+          <div className={styles.heading}>
+            <div>
+              <p>Внутрішній інструмент · {production ? "production cutover" : "staging"}</p>
+              <h1 id="import-title">Одноразовий імпорт до D1</h1>
+            </div>
           </div>
-          <a href="/librarian">← Кабінет</a>
-        </div>
 
         <div className={production ? styles.productionWarning : styles.warning}>
           <strong>{production
@@ -312,8 +322,9 @@ export default function ImportConsole({
 
         {message ? <p className={messageIsError ? styles.message : styles.success}>{message}</p> : null}
         {result ? <pre className={styles.report}>{JSON.stringify(result, null, 2)}</pre> : null}
-      </section>
-    </main>
+        </section>
+      </main>
+    </LibrarianShell>
   );
 }
 

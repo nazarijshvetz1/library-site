@@ -1,8 +1,7 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element -- shared external library logo is intentionally reused. */
-
 import { useEffect, useState } from "react";
+import LibrarianShell from "../_components/librarian-shell";
 import styles from "./excel-export.module.css";
 
 type ExportState =
@@ -140,24 +139,14 @@ export default function ExcelExportWorkspace({
   }
 
   return (
-    <main className={styles.shell}>
-      <header className={styles.header}>
-        <a className={styles.brand} href="/librarian">
-          <img src="https://nazarijshvetz1.github.io/library-site/library-logo.png" alt="" width="52" height="52" />
-          <span><strong>Єдина бібліотека</strong><small>Експорт службової бази</small></span>
-        </a>
-        <nav className={styles.headerNav} aria-label="Розділи кабінету бібліотекаря">
-          <a href="/librarian">Каталог</a>
-          <a href="/librarian/visits">Розклад</a>
-          <a href="/librarian/teachers">Вчителі</a>
-        </nav>
-        <div className={styles.account}>
-          <span><strong>{displayName}</strong><small>{role === "admin" ? "Адміністратор" : "Бібліотекар"}</small></span>
-          <a href={signOutHref}>Вийти</a>
-        </div>
-      </header>
-
-      <section className={styles.page} aria-labelledby="export-title">
+    <LibrarianShell
+      activeSection="management"
+      displayName={displayName}
+      roleLabel={role === "admin" ? "Адміністратор" : "Бібліотекар"}
+      signOutHref={signOutHref}
+    >
+      <main className={styles.shell}>
+        <section className={styles.page} aria-labelledby="export-title">
         <div className={styles.intro}>
           <p>Захищений інструмент · лише читання</p>
           <h1 id="export-title">Експорт в Excel</h1>
@@ -284,8 +273,9 @@ export default function ExcelExportWorkspace({
             </div>
           ) : null}
         </section>
-      </section>
-    </main>
+        </section>
+      </main>
+    </LibrarianShell>
   );
 }
 

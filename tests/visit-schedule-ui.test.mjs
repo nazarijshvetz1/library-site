@@ -141,12 +141,15 @@ test("admin visit UI shows private fields only behind librarian authorization", 
 });
 
 test("site entry points link to protected booking and librarian schedule", async () => {
-  const [home, workspace] = await Promise.all([
+  const [home, shell, routes] = await Promise.all([
     read("app/page.tsx"),
-    read("app/librarian/d1-workspace.tsx"),
+    read("app/librarian/_components/librarian-shell.tsx"),
+    read("app/librarian/_components/librarian-routes.ts"),
   ]);
   assert.match(home, /href="\/teacher"/u);
-  assert.match(workspace, /telegramMiniApp \? "\/librarian\/telegram\/cabinet\?target=visits" : "\/librarian\/visits"/u);
+  assert.match(shell, /librarianSectionHref\(item\.id, telegramMiniApp\)/u);
+  assert.match(routes, /visits: "\/librarian\/visits"/u);
+  assert.match(routes, /visits: "\/librarian\/telegram\/cabinet\?target=visits"/u);
 });
 
 test("public app preserves only bounded date and time deep-link values", async () => {

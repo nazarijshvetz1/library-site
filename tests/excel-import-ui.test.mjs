@@ -46,16 +46,18 @@ test("legacy subject sheets are recognized without importing totals or NUSH labe
   assert.equal(preview.issues.some((issue) => issue.severity === "error"), false);
 });
 
-test("protected page and librarian navigation expose Excel import and template", async () => {
-  const [page, workspace, ui, parser] = await Promise.all([
+test("protected page and shared librarian navigation expose Excel import and template", async () => {
+  const [page, shell, routes, ui, parser] = await Promise.all([
     readFile(new URL("../app/librarian/import/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/librarian/d1-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/librarian/_components/librarian-shell.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/librarian/_components/librarian-routes.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/librarian/import/excel-import-workspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/librarian/import/excel-workbook-parser.ts", import.meta.url), "utf8"),
   ]);
   assert.match(page, /requireChatGPTUser\("\/librarian\/import"\)/u);
   assert.match(page, /getLibrarianAccess/u);
-  assert.match(workspace, /href="\/librarian\/import"/u);
+  assert.match(shell, /excelImportHref/u);
+  assert.match(routes, /"\/librarian\/import"/u);
   assert.match(ui, /Імпорт з Excel/u);
   assert.match(ui, /library-import-template\.xlsx/u);
   assert.match(ui, /Спочатку — лише перевірка/u);

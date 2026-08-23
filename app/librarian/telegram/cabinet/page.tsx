@@ -55,6 +55,7 @@ export default async function TelegramLibrarianCabinetPage({ searchParams }: Pag
       <LibrarianVisitWorkspace
         pendingScope={pendingScope}
         displayName={session.user.displayName}
+        role={session.role}
         writesEnabled={access.writesEnabled}
         signOutHref={botHref}
         telegramMiniApp
@@ -65,6 +66,7 @@ export default async function TelegramLibrarianCabinetPage({ searchParams }: Pag
     return (
       <AcquisitionWorkspace
         displayName={session.user.displayName}
+        role={session.role}
         writesEnabled={access.writesEnabled}
         signOutHref={botHref}
         telegramMiniApp

@@ -1,6 +1,6 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element, @next/next/no-html-link-for-pages -- Vinext Link navigation fails in production; full-page anchors are intentional. */
+/* eslint-disable @next/next/no-img-element -- Material cover photos intentionally use direct image URLs. */
 
 import {
   type FormEvent,
@@ -41,10 +41,16 @@ import AcademicWorkspace, {
   type AcademicTool,
   isAcademicTool,
 } from "./academic-workspace";
+import LibrarianShell from "./_components/librarian-shell";
+import {
+  librarianSectionHref,
+  type LibrarianSection,
+} from "./_components/librarian-routes";
 
 import styles from "./d1-workspace.module.css";
 
 type Tool =
+  | "dashboard"
   | "catalog"
   | "create"
   | "receipt"
@@ -382,9 +388,6 @@ type LibrarianWorkspaceProps = {
   telegramMiniApp?: boolean;
 };
 
-const PUBLIC_CATALOG_URL = "https://nazarijshvetz1.github.io/library-site/";
-const LOGO_URL = `${PUBLIC_CATALOG_URL}library-logo.png`;
-
 const EMPTY_FILTERS: CatalogSearchFilters = {
   q: "",
   rubric: "",
@@ -413,31 +416,74 @@ function buildMaterialTitleSuggestionUrl(title: string): string {
   return `/api/librarian/materials/search?${params.toString()}`;
 }
 
-const TOOLS: Array<{ id: Tool; icon: string; label: string; hint: string }> = [
-  { id: "catalog", icon: "⌕", label: "Каталог", hint: "Пошук і картка" },
-  { id: "create", icon: "+", label: "Новий матеріал", hint: "Додати без чернетки" },
-  { id: "receipt", icon: "↓", label: "Надходження", hint: "Додати примірники" },
-  { id: "transfer", icon: "⇄", label: "Переміщення", hint: "Змінити розміщення" },
-  { id: "writeoff", icon: "−", label: "Списання", hint: "Зменшити залишок" },
+type ToolItem = { id: Tool; icon: string; label: string; hint: string };
+type ToolGroup = { id: string; label: string; items: ToolItem[] };
+
+const DASHBOARD_TOOL: ToolItem = {
+  id: "dashboard",
+  icon: "⌂",
+  label: "Головна",
+  hint: "Огляд і швидкі дії",
+};
+
+const TOOL_GROUPS: ToolGroup[] = [
   {
-    id: "count",
-    icon: "✓",
-    label: "Фактична кількість",
-    hint: "Звірити залишок",
+    id: "fund",
+    label: "Фонд",
+    items: [
+      { id: "catalog", icon: "⌕", label: "Каталог", hint: "Пошук і картка" },
+      { id: "create", icon: "+", label: "Новий матеріал", hint: "Додати без чернетки" },
+      { id: "receipt", icon: "↓", label: "Надходження", hint: "Додати примірники" },
+      { id: "transfer", icon: "⇄", label: "Переміщення", hint: "Змінити розміщення" },
+      { id: "count", icon: "✓", label: "Фактична кількість", hint: "Звірити залишок" },
+      { id: "writeoff", icon: "−", label: "Списання", hint: "Зменшити залишок" },
+    ],
   },
-  { id: "issue", icon: "→", label: "Видача", hint: "Видати вчителю" },
-  { id: "return", icon: "↩", label: "Повернення", hint: "Прийняти книги" },
-  { id: "class-issue", icon: "⇥", label: "Видача класу", hint: "Кілька матеріалів класу" },
-  { id: "class-return", icon: "⇤", label: "Повернення класу", hint: "Частково або повністю" },
-  { id: "locations", icon: "⌂", label: "Кабінети", hint: "Додати, змінити або закрити" },
-  { id: "contacts", icon: "☎", label: "Контакти", hint: "Дані для публічного сайту" },
-  { id: "academic-year", icon: "▣", label: "Новий навчальний рік", hint: "Створити період" },
-  { id: "class-create", icon: "+", label: "Відкрити клас", hint: "Додати до року" },
-  { id: "class-update", icon: "↻", label: "Змінити клас", hint: "Керівник і кабінет" },
-  { id: "class-close", icon: "×", label: "Закрити клас", hint: "Зберегти історію" },
-  { id: "class-reopen", icon: "↺", label: "Поновити клас", hint: "Виправити помилкове закриття" },
-  { id: "rollover", icon: "⇢", label: "Перехід на новий рік", hint: "Перевести всі класи" },
+  {
+    id: "circulation",
+    label: "Видача й повернення",
+    items: [
+      { id: "issue", icon: "→", label: "Видача вчителю", hint: "Оформити видачу" },
+      { id: "return", icon: "↩", label: "Повернення", hint: "Прийняти книги" },
+      { id: "class-issue", icon: "⇥", label: "Видача класу", hint: "Кілька матеріалів" },
+      { id: "class-return", icon: "⇤", label: "Повернення класу", hint: "Частково або повністю" },
+    ],
+  },
+  {
+    id: "academic",
+    label: "Класи й навчальний рік",
+    items: [
+      { id: "academic-year", icon: "▣", label: "Новий навчальний рік", hint: "Створити період" },
+      { id: "class-create", icon: "+", label: "Відкрити клас", hint: "Додати до року" },
+      { id: "class-update", icon: "↻", label: "Змінити клас", hint: "Керівник і кабінет" },
+      { id: "class-close", icon: "×", label: "Закрити клас", hint: "Зберегти історію" },
+      { id: "class-reopen", icon: "↺", label: "Поновити клас", hint: "Виправити закриття" },
+      { id: "rollover", icon: "⇢", label: "Перехід на новий рік", hint: "Перевести всі класи" },
+    ],
+  },
+  {
+    id: "settings",
+    label: "Налаштування",
+    items: [
+      { id: "locations", icon: "⌂", label: "Кабінети", hint: "Додати, змінити або закрити" },
+      { id: "contacts", icon: "☎", label: "Контакти", hint: "Дані для відкритого сайту" },
+    ],
+  },
 ];
+
+const TOOLS: ToolItem[] = [DASHBOARD_TOOL, ...TOOL_GROUPS.flatMap((group) => group.items)];
+const TOOL_IDS = new Set<Tool>(TOOLS.map((item) => item.id));
+
+function parseTool(value: string | null): Tool | null {
+  return value && TOOL_IDS.has(value as Tool) ? value as Tool : null;
+}
+
+function librarianSectionForTool(tool: Tool): LibrarianSection {
+  if (tool === "dashboard") return "home";
+  if (["issue", "return", "class-issue", "class-return"].includes(tool)) return "circulation";
+  if (tool === "locations" || tool === "contacts" || isAcademicTool(tool)) return "management";
+  return "fund";
+}
 
 export default function D1LibrarianWorkspace({
   displayName,
@@ -446,7 +492,7 @@ export default function D1LibrarianWorkspace({
   signOutHref,
   telegramMiniApp = false,
 }: LibrarianWorkspaceProps) {
-  const [tool, setTool] = useState<Tool>("catalog");
+  const [tool, setTool] = useState<Tool>("dashboard");
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [items, setItems] = useState<CatalogMaterial[]>([]);
   const [searchState, setSearchState] = useState<LoadState>("loading");
@@ -571,37 +617,53 @@ export default function D1LibrarianWorkspace({
     [loadDetail],
   );
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const params = new URLSearchParams(window.location.search);
-      const requestedTool = params.get("tool");
-      if (requestedTool === "receipt") {
-        setAcquisitionReturnId((params.get("acquisition") ?? "").trim());
-        const materialId = (params.get("material") ?? "").trim().toUpperCase();
-        if (/^CAT-\d{4,}$/u.test(materialId)) {
-          setTool("receipt");
-          setFilters((current) => ({ ...current, q: materialId, available: false }));
-          selectMaterial(materialId);
-        }
-        return;
-      }
-      if (requestedTool === "create") {
-        const title = (params.get("title") ?? "").trim();
-        if (!title) return;
-        setTool("create");
-        setAcquisitionReturnId((params.get("acquisition") ?? "").trim());
-        setAcquisitionPrefill({
-          title,
-          author: (params.get("author") ?? "").trim(),
-          publicationYear: (params.get("year") ?? "").trim(),
-          subject: (params.get("subject") ?? "").trim(),
-          sourceUrl: (params.get("link") ?? "").trim(),
-          quantity: (params.get("quantity") ?? "").trim(),
-        });
-      }
-    }, 0);
-    return () => window.clearTimeout(timer);
+  const applyToolFromLocation = useCallback(() => {
+    const url = new URL(window.location.href);
+    const requestedTool = parseTool(url.searchParams.get("tool")) ?? "dashboard";
+    if (!parseTool(url.searchParams.get("tool"))) {
+      url.searchParams.set("tool", requestedTool);
+      const currentState = typeof window.history.state === "object" && window.history.state
+        ? window.history.state as Record<string, unknown>
+        : {};
+      window.history.replaceState(
+        { ...currentState, librarianTool: requestedTool },
+        "",
+        `${url.pathname}${url.search}${url.hash}`,
+      );
+    }
+
+    setTool(requestedTool);
+    setAcquisitionReturnId((url.searchParams.get("acquisition") ?? "").trim());
+
+    if (requestedTool === "create") {
+      const title = (url.searchParams.get("title") ?? "").trim();
+      setAcquisitionPrefill(title ? {
+        title,
+        author: (url.searchParams.get("author") ?? "").trim(),
+        publicationYear: (url.searchParams.get("year") ?? "").trim(),
+        subject: (url.searchParams.get("subject") ?? "").trim(),
+        sourceUrl: (url.searchParams.get("link") ?? "").trim(),
+        quantity: (url.searchParams.get("quantity") ?? "").trim(),
+      } : null);
+    }
+
+    const materialId = (url.searchParams.get("material") ?? "").trim().toUpperCase();
+    if (requestedTool !== "dashboard" && /^CAT-\d{4,}$/u.test(materialId)) {
+      setFilters((current) => ({ ...current, q: materialId, available: false }));
+      selectMaterial(materialId);
+    }
+
+    window.queueMicrotask(() => workspaceTitleRef.current?.focus());
   }, [selectMaterial]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(applyToolFromLocation, 0);
+    window.addEventListener("popstate", applyToolFromLocation);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("popstate", applyToolFromLocation);
+    };
+  }, [applyToolFromLocation]);
 
   async function loadMore() {
     if (!nextCursor || loadingMore) return;
@@ -636,6 +698,19 @@ export default function D1LibrarianWorkspace({
     setEditing(false);
     setWorkspaceNotice("");
     setWorkspaceNoticeTone("error");
+    const url = new URL(window.location.href);
+    const currentTool = parseTool(url.searchParams.get("tool"));
+    url.searchParams.set("tool", nextTool);
+    const currentState = typeof window.history.state === "object" && window.history.state
+      ? window.history.state as Record<string, unknown>
+      : {};
+    const method = currentTool === nextTool ? "replaceState" : "pushState";
+    window.history[method](
+      { ...currentState, librarianTool: nextTool },
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+    window.queueMicrotask(() => workspaceTitleRef.current?.focus());
   }
 
   function handleMaterialArchived(materialId: string) {
@@ -653,113 +728,78 @@ export default function D1LibrarianWorkspace({
     window.queueMicrotask(() => workspaceTitleRef.current?.focus());
   }
 
-  const showCatalogSearch = !isAcademicTool(tool)
+  const showCatalogSearch = tool !== "dashboard"
+    && !isAcademicTool(tool)
     && tool !== "return"
     && tool !== "class-return"
     && tool !== "locations"
     && tool !== "contacts";
 
   return (
-    <main className={styles.shell}>
-      <header className={styles.header}>
-        <a className={styles.brand} href="/">
-          <img src={LOGO_URL} alt="" width="48" height="48" />
-          <span>
-            <strong>Єдина бібліотека</strong>
-            <small>Швидкий кабінет бібліотекаря</small>
-          </span>
-        </a>
-        <div className={styles.account}>
-          <a
-            href={PUBLIC_CATALOG_URL}
-            className={styles.catalogLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Відкрити публічний каталог у новій вкладці"
-          >
-            <span className={styles.catalogLinkLabel}>Публічний каталог</span>{" "}
-            <span aria-hidden="true">↗</span>
-          </a>
-          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=visits" : "/librarian/visits"} className={styles.catalogLink}>
-            <span className={styles.catalogLinkLabel}>Відвідування</span>{" "}
-            <span aria-hidden="true">▣</span>
-          </a>
-          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=teachers" : "/librarian/teachers"} className={styles.catalogLink}>
-            <span className={styles.catalogLinkLabel}>Вчителі</span>{" "}
-            <span aria-hidden="true">●</span>
-          </a>
-          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=teachers&tab=telegram" : "/librarian/teachers?tab=telegram"} className={`${styles.catalogLink} ${styles.telegramLink}`}>
-            <span className={styles.catalogLinkLabel}>Telegram</span>{" "}
-            <span aria-hidden="true">➤</span>
-          </a>
-          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=acquisitions" : "/librarian/acquisitions"} className={styles.catalogLink}>
-            <span className={styles.catalogLinkLabel}>Комплектування</span>{" "}
-            <span aria-hidden="true">＋</span>
-          </a>
-          {!telegramMiniApp ? <a href="/librarian/export" className={styles.catalogLink}>
-            <span className={styles.catalogLinkLabel}>Експорт в Excel</span>{" "}
-            <span aria-hidden="true">⇩</span>
-          </a> : null}
-          {!telegramMiniApp ? <a href="/librarian/import" className={styles.catalogLink}>
-            <span className={styles.catalogLinkLabel}>Імпорт з Excel</span>{" "}
-            <span aria-hidden="true">⇧</span>
-          </a> : null}
-          <span>
-            <strong>{displayName}</strong>
-            <small>{role === "admin" ? "Адміністратор" : "Бібліотекар"}</small>
-          </span>
-          <a className={styles.signOut} href={signOutHref} title="Вийти">
-            ↗
-          </a>
-        </div>
-      </header>
-
-      <div className={styles.body}>
+    <LibrarianShell
+      activeSection={librarianSectionForTool(tool)}
+      displayName={displayName}
+      roleLabel={role === "admin" ? "Адміністратор" : "Бібліотекар"}
+      signOutHref={signOutHref}
+      telegramMiniApp={telegramMiniApp}
+      writesEnabled={writesEnabled}
+    >
+      <main className={styles.shell}>
+        <div className={styles.body}>
         <aside className={styles.sidebar} aria-label="Робочі дії">
           <p className={styles.sidebarLabel}>Робоче місце</p>
           <nav className={styles.toolNav}>
-            {TOOLS.map((item) => (
-              <button
-                key={item.id}
-                className={tool === item.id ? styles.toolActive : styles.tool}
-                type="button"
-                onClick={() => chooseTool(item.id)}
-              >
-                <span aria-hidden="true">{item.icon}</span>
-                <span>
-                  <strong>{item.label}</strong>
-                  <small>{item.hint}</small>
-                </span>
-              </button>
+            <button
+              className={tool === DASHBOARD_TOOL.id ? styles.toolActive : styles.tool}
+              type="button"
+              aria-pressed={tool === DASHBOARD_TOOL.id}
+              onClick={() => chooseTool(DASHBOARD_TOOL.id)}
+            >
+              <span aria-hidden="true">{DASHBOARD_TOOL.icon}</span>
+              <span>
+                <strong>{DASHBOARD_TOOL.label}</strong>
+                <small>{DASHBOARD_TOOL.hint}</small>
+              </span>
+            </button>
+            {TOOL_GROUPS.map((group) => (
+              <section className={styles.toolGroup} aria-labelledby={`tool-group-${group.id}`} key={group.id}>
+                <h2 id={`tool-group-${group.id}`}>{group.label}</h2>
+                {group.items.map((item) => (
+                  <button
+                    key={item.id}
+                    className={tool === item.id ? styles.toolActive : styles.tool}
+                    type="button"
+                    aria-pressed={tool === item.id}
+                    onClick={() => chooseTool(item.id)}
+                  >
+                    <span aria-hidden="true">{item.icon}</span>
+                    <span>
+                      <strong>{item.label}</strong>
+                      <small>{item.hint}</small>
+                    </span>
+                  </button>
+                ))}
+              </section>
             ))}
           </nav>
-          <div className={writesEnabled ? styles.writeOn : styles.writeOff}>
-            <span aria-hidden="true">{writesEnabled ? "●" : "○"}</span>
-            <span>
-              <strong>{writesEnabled ? "Запис увімкнено" : "Лише перегляд"}</strong>
-              <small>
-                {writesEnabled
-                  ? "Зміни одразу потрапляють у нову базу."
-                  : "Адміністратор тимчасово вимкнув зміни."}
-              </small>
-            </span>
-          </div>
         </aside>
 
         <section className={styles.workspace}>
-          <div className={styles.mobileTools} aria-label="Робочі дії">
-            {TOOLS.map((item) => (
-              <button
-                key={item.id}
-                className={tool === item.id ? styles.mobileToolActive : ""}
-                type="button"
-                onClick={() => chooseTool(item.id)}
-              >
-                <span aria-hidden="true">{item.icon}</span>
-                {item.label}
-              </button>
-            ))}
-          </div>
+          <label className={styles.mobileTools}>
+            <span>Робочий розділ</span>
+            <select
+              aria-label="Оберіть робочий розділ"
+              value={tool}
+              onChange={(event) => chooseTool(event.currentTarget.value as Tool)}
+            >
+              <option value={DASHBOARD_TOOL.id}>{DASHBOARD_TOOL.label}</option>
+              {TOOL_GROUPS.map((group) => (
+                <optgroup label={group.label} key={group.id}>
+                  {group.items.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}
+                </optgroup>
+              ))}
+            </select>
+          </label>
 
           <div className={styles.titleRow}>
             <div>
@@ -790,6 +830,20 @@ export default function D1LibrarianWorkspace({
             </div>
           ) : null}
 
+          {tool === "dashboard" ? (
+            <DashboardPanel
+              filters={filters}
+              onFilters={setFilters}
+              items={items}
+              searchState={searchState}
+              writesEnabled={writesEnabled}
+              teachers={teachers}
+              locations={locations}
+              referenceState={referenceState}
+              telegramMiniApp={telegramMiniApp}
+              onChooseTool={chooseTool}
+            />
+          ) : (
           <div className={tool === "create" ? styles.workGridCreate : showCatalogSearch ? styles.workGrid : styles.workGridWide}>
             {showCatalogSearch && tool !== "create" ? (
               <CatalogSearch
@@ -997,9 +1051,179 @@ export default function D1LibrarianWorkspace({
               />
             ) : null}
           </div>
+          )}
+        </section>
+        </div>
+      </main>
+    </LibrarianShell>
+  );
+}
+
+function DashboardPanel({
+  filters,
+  onFilters,
+  items,
+  searchState,
+  writesEnabled,
+  teachers,
+  locations,
+  referenceState,
+  telegramMiniApp,
+  onChooseTool,
+}: {
+  filters: CatalogSearchFilters;
+  onFilters: (value: CatalogSearchFilters | ((current: CatalogSearchFilters) => CatalogSearchFilters)) => void;
+  items: CatalogMaterial[];
+  searchState: LoadState;
+  writesEnabled: boolean;
+  teachers: LibraryTeacher[];
+  locations: LibraryLocation[];
+  referenceState: LoadState;
+  telegramMiniApp: boolean;
+  onChooseTool: (tool: Tool) => void;
+}) {
+  const [attention, setAttention] = useState<{
+    visitsToday: number;
+    newTeacherOrders: number;
+    activeAcquisitions: number;
+  } | null>(null);
+  const [attentionUnavailable, setAttentionUnavailable] = useState(false);
+  const availableOnPage = items.reduce((sum, item) => sum + item.availableQuantity, 0);
+  const quickActions = TOOLS.filter((item) => [
+    "return",
+    "issue",
+    "class-issue",
+    "receipt",
+    "create",
+    "count",
+  ].includes(item.id));
+
+  useEffect(() => {
+    let cancelled = false;
+    const date = todayInKyiv();
+    const visitParams = new URLSearchParams({ from: date, to: date, status: "active", limit: "100" });
+    const acquisitionParams = new URLSearchParams({ status: "active", requester: "all", q: "" });
+    void Promise.all([
+      apiJson<{ bookings: unknown[] }>(`/api/librarian/visits?${visitParams.toString()}`),
+      apiJson<{ newCount: number }>("/api/librarian/material-requests?limit=100"),
+      apiJson<{ summary: { active: number } }>(`/api/librarian/acquisition-requests?${acquisitionParams.toString()}`),
+    ]).then(([visits, orders, acquisitions]) => {
+      if (cancelled) return;
+      setAttentionUnavailable(false);
+      setAttention({
+        visitsToday: visits.bookings.length,
+        newTeacherOrders: orders.newCount,
+        activeAcquisitions: acquisitions.summary.active,
+      });
+    }).catch(() => {
+      if (!cancelled) setAttentionUnavailable(true);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  function openCatalog(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onChooseTool("catalog");
+  }
+
+  function searchScannedIsbn(value: string) {
+    onFilters((current) => ({ ...current, q: value, available: false }));
+    onChooseTool("catalog");
+  }
+
+  return (
+    <div className={styles.dashboard}>
+      <section className={styles.dashboardHero} aria-labelledby="dashboard-search-title">
+        <div className={styles.dashboardHeroCopy}>
+          <span className={writesEnabled ? styles.dashboardStatusOn : styles.dashboardStatusOff}>
+            <span aria-hidden="true">{writesEnabled ? "●" : "○"}</span>
+            {writesEnabled ? "Запис увімкнено" : "Лише перегляд"}
+          </span>
+          <h2 id="dashboard-search-title">Знайдіть матеріал або відскануйте ISBN</h2>
+          <p>Пошук відкриє картку матеріалу, залишки та доступні робочі дії.</p>
+        </div>
+        <form className={styles.dashboardSearch} onSubmit={openCatalog} role="search">
+          <label>
+            <span>Назва, автор, ISBN або CAT-ID</span>
+            <input
+              value={filters.q}
+              onChange={(event) => onFilters((current) => ({ ...current, q: event.currentTarget.value }))}
+              placeholder="Наприклад, CAT-0195"
+            />
+          </label>
+          <button type="submit">Знайти в каталозі</button>
+          <IsbnCameraScanner disabled={false} onDetected={searchScannedIsbn} />
+        </form>
+      </section>
+
+      <section className={styles.dashboardMetrics} aria-label="Стан робочого місця">
+        <article>
+          <strong>{searchState === "loading" ? "…" : items.length}</strong>
+          <span>матеріалів на поточній сторінці</span>
+        </article>
+        <article>
+          <strong>{searchState === "loading" ? "…" : availableOnPage}</strong>
+          <span>доступних примірників у результатах</span>
+        </article>
+        <article>
+          <strong>{referenceState === "loading" ? "…" : teachers.length}</strong>
+          <span>вчителів у довіднику</span>
+        </article>
+        <article>
+          <strong>{referenceState === "loading" ? "…" : locations.length}</strong>
+          <span>активних місць зберігання</span>
+        </article>
+      </section>
+
+      <section className={styles.dashboardSection} aria-labelledby="dashboard-quick-title">
+        <div className={styles.dashboardSectionHeading}>
+          <span>Щодня</span>
+          <h2 id="dashboard-quick-title">Швидкі дії</h2>
+        </div>
+        <div className={styles.dashboardQuickGrid}>
+          {quickActions.map((item) => (
+            <button type="button" key={item.id} onClick={() => onChooseTool(item.id)}>
+              <span aria-hidden="true">{item.icon}</span>
+              <span><strong>{item.label}</strong><small>{item.hint}</small></span>
+              <span aria-hidden="true">→</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <div className={styles.dashboardLowerGrid}>
+        <section className={styles.dashboardSection} aria-labelledby="dashboard-sections-title">
+          <div className={styles.dashboardSectionHeading}>
+            <span>Усі інструменти</span>
+            <h2 id="dashboard-sections-title">Робочі розділи</h2>
+          </div>
+          <div className={styles.dashboardGroupGrid}>
+            {TOOL_GROUPS.map((group) => (
+              <article key={group.id}>
+                <h3>{group.label}</h3>
+                <div>
+                  {group.items.map((item) => (
+                    <button type="button" key={item.id} onClick={() => onChooseTool(item.id)}>
+                      {item.label}<span aria-hidden="true">→</span>
+                    </button>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className={`${styles.dashboardSection} ${styles.dashboardQueues}`} aria-labelledby="dashboard-queues-title">
+          <div className={styles.dashboardSectionHeading}>
+            <span>Черги</span>
+            <h2 id="dashboard-queues-title">Потребує уваги</h2>
+          </div>
+          <a href={librarianSectionHref("visits", telegramMiniApp)}><span><strong>Графік відвідувань</strong><small>Записи на сьогодні</small></span><span className={styles.dashboardQueueCount}>{attentionUnavailable ? "—" : attention?.visitsToday ?? "…"}</span><span aria-hidden="true">→</span></a>
+          <a href={librarianSectionHref("orders", telegramMiniApp)}><span><strong>Замовлення вчителів</strong><small>Нові заявки</small></span><span className={styles.dashboardQueueCount}>{attentionUnavailable ? "—" : attention?.newTeacherOrders ?? "…"}</span><span aria-hidden="true">→</span></a>
+          <a href={librarianSectionHref("acquisitions", telegramMiniApp)}><span><strong>Комплектування фонду</strong><small>Активні пропозиції й дозамовлення</small></span><span className={styles.dashboardQueueCount}>{attentionUnavailable ? "—" : attention?.activeAcquisitions ?? "…"}</span><span aria-hidden="true">→</span></a>
         </section>
       </div>
-    </main>
+    </div>
   );
 }
 
@@ -6028,6 +6252,7 @@ async function apiJson<T>(url: string, init: RequestInit = {}): Promise<T> {
 }
 
 function toolTitle(tool: Tool): string {
+  if (tool === "dashboard") return "Головна";
   if (tool === "create") return "Новий матеріал";
   if (tool === "receipt") return "Надходження";
   if (tool === "transfer") return "Переміщення";
@@ -6049,6 +6274,7 @@ function toolTitle(tool: Tool): string {
 }
 
 function toolDescription(tool: Tool): string {
+  if (tool === "dashboard") return "Пошук, стан робочого місця та найчастіші операції в одному місці.";
   if (tool === "create") return "Додайте видання напряму в нову базу; CAT-ID створиться автоматично.";
   if (tool === "receipt") return "Оберіть матеріал і додайте нові примірники на баланс.";
   if (tool === "transfer") return "Перемістіть примірники між двома місцями однією атомарною операцією.";

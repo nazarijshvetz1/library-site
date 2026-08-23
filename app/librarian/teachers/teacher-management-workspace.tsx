@@ -4,6 +4,7 @@
 
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 
+import LibrarianShell from "../_components/librarian-shell";
 import { visitApi, VisitApiError } from "@/app/visits/visit-client";
 import MaterialRequestInbox from "@/app/librarian/visits/material-request-inbox";
 import TeacherAccessAdmin from "@/app/librarian/visits/teacher-access-admin";
@@ -25,8 +26,6 @@ import {
   updateTeacherProfile,
 } from "./teacher-management-client";
 import styles from "./teacher-management.module.css";
-
-const LOGO_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
 
 type MainTab = "overview" | "teachers" | "orders" | "visits" | "telegram";
 type DetailTab = "profile" | "orders" | "issued" | "visits";
@@ -105,27 +104,16 @@ export default function TeacherManagementWorkspace({
   }
 
   return (
-    <main className={styles.shell}>
-      <header className={styles.header}>
-        <a className={styles.brand} href={telegramMiniApp ? "/librarian/telegram/cabinet?target=home" : "/librarian"}>
-          <img src={LOGO_URL} alt="" width="48" height="48" />
-          <span><strong>Єдина бібліотека</strong><small>Керування вчителями</small></span>
-        </a>
-        <nav className={styles.headerNav} aria-label="Розділи кабінету бібліотекаря">
-          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=home" : "/librarian"}>Каталог</a>
-          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=visits" : "/librarian/visits"}>Розклад</a>
-          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=acquisitions" : "/librarian/acquisitions"}>Комплектування</a>
-          <a className={styles.telegramNavLink} href={telegramMiniApp ? "/librarian/telegram/cabinet?target=teachers&tab=telegram" : "/librarian/teachers?tab=telegram"}>Telegram</a>
-          {!telegramMiniApp ? <a href="/librarian/export">Експорт в Excel</a> : null}
-          {!telegramMiniApp ? <a href="/librarian/import">Імпорт з Excel</a> : null}
-        </nav>
-        <div className={styles.account}>
-          <span><strong>{displayName}</strong><small>{role === "admin" ? "Адміністратор" : "Бібліотекар"}</small></span>
-          <a href={signOutHref}>{telegramMiniApp ? "До бота" : "Вийти"}</a>
-        </div>
-      </header>
-
-      <section className={styles.page}>
+    <LibrarianShell
+      activeSection={tab === "orders" ? "orders" : "teachers"}
+      displayName={displayName}
+      roleLabel={role === "admin" ? "Адміністратор" : "Бібліотекар"}
+      signOutHref={signOutHref}
+      telegramMiniApp={telegramMiniApp}
+      writesEnabled={effectiveWrites}
+    >
+      <main className={styles.shell}>
+        <section className={styles.page}>
         <div className={styles.intro}>
           <div>
             <p className={styles.eyebrow}>Захищений робочий розділ</p>
@@ -168,8 +156,9 @@ export default function TeacherManagementWorkspace({
             <LibrarianTelegramPanel writesEnabled={effectiveWrites} />
           )}
         </div>
-      </section>
-    </main>
+        </section>
+      </main>
+    </LibrarianShell>
   );
 }
 

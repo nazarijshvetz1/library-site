@@ -4,6 +4,7 @@
 
 import { BarcodeFormat, QRCodeWriter } from "@zxing/library";
 import { useCallback, useEffect, useRef, useState } from "react";
+import LibrarianShell from "../_components/librarian-shell";
 import { parseAcquisitionWorkbook, type ParsedAcquisitionWorkbook } from "./acquisition-excel-parser";
 import styles from "./acquisition-workspace.module.css";
 
@@ -22,7 +23,7 @@ type Preview = { valid: boolean; rows: Array<{ sourceSheet: string; sourceRow: n
 
 const STATUS: Record<string, string> = { submitted: "Нова", in_review: "На розгляді", clarification: "Потрібне уточнення", approved: "Погоджено", planned: "Заплановано", ordered: "Замовлено", partially_received: "Частково отримано", received: "Отримано", rejected: "Відхилено", cancelled: "Скасовано" };
 
-export default function AcquisitionWorkspace({ displayName, writesEnabled, signOutHref, telegramMiniApp = false }: { displayName: string; writesEnabled: boolean; signOutHref: string; telegramMiniApp?: boolean }) {
+export default function AcquisitionWorkspace({ displayName, role = "librarian", writesEnabled, signOutHref, telegramMiniApp = false }: { displayName: string; role?: string; writesEnabled: boolean; signOutHref: string; telegramMiniApp?: boolean }) {
   const [data, setData] = useState<Envelope | null>(null); const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [notice, setNotice] = useState("");
   const [status, setStatus] = useState("active"); const [requester, setRequester] = useState("all"); const [query, setQuery] = useState("");
@@ -123,9 +124,16 @@ export default function AcquisitionWorkspace({ displayName, writesEnabled, signO
     } catch (importError) { setError(message(importError)); } finally { setBusy(false); }
   }
   const summary = data?.summary;
-  return <main className={`${styles.shell} ${telegramMiniApp ? styles.telegram : ""}`}>
-    <header className={styles.header}><a className={styles.brand} href="/librarian"><strong>Єдина бібліотека</strong><span>Комплектування фонду</span></a><nav><a href="/librarian">Каталог</a><a href="/librarian/visits">Відвідування</a><a href="/librarian/teachers">Вчителі</a></nav><div className={styles.account}><span>{displayName}</span><a href={signOutHref}>{telegramMiniApp ? "До бота" : "Вийти"}</a></div></header>
-    <section className={styles.page}>
+  return <LibrarianShell
+    activeSection="acquisitions"
+    displayName={displayName}
+    roleLabel={role === "admin" ? "Адміністратор" : "Бібліотекар"}
+    signOutHref={signOutHref}
+    telegramMiniApp={telegramMiniApp}
+    writesEnabled={writesEnabled}
+  >
+    <main className={`${styles.shell} ${telegramMiniApp ? styles.telegram : ""}`}>
+      <section className={styles.page}>
       <div className={styles.hero}><div><span>Керування придбаннями</span><h1>Комплектування фонду</h1><p>Дозамовлення, нові видання та пропозиції учнів — без впливу на фактичний залишок до оформлення надходження.</p></div><button type="button" onClick={() => void load()} disabled={loading}>↻ Оновити</button></div>
       {!writesEnabled ? <div className={styles.warning}>Запис тимчасово вимкнено. Дані доступні лише для перегляду.</div> : null}
       {error ? <div className={styles.error} role="alert">{error}</div> : null}{notice ? <div className={styles.success} role="status">{notice}</div> : null}
@@ -140,8 +148,9 @@ export default function AcquisitionWorkspace({ displayName, writesEnabled, signO
         <div className={styles.filters}><select value={status} onChange={(event) => setStatus(event.currentTarget.value)}><option value="active">Активні</option><option value="all">Усі</option>{Object.entries(STATUS).map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select><select value={requester} onChange={(event) => setRequester(event.currentTarget.value)}><option value="all">Усі заявники</option><option value="teacher">Учителі</option><option value="student">Учні</option></select><input value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="Назва, автор, ім’я або номер" /></div>
         {loading ? <p className={styles.empty}>Оновлюємо чергу…</p> : data?.requests.length ? <div className={styles.list}>{data.requests.map((record) => <RequestCard key={record.id} record={record} busy={busy || !writesEnabled} telegramMiniApp={telegramMiniApp} onAction={act} onSend={sendAction} />)}</div> : <p className={styles.empty}>За цими фільтрами заявок немає.</p>}
       </section>
-    </section>
-  </main>;
+      </section>
+    </main>
+  </LibrarianShell>;
 }
 
 function StudentSuggestionQr({ onNotice, onError }: { onNotice: (value: string) => void; onError: (value: string) => void }) {

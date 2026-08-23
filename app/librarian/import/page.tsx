@@ -1,11 +1,10 @@
 import type { Metadata } from "next";
 
-/* eslint-disable @next/next/no-html-link-for-pages -- Vinext full-page navigation is intentional. */
-
-import { requireChatGPTUser } from "@/app/chatgpt-auth";
+import { chatGPTSignOutPath, requireChatGPTUser } from "@/app/chatgpt-auth";
 import { getLibrarianAccess } from "@/lib/librarian-access";
 import { getRuntimeBoolean, getRuntimeString } from "@/lib/runtime-env";
 import { resolveLibraryImportTarget } from "@/lib/staging-import-gate";
+import LibrarianAccessDenied from "../librarian-access-denied";
 import ExcelImportWorkspace from "./excel-import-workspace";
 import ImportConsole from "./staging-import-console";
 
@@ -20,16 +19,7 @@ export default async function LibraryImportPage() {
   const user = await requireChatGPTUser("/librarian/import");
   const access = getLibrarianAccess(user);
   if (!access.allowed) {
-    return (
-      <main className="access-shell">
-        <section className="access-card" aria-labelledby="excel-import-access-title">
-          <p className="eyebrow centered"><span aria-hidden="true" /> Захищений кабінет</p>
-          <h1 id="excel-import-access-title">Доступ до імпорту не надано</h1>
-          <p>Цей обліковий запис не входить до списку працівників бібліотеки.</p>
-          <div className="access-actions"><a className="button button-primary" href="/">На головну</a></div>
-        </section>
-      </main>
-    );
+    return <LibrarianAccessDenied title="Доступ до імпорту не надано" signOutHref={chatGPTSignOutPath("/")} />;
   }
 
   const target = resolveLibraryImportTarget(
@@ -41,9 +31,11 @@ export default async function LibraryImportPage() {
     && getRuntimeBoolean("LIBRARY_IMPORT_ENABLED")
     && !(target === "production" && access.writesEnabled),
   );
+  const roleLabel = access.role === "admin" ? "Адміністратор" : "Бібліотекар";
+  const signOutHref = chatGPTSignOutPath("/");
   if (cutoverEnabled && target) {
-    return <ImportConsole displayName={user.displayName} target={target} />;
+    return <ImportConsole displayName={user.displayName} roleLabel={roleLabel} signOutHref={signOutHref} target={target} />;
   }
 
-  return <ExcelImportWorkspace displayName={user.displayName} writesEnabled={access.writesEnabled} />;
+  return <ExcelImportWorkspace displayName={user.displayName} roleLabel={roleLabel} signOutHref={signOutHref} writesEnabled={access.writesEnabled} />;
 }

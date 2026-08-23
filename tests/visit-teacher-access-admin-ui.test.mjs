@@ -14,7 +14,8 @@ test("librarian visit page exposes protected teacher-code management", async () 
     read("app/librarian/visits/teacher-access-admin.tsx"),
   ]);
 
-  assert.match(workspace, /<TeacherAccessAdmin writesEnabled=\{writesEnabled\} \/>/u);
+  assert.doesNotMatch(workspace, /<TeacherAccessAdmin/u);
+  assert.doesNotMatch(workspace, /<MaterialRequestInbox/u);
   assert.match(workspace, /<th>Учитель<\/th>/u);
   assert.doesNotMatch(workspace, /booking\.ownerEmail|<th>Акаунт<\/th>/u);
   assert.match(access, /\/api\/librarian\/visits\/teacher-access/u);

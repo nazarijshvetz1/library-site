@@ -1,7 +1,5 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element */
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -18,15 +16,13 @@ import {
   writeVisitPendingIntent,
   clearVisitPendingIntent,
 } from "@/app/visits/visit-client";
+import LibrarianShell from "../_components/librarian-shell";
 import styles from "@/app/visits/visits.module.css";
-import TeacherAccessAdmin from "./teacher-access-admin";
-import MaterialRequestInbox from "./material-request-inbox";
-
-const LOGO_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
 
 type Props = {
   pendingScope: string;
   displayName: string;
+  role?: string;
   writesEnabled: boolean;
   signOutHref: string;
   telegramMiniApp?: boolean;
@@ -35,10 +31,12 @@ type Props = {
 export default function LibrarianVisitWorkspace({
   pendingScope,
   displayName,
+  role = "librarian",
   writesEnabled,
   signOutHref,
   telegramMiniApp = false,
 }: Props) {
+  void pendingScope;
   const [data, setData] = useState<LibrarianVisitsEnvelope | null>(null);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
@@ -122,24 +120,16 @@ export default function LibrarianVisitWorkspace({
   }
 
   return (
-    <main className={styles.shell}>
-      <header className={styles.header}>
-        <a className={styles.brand} href={telegramMiniApp ? "/librarian/telegram/cabinet?target=home" : "/librarian"}>
-          <img src={LOGO_URL} alt="" width="48" height="48" />
-          <span><strong>Єдина бібліотека</strong><small>Розклад відвідувань</small></span>
-        </a>
-        <div className={styles.account}>
-          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=home" : "/librarian"}>Кабінет</a>
-          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=teachers" : "/librarian/teachers"}>Вчителі</a>
-          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=acquisitions" : "/librarian/acquisitions"}>Комплектування</a>
-          {!telegramMiniApp ? <a href="/librarian/export">Експорт в Excel</a> : null}
-          {!telegramMiniApp ? <a href="/librarian/import">Імпорт з Excel</a> : null}
-          <span><strong>{displayName}</strong><small>Бібліотекар</small></span>
-          <a href={signOutHref}>{telegramMiniApp ? "До бота" : "Вийти"}</a>
-        </div>
-      </header>
-
-      <section className={styles.page}>
+    <LibrarianShell
+      activeSection="visits"
+      displayName={displayName}
+      roleLabel={role === "admin" ? "Адміністратор" : "Бібліотекар"}
+      signOutHref={signOutHref}
+      telegramMiniApp={telegramMiniApp}
+      writesEnabled={writesEnabled}
+    >
+      <main className={styles.shell}>
+        <section className={styles.page}>
         <div className={styles.intro}>
           <p className={styles.eyebrow}>Захищений перегляд</p>
           <h1>Відвідування бібліотеки</h1>
@@ -177,10 +167,9 @@ export default function LibrarianVisitWorkspace({
             </div>
           ) : <p className={styles.empty}>За цими фільтрами записів немає.</p>}
         </section>
-        <MaterialRequestInbox pendingScope={pendingScope} writesEnabled={writesEnabled} />
-        <TeacherAccessAdmin writesEnabled={writesEnabled} />
-      </section>
-    </main>
+        </section>
+      </main>
+    </LibrarianShell>
   );
 }
 
