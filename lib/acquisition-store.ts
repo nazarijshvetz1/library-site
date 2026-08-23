@@ -41,7 +41,7 @@ export type AcquisitionProjection = {
   materialId: string | null;
   title: string;
   author: string;
-  publicationYear: number;
+  publicationYear: number | null;
   requestedQuantity: number;
   approvedQuantity: number | null;
   orderedQuantity: number;
@@ -79,7 +79,7 @@ type RequestRow = {
   teacher_user_id: string | null; requester_name: string; requester_class_name: string;
   category: "educational" | "literature"; source_kind: "catalog" | "manual";
   literature_kind: "none" | "fiction" | "science" | "popular_science" | "other";
-  material_id: string | null; title: string; author: string; publication_year: number;
+  material_id: string | null; title: string; author: string; publication_year: number | null;
   requested_quantity: number; approved_quantity: number | null; ordered_quantity: number;
   received_quantity: number; source_url: string; subject: string; target_class: string;
   requester_note: string; librarian_note: string; clarification_message: string;
@@ -120,7 +120,7 @@ export async function listTeacherAcquisitionRequests(
 export async function listLibrarianAcquisitionRequests(
   db: AcquisitionDatabase,
   options: { status?: AcquisitionStatus | "active" | "all"; requesterKind?: "teacher" | "student" | "all"; query?: string; limit?: number } = {},
-): Promise<{ requests: AcquisitionProjection[]; summary: AcquisitionSummary; procurementGroups: Array<{ duplicateKey: string; title: string; author: string; publicationYear: number; requestCount: number; requestedQuantity: number; orderedQuantity: number; receivedQuantity: number }> }> {
+): Promise<{ requests: AcquisitionProjection[]; summary: AcquisitionSummary; procurementGroups: Array<{ duplicateKey: string; title: string; author: string; publicationYear: number | null; requestCount: number; requestedQuantity: number; orderedQuantity: number; receivedQuantity: number }> }> {
   const status = options.status ?? "all";
   const requesterKind = options.requesterKind ?? "all";
   const query = (options.query ?? "").trim().slice(0, 120);
@@ -177,7 +177,7 @@ export async function listLibrarianAcquisitionRequests(
     },
     procurementGroups: (groups.results ?? []).map((row) => ({
       duplicateKey: String(row.duplicate_key), title: String(row.title), author: String(row.author),
-      publicationYear: number(row.publication_year), requestCount: number(row.request_count),
+      publicationYear: nullableNumber(row.publication_year), requestCount: number(row.request_count),
       requestedQuantity: number(row.requested_quantity), orderedQuantity: number(row.ordered_quantity), receivedQuantity: number(row.received_quantity),
     })),
   };
@@ -627,7 +627,7 @@ function projectRequest(row: RequestRow): AcquisitionProjection {
     id: row.id, publicNumber: row.public_number, requesterKind: row.requester_kind, teacherUserId: row.teacher_user_id,
     requesterName: row.requester_name, requesterClassName: row.requester_class_name, category: row.category, sourceKind: row.source_kind,
     literatureKind: row.literature_kind, materialId: row.material_id, title: row.title, author: row.author,
-    publicationYear: number(row.publication_year), requestedQuantity: number(row.requested_quantity), approvedQuantity: nullableNumber(row.approved_quantity),
+    publicationYear: nullableNumber(row.publication_year), requestedQuantity: number(row.requested_quantity), approvedQuantity: nullableNumber(row.approved_quantity),
     orderedQuantity: number(row.ordered_quantity), receivedQuantity: number(row.received_quantity), sourceUrl: row.source_url,
     subject: row.subject, targetClass: row.target_class, requesterNote: row.requester_note, librarianNote: row.librarian_note,
     clarificationMessage: row.clarification_message, rejectionReason: row.rejection_reason, status: row.status,

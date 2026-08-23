@@ -1824,8 +1824,8 @@ export const acquisitionRequests = sqliteTable(
     }),
     title: text("title").notNull(),
     author: text("author").notNull(),
-    publicationYear: integer("publication_year").notNull(),
-    requestedQuantity: integer("requested_quantity").notNull(),
+    publicationYear: integer("publication_year"),
+    requestedQuantity: integer("requested_quantity").notNull().default(1),
     approvedQuantity: integer("approved_quantity"),
     orderedQuantity: integer("ordered_quantity").notNull().default(0),
     receivedQuantity: integer("received_quantity").notNull().default(0),
@@ -1885,10 +1885,14 @@ export const acquisitionRequests = sqliteTable(
     check("acquisition_requests_text_valid", sql`
       length(trim(${table.publicNumber})) > 0 and length(trim(${table.submissionKey})) > 0
       and length(${table.submissionHash}) = 64 and length(trim(${table.requesterName})) > 0
-      and length(trim(${table.title})) > 0 and length(trim(${table.author})) > 0
-      and length(trim(${table.sourceUrl})) > 0 and length(trim(${table.duplicateKey})) > 0
+      and length(trim(${table.title})) > 0
+      and (${table.requesterKind} = 'student' or length(trim(${table.author})) > 0)
+      and (${table.requesterKind} = 'student' or (${table.category} = 'educational' and ${table.sourceKind} = 'catalog') or length(trim(${table.sourceUrl})) > 0)
+      and length(trim(${table.duplicateKey})) > 0
       and length(trim(${table.academicYearLabel})) > 0`),
-    check("acquisition_requests_year_valid", sql`${table.publicationYear} between 1000 and 2100`),
+    check("acquisition_requests_year_valid", sql`
+      (${table.requesterKind} = 'student' and (${table.publicationYear} is null or ${table.publicationYear} between 1000 and 2100))
+      or (${table.requesterKind} = 'teacher' and ${table.publicationYear} is not null and ${table.publicationYear} between 1000 and 2100)`),
     check("acquisition_requests_quantities_valid", sql`
       ${table.requestedQuantity} between 1 and 1000
       and (${table.approvedQuantity} is null or ${table.approvedQuantity} between 0 and 1000)

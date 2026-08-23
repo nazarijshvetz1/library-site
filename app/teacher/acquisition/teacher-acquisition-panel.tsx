@@ -1,9 +1,15 @@
 "use client";
 
-import { type FormEvent, useCallback, useEffect, useState } from "react";
+/* eslint-disable @next/next/no-img-element -- first-party catalog thumbnails are already resized by the catalog service. */
+
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import styles from "./teacher-acquisition.module.css";
 
-type CatalogItem = { id: string; title: string; author: string; year: number | null; subject: string; availableQuantity: number };
+type CatalogItem = {
+  id: string; title: string; author: string; year: number | null; subject: string;
+  classFrom: number | null; classTo: number | null; thumbnailUrl: string; availableQuantity: number;
+};
+type CatalogDetail = CatalogItem & { links: Array<{ url: string }> };
 type Acquisition = {
   id: string; publicNumber: string; title: string; author: string; publicationYear: number; requestedQuantity: number;
   approvedQuantity: number | null; orderedQuantity: number; receivedQuantity: number; status: string; version: number;
@@ -16,6 +22,7 @@ const STATUS_LABELS: Record<string, string> = {
   planned: "Заплановано", ordered: "Замовлено", partially_received: "Частково отримано", received: "Отримано",
   rejected: "Відхилено", cancelled: "Скасовано",
 };
+const PUBLIC_CATALOG_URL = "https://nazarijshvetz1.github.io/library-site/";
 
 export default function TeacherAcquisitionPanel() {
   const [category, setCategory] = useState<"educational" | "literature">("educational");
@@ -30,7 +37,9 @@ export default function TeacherAcquisitionPanel() {
   const [targetClass, setTargetClass] = useState(""); const [note, setNote] = useState("");
   const [requests, setRequests] = useState<Acquisition[]>([]);
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [notice, setNotice] = useState(""); const [error, setError] = useState("");
+  const detailRequest = useRef(0);
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -44,7 +53,9 @@ export default function TeacherAcquisitionPanel() {
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
 
   useEffect(() => {
-    if (sourceKind !== "catalog" || query.trim().length < 2) return;
+    if (sourceKind !== "catalog" || selected || query.trim().length < 2) {
+      return;
+    }
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       try {
@@ -55,15 +66,35 @@ export default function TeacherAcquisitionPanel() {
       } catch { if (!controller.signal.aborted) setCatalog([]); }
     }, 280);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [query, sourceKind]);
+  }, [query, selected, sourceKind]);
 
-  function choose(item: CatalogItem) {
-    setSelected(item); setTitle(item.title); setAuthor(item.author || "Автор не вказаний");
-    setYear(item.year ? String(item.year) : ""); setSubject(item.subject || subject); setCatalog([]); setQuery(item.id);
+  async function choose(item: CatalogItem) {
+    const requestNumber = detailRequest.current + 1;
+    detailRequest.current = requestNumber;
+    setSelected(item); setTitle(item.title); setAuthor(item.author || "");
+    setYear(item.year ? String(item.year) : ""); setSubject(item.subject || "");
+    setTargetClass(formatCatalogClass(item.classFrom, item.classTo));
+    setSourceUrl(`${PUBLIC_CATALOG_URL}?material=${encodeURIComponent(item.id)}`);
+    setCatalog([]); setQuery(item.id); setDetailLoading(true);
+    try {
+      const response = await fetch(`/api/catalog-v2/${encodeURIComponent(item.id)}`, { cache: "no-store" });
+      const body = await response.json() as { material?: CatalogDetail };
+      if (!response.ok || !body.material || detailRequest.current !== requestNumber) return;
+      const detail = body.material;
+      setAuthor(detail.author || ""); setYear(detail.year ? String(detail.year) : "");
+      setSubject(detail.subject || ""); setTargetClass(formatCatalogClass(detail.classFrom, detail.classTo));
+      setSourceUrl(detail.links.find((link) => /^https?:\/\//iu.test(link.url))?.url
+        ?? `${PUBLIC_CATALOG_URL}?material=${encodeURIComponent(detail.id)}`);
+    } catch {
+      // The catalog summary is enough to continue; an edition link is optional in this mode.
+    } finally {
+      if (detailRequest.current === requestNumber) setDetailLoading(false);
+    }
   }
   function changeSource(value: "catalog" | "manual") {
-    setSourceKind(value); setSelected(null); setQuery("");
-    if (value === "manual") { setTitle(""); setAuthor(""); setYear(""); }
+    detailRequest.current += 1;
+    setSourceKind(value); setSelected(null); setQuery(""); setCatalog([]); setDetailLoading(false);
+    setTitle(""); setAuthor(""); setYear(""); setSubject(""); setTargetClass(""); setSourceUrl("");
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -82,10 +113,14 @@ export default function TeacherAcquisitionPanel() {
       const body = await response.json() as JsonError;
       if (!response.ok) throw new Error(body.error || firstFieldError(body.fieldErrors) || "Не вдалося надіслати пропозицію.");
       setNotice("Пропозицію надіслано бібліотекарю.");
-      setSelected(null); setQuery(""); setTitle(""); setAuthor(""); setYear(""); setQuantity("1"); setSourceUrl(""); setNote("");
+      detailRequest.current += 1;
+      setSelected(null); setQuery(""); setTitle(""); setAuthor(""); setYear(""); setQuantity("1");
+      setSourceUrl(""); setSubject(""); setTargetClass(""); setNote(""); setDetailLoading(false);
       await load();
     } catch (submitError) { setError(message(submitError)); } finally { setBusy(false); }
   }
+
+  const existingCatalogMaterial = category === "educational" && sourceKind === "catalog";
 
   async function cancel(record: Acquisition) {
     if (!window.confirm(`Скасувати пропозицію ${record.publicNumber}?`)) return;
@@ -120,9 +155,12 @@ export default function TeacherAcquisitionPanel() {
             <label><input type="radio" name="source" checked={sourceKind === "manual"} onChange={() => changeSource("manual")} /> Ще немає</label>
           </fieldset> : null}
           {sourceKind === "catalog" ? <label className={styles.wide}>Знайти матеріал у каталозі *
-            <input value={query} onChange={(event) => { setQuery(event.currentTarget.value); setSelected(null); }} placeholder="Назва, автор або CAT-ID" />
-            {catalog.length ? <div className={styles.results}>{catalog.map((item) => <button type="button" key={item.id} onClick={() => choose(item)}><strong>{item.title}</strong><span>{item.id} · {item.author || "Автор не вказаний"} · доступно {item.availableQuantity}</span></button>)}</div> : null}
-            {selected ? <small>Обрано: {selected.id}</small> : null}
+            <input value={query} onChange={(event) => { detailRequest.current += 1; setQuery(event.currentTarget.value); setSelected(null); setCatalog([]); setDetailLoading(false); }} placeholder="Назва, автор або CAT-ID" />
+            {catalog.length ? <div className={styles.results}>{catalog.map((item) => <button type="button" key={item.id} onClick={() => void choose(item)}>
+              <CatalogCover item={item} />
+              <span className={styles.resultCopy}><strong>{item.title}</strong><span>{item.author || "Автор не вказаний"}{item.year ? ` · ${item.year}` : ""}</span><small>{item.id} · доступно {item.availableQuantity}</small></span>
+            </button>)}</div> : null}
+            {selected ? <span className={styles.selectedMaterial}><CatalogCover item={selected} /><span><strong>{selected.title}</strong><small>{selected.author || "Автор потрібно вказати"}{selected.year ? ` · ${selected.year}` : ""} · {selected.id}</small>{detailLoading ? <small>Доповнюємо дані з каталогу…</small> : null}</span></span> : null}
           </label> : null}
           <div className={styles.fields}>
             {category === "literature" ? <label>Вид літератури *<select value={literatureKind} onChange={(event) => setLiteratureKind(event.currentTarget.value)}><option value="fiction">Художня</option><option value="science">Наукова</option><option value="popular_science">Науково-популярна</option><option value="other">Інша</option></select></label> : null}
@@ -130,8 +168,8 @@ export default function TeacherAcquisitionPanel() {
             <label>Автор *<input required minLength={2} maxLength={240} value={author} readOnly={Boolean(selected && selected.author)} onChange={(event) => setAuthor(event.currentTarget.value)} /></label>
             <label>Рік *<input required type="number" min="1000" max="2100" value={year} onChange={(event) => setYear(event.currentTarget.value)} /></label>
             <label>Кількість *<input required type="number" min="1" max="1000" value={quantity} onChange={(event) => setQuantity(event.currentTarget.value)} /></label>
-            {category === "educational" ? <><label>Предмет *<input required maxLength={120} value={subject} onChange={(event) => setSubject(event.currentTarget.value)} /></label><label>Клас *<input required maxLength={80} value={targetClass} onChange={(event) => setTargetClass(event.currentTarget.value)} placeholder="Наприклад, 7-А" /></label></> : null}
-            <label className={styles.wide}>Покликання на видання *<input required type="url" maxLength={1000} value={sourceUrl} onChange={(event) => setSourceUrl(event.currentTarget.value)} placeholder="https://…" /></label>
+            {category === "educational" ? <><label>Предмет{existingCatalogMaterial ? "" : " *"}<input required={!existingCatalogMaterial} maxLength={120} value={subject} onChange={(event) => setSubject(event.currentTarget.value)} /></label><label>Клас{existingCatalogMaterial ? "" : " *"}<input required={!existingCatalogMaterial} maxLength={80} value={targetClass} onChange={(event) => setTargetClass(event.currentTarget.value)} placeholder="Наприклад, 7-А" /></label></> : null}
+            <label className={styles.wide}>Покликання на видання{existingCatalogMaterial ? "" : " *"}<input required={!existingCatalogMaterial} type="url" maxLength={1000} value={sourceUrl} onChange={(event) => setSourceUrl(event.currentTarget.value)} placeholder="https://…" />{existingCatalogMaterial ? <small>Якщо в каталозі покликання немає, це поле можна залишити порожнім.</small> : null}</label>
             <label className={styles.wide}>Примітка<textarea maxLength={1000} value={note} onChange={(event) => setNote(event.currentTarget.value)} placeholder="Для якого уроку або з якою метою" /></label>
           </div>
           <button className={styles.primary} type="submit" disabled={busy || (sourceKind === "catalog" && !selected)}>{busy ? "Надсилаємо…" : "Надіслати пропозицію"}</button>
@@ -155,3 +193,16 @@ export default function TeacherAcquisitionPanel() {
 
 function firstFieldError(errors?: Record<string, string>): string { return Object.values(errors ?? {})[0] ?? ""; }
 function message(error: unknown): string { return error instanceof Error ? error.message : "Сталася помилка."; }
+
+function formatCatalogClass(classFrom: number | null, classTo: number | null): string {
+  if (!classFrom && !classTo) return "";
+  const from = classFrom ?? classTo;
+  const to = classTo ?? classFrom;
+  return from === to ? `${from} клас` : `${from}–${to} класи`;
+}
+
+function CatalogCover({ item }: { item: CatalogItem }) {
+  return item.thumbnailUrl
+    ? <img className={styles.resultCover} src={item.thumbnailUrl} alt="" loading="lazy" />
+    : <span className={styles.resultCoverFallback} aria-hidden="true">К</span>;
+}

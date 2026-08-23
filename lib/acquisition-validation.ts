@@ -43,7 +43,7 @@ export type StudentAcquisitionCreateInput = {
   className: string;
   title: string;
   author: string;
-  publicationYear: number;
+  publicationYear: number | null;
   requestedQuantity: number;
   sourceUrl: string;
   note: string;
@@ -132,11 +132,16 @@ export function validateAcquisitionCreateInput(input: unknown): ValidationResult
   const author = readText(input.author, "author", errors, 2, 240);
   const publicationYear = readYear(input.publicationYear, "publicationYear", errors);
   const requestedQuantity = readInteger(input.requestedQuantity, "requestedQuantity", errors, 1, ACQUISITION_MAX_QUANTITY);
-  const sourceUrl = readHttpUrl(input.sourceUrl, "sourceUrl", errors);
+  const sourceUrl = readOptionalHttpUrl(input.sourceUrl, "sourceUrl", errors);
   const subject = readOptionalText(input.subject, "subject", errors, 120);
   const targetClass = readOptionalText(input.targetClass, "targetClass", errors, 80);
   const note = readOptionalText(input.note, "note", errors, 1_000);
-  validateCategoryShape({ category, sourceKind, literatureKind, materialId, subject, targetClass }, errors);
+  validateCategoryShape(
+    { category, sourceKind, literatureKind, materialId, subject, targetClass, sourceUrl },
+    errors,
+    "",
+    true,
+  );
   return finish(errors, {
     requestId, category, sourceKind, literatureKind, materialId, title, author,
     publicationYear, requestedQuantity, sourceUrl, subject, targetClass, note,
@@ -154,10 +159,10 @@ export function validateStudentAcquisitionCreateInput(input: unknown): Validatio
   const fullName = readText(input.fullName, "fullName", errors, 3, 160);
   const className = readText(input.className, "className", errors, 1, 80);
   const title = readText(input.title, "title", errors, 2, 320);
-  const author = readText(input.author, "author", errors, 2, 240);
-  const publicationYear = readYear(input.publicationYear, "publicationYear", errors);
-  const requestedQuantity = readInteger(input.requestedQuantity, "requestedQuantity", errors, 1, 50);
-  const sourceUrl = readHttpUrl(input.sourceUrl, "sourceUrl", errors);
+  const author = readOptionalTextWithMin(input.author, "author", errors, 2, 240);
+  const publicationYear = readOptionalYear(input.publicationYear, "publicationYear", errors);
+  const requestedQuantity = readOptionalInteger(input.requestedQuantity, "requestedQuantity", errors, 1, 50) ?? 1;
+  const sourceUrl = readOptionalHttpUrl(input.sourceUrl, "sourceUrl", errors);
   const note = readOptionalText(input.note, "note", errors, 500);
   const website = readOptionalText(input.website, "website", errors, 200);
   const startedAt = readIsoDateTime(input.startedAt, "startedAt", errors);
@@ -286,7 +291,14 @@ function validateImportRow(input: unknown, index: number): ValidationResult<Acqu
     if (!studentName) errors[`${prefix}studentName`] = "Укажіть прізвище та ім’я учня.";
     if (!studentClassName) errors[`${prefix}studentClassName`] = "Укажіть клас учня.";
   }
-  validateCategoryShape({ category, sourceKind, literatureKind, materialId, subject, targetClass }, errors, prefix);
+  validateCategoryShape({ category, sourceKind, literatureKind, materialId, subject, targetClass, sourceUrl }, errors, prefix);
+  if (existingRequestNumber && requesterKind === "student") {
+    // Rows exported by this app are informational when REQUEST-ID is present.
+    // Optional public-form metadata may therefore be blank without blocking a round trip.
+    for (const field of ["author", "publicationYear", "requestedQuantity", "sourceUrl"]) {
+      delete errors[`${prefix}${field}`];
+    }
+  }
   return finish(errors, {
     sourceSheet, sourceRow, existingRequestNumber, requesterKind, teacherUserId, teacherName, studentName, studentClassName,
     category, sourceKind, literatureKind, materialId, title, author, publicationYear,
@@ -295,18 +307,27 @@ function validateImportRow(input: unknown, index: number): ValidationResult<Acqu
 }
 
 function validateCategoryShape(
-  input: Pick<AcquisitionCreateInput, "category" | "sourceKind" | "literatureKind" | "materialId" | "subject" | "targetClass">,
+  input: Pick<AcquisitionCreateInput, "category" | "sourceKind" | "literatureKind" | "materialId" | "subject" | "targetClass" | "sourceUrl">,
   errors: Record<string, string>,
   prefix = "",
+  allowCatalogMetadataOptional = false,
 ): void {
+  const optionalCatalogMetadata = allowCatalogMetadataOptional
+    && input.category === "educational"
+    && input.sourceKind === "catalog";
   if (input.sourceKind === "catalog" && !input.materialId) errors[`${prefix}materialId`] = "Оберіть матеріал із каталогу.";
   if (input.sourceKind === "manual" && input.materialId) errors[`${prefix}materialId`] = "Для нового матеріалу CAT-ID не передається.";
   if (input.category === "educational") {
     if (input.literatureKind !== "none") errors[`${prefix}literatureKind`] = "Для навчального матеріалу вид літератури не потрібен.";
-    if (!input.subject) errors[`${prefix}subject`] = "Укажіть предмет.";
-    if (!input.targetClass) errors[`${prefix}targetClass`] = "Укажіть клас.";
+    if (!optionalCatalogMetadata) {
+      if (!input.subject) errors[`${prefix}subject`] = "Укажіть предмет.";
+      if (!input.targetClass) errors[`${prefix}targetClass`] = "Укажіть клас.";
+    }
   } else if (input.literatureKind === "none") {
     errors[`${prefix}literatureKind`] = "Оберіть вид літератури.";
+  }
+  if (!optionalCatalogMetadata && !input.sourceUrl) {
+    errors[`${prefix}sourceUrl`] = "Укажіть покликання на видання.";
   }
 }
 
@@ -322,11 +343,11 @@ export function acquisitionDuplicateKey(input: {
   materialId: string | null;
   title: string;
   author: string;
-  publicationYear: number;
+  publicationYear: number | null;
 }): string {
   return input.materialId
     ? `catalog:${input.materialId.toUpperCase()}`
-    : `text:${normalizedAcquisitionText(input.title)}|${normalizedAcquisitionText(input.author)}|${input.publicationYear}`;
+    : `text:${normalizedAcquisitionText(input.title)}|${normalizedAcquisitionText(input.author)}|${input.publicationYear ?? ""}`;
 }
 
 function readCategory(value: unknown, field: string, errors: Record<string, string>): AcquisitionCategory {
@@ -379,8 +400,19 @@ function readOptionalText(value: unknown, field: string, errors: Record<string, 
   return result;
 }
 
+function readOptionalTextWithMin(value: unknown, field: string, errors: Record<string, string>, min: number, max: number): string {
+  const result = clean(value);
+  if (result && (result.length < min || result.length > max)) errors[field] = `Введіть від ${min} до ${max} символів або залиште поле порожнім.`;
+  return result;
+}
+
 function readYear(value: unknown, field: string, errors: Record<string, string>): number {
   return readInteger(value, field, errors, 1000, Math.min(2100, new Date().getUTCFullYear() + 5));
+}
+
+function readOptionalYear(value: unknown, field: string, errors: Record<string, string>): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  return readYear(value, field, errors);
 }
 
 function readInteger(value: unknown, field: string, errors: Record<string, string>, min: number, max: number): number {
@@ -390,6 +422,11 @@ function readInteger(value: unknown, field: string, errors: Record<string, strin
 }
 
 function readNullableInteger(value: unknown, field: string, errors: Record<string, string>, min: number, max: number): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  return readInteger(value, field, errors, min, max);
+}
+
+function readOptionalInteger(value: unknown, field: string, errors: Record<string, string>, min: number, max: number): number | null {
   if (value === null || value === undefined || value === "") return null;
   return readInteger(value, field, errors, min, max);
 }
@@ -407,6 +444,11 @@ function readHttpUrl(value: unknown, field: string, errors: Record<string, strin
     errors[field] = "Укажіть повне покликання, що починається з https:// або http://.";
   }
   return result;
+}
+
+function readOptionalHttpUrl(value: unknown, field: string, errors: Record<string, string>): string {
+  const result = clean(value);
+  return result ? readHttpUrl(result, field, errors) : "";
 }
 
 function readIsoDateTime(value: unknown, field: string, errors: Record<string, string>): string {

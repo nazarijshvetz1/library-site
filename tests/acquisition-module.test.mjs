@@ -58,8 +58,19 @@ function createInput(requestId=crypto.randomUUID()){return {requestId,category:"
 
 test("acquisition validation has no ISBN and freezes exact request shapes",()=>{
   assert.equal(validation.validateAcquisitionCreateInput(createInput()).ok,true);
+  assert.equal(validation.validateAcquisitionCreateInput({...createInput(),sourceUrl:"",subject:"",targetClass:""}).ok,true);
+  assert.equal(validation.validateAcquisitionCreateInput({...createInput(),sourceKind:"manual",materialId:null,sourceUrl:""}).ok,false);
+  assert.equal(validation.validateAcquisitionCreateInput({...createInput(),sourceKind:"manual",materialId:null,subject:""}).ok,false);
+  assert.equal(validation.validateAcquisitionCreateInput({...createInput(),sourceKind:"manual",materialId:null,targetClass:""}).ok,false);
+  assert.equal(validation.validateAcquisitionCreateInput({...createInput(),category:"literature",literatureKind:"fiction",sourceUrl:""}).ok,false);
   assert.equal(validation.validateAcquisitionCreateInput({...createInput(),isbn:"123"}).ok,false);
   assert.equal(validation.validateStudentAcquisitionCreateInput({requestId:crypto.randomUUID(),fullName:"Іваненко Марія",className:"7-А",title:"Книга",author:"Автор",publicationYear:2024,requestedQuantity:1,sourceUrl:"https://example.test/book",note:"",website:"",startedAt:new Date(Date.now()-3000).toISOString()}).ok,true);
+  const optional=validation.validateStudentAcquisitionCreateInput({requestId:crypto.randomUUID(),fullName:"Іваненко Марія",className:"7-А",title:"Книга",note:"",website:"",startedAt:new Date(Date.now()-3000).toISOString()});
+  assert.equal(optional.ok,true);assert.equal(optional.value.author,"");assert.equal(optional.value.publicationYear,null);assert.equal(optional.value.requestedQuantity,1);assert.equal(optional.value.sourceUrl,"");
+  assert.equal(validation.validateStudentAcquisitionCreateInput({...optional.value,publicationYear:999}).ok,false);
+  assert.equal(validation.validateStudentAcquisitionCreateInput({...optional.value,requestedQuantity:0}).ok,false);
+  assert.equal(validation.validateStudentAcquisitionCreateInput({...optional.value,sourceUrl:"javascript:alert(1)"}).ok,false);
+  assert.equal(validation.validateStudentAcquisitionCreateInput({...optional.value,title:""}).ok,false);
 });
 
 test("teacher proposal is idempotent and catalog snapshots are authoritative",async()=>{
@@ -94,6 +105,19 @@ test("anonymous proposal validates the active class and records only a private r
   assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM acquisition_requests").get().n,5);
 });
 
+test("anonymous proposal persists omitted metadata without synthetic values",async()=>{
+  const {sqlite,db}=context();
+  const validated=validation.validateStudentAcquisitionCreateInput({requestId:crypto.randomUUID(),fullName:"Петренко Андрій",className:"7-А",title:"Нова книга",note:"",website:"",startedAt:new Date(Date.now()-3000).toISOString()});
+  assert.equal(validated.ok,true);
+  const request=new Request("https://library.test/api/public/book-suggestions",{headers:{"user-agent":"test","CF-Connecting-IP":"203.0.113.20"}});
+  const first=await store.createStudentAcquisitionRequest(db,request,validated.value,"s".repeat(40));
+  const replay=await store.createStudentAcquisitionRequest(db,request,validated.value,"s".repeat(40));
+  assert.equal(replay.replayed,true);assert.deepEqual(replay.request,first.request);
+  assert.equal(first.request.author,"");assert.equal(first.request.publicationYear,null);assert.equal(first.request.requestedQuantity,1);assert.equal(first.request.sourceUrl,"");
+  const stored=sqlite.prepare("SELECT author,publication_year,requested_quantity,source_url FROM acquisition_requests WHERE id=?").get(first.request.id);
+  assert.equal(stored.author,"");assert.equal(stored.publication_year,null);assert.equal(stored.requested_quantity,1);assert.equal(stored.source_url,"");
+});
+
 test("Excel preview resolves identities and repeated workbook commit is idempotent",async()=>{
   const {sqlite,db}=context();const fileHash="d".repeat(64);
   const rows=[{sourceSheet:"Дозамовлення",sourceRow:2,requesterKind:"teacher",teacherUserId:"USR-T1",teacherName:"Шевченко Олена",studentName:"",studentClassName:"",category:"educational",sourceKind:"catalog",literatureKind:"none",materialId:"CAT-0001",title:"Алгебра — 7 клас",author:"Автор",publicationYear:2024,requestedQuantity:4,sourceUrl:"https://example.test/algebra",subject:"Математика",targetClass:"7-А",note:""}];
@@ -103,4 +127,18 @@ test("Excel preview resolves identities and repeated workbook commit is idempote
   assert.equal(first.imported,1);assert.equal(first.replayed,false);assert.equal(replay.replayed,true);
   assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM acquisition_import_batches").get().n,1);
   assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM acquisition_requests").get().n,1);
+});
+
+test("acquisition interfaces expose catalog metadata, optional student fields and a local printable QR",()=>{
+  const teacherUi=fs.readFileSync(path.join(root,"app/teacher/acquisition/teacher-acquisition-panel.tsx"),"utf8");
+  const studentUi=fs.readFileSync(path.join(root,"app/suggest-book/suggest-book-form.tsx"),"utf8");
+  const librarianUi=fs.readFileSync(path.join(root,"app/librarian/acquisitions/acquisition-workspace.tsx"),"utf8");
+  const librarianCss=fs.readFileSync(path.join(root,"app/librarian/acquisitions/acquisition-workspace.module.css"),"utf8");
+  assert.match(teacherUi,/thumbnailUrl/u);assert.match(teacherUi,/classFrom/u);assert.match(teacherUi,/\/api\/catalog-v2\/\$\{encodeURIComponent\(item\.id\)\}/u);
+  assert.match(teacherUi,/setSourceUrl\(detail\.links\.find/u);assert.match(teacherUi,/required=\{!existingCatalogMaterial\}/u);
+  assert.match(studentUi,/publicationYear:year\.trim\(\)\?Number\(year\):null/u);assert.match(studentUi,/requestedQuantity:quantity\.trim\(\)\?Number\(quantity\):null/u);
+  assert.doesNotMatch(studentUi,/Автор \*<input/u);assert.doesNotMatch(studentUi,/Покликання на книгу \*<input/u);
+  assert.match(librarianUi,/new URL\("\/suggest-book", window\.location\.origin\)/u);assert.match(librarianUi,/QRCodeWriter/u);
+  assert.match(librarianUi,/Копіювати QR-код/u);assert.match(librarianUi,/Завантажити QR/u);assert.match(librarianUi,/Друкувати QR/u);
+  assert.doesNotMatch(librarianUi,/api\.qrserver|chart\.googleapis/iu);assert.match(librarianCss,/acquisition-student-qr-print/u);assert.match(librarianCss,/@page\{size:A4 portrait/u);
 });

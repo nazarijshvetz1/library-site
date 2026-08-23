@@ -148,6 +148,13 @@
       "when": 1787486091171,
       "tag": "0020_pretty_squadron_sinister",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1787501278298,
+      "tag": "0021_optional_student_acquisition_metadata",
+      "breakpoints": true
     }
   ]
 }

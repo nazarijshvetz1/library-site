@@ -25,6 +25,7 @@ const migrationFiles = [
   "drizzle/0018_yielding_skaar.sql",
   "drizzle/0019_kindly_wolfsbane.sql",
   "drizzle/0020_pretty_squadron_sinister.sql",
+  "drizzle/0021_optional_student_acquisition_metadata.sql",
 ];
 
 async function migratedDatabase() {
@@ -35,6 +36,36 @@ async function migratedDatabase() {
   }
   return database;
 }
+
+test("0021 keeps existing acquisition requests and child events while loosening only student metadata", async () => {
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON;");
+  for (const file of migrationFiles.slice(0, -1)) {
+    database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
+  }
+  const now = "2026-08-23T10:00:00.000Z";
+  database.prepare(`INSERT INTO users (id,full_name,sort_name,email,auth_user_id,role,status,created_at,updated_at)
+    VALUES ('USR-ACQ-TEACHER','Учитель','учитель',NULL,NULL,'teacher','active',?,?)`).run(now, now);
+  database.prepare(`INSERT INTO academic_years (id,label,start_date,end_date,status,notes,version,created_at,updated_at)
+    VALUES ('YR-ACQ','2026/2027','2026-09-01','2027-05-31','active','',1,?,?)`).run(now, now);
+  database.prepare(`INSERT INTO acquisition_requests (
+    id,public_number,submission_key,submission_hash,requester_kind,teacher_user_id,requester_name,
+    category,source_kind,title,author,publication_year,requested_quantity,source_url,subject,target_class,
+    duplicate_key,academic_year_id,academic_year_label,submitted_at,created_at,updated_at
+  ) VALUES ('ACQ-PRE-MIGRATION','ACQ-OLD','teacher:old','${"a".repeat(64)}','teacher','USR-ACQ-TEACHER','Учитель',
+    'educational','manual','Алгебра','Автор',2024,2,'https://example.test/book','Математика','7-А',
+    'text:алгебра|автор|2024','YR-ACQ','2026/2027',?,?,?)`).run(now, now, now);
+  database.prepare(`INSERT INTO acquisition_request_events (id,request_id,actor_user_id,actor_kind,kind,from_status,to_status,metadata_json,created_at)
+    VALUES ('AQE-PRE-MIGRATION','ACQ-PRE-MIGRATION','USR-ACQ-TEACHER','teacher','submitted',NULL,'submitted','{}',?)`).run(now);
+
+  database.exec(await readFile(new URL("../drizzle/0021_optional_student_acquisition_metadata.sql", import.meta.url), "utf8"));
+  assert.equal(database.prepare("SELECT COUNT(*) count FROM acquisition_requests WHERE id='ACQ-PRE-MIGRATION'").get().count, 1);
+  assert.equal(database.prepare("SELECT COUNT(*) count FROM acquisition_request_events WHERE request_id='ACQ-PRE-MIGRATION'").get().count, 1);
+  assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+  const yearColumn = database.prepare("SELECT * FROM pragma_table_info('acquisition_requests') WHERE name='publication_year'").get();
+  assert.equal(yearColumn.notnull, 0);
+  database.close();
+});
 
 async function databaseBeforeConditionNormalization() {
   const database = new DatabaseSync(":memory:");
