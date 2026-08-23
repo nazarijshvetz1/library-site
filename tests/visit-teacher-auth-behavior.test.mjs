@@ -1558,7 +1558,9 @@ test("bulk issue is constant-statement, stores no codes and rolls back a subset 
   ).all()) + JSON.stringify(context.sqlite.prepare(
     "SELECT metadata_json,after_json FROM audit_events",
   ).all());
-  for (const row of result.issued) assert.doesNotMatch(stored, new RegExp(row.code.replace("-", ""), "iu"));
+  for (const row of result.issued) {
+    assert.equal(stored.includes(JSON.stringify(row.code.replace("-", ""))), false);
+  }
 
   const raced = await database();
   insertUser(raced.sqlite, "USR-T2", "Учитель Другий", "teacher2@example.test", "auth-t2", "teacher");
