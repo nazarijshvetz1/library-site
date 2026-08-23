@@ -4,6 +4,8 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 const store = await import("../lib/location-registry-store.ts");
+const academic = await import("../lib/academic-admin-store.ts");
+const academicValidation = await import("../lib/academic-admin-validation.ts");
 
 const migrationFiles = [
   "0000_librarian_drafts.sql", "0001_draft_workflow.sql", "0002_remove_legacy_audit_triggers.sql",
@@ -100,6 +102,47 @@ test("cabinet create, edit, close and delete are audited and version-safe", asyn
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS total FROM locations WHERE id=?").get(closed.id).total, 0);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS total FROM audit_events WHERE entity_type='location'").get().total, 4);
   assert.deepEqual(sqlite.prepare("PRAGMA foreign_key_check").all(), []);
+});
+
+test("a newly created UUID cabinet can be assigned to a class", async () => {
+  const { sqlite, db, user } = await context();
+  const cabinet = await store.createManagedLocation(db, user, {
+    requestId: crypto.randomUUID(), name: "Кабінет № 302", isPublic: true, sortOrder: 302,
+  });
+  const now = "2026-08-22T09:05:00.000Z";
+  sqlite.prepare(`INSERT INTO academic_years(
+    id,label,start_date,end_date,status,notes,version,created_at,updated_at
+  ) VALUES('YR-2026-2027','2026/2027','2026-09-01','2027-05-31','active','',1,?,?)`).run(now, now);
+  sqlite.prepare(`INSERT INTO cohorts(id,status,notes,created_at,updated_at)
+    VALUES('COH-001','active','',?,?)`).run(now, now);
+  sqlite.prepare(`INSERT INTO class_years(
+    id,academic_year_id,cohort_id,class_name,grade,code,teacher_user_id,location_id,
+    start_date,end_date,status,actual_closed_date,notes,version,created_at,updated_at
+  ) VALUES(
+    'CY-2026-001','YR-2026-2027','COH-001','1-А',1,'А',NULL,NULL,
+    '2026-09-01','2027-05-31','active',NULL,'',1,?,?
+  )`).run(now, now);
+
+  const validated = academicValidation.validateClassYearUpdateInput({
+    requestId: crypto.randomUUID(),
+    expectedVersion: 1,
+    reason: "Призначення кабінету",
+    changes: { locationId: cabinet.id },
+  });
+  assert.equal(validated.ok, true);
+  assert.equal(validated.value.changes.locationId, cabinet.id);
+
+  const updated = await academic.updateClassYearDirect(
+    user,
+    "CY-2026-001",
+    validated.value,
+    db,
+  );
+  assert.equal(updated.version, 2);
+  assert.equal(
+    sqlite.prepare("SELECT location_id FROM class_years WHERE id='CY-2026-001'").get().location_id,
+    cabinet.id,
+  );
 });
 
 test("library and cabinets with inventory history cannot be removed", async () => {

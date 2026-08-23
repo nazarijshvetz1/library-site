@@ -81,7 +81,7 @@ const ACADEMIC_YEAR_LABEL_RE = /^(20\d{2})\/(20\d{2})$/u;
 const CLASS_YEAR_ID_RE = /^CY-20\d{2}-\d{3,}$/u;
 const COHORT_ID_RE = /^COH-\d{3,}$/u;
 const USER_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
-const LOCATION_ID_RE = /^LOC-\d{3,}$/u;
+const LOCATION_ID_RE = /^LOC-[A-Za-z0-9][A-Za-z0-9._:-]{0,123}$/u;
 const CLASS_CODE_RE = /^[\p{L}\p{N}().'_-]{1,16}$/u;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/u;
 
@@ -471,7 +471,12 @@ function readNullablePattern(
   errors: Record<string, string>,
 ): string | null {
   if (value === null || value === undefined || value === "") return null;
-  return readPatternText(value, pattern, key, message, errors).toUpperCase();
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized || !pattern.test(normalized)) {
+    errors[key] = message;
+    return null;
+  }
+  return normalized;
 }
 
 function readNullableUserId(
