@@ -66,10 +66,13 @@ type ActionEnvelope = {
   credential: TeacherCredential;
 };
 
+type ActivationInvitePurpose = "registration" | "pin_reset";
+
 type ActivationInvite = {
   teacherId: string;
   fullName: string;
   inviteId: string;
+  purpose: ActivationInvitePurpose;
   linkUrl: string;
   expiresAt: string;
 };
@@ -78,6 +81,7 @@ type InviteEnvelope = {
   success: true;
   inviteId: string;
   teacher: { id: string; fullName: string };
+  purpose: ActivationInvitePurpose;
   linkUrl: string;
   expiresAt: string;
 };
@@ -210,7 +214,10 @@ export default function TeacherAccessAdmin({
   }
 
   async function createTelegramInvite(teacher: TeacherAccessRow) {
-    if (!teacher.credential) return;
+    const purpose: ActivationInvitePurpose = teacher.credential ? "pin_reset" : "registration";
+    if (purpose === "pin_reset" && !window.confirm(
+      `Створити одноразовий QR для заміни PIN учителя ${teacher.fullName}? Чинний PIN працюватиме до успішної заміни. Після неї старий PIN і попередні сеанси буде скасовано.`,
+    )) return;
     setBusyAction(`telegram-invite:${teacher.id}`);
     setNotice("");
     setClipboardNotice("");
@@ -221,7 +228,7 @@ export default function TeacherAccessAdmin({
           method: "POST",
           body: JSON.stringify({
             requestId: crypto.randomUUID(),
-            expectedCredentialVersion: teacher.credential.version,
+            expectedCredentialVersion: teacher.credential?.version ?? 0,
           }),
         },
       );
@@ -229,10 +236,13 @@ export default function TeacherAccessAdmin({
         teacherId: result.teacher.id,
         fullName: result.teacher.fullName,
         inviteId: result.inviteId,
+        purpose: result.purpose,
         linkUrl: result.linkUrl,
         expiresAt: result.expiresAt,
       });
-      setNotice("Персональне Telegram-запрошення створено. Воно діє 30 хвилин і лише один раз.");
+      setNotice(result.purpose === "registration"
+        ? "QR-реєстрацію створено. Вона діє 10 хвилин і лише один раз."
+        : "QR-відновлення PIN створено. Воно діє 10 хвилин і лише один раз.");
       setNoticeTone("success");
       await load(true);
     } catch (error) {
@@ -496,14 +506,16 @@ export default function TeacherAccessAdmin({
                     {(teacher.credential?.activeSessions ?? 0) > 0 ? (
                       <button type="button" onClick={() => void updateCredential(teacher, "revoke_sessions")} disabled={!canWrite}>Завершити сеанси</button>
                     ) : null}
-                    {teacher.credential && !teacher.telegram.connected && !teacher.telegram.activeInviteId ? (
+                    {!teacher.telegram.activeInviteId ? (
                       <button type="button" onClick={() => void createTelegramInvite(teacher)} disabled={!canWrite}>
-                        {busyAction === `telegram-invite:${teacher.id}` ? "Створюємо…" : "QR-запрошення"}
+                        {busyAction === `telegram-invite:${teacher.id}`
+                          ? "Створюємо…"
+                          : teacher.credential ? "QR-відновлення PIN" : "QR-реєстрація"}
                       </button>
                     ) : null}
                     {teacher.telegram.activeInviteId ? (
                       <button type="button" onClick={() => void revokeTelegramInvite(teacher)} disabled={!canWrite}>
-                        {busyAction === `telegram-revoke:${teacher.id}` ? "Відкликаємо…" : "Відкликати QR"}
+                        {busyAction === `telegram-revoke:${teacher.id}` ? "Скасовуємо…" : "Скасувати QR"}
                       </button>
                     ) : null}
                     {teacher.telegram.connected ? (
@@ -577,6 +589,9 @@ function TelegramInviteDialog({
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [copyNotice, setCopyNotice] = useState("");
+  const [remainingSeconds, setRemainingSeconds] = useState(() => inviteRemainingSeconds(invite.expiresAt));
+  const registration = invite.purpose === "registration";
+  const expired = remainingSeconds <= 0;
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -596,6 +611,13 @@ function TelegramInviteDialog({
     drawQrCode(canvas, invite.linkUrl);
   }, [canvasId, invite.linkUrl]);
 
+  useEffect(() => {
+    const update = () => setRemainingSeconds(inviteRemainingSeconds(invite.expiresAt));
+    update();
+    const timer = window.setInterval(update, 1_000);
+    return () => window.clearInterval(timer);
+  }, [invite.expiresAt]);
+
   async function copyInvite() {
     const copied = await copyTextWithFallback(invite.linkUrl);
     setCopyNotice(copied
@@ -608,7 +630,7 @@ function TelegramInviteDialog({
     if (!canvas) return;
     const link = document.createElement("a");
     link.href = canvas.toDataURL("image/png");
-    link.download = `telegram-запрошення-${safeFilePart(invite.fullName)}.png`;
+    link.download = `${registration ? "qr-реєстрація" : "qr-відновлення-pin"}-${safeFilePart(invite.fullName)}.png`;
     link.click();
   }
 
@@ -624,17 +646,30 @@ function TelegramInviteDialog({
     >
       <section className={styles.inviteDialog}>
         <div className={styles.dialogHeading}>
-          <div><span>Одноразовий доступ</span><h3 id={`${canvasId}-title`}>Особисте запрошення</h3></div>
+          <div>
+            <span>Одноразовий доступ</span>
+            <h3 id={`${canvasId}-title`}>{registration ? "QR-реєстрація вчителя" : "QR-відновлення PIN"}</h3>
+          </div>
           <button ref={closeButtonRef} type="button" onClick={onClose} disabled={busy} aria-label="Закрити"><SiteIcon name="close" size={18} /></button>
         </div>
         <p>Для: <strong>{invite.fullName}</strong></p>
-        <canvas id={canvasId} className={styles.qrCanvas} width="280" height="280" aria-label="QR-код персонального Telegram-запрошення" />
+        <p className={styles.inviteInstruction}>
+          Покажіть QR цьому вчителю. Після сканування він одразу створить або замінить власний 4-значний PIN — тимчасовий код не потрібен.
+        </p>
+        <canvas id={canvasId} className={styles.qrCanvas} width="280" height="280" aria-label={registration ? "QR-код реєстрації вчителя" : "QR-код відновлення PIN"} />
+        <p className={`${styles.inviteCountdown} ${expired ? styles.inviteExpired : ""}`} role="timer" aria-live="polite">
+          {expired ? "Строк дії QR завершився" : `Залишилося ${formatInviteCountdown(remainingSeconds)}`}
+        </p>
         <p className={styles.inviteWarning}>Діє до {formatDateTime(invite.expiresAt)}, лише один раз. Передайте QR або посилання тільки цьому вчителю.</p>
         <div className={styles.dialogActions}>
-          <a href={invite.linkUrl} target="_blank" rel="noreferrer">Відкрити в Telegram</a>
-          <button type="button" onClick={() => void copyInvite()} disabled={busy}>Копіювати посилання</button>
-          <button type="button" onClick={downloadQr} disabled={busy}>Завантажити QR</button>
-          <button className={styles.dangerButton} type="button" onClick={onRevoke} disabled={busy}>Відкликати</button>
+          {expired ? (
+            <span aria-disabled="true">Відкрити в Telegram</span>
+          ) : (
+            <a href={invite.linkUrl} target="_blank" rel="noreferrer">Відкрити в Telegram</a>
+          )}
+          <button type="button" onClick={() => void copyInvite()} disabled={busy || expired}>Копіювати посилання</button>
+          <button type="button" onClick={downloadQr} disabled={busy || expired}>Завантажити QR</button>
+          <button className={styles.dangerButton} type="button" onClick={onRevoke} disabled={busy}>Скасувати QR</button>
         </div>
         <p className={styles.clipboardNotice} role="status" aria-live="polite">{copyNotice}</p>
       </section>
@@ -719,6 +754,18 @@ function formatDateTime(value: string): string {
     dateStyle: "short",
     timeStyle: "short",
   }).format(date);
+}
+
+function inviteRemainingSeconds(expiresAt: string): number {
+  const expiresAtMs = Date.parse(expiresAt);
+  if (!Number.isFinite(expiresAtMs)) return 0;
+  return Math.max(0, Math.ceil((expiresAtMs - Date.now()) / 1_000));
+}
+
+function formatInviteCountdown(seconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  return `${String(minutes).padStart(2, "0")}:${String(safeSeconds % 60).padStart(2, "0")}`;
 }
 
 function pluralCode(count: number): string {

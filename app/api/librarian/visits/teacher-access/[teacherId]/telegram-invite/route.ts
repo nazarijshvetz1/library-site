@@ -31,7 +31,7 @@ export async function POST(
   if (!exactBodyKeys(body.value, ["requestId", "expectedCredentialVersion"])
     || !validRequestId(body.value.requestId)
     || !Number.isSafeInteger(body.value.expectedCredentialVersion)
-    || Number(body.value.expectedCredentialVersion) < 1) {
+    || Number(body.value.expectedCredentialVersion) < 0) {
     return visitError(400, "validation_failed", "Перевірте версію доступу.");
   }
   try {

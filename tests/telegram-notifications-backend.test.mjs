@@ -177,6 +177,66 @@ test("group start never consumes the token", async () => {
   context.sqlite.close();
 });
 
+test("personal QR creates an atomic QR-only pending credential for an unregistered teacher", async () => {
+  const context = await database();
+  const requestId = crypto.randomUUID();
+  const linkNow = new Date();
+  const created = await telegram.createTelegramTeacherActivationInvite(
+    context.db,
+    { id: "USR-LIB", email: "library@example.test" },
+    "USR-TEACHER",
+    { requestId, expectedCredentialVersion: 0 },
+    { now: linkNow, randomBytes: new Uint8Array(32).fill(8) },
+  );
+
+  assert.equal(created.purpose, "registration");
+  assert.equal(new Date(created.expiresAt).getTime() - linkNow.getTime(), 10 * 60 * 1000);
+  const rawToken = new URL(created.linkUrl).searchParams.get("start");
+  const credential = context.sqlite.prepare(`SELECT login_id,code_hmac,must_change_pin,status,version,
+    code_expires_at,last_access_command_id FROM visit_teacher_credentials WHERE teacher_user_id='USR-TEACHER'`).get();
+  assert.match(credential.login_id, /^qr_[0-9a-f]{64}$/u);
+  assert.match(credential.code_hmac, /^[0-9a-f]{64}$/u);
+  assert.notEqual(credential.code_hmac, rawToken);
+  assert.deepEqual(
+    {
+      must_change_pin: credential.must_change_pin,
+      status: credential.status,
+      version: credential.version,
+      code_expires_at: credential.code_expires_at,
+      last_access_command_id: credential.last_access_command_id,
+    },
+    {
+      must_change_pin: 1,
+      status: "active",
+      version: 1,
+      code_expires_at: created.expiresAt,
+      last_access_command_id: requestId,
+    },
+  );
+  const invite = context.sqlite.prepare(`SELECT credential_version,token_hash FROM telegram_teacher_activation_invites
+    WHERE id=?`).get(created.inviteId);
+  assert.equal(invite.credential_version, 1);
+  assert.match(invite.token_hash, /^[0-9a-f]{64}$/u);
+  assert.notEqual(invite.token_hash, rawToken);
+
+  await assert.rejects(
+    telegram.createTelegramTeacherActivationInvite(
+      context.db,
+      { id: "USR-LIB", email: "library@example.test" },
+      "USR-TEACHER",
+      { requestId: crypto.randomUUID(), expectedCredentialVersion: 0 },
+      { now: linkNow, randomBytes: new Uint8Array(32).fill(7) },
+    ),
+    (error) => error instanceof telegram.TelegramIntegrationError
+      && error.code === "credential_version_conflict",
+  );
+  assert.equal(context.sqlite.prepare(`SELECT COUNT(*) AS n FROM visit_teacher_credentials
+    WHERE teacher_user_id='USR-TEACHER'`).get().n, 1);
+  assert.equal(context.sqlite.prepare(`SELECT COUNT(*) AS n FROM telegram_teacher_activation_invites
+    WHERE teacher_user_id='USR-TEACHER'`).get().n, 1);
+  context.sqlite.close();
+});
+
 test("personal teacher activation invite stores only a digest and binds to one private Telegram", async () => {
   const context = await database();
   addTeacherCredential(context);
@@ -192,6 +252,8 @@ test("personal teacher activation invite stores only a digest and binds to one p
   const rawToken = new URL(created.linkUrl).searchParams.get("start");
   assert.match(rawToken, /^ta_[A-Za-z0-9_-]{43}$/u);
   assert.equal(created.teacher.fullName, "Шевченко Олена");
+  assert.equal(created.purpose, "registration");
+  assert.equal(new Date(created.expiresAt).getTime() - linkNow.getTime(), 10 * 60 * 1000);
   const stored = context.sqlite.prepare(`SELECT token_hash,request_id,bound_telegram_user_id
     FROM telegram_teacher_activation_invites WHERE id=?`).get(created.inviteId);
   assert.match(stored.token_hash, /^[0-9a-f]{64}$/u);
@@ -220,6 +282,10 @@ test("personal teacher activation invite stores only a digest and binds to one p
   assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM telegram_connections").get().n, 0);
   const message = bodies.find((body) => body.text);
   assert.match(message.text, /Шевченко Олена/u);
+  assert.match(message.text, /QR підтверджено/u);
+  assert.match(message.text, /Тимчасовий код не потрібен/u);
+  assert.doesNotMatch(message.text, /введіть тимчасовий код/u);
+  assert.equal(message.reply_markup.inline_keyboard[0][0].text, "✨ Створити PIN");
   assert.equal(message.reply_markup.inline_keyboard[0][0].web_app.url,
     "https://library.example.test/teacher/telegram?mode=activate");
   assert.deepEqual(await telegram.processTelegramWebhookUpdate(
@@ -247,6 +313,84 @@ test("personal teacher activation invite stores only a digest and binds to one p
   ), { inviteId: second.inviteId, revoked: true });
   assert.ok(context.sqlite.prepare("SELECT revoked_at FROM telegram_teacher_activation_invites WHERE id=?")
     .get(second.inviteId).revoked_at);
+  context.sqlite.close();
+});
+
+test("personal PIN-reset QR permits same-teacher Telegram rebind but rejects a Telegram bound to another teacher", async () => {
+  const context = await database();
+  addTeacherCredential(context, 4);
+  context.sqlite.prepare(`UPDATE visit_teacher_credentials SET must_change_pin=0,code_expires_at=NULL
+    WHERE teacher_user_id='USR-TEACHER'`).run();
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-TEACHER','7001','7001','old_teacher','active',1,1,1,?,NULL,?,?)`)
+    .run(context.now, context.now, context.now);
+
+  const created = await telegram.createTelegramTeacherActivationInvite(
+    context.db,
+    { id: "USR-LIB", email: "library@example.test" },
+    "USR-TEACHER",
+    { requestId: crypto.randomUUID(), expectedCredentialVersion: 4 },
+    { now: new Date(), randomBytes: new Uint8Array(32).fill(11) },
+  );
+  assert.equal(created.purpose, "pin_reset");
+  const rawToken = new URL(created.linkUrl).searchParams.get("start");
+  const payload = {
+    update_id: 110,
+    message: { text: `/start ${rawToken}`, chat: { id: 7102, type: "private" }, from: { id: 7102, username: "new_phone" } },
+  };
+  const bodies = [];
+  assert.deepEqual(await telegram.processTelegramWebhookUpdate(
+    context.db,
+    JSON.stringify(payload),
+    payload,
+    async (_url, init) => { bodies.push(JSON.parse(init.body)); return telegramOk(73); },
+    "https://library.example.test",
+  ), { outcome: "activation_invite_claimed", duplicate: false });
+  assert.equal(context.sqlite.prepare(`SELECT bound_telegram_user_id FROM telegram_teacher_activation_invites
+    WHERE id=?`).get(created.inviteId).bound_telegram_user_id, "7102");
+  assert.equal(context.sqlite.prepare(`SELECT COUNT(*) AS n FROM telegram_connections
+    WHERE user_id='USR-TEACHER' AND telegram_user_id='7001' AND status='active'`).get().n, 1);
+  const message = bodies.find((body) => body.text);
+  assert.match(message.text, /QR підтверджено/u);
+  assert.match(message.text, /Чинний PIN не потрібен/u);
+  assert.equal(message.reply_markup.inline_keyboard[0][0].text, "🔐 Замінити PIN");
+  assert.equal(message.reply_markup.inline_keyboard[0][0].web_app.url,
+    "https://library.example.test/teacher/telegram?mode=activate");
+
+  context.sqlite.prepare(`INSERT INTO users
+    (id,full_name,sort_name,email,auth_user_id,role,status,created_at,updated_at)
+    VALUES ('USR-OTHER','Інший Учитель','Інший Учитель',NULL,NULL,'teacher','active',?,?)`)
+    .run(context.now, context.now);
+  context.sqlite.prepare(`INSERT INTO teacher_profiles (teacher_user_id,created_at,updated_at)
+    VALUES ('USR-OTHER',?,?)`).run(context.now, context.now);
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-OTHER','7200','7200','other_teacher','active',1,1,1,?,NULL,?,?)`)
+    .run(context.now, context.now, context.now);
+  const conflicting = await telegram.createTelegramTeacherActivationInvite(
+    context.db,
+    { id: "USR-LIB", email: "library@example.test" },
+    "USR-TEACHER",
+    { requestId: crypto.randomUUID(), expectedCredentialVersion: 4 },
+    { now: new Date(), randomBytes: new Uint8Array(32).fill(12) },
+  );
+  const conflictToken = new URL(conflicting.linkUrl).searchParams.get("start");
+  const conflictPayload = {
+    update_id: 111,
+    message: { text: `/start ${conflictToken}`, chat: { id: 7200, type: "private" }, from: { id: 7200, username: "other_teacher" } },
+  };
+  assert.deepEqual(await telegram.processTelegramWebhookUpdate(
+    context.db,
+    JSON.stringify(conflictPayload),
+    conflictPayload,
+    async () => telegramOk(74),
+    "https://library.example.test",
+  ), { outcome: "activation_invite_conflict", duplicate: false });
+  assert.equal(context.sqlite.prepare(`SELECT bound_telegram_user_id FROM telegram_teacher_activation_invites
+    WHERE id=?`).get(conflicting.inviteId).bound_telegram_user_id, null);
   context.sqlite.close();
 });
 

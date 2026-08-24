@@ -326,7 +326,7 @@ test("Telegram Mini App launch is bounded, signed server-side and returns to cha
   assert.match(page, /returnToChat=\{launchMode !== null\}/u);
   assert.match(page, /robots: \{ index: false, follow: false \}/u);
   assert.match(launch, /window\.Telegram\?\.WebApp/u);
-  assert.match(launch, /pinDiffersFromCode = pinStatus\.complete && normalizedPin !== normalizedCode/u);
+  assert.match(launch, /pinDiffersFromCode = !requiresCode \|\| \(pinStatus\.complete && normalizedPin !== normalizedCode\)/u);
   assert.match(launch, /webApp\.initData/u);
   assert.doesNotMatch(launch, /initDataUnsafe/u);
   assert.doesNotMatch(launch, /fetch\("\/api\/teacher\/session"/u);
@@ -345,6 +345,13 @@ test("Telegram Mini App launch is bounded, signed server-side and returns to cha
   assert.match(launch, /🔑 Увійти/u);
   assert.match(launch, /✨ Активувати вперше/u);
   assert.match(launch, /Створіть власний 4-значний PIN/u);
+  assert.match(launch, /const requiresCode = activation\.requiresCode/u);
+  assert.match(launch, /requiresCode \? <div className=\{styles\.fieldGroup\}/u);
+  assert.match(launch, /code: requiresCode \? normalizedCode : ""/u);
+  assert.match(launch, /QR підтвердив особу/u);
+  assert.match(launch, /Тимчасовий код не потрібен/u);
+  assert.match(launch, /activation\.purpose === "pin_reset" \? "Замінити PIN" : "Створити PIN"/u);
+  assert.match(launch, /Завершити реєстрацію/u);
   assert.match(launch, /Можна використати будь-які 4 цифри, але новий PIN має відрізнятися/u);
   assert.match(launch, /aria-describedby=\{`\$\{listId\}-code-help`\}/u);
   assert.match(launch, /Введіть рівно 4 цифри чинного PIN/u);
@@ -360,6 +367,7 @@ test("Telegram Mini App launch is bounded, signed server-side and returns to cha
   assert.match(route, /createVisitTeacherTelegramSession/u);
   assert.doesNotMatch(route, /returnToChat|refreshConnectedTeacherTelegramMenu|menuRefreshed/u);
   assert.match(route, /onboardingRequired: true/u);
+  assert.match(route, /purpose: result\.purpose/u);
   assert.match(route, /onboardingRequired: false/u);
   assert.match(route, /isSameOriginRequest\(request\)/u);
   assert.match(route, /telegramTeacherSessionCookie\(result\.token\)/u);

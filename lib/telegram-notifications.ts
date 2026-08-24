@@ -21,6 +21,7 @@ export type TelegramNotificationCategory = "orders" | "visits" | "system";
 export type TelegramFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 const TELEGRAM_LINK_TOKEN_SECONDS = 10 * 60;
+const TELEGRAM_TEACHER_PERSONAL_ACTIVATION_SECONDS = 10 * 60;
 const TELEGRAM_TEACHER_ACTIVATION_SECONDS = 30 * 60;
 const TELEGRAM_DELIVERY_LEASE_SECONDS = 45;
 const TELEGRAM_MAX_ATTEMPTS = 8;
@@ -231,28 +232,40 @@ export async function createTelegramTeacherActivationInvite(
   teacherUserId: string,
   input: { requestId: string; expectedCredentialVersion: number },
   options: { now?: Date; randomBytes?: Uint8Array } = {},
-): Promise<{ inviteId: string; teacher: { id: string; fullName: string }; linkUrl: string; expiresAt: string }> {
+): Promise<{
+  inviteId: string;
+  teacher: { id: string; fullName: string };
+  purpose: "registration" | "pin_reset";
+  linkUrl: string;
+  expiresAt: string;
+}> {
   const configuration = requireLinkingConfiguration();
   const nowDate = options.now ?? new Date();
   const now = nowDate.toISOString();
   const teacher = await db.prepare(`
-    SELECT u.id,u.full_name,c.version,c.status,c.locked_until
+    SELECT u.id,u.full_name,c.version,c.status,c.locked_until,c.must_change_pin
     FROM users u
     JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
-    JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id
+    LEFT JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id
     WHERE u.id=? AND u.status='active' LIMIT 1
   `).bind(teacherUserId).first<{
-    id: string; full_name: string; version: number; status: string; locked_until: string | null;
+    id: string;
+    full_name: string;
+    version: number | null;
+    status: string | null;
+    locked_until: string | null;
+    must_change_pin: number | null;
   }>();
   if (!teacher) {
     throw new TelegramIntegrationError(
-      "teacher_credential_required",
-      409,
-      "Спочатку створіть учителю тимчасовий код доступу.",
+      "teacher_not_found",
+      404,
+      "Активного вчителя не знайдено.",
       { permanent: true },
     );
   }
-  if (teacher.status !== "active") {
+  const currentCredentialVersion = teacher.version === null ? 0 : Number(teacher.version);
+  if (teacher.status !== null && teacher.status !== "active") {
     throw new TelegramIntegrationError("teacher_access_disabled", 409, "Доступ учителя вимкнено.", {
       permanent: true,
     });
@@ -262,7 +275,7 @@ export async function createTelegramTeacherActivationInvite(
       permanent: true,
     });
   }
-  if (Number(teacher.version) !== input.expectedCredentialVersion) {
+  if (currentCredentialVersion !== input.expectedCredentialVersion) {
     throw new TelegramIntegrationError(
       "credential_version_conflict",
       409,
@@ -277,12 +290,46 @@ export async function createTelegramTeacherActivationInvite(
   const inviteId = `TGA-${crypto.randomUUID()}`;
   const token = `ta_${base64Url(bytes)}`;
   const tokenHash = await sha256Hex(token);
-  const expiresAt = new Date(nowDate.getTime() + TELEGRAM_TEACHER_ACTIVATION_SECONDS * 1000).toISOString();
+  const pendingLoginId = `qr_${tokenHash}`;
+  const pendingCredentialSecret = crypto.getRandomValues(new Uint8Array(32));
+  // This digest is intentionally not derived with the teacher-auth pepper and
+  // its random preimage is never persisted. It therefore cannot be presented
+  // as a valid 4-digit code and only satisfies the credential-row invariant
+  // until the bound teacher chooses a PIN.
+  const pendingCodeHmac = await sha256Hex(`qr-only-pending:${base64Url(pendingCredentialSecret)}`);
+  const expiresAt = new Date(nowDate.getTime() + TELEGRAM_TEACHER_PERSONAL_ACTIVATION_SECONDS * 1000).toISOString();
+  const purpose = currentCredentialVersion === 0 || Boolean(teacher.must_change_pin)
+    ? "registration" as const
+    : "pin_reset" as const;
   try {
     await db.batch([
       db.prepare(`UPDATE telegram_teacher_activation_invites SET revoked_at=?,updated_at=?
         WHERE teacher_user_id=? AND kind='personal' AND consumed_at IS NULL
           AND revoked_at IS NULL`).bind(now, now, teacherUserId),
+      db.prepare(`
+        INSERT INTO visit_teacher_credentials (
+          teacher_user_id,login_id,code_hmac,must_change_pin,status,version,failed_attempts,
+          failure_window_started_at,locked_until,last_login_at,code_rotated_at,code_expires_at,
+          last_access_command_id,created_by_user_id,updated_by_user_id,created_at,updated_at
+        )
+        SELECT u.id,?,?,1,'active',1,0,NULL,NULL,NULL,?,?,?,actor.id,actor.id,?,?
+        FROM users u
+        JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+        JOIN users actor ON actor.id=? AND actor.status='active' AND actor.role IN ('admin','librarian')
+        WHERE u.id=? AND u.status='active' AND ?=0
+          AND NOT EXISTS (SELECT 1 FROM visit_teacher_credentials c WHERE c.teacher_user_id=u.id)
+      `).bind(
+        pendingLoginId,
+        pendingCodeHmac,
+        now,
+        expiresAt,
+        input.requestId,
+        now,
+        now,
+        actor.id,
+        teacherUserId,
+        input.expectedCredentialVersion,
+      ),
       db.prepare(`
         INSERT INTO telegram_teacher_activation_invites (
           id,kind,teacher_user_id,credential_version,token_hash,issued_by_user_id,request_id,
@@ -293,13 +340,22 @@ export async function createTelegramTeacherActivationInvite(
         FROM users u
         JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
         JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id
-        WHERE u.id=? AND u.status='active' AND c.status='active' AND c.version=?
+        WHERE u.id=? AND u.status='active' AND c.status='active'
+          AND ((?>0 AND c.version=?) OR (?=0 AND c.version=1
+            AND c.code_hmac=? AND c.last_access_command_id=?))
           AND (c.locked_until IS NULL OR c.locked_until<=?)
           AND EXISTS (SELECT 1 FROM users actor WHERE actor.id=? AND actor.status='active'
             AND actor.role IN ('admin','librarian'))
       `).bind(
         inviteId, tokenHash, actor.id, input.requestId, expiresAt, now, now,
-        teacherUserId, input.expectedCredentialVersion, now, actor.id,
+        teacherUserId,
+        input.expectedCredentialVersion,
+        input.expectedCredentialVersion,
+        input.expectedCredentialVersion,
+        pendingCodeHmac,
+        input.requestId,
+        now,
+        actor.id,
       ),
       db.prepare(`INSERT INTO audit_events (
         id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,
@@ -310,7 +366,7 @@ export async function createTelegramTeacherActivationInvite(
           WHERE i.id=? AND i.teacher_user_id=? AND i.request_id=?
             AND i.revoked_at IS NULL AND i.consumed_at IS NULL) THEN ? ELSE NULL END,
         ?,NULL,NULL,
-        json_object('teacherUserId',?,'credentialVersion',?,'expiresAt',?),?)`)
+        json_object('teacherUserId',?,'credentialVersion',?,'purpose',?,'expiresAt',?),?)`)
         .bind(
           `AUD-${crypto.randomUUID()}`,
           actor.id,
@@ -321,7 +377,8 @@ export async function createTelegramTeacherActivationInvite(
           inviteId,
           input.requestId,
           teacherUserId,
-          input.expectedCredentialVersion,
+          input.expectedCredentialVersion === 0 ? 1 : input.expectedCredentialVersion,
+          purpose,
           expiresAt,
           now,
         ),
@@ -349,6 +406,7 @@ export async function createTelegramTeacherActivationInvite(
   return {
     inviteId,
     teacher: { id: teacher.id, fullName: teacher.full_name },
+    purpose,
     linkUrl: `https://t.me/${configuration.botUsername}?start=${token}`,
     expiresAt,
   };
@@ -1180,17 +1238,11 @@ async function processTeacherActivationInviteStart(
   }
   const conflict = await db.prepare(`
     SELECT user_id FROM telegram_connections
-    WHERE status='active' AND (
-      ((chat_id=? OR telegram_user_id=?) AND user_id!=?)
-      OR (user_id=? AND (chat_id!=? OR telegram_user_id!=?))
-    ) LIMIT 1
+    WHERE status='active' AND (chat_id=? OR telegram_user_id=?) AND user_id!=? LIMIT 1
   `).bind(
     update.message.chatId,
     update.message.telegramUserId,
     invite.teacher_user_id,
-    invite.teacher_user_id,
-    update.message.chatId,
-    update.message.telegramUserId,
   ).first<{ user_id: string }>();
   if (conflict) {
     const inserted = await insertWebhookReceipt(db, update.updateId, payloadHash, "activation_invite_conflict");
@@ -1931,16 +1983,16 @@ async function bestEffortTeacherOnboardingMenu(
       : "Вітаємо в «Єдиній бібліотеці»!";
     const instructions = invitedTeacherName
       ? invitedRequiresNewPin
-        ? "Відкрийте захищене вікно нижче, введіть тимчасовий код бібліотекаря та створіть PIN."
-        : "Відкрийте захищене вікно нижче та увійдіть зі своїм чинним PIN."
+        ? "QR підтверджено. Відкрийте захищене вікно нижче та створіть особистий PIN. Тимчасовий код не потрібен."
+        : "QR підтверджено. Відкрийте захищене вікно нижче та замініть особистий PIN. Чинний PIN не потрібен."
       : "Якщо кабінет уже активовано — увійдіть зі своїм PIN. Для першого входу виберіть активацію та введіть тимчасовий код бібліотекаря.";
     const warning = "Код і PIN вводьте лише в захищеному вікні — не надсилайте їх у чат.";
     const keyboard = origin ? {
       inline_keyboard: [
         ...(invitedTeacherName
           ? [[invitedRequiresNewPin
-              ? { text: "✨ Активувати вперше", web_app: { url: new URL("/teacher/telegram?mode=activate", origin).toString() } }
-              : { text: "🔑 Увійти", web_app: { url: new URL("/teacher/telegram?mode=login", origin).toString() } }]]
+              ? { text: "✨ Створити PIN", web_app: { url: new URL("/teacher/telegram?mode=activate", origin).toString() } }
+              : { text: "🔐 Замінити PIN", web_app: { url: new URL("/teacher/telegram?mode=activate", origin).toString() } }]]
           : [
               [{ text: "🔑 Увійти", web_app: { url: new URL("/teacher/telegram?mode=login", origin).toString() } }],
               [{ text: "✨ Активувати вперше", web_app: { url: new URL("/teacher/telegram?mode=activate", origin).toString() } }],

@@ -106,9 +106,18 @@ test("librarian can issue local QR invitations and atomically protect a lost pho
   ]);
   assert.match(access, /QRCodeWriter/u);
   assert.match(access, /BarcodeFormat\.QR_CODE/u);
-  assert.match(access, /QR-запрошення/u);
+  assert.match(access, /QR-реєстрація/u);
+  assert.match(access, /QR-відновлення PIN/u);
+  assert.match(access, /expectedCredentialVersion: teacher\.credential\?\.version \?\? 0/u);
+  assert.match(access, /teacher\.credential \? "QR-відновлення PIN" : "QR-реєстрація"/u);
+  assert.doesNotMatch(access, /!teacher\.telegram\.connected && !teacher\.telegram\.activeInviteId/u);
+  assert.match(access, /Чинний PIN працюватиме до успішної заміни/u);
   assert.match(access, /Копіювати посилання/u);
   assert.match(access, /Завантажити QR/u);
+  assert.match(access, /Залишилося/u);
+  assert.match(access, /role="timer"/u);
+  assert.match(access, /Скасувати QR/u);
+  assert.match(access, /тимчасовий код не потрібен/u);
   assert.match(access, /Втрачено телефон/u);
   assert.match(access, /<dialog/u);
   assert.match(access, /dialog\.showModal\(\)/u);
@@ -116,12 +125,12 @@ test("librarian can issue local QR invitations and atomically protect a lost pho
   assert.match(access, /previousFocus\?\.focus\(\)/u);
   assert.match(access, /role="status" aria-live="polite">\{copyNotice\}/u);
   assert.match(access, /Тимчасові коди для входу/u);
-  assert.match(access, /expectedCredentialVersion: teacher\.credential\.version/u);
   assert.match(access, /expectedTelegramVersion: teacher\.telegram\.version/u);
   assert.doesNotMatch(access, /api\.qrserver|chart\.googleapis|localStorage|sessionStorage/u);
   assert.match(css, /\.dialogBackdrop/u);
   assert.match(css, /\.dialogBackdrop:not\(\[open\]\)/u);
   assert.match(css, /\.qrCanvas/u);
+  assert.match(css, /\.inviteCountdown/u);
   for (const route of [inviteRoute, lostPhoneRoute]) {
     assert.match(route, /authorizeVisitTeacherAccessApi\(request\)/u);
     assert.match(route, /exactBodyKeys/u);

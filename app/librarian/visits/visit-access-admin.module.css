@@ -387,6 +387,25 @@
   box-shadow: 0 8px 26px rgba(21, 61, 40, .12);
 }
 
+.inviteInstruction {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.inviteCountdown {
+  margin: -4px 0 12px;
+  color: var(--green-800);
+  font-size: 16px;
+  font-weight: 850;
+  text-align: center;
+}
+
+.inviteExpired {
+  color: var(--danger);
+}
+
 .inviteWarning {
   padding: 12px 14px;
   border-radius: 12px;
@@ -403,6 +422,7 @@
 }
 
 .dialogActions a,
+.dialogActions span,
 .dialogActions button {
   min-height: 44px;
   padding: 10px 12px;
@@ -424,6 +444,11 @@
   border-color: #e6c4bd;
   background: #fff5f2;
   color: var(--danger);
+}
+
+.dialogActions span[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: .5;
 }
 
 @media (max-width: 760px) {

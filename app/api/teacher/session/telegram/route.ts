@@ -40,6 +40,7 @@ export async function POST(request: Request): Promise<Response> {
         onboardingRequired: true,
         activation: {
           mode: result.mode,
+          purpose: result.purpose,
           teacher: result.teacher,
           requiresCode: result.requiresCode,
           requiresNewPin: result.requiresNewPin,
