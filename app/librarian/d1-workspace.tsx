@@ -500,6 +500,7 @@ export default function D1LibrarianWorkspace({
   const [resolvedSearchScope, setResolvedSearchScope] = useState("");
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const loadMoreRequestRef = useRef(0);
   const [rubrics, setRubrics] = useState<string[]>([]);
   const [subjects, setSubjects] = useState<string[]>([]);
   const [publicationTypes, setPublicationTypes] = useState<string[]>([]);
@@ -514,10 +515,16 @@ export default function D1LibrarianWorkspace({
   const [workspaceNotice, setWorkspaceNotice] = useState("");
   const [workspaceNoticeTone, setWorkspaceNoticeTone] = useState<"error" | "success">("error");
   const [refreshToken, setRefreshToken] = useState(0);
+  const catalogRevision = `${catalogFiltersKey(filters)}\u001e${refreshToken}`;
+  const catalogRevisionRef = useRef(catalogRevision);
+  useEffect(() => {
+    catalogRevisionRef.current = catalogRevision;
+  }, [catalogRevision]);
   const [teachers, setTeachers] = useState<LibraryTeacher[]>([]);
   const [locations, setLocations] = useState<LibraryLocation[]>([]);
   const [referenceState, setReferenceState] = useState<LoadState>("loading");
   const [referenceError, setReferenceError] = useState("");
+  const [referenceRefreshToken, setReferenceRefreshToken] = useState(0);
   const [acquisitionPrefill, setAcquisitionPrefill] = useState<AcquisitionMaterialPrefill | null>(null);
   const [acquisitionReturnId, setAcquisitionReturnId] = useState("");
   const workspaceTitleRef = useRef<HTMLHeadingElement>(null);
@@ -547,6 +554,7 @@ export default function D1LibrarianWorkspace({
     const requestScope = catalogFiltersKey(filters);
     const timer = window.setTimeout(async () => {
       setSearchState("loading");
+      setLoadingMore(false);
       setSearchError("");
       try {
         const response = await apiJson<SearchEnvelope>(
@@ -602,7 +610,7 @@ export default function D1LibrarianWorkspace({
       setReferenceError(errorMessage(error));
     });
     return () => controller.abort();
-  }, []);
+  }, [referenceRefreshToken]);
 
   const selectMaterial = useCallback(
     (materialId: string) => {
@@ -667,11 +675,14 @@ export default function D1LibrarianWorkspace({
 
   async function loadMore() {
     if (!nextCursor || loadingMore) return;
+    const requestSequence = ++loadMoreRequestRef.current;
+    const requestRevision = `${catalogFiltersKey(filters)}\u001e${refreshToken}`;
     setLoadingMore(true);
     try {
       const response = await apiJson<SearchEnvelope>(
         buildCatalogSearchUrl(filters, nextCursor),
       );
+      if (requestSequence !== loadMoreRequestRef.current || catalogRevisionRef.current !== requestRevision) return;
       setItems((current) => {
         const known = new Set(current.map((item) => item.id));
         return [
@@ -681,9 +692,13 @@ export default function D1LibrarianWorkspace({
       });
       setNextCursor(response.page.nextCursor);
     } catch (error) {
-      setSearchError(errorMessage(error));
+      if (requestSequence === loadMoreRequestRef.current && catalogRevisionRef.current === requestRevision) {
+        setSearchError(errorMessage(error));
+      }
     } finally {
-      setLoadingMore(false);
+      if (requestSequence === loadMoreRequestRef.current && catalogRevisionRef.current === requestRevision) {
+        setLoadingMore(false);
+      }
     }
   }
 
@@ -1018,7 +1033,7 @@ export default function D1LibrarianWorkspace({
                 />
               ) : null}
               {tool === "locations" ? (
-                <LocationManagementPanel writesEnabled={writesEnabled} />
+                <LocationManagementPanel writesEnabled={writesEnabled} onChanged={() => { setReferenceState("loading"); setReferenceError(""); setReferenceRefreshToken((value) => value + 1); }} />
               ) : null}
               {tool === "contacts" ? (
                 <ContactsManagementPanel writesEnabled={writesEnabled} />
@@ -5688,7 +5703,7 @@ function yakabooSearchUrl(isbn: string): string {
   return `https://www.yakaboo.ua/ua/search/?q=${encodeURIComponent(query)}`;
 }
 
-function LocationManagementPanel({ writesEnabled }: { writesEnabled: boolean }) {
+function LocationManagementPanel({ writesEnabled, onChanged }: { writesEnabled: boolean; onChanged: () => void }) {
   const [locations, setLocations] = useState<ManagedLocation[]>([]);
   const [state, setState] = useState<LoadState>("loading");
   const [message, setMessage] = useState("");
@@ -5702,12 +5717,20 @@ function LocationManagementPanel({ writesEnabled }: { writesEnabled: boolean }) 
   const [editPublic, setEditPublic] = useState(true);
   const [editSortOrder, setEditSortOrder] = useState("0");
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (preserveMessage = false) => {
     setState("loading");
+    if (!preserveMessage) {
+      setMessage("");
+      setSuccess(false);
+    }
     try {
       const response = await apiJson<{ success: true; locations: ManagedLocation[] }>("/api/librarian/locations");
       setLocations(response.locations);
       setState("ready");
+      if (!preserveMessage) {
+        setMessage("");
+        setSuccess(false);
+      }
     } catch (error) {
       setState("error");
       setMessage(errorMessage(error));
@@ -5739,7 +5762,8 @@ function LocationManagementPanel({ writesEnabled }: { writesEnabled: boolean }) 
       setCreateName("");
       setMessage("Кабінет додано.");
       setSuccess(true);
-      await load();
+      await load(true);
+      onChanged();
     } catch (error) {
       setMessage(errorMessage(error));
       setSuccess(false);
@@ -5769,7 +5793,8 @@ function LocationManagementPanel({ writesEnabled }: { writesEnabled: boolean }) 
       setEditingId("");
       setMessage(successMessage);
       setSuccess(true);
-      await load();
+      await load(true);
+      onChanged();
     } catch (error) {
       setMessage(errorMessage(error));
       setSuccess(false);
@@ -5797,7 +5822,8 @@ function LocationManagementPanel({ writesEnabled }: { writesEnabled: boolean }) 
       });
       setMessage("Порожній кабінет видалено.");
       setSuccess(true);
-      await load();
+      await load(true);
+      onChanged();
     } catch (error) {
       setMessage(errorMessage(error));
       setSuccess(false);
@@ -5817,7 +5843,7 @@ function LocationManagementPanel({ writesEnabled }: { writesEnabled: boolean }) 
         </div>
         <div className={styles.formActions}><span>Видалити можна лише порожній кабінет без історії.</span><button className={styles.primaryButton} type="submit" disabled={!writesEnabled || busyId === "create" || !createName.trim()}>{busyId === "create" ? "Додаємо…" : "Додати кабінет"}</button></div>
       </form>
-      {message ? <InlineMessage tone={success ? "success" : "error"}>{message}</InlineMessage> : null}
+      {message && state !== "error" ? <InlineMessage tone={success ? "success" : "error"}>{message}</InlineMessage> : null}
       <section className={styles.locationDirectory} aria-labelledby="location-directory-title">
         <div className={styles.formHeading}><div><p>{locations.length} місць</p><h2 id="location-directory-title">Усі кабінети й місця</h2><small>Закриті місця залишаються в історії, але зникають із робочих списків.</small></div><button type="button" title="Оновити" onClick={() => void load()} disabled={state === "loading"}>↻</button></div>
         {state === "loading" ? <PanelLoading /> : null}
@@ -5961,7 +5987,7 @@ function ContactsManagementPanel({ writesEnabled }: { writesEnabled: boolean }) 
           <h2>Контакти бібліотеки</h2>
           <small>Після збереження ці дані бачать усі у вкладці «Контакти». Не додавайте приватну інформацію, яку не хочете публікувати.</small>
         </div>
-        <button type="button" title="Оновити" onClick={() => void load()} disabled={state === "loading" || saving}>↻</button>
+        <button type="button" title="Оновити" onClick={() => void load()} disabled={saving}>↻</button>
       </div>
       {message ? <InlineMessage tone={success ? "success" : "error"}>{message}</InlineMessage> : null}
       {state === "error" ? (

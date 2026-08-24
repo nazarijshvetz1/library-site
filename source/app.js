@@ -78,6 +78,23 @@ export function titleSuggestions(items, query, limit = 6) {
     .map(({ item }) => item);
 }
 
+export function matchesMaterialSearch(item, query) {
+  const needle = normalizedSearchText(query);
+  if (!needle) return true;
+  const tokens = needle.split(" ").filter(Boolean);
+  const haystack = normalizedSearchText([
+    item?.title,
+    item?.author,
+    item?.subject,
+    item?.type,
+    item?.rubric,
+    item?.id,
+    item?.isbn,
+    item?.publisher,
+  ].join(" "));
+  return tokens.every((token) => haystack.includes(token));
+}
+
 export function normalizeCatalogApiUrl(value, baseUrl = "https://catalog.invalid/") {
   try {
     const url = new URL(String(value || "").trim(), String(baseUrl || "https://catalog.invalid/"));
@@ -472,7 +489,6 @@ const elements = {
 };
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#039;", '"': "&quot;" })[character]);
-const normalized = normalizedSearchText;
 const cleanText = (value, maximum = 500) => String(value ?? "").trim().slice(0, maximum);
 const nonNegativeInteger = (value) => {
   const number = Math.floor(Number(value));
@@ -760,11 +776,11 @@ function applyDataset(nextMaterials, suppliedStats) {
 }
 
 function filteredMaterials() {
-  const query = normalized(state.search); const grade = Number(state.grade);
+  const query = state.search; const grade = Number(state.grade);
   const collectionIds = state.collection ? new Set(materialsForCollection(state.collection).map((item) => item.id)) : null;
   const result = materials.filter((item) => {
     if (collectionIds && !collectionIds.has(item.id)) return false;
-    if (query && !normalized([item.title, item.author, item.subject, item.type, item.rubric, item.id, item.isbn, item.publisher].join(" ")).includes(query)) return false;
+    if (!matchesMaterialSearch(item, query)) return false;
     if (grade && !(Number(item.classFrom) <= grade && Number(item.classTo || item.classFrom) >= grade)) return false;
     if (state.rubric && item.rubric !== state.rubric) return false;
     if (state.subject && item.subject !== state.subject) return false;
@@ -949,7 +965,11 @@ async function loadMaterialDetail(id) {
     headers: { Accept: "application/json" },
     cache: "no-store",
   }).then(async (response) => {
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) {
+      const error = new Error(`HTTP ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
     const detail = normalizeDetailPayload(await response.json());
     materialDetails.set(id, detail);
     return detail;
@@ -959,8 +979,9 @@ async function loadMaterialDetail(id) {
 }
 
 function showMaterial(id, { updateHistory = true } = {}) {
-  const summary = materials.find((material) => material.id === id); if (!summary) return false;
   const cachedDetail = materialDetails.get(id);
+  const summary = materials.find((material) => material.id === id);
+  if (!summary && !cachedDetail) return false;
   const hasApi = Boolean(catalogDetailApiUrl(config.catalogApiUrl, id, window.location.href));
   const item = cachedDetail || summary;
   const directUrl = renderMaterialDialog(item, { loadingDetail: !cachedDetail && hasApi });
@@ -979,10 +1000,36 @@ function showMaterial(id, { updateHistory = true } = {}) {
   return true;
 }
 
+function renderLinkedMaterialStatus(id, message, { error = false, retry = false } = {}) {
+  elements.dialogContent.innerHTML = `<div class="dialog-copy linked-material-status" ${error ? 'role="alert"' : 'role="status"'}>
+    <p class="dialog-id">${escapeHtml(id)}</p>
+    <h2 id="material-dialog-title">${error ? "Матеріал не відкрився" : "Завантажуємо матеріал…"}</h2>
+    <p id="material-dialog-note">${escapeHtml(message)}</p>
+    ${retry ? '<button class="details-button" type="button" data-retry-linked-material>Спробувати ще раз</button>' : ''}
+  </div>`;
+}
+
 function openLinkedMaterial() {
   const id = materialIdFromUrl(window.location.href);
   if (!id) return false;
-  return showMaterial(id, { updateHistory: false });
+  if (showMaterial(id, { updateHistory: false })) return true;
+  if (!catalogDetailApiUrl(config.catalogApiUrl, id, window.location.href)) return false;
+  currentMaterialId = id;
+  renderLinkedMaterialStatus(id, "Отримуємо актуальну картку без очікування повної синхронізації каталогу.");
+  if (!elements.dialog.open) elements.dialog.showModal();
+  loadMaterialDetail(id).then((detail) => {
+    if (currentMaterialId !== id || !elements.dialog.open) return;
+    renderMaterialDialog(detail);
+  }).catch((error) => {
+    if (currentMaterialId !== id || !elements.dialog.open) return;
+    const missing = Number(error?.status) === 404;
+    renderLinkedMaterialStatus(
+      id,
+      missing ? "Матеріал із таким CAT-ID не знайдено." : "Не вдалося завантажити картку. Перевірте з’єднання та спробуйте ще раз.",
+      { error: true, retry: !missing },
+    );
+  });
+  return true;
 }
 
 function closeMaterial({ fromHistory = false } = {}) {
@@ -1015,7 +1062,7 @@ async function copyText(value) {
 }
 
 async function shareOrCopyMaterial(id, mode) {
-  const item = materials.find((material) => material.id === id);
+  const item = materialDetails.get(id) || materials.find((material) => material.id === id);
   if (!item) return;
   const directUrl = directMaterialUrl(item.id);
   const report = mode === "report";
@@ -1308,6 +1355,7 @@ document.querySelector("#clearFilters").addEventListener("click", clearFilters);
 document.addEventListener("click", (event) => {
   const suggestion = event.target.closest("[data-title-suggestion]"); if (suggestion) chooseTitleSuggestion(suggestion.dataset.titleSuggestion);
   const detail = event.target.closest("[data-details]"); if (detail) showMaterial(detail.dataset.details);
+  const retryLinkedMaterial = event.target.closest("[data-retry-linked-material]"); if (retryLinkedMaterial) openLinkedMaterial();
   const collection = event.target.closest("[data-collection]"); if (collection) activateCollection(collection.dataset.collection);
   const copyMaterial = event.target.closest("[data-copy-material]"); if (copyMaterial) shareOrCopyMaterial(copyMaterial.dataset.copyMaterial, "copy");
   const shareMaterial = event.target.closest("[data-share-material]"); if (shareMaterial) shareOrCopyMaterial(shareMaterial.dataset.shareMaterial, "share");
@@ -1333,7 +1381,7 @@ elements.dialog.addEventListener("click", (event) => { if (event.target === elem
 elements.dialog.addEventListener("cancel", (event) => { event.preventDefault(); closeMaterial(); });
 window.addEventListener("popstate", () => {
   const linkedId = materialIdFromUrl(window.location.href);
-  if (linkedId) showMaterial(linkedId, { updateHistory: false });
+  if (linkedId) openLinkedMaterial();
   else closeMaterial({ fromHistory: true });
 });
 elements.filterToggle.addEventListener("click", () => { const open = elements.filters.classList.toggle("open"); elements.filterToggle.setAttribute("aria-expanded", String(open)); });

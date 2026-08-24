@@ -10,6 +10,14 @@ const TEACHER_CABINET_URL = "https://yedyna-biblioteka-liceiu.nazarijshvetz1.cha
 const LOGO_URL = `${PUBLIC_CATALOG_URL}library-logo.png`;
 
 type ClassReference = { id: string; name: string };
+type PublicResponseBody = {
+  success?: boolean;
+  classes?: ClassReference[];
+  academicYear?: string;
+  publicNumber?: string;
+  error?: string;
+  fieldErrors?: Record<string, string>;
+};
 
 export default function SuggestBookForm() {
   const [classes, setClasses] = useState<ClassReference[]>([]);
@@ -31,22 +39,26 @@ export default function SuggestBookForm() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const feedbackRef = useRef<HTMLDivElement>(null);
+  const submissionRef = useRef<{ fingerprint: string; requestId: string } | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
     void fetch("/api/public/acquisition-reference", { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
-        const body = await response.json() as { classes?: ClassReference[]; academicYear?: string; error?: string };
-        if (!response.ok) throw new Error(body.error || "Не вдалося завантажити список класів.");
-        const nextClasses = body.classes ?? [];
-        if (nextClasses.length === 0) throw new Error("У бібліотеці ще не налаштовано активні класи.");
+        const body = await readPublicResponse(response, "Не вдалося завантажити список класів.");
+        if (!response.ok) throw new PublicFormError(body.error || "Не вдалося завантажити список класів.");
+        if (body.success !== true || !Array.isArray(body.classes)) {
+          throw new PublicFormError("Сервіс повернув некоректний список класів.");
+        }
+        const nextClasses = body.classes;
+        if (nextClasses.length === 0) throw new PublicFormError("У бібліотеці ще не налаштовано активні класи.");
         setClasses(nextClasses);
         setAcademicYear(body.academicYear ?? "");
       })
       .catch((loadError) => {
         if (!controller.signal.aborted) {
           setClasses([]);
-          setReferenceError(message(loadError));
+          setReferenceError(publicErrorMessage(loadError, "Не вдалося завантажити список класів."));
         }
       })
       .finally(() => {
@@ -65,11 +77,17 @@ export default function SuggestBookForm() {
     setError("");
     setSuccess("");
     try {
+      const fingerprint = JSON.stringify({
+        fullName, className, title, author, year, quantity, sourceUrl, note, website, startedAt,
+      });
+      if (!submissionRef.current || submissionRef.current.fingerprint !== fingerprint) {
+        submissionRef.current = { fingerprint, requestId: crypto.randomUUID() };
+      }
       const response = await fetch("/api/public/book-suggestions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          requestId: crypto.randomUUID(),
+          requestId: submissionRef.current.requestId,
           fullName,
           className,
           title,
@@ -82,11 +100,12 @@ export default function SuggestBookForm() {
           startedAt,
         }),
       });
-      const body = await response.json() as { publicNumber?: string; error?: string; fieldErrors?: Record<string, string> };
-      if (!response.ok) {
-        throw new Error(Object.values(body.fieldErrors ?? {})[0] || body.error || "Не вдалося надіслати пропозицію.");
+      const body = await readPublicResponse(response, "Не вдалося надіслати пропозицію.");
+      if (!response.ok || body.success !== true || !body.publicNumber) {
+        throw new PublicFormError(Object.values(body.fieldErrors ?? {})[0] || body.error || "Не вдалося надіслати пропозицію.");
       }
       setSuccess(`Дякуємо! Пропозицію ${body.publicNumber ?? ""} передано бібліотекарю.`);
+      submissionRef.current = null;
       setTitle("");
       setAuthor("");
       setYear("");
@@ -95,7 +114,7 @@ export default function SuggestBookForm() {
       setNote("");
       setStartedAt(new Date().toISOString());
     } catch (submitError) {
-      setError(message(submitError));
+      setError(publicErrorMessage(submitError, "Не вдалося надіслати пропозицію. Спробуйте ще раз."));
     } finally {
       setBusy(false);
     }
@@ -227,6 +246,46 @@ export default function SuggestBookForm() {
   );
 }
 
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : "Сталася помилка.";
+class PublicFormError extends Error {}
+
+async function readPublicResponse(response: Response, fallback: string): Promise<PublicResponseBody> {
+  const text = await response.text();
+  try {
+    const value = JSON.parse(text) as unknown;
+    if (!isRecord(value)) throw new Error("object expected");
+    const rawClasses = value.classes;
+    const classes = Array.isArray(rawClasses) && rawClasses.every(isClassReference)
+      ? rawClasses
+      : undefined;
+    const rawFieldErrors = value.fieldErrors;
+    const fieldErrors = isRecord(rawFieldErrors)
+      ? Object.fromEntries(Object.entries(rawFieldErrors).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+      : undefined;
+    return {
+      success: value.success === true,
+      classes,
+      academicYear: typeof value.academicYear === "string" ? value.academicYear : undefined,
+      publicNumber: typeof value.publicNumber === "string" ? value.publicNumber : undefined,
+      error: typeof value.error === "string" ? value.error : undefined,
+      fieldErrors,
+    };
+  } catch {
+    throw new PublicFormError(fallback);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isClassReference(value: unknown): value is ClassReference {
+  return isRecord(value)
+    && typeof value.id === "string"
+    && value.id.length > 0
+    && typeof value.name === "string"
+    && value.name.length > 0;
+}
+
+function publicErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof PublicFormError ? error.message : fallback;
 }

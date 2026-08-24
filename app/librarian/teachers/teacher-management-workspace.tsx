@@ -2,10 +2,10 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import LibrarianShell from "../_components/librarian-shell";
-import { visitApi, VisitApiError } from "@/app/visits/visit-client";
+import { visitApi } from "@/app/visits/visit-client";
 import MaterialRequestInbox from "@/app/librarian/visits/material-request-inbox";
 import TeacherAccessAdmin from "@/app/librarian/visits/teacher-access-admin";
 import TeacherCodeImport from "./teacher-code-import";
@@ -401,12 +401,23 @@ function TeacherDirectoryPanel({
   const [detail, setDetail] = useState<TeacherDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [accessRefreshKey, setAccessRefreshKey] = useState(0);
+  const listRequestRef = useRef(0);
+  const detailRequestRef = useRef(0);
+  const selectedIdRef = useRef<string | null>(null);
+  const directoryScope = `${query}\u001e${status}`;
+  const directoryScopeRef = useRef(directoryScope);
+  useEffect(() => {
+    directoryScopeRef.current = directoryScope;
+  }, [directoryScope]);
 
   const load = useCallback(async (cursor: string | null = null) => {
+    const requestSequence = ++listRequestRef.current;
+    const requestScope = `${query}\u001e${status}`;
     if (cursor) setLoadingMore(true);
     else setLoading(true);
     try {
       const next = await loadTeacherDirectory({ query, status, cursor, limit: 30 });
+      if (requestSequence !== listRequestRef.current || requestScope !== directoryScopeRef.current) return;
       if (cursor) {
         setData((current) => current ? {
           ...next,
@@ -417,10 +428,13 @@ function TeacherDirectoryPanel({
         onDirectoryChange(next);
       }
     } catch (error) {
+      if (requestSequence !== listRequestRef.current || requestScope !== directoryScopeRef.current) return;
       onNotice(errorMessage(error), "error");
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (requestSequence === listRequestRef.current && requestScope === directoryScopeRef.current) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
   }, [onDirectoryChange, onNotice, query, status]);
 
@@ -430,15 +444,20 @@ function TeacherDirectoryPanel({
   }, [load]);
 
   async function selectTeacher(teacherId: string) {
+    const requestSequence = ++detailRequestRef.current;
+    selectedIdRef.current = teacherId;
     setSelectedId(teacherId);
+    setDetail(null);
     setDetailLoading(true);
     try {
       const response = await loadTeacherDetail(teacherId);
+      if (requestSequence !== detailRequestRef.current || selectedIdRef.current !== teacherId) return;
       setDetail(response);
     } catch (error) {
+      if (requestSequence !== detailRequestRef.current || selectedIdRef.current !== teacherId) return;
       onNotice(errorMessage(error), "error");
     } finally {
-      setDetailLoading(false);
+      if (requestSequence === detailRequestRef.current && selectedIdRef.current === teacherId) setDetailLoading(false);
     }
   }
 
@@ -448,7 +467,10 @@ function TeacherDirectoryPanel({
   }
 
   async function mutationSaved(next: TeacherDetail, message: string) {
-    setDetail(next);
+    if (selectedIdRef.current === next.teacher.id) {
+      setDetail(next);
+      setDetailLoading(false);
+    }
     onNotice(message);
     await load();
   }
@@ -471,6 +493,8 @@ function TeacherDirectoryPanel({
             onCancel={() => setCreating(false)}
             onSaved={async (next) => {
               setCreating(false);
+              detailRequestRef.current += 1;
+              selectedIdRef.current = next.teacher.id;
               setSelectedId(next.teacher.id);
               await mutationSaved(next, `Картку ${next.teacher.fullName} створено.`);
             }}
@@ -510,7 +534,7 @@ function TeacherDirectoryPanel({
             </div>
             <aside className={styles.detailRegion} aria-label="Картка вибраного вчителя">
               {detailLoading ? <p className={styles.empty}>Відкриваємо картку…</p> : detail ? (
-                <TeacherDetailCard detail={detail} locations={data.locations} writesEnabled={writesEnabled} onSaved={mutationSaved} onDeleted={async () => { setDetail(null); setSelectedId(null); onNotice("Порожню помилкову картку видалено."); await load(); }} />
+                <TeacherDetailCard detail={detail} locations={data.locations} writesEnabled={writesEnabled} onSaved={mutationSaved} onDeleted={async () => { selectedIdRef.current = null; setDetail(null); setSelectedId(null); onNotice("Порожню помилкову картку видалено."); await load(); }} />
               ) : <div className={styles.detailPlaceholder}><span aria-hidden="true">👤</span><h3>Виберіть учителя</h3><p>Тут з’являться профіль, замовлення, фактичні видачі та відвідування.</p></div>}
             </aside>
           </div>
@@ -832,5 +856,5 @@ function todayInKyiv() {
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof VisitApiError ? error.message : "Не вдалося виконати запит. Спробуйте ще раз.";
+  return error instanceof Error ? error.message : "Не вдалося виконати запит. Спробуйте ще раз.";
 }

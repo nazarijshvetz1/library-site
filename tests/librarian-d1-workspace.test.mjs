@@ -487,6 +487,9 @@ test("new librarian route renders D1 workspace inside the shared branded shell",
   assert.match(workspace, /window\.confirm/u);
   assert.match(workspace, /selectedIdRef\.current !== materialId/u);
   assert.match(workspace, /detailRequestRef\.current/u);
+  assert.match(workspace, /catalogRevisionRef\.current !== requestRevision/u);
+  assert.match(workspace, /loadMoreRequestRef = useRef\(0\)/u);
+  assert.match(workspace, /requestSequence === loadMoreRequestRef\.current && catalogRevisionRef\.current === requestRevision/u);
   assert.match(workspace, /writePendingInventoryIntent\(intent\)/u);
   assert.match(workspace, /retryPending \? "Перевірити результат"/u);
   assert.match(workspace, /role=\{tone === "error" \? "alert" : "status"\}/u);

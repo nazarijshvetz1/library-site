@@ -8,6 +8,7 @@ import {
   materialOrderUrl,
   materialIssueText,
   materialShareText,
+  matchesMaterialSearch,
   newestMaterialsByCatalogId,
   normalizeCatalogApiUrl,
   normalizeVisitSchedule,
@@ -43,6 +44,20 @@ test("offers bounded title suggestions with stable relevance", () => {
   assert.deepEqual(titleSuggestions(items, "матем", 6).map((item) => item.id), ["CAT-0001", "CAT-0002"]);
   assert.deepEqual(titleSuggestions(items, "збір задач", 6).map((item) => item.id), ["CAT-0002"]);
   assert.deepEqual(titleSuggestions(items, "м", 6), []);
+});
+
+test("matches every search token across catalog metadata", () => {
+  const item = {
+    id: "CAT-0001",
+    title: "Математика — 5 клас",
+    author: "Іваненко",
+    subject: "Математика",
+    type: "Підручник",
+    rubric: "Підручники",
+  };
+  assert.equal(matchesMaterialSearch(item, "математика 5"), true);
+  assert.equal(matchesMaterialSearch(item, "іваненко підручник"), true);
+  assert.equal(matchesMaterialSearch(item, "математика 10"), false);
 });
 
 test("serves the Ukrainian catalog homepage", async () => {
@@ -270,10 +285,19 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(css, /\.dialog-order/);
   assert.match(html, /class="hero-assurances"/u);
   assert.match(html, /class="suggestion-cta"/u);
+  assert.match(html, /клас, своє ім’я, назву та автора книги/u);
   assert.match(html, /href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/suggest-book"/u);
   assert.match(html, /aria-labelledby="material-dialog-title" aria-describedby="material-dialog-note"/u);
   assert.match(app, /id="material-dialog-title"/u);
   assert.match(app, /id="material-dialog-note"/u);
+  assert.match(app, /function renderLinkedMaterialStatus/u);
+  assert.match(app, /loadMaterialDetail\(id\)\.then/u);
+  assert.match(app, /Number\(error\?\.status\) === 404/u);
+  assert.match(app, /if \(!summary && !cachedDetail\) return false/u);
+  assert.match(app, /data-retry-linked-material/u);
+  assert.match(app, /retry: !missing/u);
+  assert.match(app, /if \(linkedId\) openLinkedMaterial\(\)/u);
+  assert.match(app, /Матеріал із таким CAT-ID не знайдено/u);
   assert.match(brand, /--gold: #cda252/u);
   assert.match(brand, /\.suggestion-cta/u);
   assert.match(brand, /env\(safe-area-inset-bottom\)/u);

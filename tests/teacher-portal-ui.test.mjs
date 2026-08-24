@@ -124,12 +124,16 @@ test("authenticated teacher workflows use frozen routes and exact request fields
   assert.match(workspace, /\/api\/teacher\/notifications/u);
   assert.match(workspace, /expectedVersion: notification\.version, read: true/u);
   assert.match(workspace, /\/api\/teacher\/security\/code/u);
-  assert.match(workspace, /currentCode: normalizedTeacherAccessCode\(currentCode\),[\s\S]*newPin: normalizedTeacherPin\(newPin\)/u);
+  assert.match(workspace, /currentCode: normalizedCurrentCode,[\s\S]*newPin: normalizedNewPin/u);
   assert.match(workspace, /teacherPinStrength\(newPin\)/u);
   assert.match(workspace, /setNewPin\(normalizedTeacherPin\(event\.currentTarget\.value\)\)/u);
   assert.match(workspace, /setConfirmPin\(normalizedTeacherPin\(event\.currentTarget\.value\)\)/u);
-  assert.match(workspace, /!teacherAccessCodeComplete\(currentCode\) \|\| !strength\.strong \|\| !pinsMatch/u);
-  assert.match(workspace, /Можна використати будь-яку комбінацію з 4 цифр/u);
+  assert.match(workspace, /!currentCodeComplete \|\| !strength\.strong \|\| !pinDiffersFromCurrent \|\| !pinsMatch/u);
+  assert.match(workspace, /pinDiffersFromCurrent = strength\.complete && normalizedNewPin !== normalizedCurrentCode/u);
+  assert.match(workspace, /Можна використати будь-які 4 цифри, але новий PIN має відрізнятися/u);
+  assert.match(workspace, /aria-describedby="current-code-help"/u);
+  assert.match(workspace, /id="current-code-help" aria-live="polite" aria-atomic="true"/u);
+  assert.match(workspace, /Потрібно рівно 4 цифри або повний старий 10-символьний код/u);
   assert.doesNotMatch(workspace, /Не чотири однакові цифри|Не проста послідовність/u);
   assert.doesNotMatch(workspace, /localStorage/u);
   assert.match(workspace, /mustChangePin/u);
@@ -319,6 +323,7 @@ test("Telegram Mini App launch is bounded, signed server-side and returns to cha
   assert.match(page, /returnToChat=\{launchMode !== null\}/u);
   assert.match(page, /robots: \{ index: false, follow: false \}/u);
   assert.match(launch, /window\.Telegram\?\.WebApp/u);
+  assert.match(launch, /pinDiffersFromCode = pinStatus\.complete && normalizedPin !== normalizedCode/u);
   assert.match(launch, /webApp\.initData/u);
   assert.doesNotMatch(launch, /initDataUnsafe/u);
   assert.doesNotMatch(launch, /fetch\("\/api\/teacher\/session"/u);
@@ -337,7 +342,9 @@ test("Telegram Mini App launch is bounded, signed server-side and returns to cha
   assert.match(launch, /🔑 Увійти/u);
   assert.match(launch, /✨ Активувати вперше/u);
   assert.match(launch, /Створіть власний 4-значний PIN/u);
-  assert.match(launch, /Можна використати будь-яку комбінацію з 4 цифр/u);
+  assert.match(launch, /Можна використати будь-які 4 цифри, але новий PIN має відрізнятися/u);
+  assert.match(launch, /aria-describedby=\{`\$\{listId\}-code-help`\}/u);
+  assert.match(launch, /Введіть рівно 4 цифри чинного PIN/u);
   assert.doesNotMatch(launch, /Не використовуйте 1111|без повторів і простих послідовностей/u);
   assert.match(launch, /Код і PIN вводьте лише/u);
   assert.match(launch, /activation\.mode === "connected" \? "Telegram підтверджено"/u);

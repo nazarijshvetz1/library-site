@@ -72,6 +72,8 @@ test("acquisition validation has no ISBN and freezes exact request shapes",()=>{
   assert.equal(validation.validateStudentAcquisitionCreateInput({...optional.value,requestedQuantity:0}).ok,false);
   assert.equal(validation.validateStudentAcquisitionCreateInput({...optional.value,sourceUrl:"javascript:alert(1)"}).ok,false);
   assert.equal(validation.validateStudentAcquisitionCreateInput({...optional.value,title:""}).ok,false);
+  const zeroApproval=validation.validateAcquisitionActionInput({mutationId:crypto.randomUUID(),expectedVersion:1,action:"approve",approvedQuantity:0,orderedQuantity:null,targetMaterialId:null,receiptLineId:"",allocatedQuantity:null,message:""});
+  assert.equal(zeroApproval.ok,false);assert.match(zeroApproval.fieldErrors.approvedQuantity,/не меншою за 1/u);
 });
 
 test("teacher proposal is idempotent and catalog snapshots are authoritative",async()=>{
@@ -84,14 +86,17 @@ test("teacher proposal is idempotent and catalog snapshots are authoritative",as
 
 test("librarian workflow cannot receive stock without a posted receipt allocation",async()=>{
   const {sqlite,db}=context();let request=await store.createTeacherAcquisitionRequest(db,teacher,createInput());
+  await assert.rejects(()=>store.applyLibrarianAcquisitionAction(db,librarian,request.id,{mutationId:crypto.randomUUID(),expectedVersion:request.version,action:"approve",approvedQuantity:0,orderedQuantity:null,targetMaterialId:null,receiptLineId:"",allocatedQuantity:null,message:""}),error=>error instanceof store.AcquisitionStoreError&&error.code==="invalid_quantity");
   request=await store.applyLibrarianAcquisitionAction(db,librarian,request.id,{mutationId:crypto.randomUUID(),expectedVersion:request.version,action:"approve",approvedQuantity:12,orderedQuantity:null,targetMaterialId:null,receiptLineId:"",allocatedQuantity:null,message:""});
   request=await store.applyLibrarianAcquisitionAction(db,librarian,request.id,{mutationId:crypto.randomUUID(),expectedVersion:request.version,action:"order",approvedQuantity:null,orderedQuantity:12,targetMaterialId:null,receiptLineId:"",allocatedQuantity:null,message:""});
   await assert.rejects(()=>store.applyLibrarianAcquisitionAction(db,librarian,request.id,{mutationId:crypto.randomUUID(),expectedVersion:request.version,action:"link_receipt",approvedQuantity:null,orderedQuantity:null,targetMaterialId:null,receiptLineId:"LINE-NONE",allocatedQuantity:3,message:""}),error=>error instanceof store.AcquisitionStoreError&&error.code==="receipt_line_invalid");
   const now=new Date(Date.now()+60_000).toISOString();
   sqlite.prepare(`INSERT INTO inventory_transactions (id,request_id,kind,actor_user_id,occurred_at,notes,status,created_at) VALUES ('TX-1','receipt-test','receipt','USR-LIB',?,'','posted',?)`).run(now.slice(0,10),now);
-  sqlite.prepare(`INSERT INTO inventory_transaction_lines (id,transaction_id,material_id,location_id,condition,quantity_delta,quantity_before,quantity_after,created_at) VALUES ('LINE-1','TX-1','CAT-0001','LOC-LIB','good',5,0,5,?)`).run(now);
-  request=await store.applyLibrarianAcquisitionAction(db,librarian,request.id,{mutationId:crypto.randomUUID(),expectedVersion:request.version,action:"link_receipt",approvedQuantity:null,orderedQuantity:null,targetMaterialId:null,receiptLineId:"LINE-1",allocatedQuantity:5,message:""});
-  assert.equal(request.status,"partially_received");assert.equal(request.receivedQuantity,5);assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM acquisition_receipt_allocations").get().n,1);
+  sqlite.prepare(`INSERT INTO inventory_transaction_lines (id,transaction_id,material_id,location_id,condition,quantity_delta,quantity_before,quantity_after,created_at) VALUES ('LINE-1','TX-1','CAT-0001','LOC-LIB','good',10,0,10,?)`).run(now);
+  request=await store.applyLibrarianAcquisitionAction(db,librarian,request.id,{mutationId:crypto.randomUUID(),expectedVersion:request.version,action:"link_receipt",approvedQuantity:null,orderedQuantity:null,targetMaterialId:null,receiptLineId:"LINE-1",allocatedQuantity:2,message:""});
+  assert.equal((await store.listAcquisitionReceiptOptions(db,request.id))[0].unallocatedQuantity,8);
+  request=await store.applyLibrarianAcquisitionAction(db,librarian,request.id,{mutationId:crypto.randomUUID(),expectedVersion:request.version,action:"link_receipt",approvedQuantity:null,orderedQuantity:null,targetMaterialId:null,receiptLineId:"LINE-1",allocatedQuantity:3,message:""});
+  assert.equal(request.status,"partially_received");assert.equal(request.receivedQuantity,5);assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM acquisition_receipt_allocations").get().n,1);assert.equal(sqlite.prepare("SELECT allocated_quantity n FROM acquisition_receipt_allocations").get().n,5);
 });
 
 test("anonymous proposal validates the active class and records only a private request",async()=>{
@@ -114,6 +119,7 @@ test("anonymous proposal requires author and persists other omitted metadata wit
   const first=await store.createStudentAcquisitionRequest(db,request,validated.value,"s".repeat(40));
   const replay=await store.createStudentAcquisitionRequest(db,request,validated.value,"s".repeat(40));
   assert.equal(replay.replayed,true);assert.deepEqual(replay.request,first.request);
+  assert.equal(sqlite.prepare("SELECT attempts FROM acquisition_public_rate_limits").get().attempts,1);
   assert.equal(first.request.author,"Письменник");assert.equal(first.request.publicationYear,null);assert.equal(first.request.requestedQuantity,1);assert.equal(first.request.sourceUrl,"");
   const stored=sqlite.prepare("SELECT author,publication_year,requested_quantity,source_url FROM acquisition_requests WHERE id=?").get(first.request.id);
   assert.equal(stored.author,"Письменник");assert.equal(stored.publication_year,null);assert.equal(stored.requested_quantity,1);assert.equal(stored.source_url,"");
@@ -133,6 +139,7 @@ test("Excel preview resolves identities and repeated workbook commit is idempote
 test("acquisition interfaces expose catalog metadata, optional student fields and a local printable QR",()=>{
   const teacherUi=fs.readFileSync(path.join(root,"app/teacher/acquisition/teacher-acquisition-panel.tsx"),"utf8");
   const studentUi=fs.readFileSync(path.join(root,"app/suggest-book/suggest-book-form.tsx"),"utf8");
+  const storeSource=fs.readFileSync(path.join(root,"lib/acquisition-store.ts"),"utf8");
   const librarianUi=fs.readFileSync(path.join(root,"app/librarian/acquisitions/acquisition-workspace.tsx"),"utf8");
   const librarianCss=fs.readFileSync(path.join(root,"app/librarian/acquisitions/acquisition-workspace.module.css"),"utf8");
   assert.match(teacherUi,/thumbnailUrl/u);assert.match(teacherUi,/classFrom/u);assert.match(teacherUi,/\/api\/catalog-v2\/\$\{encodeURIComponent\(item\.id\)\}/u);
@@ -143,8 +150,20 @@ test("acquisition interfaces expose catalog metadata, optional student fields an
   assert.match(studentUi,/library-logo\.png/u);assert.match(studentUi,/referenceKey/u);assert.match(studentUi,/Спробувати ще раз/u);
   assert.match(studentUi,/href="#suggestion-form"/u);assert.match(studentUi,/feedbackRef\.current\?\.focus\(\)/u);
   assert.match(studentUi,/Object\.values\(body\.fieldErrors \?\? \{\}\)\[0\] \|\| body\.error/u);
+  assert.match(studentUi,/submissionRef = useRef/u);assert.match(studentUi,/fingerprint !== fingerprint/u);
+  assert.match(studentUi,/submissionRef\.current = \{ fingerprint, requestId: crypto\.randomUUID\(\) \}/u);
+  assert.match(studentUi,/requestId: submissionRef\.current\.requestId/u);
+  assert.match(studentUi,/submissionRef\.current = null/u);assert.match(studentUi,/readPublicResponse/u);
+  assert.match(studentUi,/body\.success !== true \|\| !Array\.isArray\(body\.classes\)/u);assert.match(studentUi,/function isClassReference/u);
+  assert.match(studentUi,/response\.text\(\)/u);assert.doesNotMatch(studentUi,/await response\.json\(\)/u);
+  assert.match(studentUi,/publicErrorMessage\(submitError, "Не вдалося надіслати пропозицію\. Спробуйте ще раз\."\)/u);
   assert.match(studentUi,/name="className"/u);assert.match(studentUi,/autoComplete="name"/u);assert.match(studentUi,/aria-describedby="class-help"/u);
   assert.match(librarianUi,/new URL\("\/suggest-book", window\.location\.origin\)/u);assert.match(librarianUi,/QRCodeWriter/u);
+  assert.match(librarianUi,/loadRequestRef = useRef\(0\)/u);assert.match(librarianUi,/requestScope !== loadScopeRef\.current/u);
+  assert.match(librarianUi,/key=\{`\$\{record\.id\}:\$\{record\.version\}`\}/u);
+  assert.match(librarianUi,/selectedMaximum = Math\.min/u);assert.match(librarianUi,/loadError \? <span role="alert">/u);
+  assert.match(librarianUi,/promptNumber\("Погоджена кількість", record\.requestedQuantity, 1\)/u);
+  assert.match(storeSource,/line\.quantity_delta>COALESCE\(\(SELECT SUM\(a\.allocated_quantity\)/u);
   assert.match(librarianUi,/Копіювати QR-код/u);assert.match(librarianUi,/Завантажити QR/u);assert.match(librarianUi,/Друкувати QR/u);
   assert.doesNotMatch(librarianUi,/api\.qrserver|chart\.googleapis/iu);assert.match(librarianCss,/acquisition-student-qr-print/u);assert.match(librarianCss,/@page\{size:A4 portrait/u);
 });

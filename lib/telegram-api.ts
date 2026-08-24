@@ -1,5 +1,6 @@
-import { isSameOriginRequest } from "./librarian-api.ts";
+import { isSameOriginRequest } from "./request-origin.ts";
 import { TelegramIntegrationError } from "./telegram-notifications.ts";
+import { VisitScheduleError } from "./visit-schedule-store.ts";
 
 const JSON_HEADERS = {
   "Cache-Control": "private, no-store",
@@ -19,6 +20,9 @@ export function telegramError(status: number, code: string, error: string): Resp
 
 export function telegramStoreError(error: unknown, fallbackCode = "telegram_unavailable"): Response {
   if (error instanceof TelegramIntegrationError) {
+    return telegramError(error.status, error.code, error.message);
+  }
+  if (error instanceof VisitScheduleError) {
     return telegramError(error.status, error.code, error.message);
   }
   return telegramError(503, fallbackCode, "Telegram-сповіщення тимчасово недоступні.");

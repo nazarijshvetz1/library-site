@@ -10,6 +10,7 @@ import {
   resolveD1LibrarianUser,
 } from "@/lib/librarian-telegram-auth";
 import type { VisitD1Database } from "@/lib/visit-schedule-store";
+export { isSameOriginRequest } from "./request-origin.ts";
 
 export const MAX_DRAFT_BODY_BYTES = 48 * 1024;
 
@@ -115,17 +116,6 @@ export function librarianError(
     },
     { status },
   );
-}
-
-export function isSameOriginRequest(request: Request): boolean {
-  const origin = request.headers.get("Origin");
-  if (!origin) return false;
-
-  try {
-    return new URL(origin).origin === new URL(request.url).origin;
-  } catch {
-    return false;
-  }
 }
 
 export async function readDraftJsonBody(

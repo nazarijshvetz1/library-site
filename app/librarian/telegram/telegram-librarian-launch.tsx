@@ -10,6 +10,7 @@ type TelegramWebApp = {
   expand(): void;
   setHeaderColor?(color: string): void;
   setBackgroundColor?(color: string): void;
+  close?(): void;
 };
 
 declare global {

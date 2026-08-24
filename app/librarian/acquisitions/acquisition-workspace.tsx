@@ -30,16 +30,29 @@ export default function AcquisitionWorkspace({ displayName, role = "librarian", 
   const [workbook, setWorkbook] = useState<ParsedAcquisitionWorkbook | null>(null); const [preview, setPreview] = useState<Preview | null>(null);
   const [importId, setImportId] = useState("");
   const handoffHandled = useRef(false);
+  const loadRequestRef = useRef(0);
+  const loadScope = `${status}\u001e${requester}\u001e${query.trim()}`;
+  const loadScopeRef = useRef(loadScope);
+  useEffect(() => {
+    loadScopeRef.current = loadScope;
+  }, [loadScope]);
 
   const load = useCallback(async () => {
+    const requestSequence = ++loadRequestRef.current;
+    const requestScope = `${status}\u001e${requester}\u001e${query.trim()}`;
     setLoading(true); setError("");
     try {
       const params = new URLSearchParams({ status, requester, q: query.trim() });
       const response = await fetch(`/api/librarian/acquisition-requests?${params}`, { cache: "no-store" });
       const body = await response.json() as Envelope & { error?: string };
       if (!response.ok) throw new Error(body.error || "Не вдалося завантажити комплектування.");
+      if (requestSequence !== loadRequestRef.current || requestScope !== loadScopeRef.current) return;
       setData(body);
-    } catch (loadError) { setError(message(loadError)); } finally { setLoading(false); }
+    } catch (loadError) {
+      if (requestSequence === loadRequestRef.current && requestScope === loadScopeRef.current) setError(message(loadError));
+    } finally {
+      if (requestSequence === loadRequestRef.current && requestScope === loadScopeRef.current) setLoading(false);
+    }
   }, [query, requester, status]);
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
   useEffect(() => {
@@ -81,7 +94,7 @@ export default function AcquisitionWorkspace({ displayName, role = "librarian", 
 
   async function act(record: RequestRecord, action: string) {
     let approvedQuantity: number | null = null, orderedQuantity: number | null = null, targetMaterialId: string | null = null, text = "";
-    if (action === "approve") approvedQuantity = promptNumber("Погоджена кількість", record.requestedQuantity); else if (action === "order") orderedQuantity = promptNumber("Замовлена кількість", record.approvedQuantity ?? record.requestedQuantity);
+    if (action === "approve") approvedQuantity = promptNumber("Погоджена кількість", record.requestedQuantity, 1); else if (action === "order") orderedQuantity = promptNumber("Замовлена кількість", record.approvedQuantity ?? record.requestedQuantity, 1);
     else if (action === "request_clarification") text = window.prompt("Що потрібно уточнити у вчителя?")?.trim() ?? "";
     else if (action === "reject") text = window.prompt("Причина відхилення")?.trim() ?? "";
     else if (action === "link_material") targetMaterialId = window.prompt("CAT-ID створеного матеріалу")?.trim().toUpperCase() ?? null;
@@ -239,17 +252,57 @@ function RequestCard({ record, busy, telegramMiniApp, onAction, onSend }: { reco
       {record.materialId && ["ordered","partially_received"].includes(record.status) ? <><a href={receiptHref}>Оформити надходження</a><button disabled={busy} onClick={() => setReceiptOpen((value) => !value)}>Зарахувати надходження</button></> : null}
       {["submitted","in_review","clarification","approved","planned","ordered"].includes(record.status) ? <button className={styles.danger} disabled={busy} onClick={() => void onAction(record,"reject")}>Відхилити</button> : null}
     </div>
-    {receiptOpen ? <ReceiptAllocator record={record} disabled={busy} onSend={onSend} /> : null}
+    {receiptOpen ? <ReceiptAllocator key={`${record.id}:${record.version}`} record={record} disabled={busy} onSend={onSend} /> : null}
   </article>;
 }
 
 function ReceiptAllocator({ record, disabled, onSend }: { record: RequestRecord; disabled: boolean; onSend: (record: RequestRecord, fields: Record<string, unknown>) => Promise<void> }) {
-  const [lines, setLines] = useState<Array<{ lineId: string; occurredAt: string; locationName: string; receivedQuantity: number; unallocatedQuantity: number }>>([]); const [lineId,setLineId]=useState(""); const [quantity,setQuantity]=useState("1"); const [loading,setLoading]=useState(true);
-  useEffect(() => { const controller=new AbortController(); void fetch(`/api/librarian/acquisition-requests/${encodeURIComponent(record.id)}/receipt-lines`,{cache:"no-store",signal:controller.signal}).then(async(response)=>{const body=await response.json() as {lines?:typeof lines}; if(response.ok){setLines(body.lines??[]);setLineId(body.lines?.[0]?.lineId??"");}}).finally(()=>setLoading(false)); return()=>controller.abort(); },[record.id]);
-  return <div className={styles.receipts}><strong>Фактичні надходження цього матеріалу</strong>{loading?<span>Оновлюємо…</span>:lines.length?<><select value={lineId} onChange={(event)=>setLineId(event.currentTarget.value)}>{lines.map((line)=><option key={line.lineId} value={line.lineId}>{new Date(line.occurredAt).toLocaleDateString("uk-UA")} · {line.locationName} · доступно для зарахування {line.unallocatedQuantity}</option>)}</select><input type="number" min="1" max={Math.max(...lines.map((line)=>line.unallocatedQuantity))} value={quantity} onChange={(event)=>setQuantity(event.currentTarget.value)}/><button disabled={disabled||!lineId} onClick={()=>void onSend(record,{action:"link_receipt",approvedQuantity:null,orderedQuantity:null,targetMaterialId:null,receiptLineId:lineId,allocatedQuantity:Number(quantity),message:""})}>Зарахувати до заявки</button></>:<span>Нових незарахованих надходжень не знайдено.</span>}</div>;
+  type ReceiptLine = { lineId: string; occurredAt: string; locationName: string; receivedQuantity: number; unallocatedQuantity: number };
+  const [lines, setLines] = useState<ReceiptLine[]>([]);
+  const [lineId, setLineId] = useState("");
+  const [quantity, setQuantity] = useState("1");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const remainingNeeded = Math.max(0, record.orderedQuantity - record.receivedQuantity);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(`/api/librarian/acquisition-requests/${encodeURIComponent(record.id)}/receipt-lines`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        const body = await response.json() as { lines?: ReceiptLine[]; error?: string };
+        if (!response.ok) throw new Error(body.error || "Не вдалося завантажити надходження.");
+        const nextLines = body.lines ?? [];
+        const first = nextLines[0];
+        setLines(nextLines);
+        setLineId(first?.lineId ?? "");
+        setQuantity(String(first ? Math.min(first.unallocatedQuantity, remainingNeeded) : 1));
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) setLoadError(message(error));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [record.id, record.version, remainingNeeded]);
+
+  const selectedLine = lines.find((line) => line.lineId === lineId);
+  const selectedMaximum = Math.min(selectedLine?.unallocatedQuantity ?? 0, remainingNeeded);
+  const allocatedQuantity = Number(quantity);
+  const quantityValid = Number.isSafeInteger(allocatedQuantity) && allocatedQuantity >= 1 && allocatedQuantity <= selectedMaximum;
+  return <div className={styles.receipts}>
+    <strong>Фактичні надходження цього матеріалу</strong>
+    {loading ? <span>Оновлюємо…</span> : loadError ? <span role="alert">{loadError}</span> : lines.length ? <>
+      <select value={lineId} onChange={(event) => { const nextId = event.currentTarget.value; const next = lines.find((line) => line.lineId === nextId); setLineId(nextId); setQuantity(String(next ? Math.min(next.unallocatedQuantity, remainingNeeded) : 1)); }}>
+        {lines.map((line) => <option key={line.lineId} value={line.lineId}>{new Date(line.occurredAt).toLocaleDateString("uk-UA")} · {line.locationName} · доступно для зарахування {line.unallocatedQuantity}</option>)}
+      </select>
+      <input type="number" min="1" max={selectedMaximum} value={quantity} aria-invalid={!quantityValid} onChange={(event) => setQuantity(event.currentTarget.value)} />
+      <button type="button" disabled={disabled || !lineId || !quantityValid} onClick={() => void onSend(record, { action: "link_receipt", approvedQuantity: null, orderedQuantity: null, targetMaterialId: null, receiptLineId: lineId, allocatedQuantity, message: "" })}>Зарахувати до заявки</button>
+    </> : <span>Нових незарахованих надходжень не знайдено.</span>}
+  </div>;
 }
 
-function promptNumber(label: string, fallback: number): number | null { const raw=window.prompt(label,String(fallback)); if(raw===null)return null; const value=Number(raw); return Number.isSafeInteger(value)&&value>=0?value:null; }
+function promptNumber(label: string, fallback: number, minimum = 0): number | null { const raw=window.prompt(label,String(fallback)); if(raw===null)return null; const value=Number(raw); return Number.isSafeInteger(value)&&value>=minimum?value:null; }
 function message(error: unknown): string { return error instanceof Error ? error.message : "Сталася помилка."; }
 
 function metadataLine(author: string, publicationYear: number | null): string {

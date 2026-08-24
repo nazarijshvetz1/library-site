@@ -245,8 +245,12 @@ function TelegramTeacherActivationForm({
   const [validationNotice, setValidationNotice] = useState("");
   const generic = activation.mode === "generic";
   const normalizedCode = normalizedTeacherAccessCode(code);
+  const codeTouched = normalizedCode.length > 0;
+  const codeComplete = teacherAccessCodeComplete(code);
   const needsNewPin = intent === "activate";
   const pinStatus = teacherPinStrength(pin);
+  const normalizedPin = normalizedTeacherPin(pin);
+  const pinDiffersFromCode = pinStatus.complete && normalizedPin !== normalizedCode;
   const normalizedQuery = query.trim();
 
   useEffect(() => {
@@ -312,15 +316,17 @@ function TelegramTeacherActivationForm({
       searchRef.current?.focus();
       return;
     }
-    if (!teacherAccessCodeComplete(code)) {
+    if (!codeComplete) {
       setValidationNotice(intent === "activate"
         ? "Введіть 4 цифри тимчасового коду або чинний старий код бібліотекаря."
         : "Введіть свій чинний 4-значний PIN.");
       return;
     }
-    if (needsNewPin && (!pinStatus.strong || normalizedTeacherPin(pinConfirmation) !== normalizedTeacherPin(pin))) {
+    if (needsNewPin && (!pinStatus.strong || !pinDiffersFromCode || normalizedTeacherPin(pinConfirmation) !== normalizedPin)) {
       setValidationNotice(!pinStatus.strong
         ? "Новий PIN має складатися рівно з 4 цифр."
+        : !pinDiffersFromCode
+          ? "Новий PIN має відрізнятися від поточного або тимчасового коду."
         : "Повторіть новий PIN однаково в обох полях.");
       return;
     }
@@ -328,14 +334,14 @@ function TelegramTeacherActivationForm({
       intent,
       loginId: chosen?.loginId ?? "",
       code: normalizedCode,
-      newPin: needsNewPin ? normalizedTeacherPin(pin) : "",
+      newPin: needsNewPin ? normalizedPin : "",
     });
   }
 
   const submitDisabled = busy
     || (generic && !selected)
-    || !teacherAccessCodeComplete(code)
-    || (needsNewPin && (!pinStatus.strong || normalizedTeacherPin(pinConfirmation) !== normalizedTeacherPin(pin)));
+    || !codeComplete
+    || (needsNewPin && (!pinStatus.strong || !pinDiffersFromCode || normalizedTeacherPin(pinConfirmation) !== normalizedPin));
 
   return (
     <form className={styles.activationForm} onSubmit={submit} aria-busy={busy}>
@@ -391,6 +397,8 @@ function TelegramTeacherActivationForm({
             autoCapitalize="characters"
             maxLength={11}
             value={code}
+            aria-invalid={codeTouched && !codeComplete}
+            aria-describedby={`${listId}-code-help`}
             onChange={(event) => {
               setCode(formatTeacherAccessCode(event.currentTarget.value));
               setValidationNotice("");
@@ -398,6 +406,7 @@ function TelegramTeacherActivationForm({
             placeholder={intent === "activate" ? "4 цифри або старий код" : "4 цифри"}
             disabled={busy}
           />
+          <small id={`${listId}-code-help`} aria-live="polite" aria-atomic="true" className={codeTouched && !codeComplete ? styles.formError : undefined}>{codeTouched && !codeComplete ? (intent === "activate" ? "Введіть рівно 4 цифри або повний старий 10-символьний код бібліотекаря." : "Введіть рівно 4 цифри чинного PIN.") : (intent === "activate" ? "Введіть тимчасовий код бібліотекаря." : "Введіть свій чинний 4-значний PIN.")}</small>
         </div>
       {needsNewPin ? (
         <>
@@ -412,11 +421,12 @@ function TelegramTeacherActivationForm({
               pattern="[0-9]{4}"
               maxLength={4}
               value={pin}
+              aria-invalid={pin.length > 0 && (!pinStatus.strong || !pinDiffersFromCode)}
               onChange={(event) => setPin(normalizedTeacherPin(event.currentTarget.value))}
               placeholder="••••"
               disabled={busy}
             />
-            <small>Можна використати будь-яку комбінацію з 4 цифр.</small>
+            <small>Можна використати будь-які 4 цифри, але новий PIN має відрізнятися від поточного або тимчасового коду.</small>
           </div>
           <div className={styles.fieldGroup}>
             <label htmlFor={`${listId}-pin-confirmation`}>Повторіть новий PIN *</label>

@@ -91,4 +91,6 @@ test("teacher cards expose a preview-first bounded Excel code import", async () 
   assert.match(parser, /Тимчасовий код/u);
   assert.match(route, /visitTeacherCodeImportBody/u);
   assert.match(template, /Чинні PIN-коди не переглядаються і не змінюються/u);
+  assert.match(template, /Рівно 4 цифри/u);
+  assert.doesNotMatch(template, /10 символів/u);
 });

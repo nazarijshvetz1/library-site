@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   clearPortalPendingIntent,
@@ -124,18 +124,26 @@ export default function MaterialRequestInbox({
   const [submitting, setSubmitting] = useState(false);
   const [pending, setPending] = useState<RequestActionIntent | null>(null);
   const [status, setStatus] = useState("");
+  const loadRequestRef = useRef(0);
+  const statusRef = useRef(status);
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
   const storageKey = `library.librarian.requests.pending.v1:${pendingScope}`;
 
   const load = useCallback(async (afterMutation = false, cursor: string | null = null) => {
+    const requestSequence = ++loadRequestRef.current;
+    const requestStatus = status;
     const append = Boolean(cursor);
     if (append) setLoadingMore(true);
-    else setLoading(true);
+    else { setLoading(true); setLoadingMore(false); }
     try {
       const params = new URLSearchParams({ limit: "100" });
       if (status) params.set("status", status);
       if (cursor) params.set("cursor", cursor);
       if (append) {
         const requestResponse = await visitApi<RequestsEnvelope>(`/api/librarian/material-requests?${params.toString()}`);
+        if (requestSequence !== loadRequestRef.current || requestStatus !== statusRef.current) return;
         setData((current) => current
           ? { ...requestResponse, requests: mergePortalPageById(current.requests, requestResponse.requests) }
           : requestResponse);
@@ -144,10 +152,12 @@ export default function MaterialRequestInbox({
           visitApi<RequestsEnvelope>(`/api/librarian/material-requests?${params.toString()}`),
           visitApi<LocationsEnvelope>("/api/librarian/material-requests/locations"),
         ]);
+        if (requestSequence !== loadRequestRef.current || requestStatus !== statusRef.current) return;
         setData(requestResponse);
         setLocations(locationResponse.locations);
       }
     } catch (error) {
+      if (requestSequence !== loadRequestRef.current || requestStatus !== statusRef.current) return;
       setNotice(afterMutation
         ? "Дію збережено, але чергу не вдалося оновити. Натисніть «Оновити»."
         : append
@@ -155,8 +165,10 @@ export default function MaterialRequestInbox({
           : errorMessage(error));
       setNoticeTone(afterMutation ? "info" : "error");
     } finally {
-      if (append) setLoadingMore(false);
-      else setLoading(false);
+      if (requestSequence === loadRequestRef.current && requestStatus === statusRef.current) {
+        if (append) setLoadingMore(false);
+        else setLoading(false);
+      }
     }
   }, [status]);
 
@@ -246,7 +258,7 @@ export default function MaterialRequestInbox({
           {request.pickupLocation ? <p>Місце отримання: <strong>{request.pickupLocation.name}</strong></p> : null}
           <div className={styles.inboxActions}>
             {request.status === "submitted" ? <button className={styles.quiet} type="button" onClick={() => startReview(request)} disabled={!writesEnabled || !data?.writesEnabled || submitting || Boolean(pending)}>Взяти в роботу</button> : null}
-            {request.status === "submitted" || request.status === "in_review" || request.status === "partially_ready" ? <ReadyRequestForm request={request} locations={locations} disabled={!writesEnabled || !data?.writesEnabled || submitting || Boolean(pending)} onSubmit={sendAction} /> : null}
+            {request.status === "submitted" || request.status === "in_review" || request.status === "partially_ready" ? <ReadyRequestForm key={`${request.id}:${request.version}`} request={request} locations={locations} disabled={!writesEnabled || !data?.writesEnabled || submitting || Boolean(pending)} onSubmit={sendAction} /> : null}
             {request.status === "submitted" || request.status === "in_review" ? <button className={styles.danger} type="button" onClick={() => reject(request)} disabled={!writesEnabled || !data?.writesEnabled || submitting || Boolean(pending)}>Відхилити</button> : null}
             {(request.status === "ready" || request.status === "partially_ready") && request.items.some((item) => item.reservations.some((reservation) => reservation.remainingQuantity > 0)) ? <ReservationActionForm request={request} disabled={!writesEnabled || !data?.writesEnabled || submitting || Boolean(pending)} onSubmit={sendAction} /> : null}
             {(request.status === "ready" || request.status === "partially_ready") && request.resultingLoanId && !request.items.some((item) => item.reservations.length > 0) ? <button className={styles.primary} type="button" onClick={() => completeLegacyRequest(request)} disabled={!writesEnabled || !data?.writesEnabled || submitting || Boolean(pending)}>Підтвердити отримання старої видачі</button> : null}

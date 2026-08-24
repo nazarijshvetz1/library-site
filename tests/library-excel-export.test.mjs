@@ -146,6 +146,7 @@ test("teacher-code Excel template is styled, bounded and contains no secret code
   assert.match(sheet, /USR-T1/u);
   assert.match(sheet, /Шевченко Олена/u);
   assert.match(sheet, /Лише для вчителів без чинного коду/u);
+  assert.match(sheet, /Рівно 4 цифри/u);
   assert.doesNotMatch(sheet, /23456-789AB|code_hmac|PIN-код: \d/u);
   assert.match(styles, /<name val="Times New Roman"\/>/u);
   assert.equal(workbook.rowCount, 2);

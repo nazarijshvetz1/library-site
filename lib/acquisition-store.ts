@@ -242,7 +242,6 @@ export async function createStudentAcquisitionRequest(
   rateLimitSecret: string,
 ): Promise<{ request: AcquisitionProjection; replayed: boolean }> {
   const now = new Date().toISOString();
-  await enforcePublicLimit(db, request, now, rateLimitSecret);
   const year = await requireActiveAcademicYear(db);
   const classYear = await db.prepare(`SELECT cy.id,cy.class_name FROM class_years cy WHERE cy.academic_year_id=? AND cy.status='active' AND lower(trim(cy.class_name))=lower(trim(?)) LIMIT 1`)
     .bind(year.id, input.className).first<{ id: string; class_name: string }>();
@@ -252,6 +251,7 @@ export async function createStudentAcquisitionRequest(
   const submissionHash = await sha256(JSON.stringify({ ...input, website: "", className: classYear.class_name }));
   const existing = await existingSubmission(db, submissionKey, submissionHash);
   if (existing) return { request: existing, replayed: true };
+  await enforcePublicLimit(db, request, now, rateLimitSecret);
   const publicNumber = publicRequestNumber(input.requestId, now);
   const duplicateKey = acquisitionDuplicateKey({ materialId: null, title: input.title, author: input.author, publicationYear: input.publicationYear });
   const auditRequestId = input.requestId;
@@ -342,7 +342,9 @@ export async function applyLibrarianAcquisitionAction(
   } else if (input.action === "request_clarification") {
     allow(current.status, ["submitted", "in_review", "approved", "planned"]); next = "clarification"; clarification = input.message;
   } else if (input.action === "approve") {
-    allow(current.status, ["submitted", "in_review", "clarification"]); next = "approved"; approved = input.approvedQuantity; timestamps.approved = now;
+    allow(current.status, ["submitted", "in_review", "clarification"]);
+    if (input.approvedQuantity === null || input.approvedQuantity < 1) throw new AcquisitionStoreError("invalid_quantity", 400, "Погоджена кількість має бути не меншою за 1.");
+    next = "approved"; approved = input.approvedQuantity; timestamps.approved = now;
   } else if (input.action === "plan") {
     allow(current.status, ["approved"]); next = "planned";
   } else if (input.action === "order") {
@@ -377,8 +379,6 @@ export async function applyLibrarianAcquisitionAction(
     const allocation = input.allocatedQuantity ?? 0;
     if (allocation < 1 || number(line.allocated) + allocation > line.quantity_delta) throw new AcquisitionStoreError("receipt_allocation_exceeded", 409, "Ця кількість перевищує невикористаний залишок рядка надходження.");
     if (received + allocation > ordered) throw new AcquisitionStoreError("received_quantity_exceeded", 409, "Отримана кількість не може перевищувати замовлену.");
-    const exists = await db.prepare(`SELECT id FROM acquisition_receipt_allocations WHERE request_id=? AND inventory_transaction_line_id=? LIMIT 1`).bind(requestId, input.receiptLineId).first();
-    if (exists) throw new AcquisitionStoreError("receipt_already_linked", 409, "Цей рядок надходження вже прив’язаний до заявки.");
     receiptAllocation = allocation;
     received += allocation;
     next = received === ordered ? "received" : "partially_received";
@@ -415,7 +415,10 @@ export async function applyLibrarianAcquisitionAction(
             AND tx.created_at>=COALESCE(ar.ordered_at,ar.submitted_at)
             AND COALESCE((SELECT SUM(a.allocated_quantity) FROM acquisition_receipt_allocations a WHERE a.inventory_transaction_line_id=line.id),0)+?<=line.quantity_delta
             AND ar.version=? AND ar.updated_at=? AND changes()=1),
-        ?,?,?)`)
+        ?,?,?)
+      ON CONFLICT(request_id,inventory_transaction_line_id) DO UPDATE SET
+        allocated_quantity=acquisition_receipt_allocations.allocated_quantity+excluded.allocated_quantity,
+        actor_user_id=excluded.actor_user_id`)
       .bind(`ARA-${crypto.randomUUID()}`, requestId, input.expectedVersion + 1, now,
         requestId, input.receiptLineId, receiptAllocation, input.expectedVersion + 1, now,
         receiptAllocation, actor.id, now));
@@ -588,11 +591,11 @@ export async function listAcquisitionReceiptOptions(
     JOIN inventory_transactions tx ON tx.id=line.transaction_id
     JOIN locations l ON l.id=line.location_id
     WHERE line.material_id=? AND tx.kind='receipt' AND tx.status='posted' AND line.quantity_delta>0
+      AND line.quantity_delta>COALESCE((SELECT SUM(a.allocated_quantity) FROM acquisition_receipt_allocations a WHERE a.inventory_transaction_line_id=line.id),0)
       AND date(tx.occurred_at) >= date((SELECT COALESCE(ordered_at,submitted_at) FROM acquisition_requests WHERE id=?))
       AND tx.created_at >= (SELECT COALESCE(ordered_at,submitted_at) FROM acquisition_requests WHERE id=?)
-      AND NOT EXISTS (SELECT 1 FROM acquisition_receipt_allocations own WHERE own.request_id=? AND own.inventory_transaction_line_id=line.id)
-    ORDER BY tx.occurred_at DESC,line.id DESC LIMIT 30
-  `).bind(request.materialId, requestId, requestId, requestId).all<Record<string, string | number>>();
+      ORDER BY tx.occurred_at DESC,line.id DESC LIMIT 30
+  `).bind(request.materialId, requestId, requestId).all<Record<string, string | number>>();
   return (rows.results ?? []).filter((row) => number(row.unallocated_quantity) > 0).map((row) => ({
     lineId: String(row.line_id), occurredAt: String(row.occurred_at), locationName: String(row.location_name),
     receivedQuantity: number(row.received_quantity), unallocatedQuantity: number(row.unallocated_quantity),

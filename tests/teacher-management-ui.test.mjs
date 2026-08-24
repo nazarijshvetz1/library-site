@@ -126,6 +126,13 @@ test("selected teacher exposes profile, material history, visits and access anch
   assert.match(workspace, /<TeacherCodeImport/u);
   assert.match(workspace, /setAccessRefreshKey/u);
   assert.match(workspace, /<TeacherAccessAdmin writesEnabled=\{writesEnabled\} refreshKey=\{accessRefreshKey\} \/>/u);
+  assert.match(workspace, /listRequestRef = useRef\(0\)/u);
+  assert.match(workspace, /detailRequestRef = useRef\(0\)/u);
+  assert.match(workspace, /selectedIdRef = useRef<string \| null>\(null\)/u);
+  assert.match(workspace, /requestSequence !== listRequestRef\.current/u);
+  assert.match(workspace, /requestSequence !== detailRequestRef\.current/u);
+  assert.match(workspace, /selectedIdRef\.current === next\.teacher\.id/u);
+  assert.match(workspace, /error instanceof Error \? error\.message/u);
 });
 
 test("material request inbox separates reservation, physical issue and uncollected release", async () => {
@@ -143,6 +150,8 @@ test("material request inbox separates reservation, physical issue and uncollect
   assert.match(inbox, /completeLegacyRequest/u);
   assert.match(inbox, /request\.resultingLoanId/u);
   assert.match(inbox, /action: "complete"/u);
+  assert.match(inbox, /key=\{`\$\{request\.id\}:\$\{request\.version\}`\}/u);
+  assert.match(inbox, /loadRequestRef = useRef\(0\)/u);
   assert.doesNotMatch(inbox, /Позначити готовим і створити видачу/u);
 });
 

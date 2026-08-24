@@ -39,7 +39,8 @@ test("teacher booking UI selects canonical identity, authenticates with a person
   assert.match(source, /role="combobox"/u);
   assert.match(source, /role="listbox"/u);
   assert.match(source, /aria-activedescendant/u);
-  assert.match(source, /chosen\.loginId, normalizedTeacherAccessCode\(code\)/u);
+  assert.match(source, /const normalizedCode = normalizedTeacherAccessCode\(code\)/u);
+  assert.match(source, /chosen\.loginId, normalizedCode/u);
   assert.match(source, /results\.length === 1 \? results\[0\]/u);
   assert.match(source, /JSON\.stringify\(\{ loginId, code \}\)/u);
   assert.match(source, /error\.status === 429/u);
@@ -50,7 +51,8 @@ test("teacher booking UI selects canonical identity, authenticates with a person
   const client = await read("app/visits/visit-client.ts");
   assert.match(client, /teacherAccessCodeComplete/u);
   assert.match(client, /\^\\d\{4\}\$/u);
-  assert.match(source, /!teacherAccessCodeComplete\(code\)/u);
+  assert.match(source, /const codeComplete = teacherAccessCodeComplete\(code\)/u);
+  assert.match(source, /if \(!codeComplete\) return/u);
   assert.match(source, /mustChangePin/u);
   assert.match(source, /teacher\.fullName/u);
   assert.match(source, /data\?\.classYears/u);

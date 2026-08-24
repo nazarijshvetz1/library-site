@@ -27,6 +27,22 @@ registerHooks({
 
 const telegram = await import("../lib/telegram-notifications.ts");
 const outbox = await import("../lib/telegram-outbox.ts");
+const telegramApi = await import("../lib/telegram-api.ts");
+const visitStore = await import("../lib/visit-schedule-store.ts");
+
+test("Telegram API preserves teacher authentication errors", async () => {
+  for (const [code, status, error] of [
+    ["authentication_required", 401, "Сеанс завершився."],
+    ["pin_change_required", 403, "Створіть власний PIN."],
+  ]) {
+    const response = telegramApi.telegramStoreError(new visitStore.VisitScheduleError(code, status, error));
+    assert.equal(response.status, status);
+    assert.deepEqual(await response.json(), { schemaVersion: 1, success: false, code, error });
+  }
+  const fallback = telegramApi.telegramStoreError(new Error("private detail"));
+  assert.equal(fallback.status, 503);
+  assert.equal((await fallback.json()).code, "telegram_unavailable");
+});
 
 class PreparedStatement {
   constructor(database, sql, bindings = []) {

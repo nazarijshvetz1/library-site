@@ -710,6 +710,9 @@ function TeacherSignIn({
   const [searchNotice, setSearchNotice] = useState("");
   const [activeIndex, setActiveIndex] = useState(-1);
   const normalizedQuery = query.trim();
+  const normalizedCode = normalizedTeacherAccessCode(code);
+  const codeTouched = normalizedCode.length > 0;
+  const codeComplete = teacherAccessCodeComplete(code);
 
   useEffect(() => {
     if (selected || normalizedQuery.length < 3) return;
@@ -786,8 +789,8 @@ function TeacherSignIn({
       searchRef.current?.focus();
       return;
     }
-    if (!teacherAccessCodeComplete(code)) return;
-    void onSignIn(chosen.loginId, normalizedTeacherAccessCode(code));
+    if (!codeComplete) return;
+    void onSignIn(chosen.loginId, normalizedCode);
   }
 
   function changeCode(value: string) {
@@ -878,14 +881,16 @@ function TeacherSignIn({
               maxLength={11}
               pattern="(?:[0-9]{4}|[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5})"
               value={code}
+              aria-invalid={codeTouched && !codeComplete}
+              aria-describedby={`${listId}-code-help`}
               onChange={(event) => changeCode(event.currentTarget.value)}
               disabled={busy}
               placeholder="4 цифри"
             />
-            <small>Під час першого входу введіть код бібліотекаря. Після цього сайт запропонує створити власний 4-значний PIN.</small>
+            <small id={`${listId}-code-help`} aria-live="polite" aria-atomic="true" className={codeTouched && !codeComplete ? styles.fieldError : undefined}>{codeTouched && !codeComplete ? "Введіть рівно 4 цифри або повний старий 10-символьний код." : "Під час першого входу введіть код бібліотекаря. Після цього сайт запропонує створити власний 4-значний PIN."}</small>
           </label>
         </div>
-        <button className={styles.primary} type="submit" disabled={!teacherAccessCodeComplete(code) || busy}>
+        <button className={styles.primary} type="submit" disabled={!codeComplete || busy}>
           {busy ? "Перевіряємо…" : "Увійти до кабінету"}
         </button>
         <p className={styles.authHelp}>Забули PIN або вас немає у списку? Бібліотекар може видати новий тимчасовий код.</p>
@@ -1569,6 +1574,7 @@ function TeacherOverview({
     try {
       const response = await visitApi<TeacherProfileEnvelope>("/api/teacher/profile");
       setProfile(response.profile);
+      setProfileNotice("");
     } catch (error) {
       setProfileNotice(errorMessage(error));
       setProfileNoticeTone("error");
@@ -2105,6 +2111,7 @@ function TeacherNotificationsPanel({ pendingScope }: { pendingScope: string }) {
       setData((current) => append && current
         ? { ...response, notifications: mergePortalPageById(current.notifications, response.notifications) }
         : response);
+      setNotice("");
     } catch (error) {
       setNotice(afterMutation
         ? "Позначку збережено, але список повідомлень не вдалося оновити. Натисніть «Оновити»."
@@ -2189,12 +2196,13 @@ function TeacherTelegramSettings() {
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"success" | "error" | "info">("info");
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (preserveNotice = false) => {
     setLoading(true);
     try {
       const response = await visitApi<TelegramStatusEnvelope>("/api/teacher/telegram");
       setTelegram(response.telegram);
       setConfirmDisconnect(false);
+      if (!preserveNotice) setNotice("");
     } catch (error) {
       setNotice(errorMessage(error));
       setNoticeTone("error");
@@ -2258,7 +2266,7 @@ function TeacherTelegramSettings() {
     try {
       await visitApi("/api/teacher/telegram/test", { method: "POST" });
       setNotice("Тестове повідомлення надіслано в Telegram."); setNoticeTone("success");
-      await load();
+      await load(true);
     } catch (error) {
       setNotice(errorMessage(error)); setNoticeTone("error");
     } finally { setBusy(null); }
@@ -2375,9 +2383,14 @@ function TeacherSecurityPanel({
   const [rotated, setRotated] = useState(false);
   const dialogRef = useRef<HTMLElement | null>(null);
   const strength = teacherPinStrength(newPin);
+  const normalizedCurrentCode = normalizedTeacherAccessCode(currentCode);
+  const currentCodeTouched = normalizedCurrentCode.length > 0;
+  const currentCodeComplete = teacherAccessCodeComplete(currentCode);
+  const normalizedNewPin = normalizedTeacherPin(newPin);
+  const pinDiffersFromCurrent = strength.complete && normalizedNewPin !== normalizedCurrentCode;
   const confirmationComplete = normalizedTeacherPin(confirmPin).length === 4;
   const pinsMatch = confirmationComplete
-    && normalizedTeacherPin(confirmPin) === normalizedTeacherPin(newPin);
+    && normalizedTeacherPin(confirmPin) === normalizedNewPin;
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -2443,14 +2456,14 @@ function TeacherSecurityPanel({
 
   function submitRotation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!teacherAccessCodeComplete(currentCode) || !strength.strong || !pinsMatch) return;
+    if (!currentCodeComplete || !strength.strong || !pinDiffersFromCurrent || !pinsMatch) return;
     const requestId = crypto.randomUUID();
     void sendRotation({
       requestId,
       payload: {
         requestId,
-        currentCode: normalizedTeacherAccessCode(currentCode),
-        newPin: normalizedTeacherPin(newPin),
+        currentCode: normalizedCurrentCode,
+        newPin: normalizedNewPin,
       },
     });
   }
@@ -2465,17 +2478,18 @@ function TeacherSecurityPanel({
         {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
         <form onSubmit={submitRotation}>
           <div className={styles.fields}>
-            {initialCurrentCode && required ? <div className={`${styles.wide} ${styles.success}`} role="status">Тимчасовий код бібліотекаря підтверджено.</div> : <label className={styles.wide}>Поточний код або PIN *<input required type="password" inputMode="text" autoComplete="current-password" maxLength={11} value={currentCode} onChange={(event) => setCurrentCode(formatTeacherAccessCode(event.currentTarget.value))} placeholder="4 цифри" pattern="(?:[0-9]{4}|[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5})" disabled={submitting || rotated || Boolean(pendingRotation)} /></label>}
+            {initialCurrentCode && required ? <div className={`${styles.wide} ${styles.success}`} role="status">Тимчасовий код бібліотекаря підтверджено.</div> : <label className={styles.wide}>Поточний код або PIN *<input required type="password" inputMode="text" autoComplete="current-password" maxLength={11} value={currentCode} onChange={(event) => setCurrentCode(formatTeacherAccessCode(event.currentTarget.value))} placeholder="4 цифри" pattern="(?:[0-9]{4}|[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5})" aria-invalid={currentCodeTouched && !currentCodeComplete} aria-describedby="current-code-help" disabled={submitting || rotated || Boolean(pendingRotation)} /><small id="current-code-help" aria-live="polite" aria-atomic="true" className={currentCodeTouched && !currentCodeComplete ? styles.fieldError : undefined}>{currentCodeTouched && !currentCodeComplete ? `Зараз введено ${normalizedCurrentCode.length} символів. Потрібно рівно 4 цифри або повний старий 10-символьний код.` : "Введіть чинний 4-значний PIN або повний старий тимчасовий код."}</small></label>}
             <label className={styles.wide}>Новий PIN *
-              <span className={styles.generatedCode}><input required type={showPin ? "text" : "password"} inputMode="numeric" autoComplete="new-password" maxLength={4} value={newPin} onChange={(event) => { setNewPin(normalizedTeacherPin(event.currentTarget.value)); setRotated(false); }} placeholder="••••" pattern="[0-9]{4}" aria-invalid={newPin.length > 0 && !strength.strong} aria-describedby="new-pin-help new-pin-rules" disabled={submitting || rotated || Boolean(pendingRotation)} /><button className={styles.quiet} type="button" onClick={() => setShowPin((value) => !value)} disabled={!newPin || submitting}>{showPin ? "Сховати" : "Показати"}</button></span>
-              <small id="new-pin-help">Можна використати будь-яку комбінацію з 4 цифр.</small>
+              <span className={styles.generatedCode}><input required type={showPin ? "text" : "password"} inputMode="numeric" autoComplete="new-password" maxLength={4} value={newPin} onChange={(event) => { setNewPin(normalizedTeacherPin(event.currentTarget.value)); setRotated(false); }} placeholder="••••" pattern="[0-9]{4}" aria-invalid={newPin.length > 0 && (!strength.strong || !pinDiffersFromCurrent)} aria-describedby="new-pin-help new-pin-rules" disabled={submitting || rotated || Boolean(pendingRotation)} /><button className={styles.quiet} type="button" onClick={() => setShowPin((value) => !value)} disabled={!newPin || submitting}>{showPin ? "Сховати" : "Показати"}</button></span>
+              <small id="new-pin-help">Можна використати будь-які 4 цифри, але новий PIN має відрізнятися від поточного або тимчасового коду.</small>
               <ul id="new-pin-rules" className={styles.codeRules} aria-live="polite">
                 <li data-ok={strength.complete}>Рівно 4 цифри</li>
+                <li data-ok={pinDiffersFromCurrent}>Відрізняється від поточного коду</li>
               </ul>
             </label>
             <label className={styles.wide}>Повторіть PIN *<input required type="password" inputMode="numeric" autoComplete="new-password" maxLength={4} value={confirmPin} onChange={(event) => setConfirmPin(normalizedTeacherPin(event.currentTarget.value))} placeholder="••••" pattern="[0-9]{4}" aria-invalid={confirmationComplete && !pinsMatch} aria-describedby="confirm-pin-help" disabled={submitting || rotated || Boolean(pendingRotation)} /><small id="confirm-pin-help" className={confirmationComplete && !pinsMatch ? styles.fieldError : undefined}>{confirmationComplete && !pinsMatch ? "PIN-коди не збігаються." : "Введіть ті самі 4 цифри ще раз."}</small></label>
           </div>
-          {pendingRotation ? <button className={styles.primary} type="button" onClick={() => void sendRotation(pendingRotation)} disabled={submitting}>{submitting ? "Перевіряємо…" : "Повторити той самий запит"}</button> : <button className={styles.primary} type="submit" disabled={!teacherAccessCodeComplete(currentCode) || !strength.strong || !pinsMatch || submitting || rotated}>{submitting ? "Змінюємо…" : rotated ? "PIN змінено" : "Активувати PIN"}</button>}
+          {pendingRotation ? <button className={styles.primary} type="button" onClick={() => void sendRotation(pendingRotation)} disabled={submitting}>{submitting ? "Перевіряємо…" : "Повторити той самий запит"}</button> : <button className={styles.primary} type="submit" disabled={!currentCodeComplete || !strength.strong || !pinDiffersFromCurrent || !pinsMatch || submitting || rotated}>{submitting ? "Змінюємо…" : rotated ? "PIN змінено" : "Активувати PIN"}</button>}
         </form>
       </section>
     </div>

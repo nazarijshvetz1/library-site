@@ -142,7 +142,7 @@ export async function enforceGuestMutationRate(
   } catch {
     await assertRateAvailable(db, currentIpHash, nowDate, MUTATION_WINDOW_MS, MUTATION_IP_LIMIT);
     await assertRateAvailable(db, sessionHash, nowDate, MUTATION_WINDOW_MS, MUTATION_SESSION_LIMIT);
-    throw new VisitScheduleError("guest_session_expired", 401, "Р“РѕСЃС‚СЊРѕРІР° СЃРµСЃС–СЏ Р·Р°РІРµСЂС€РёР»Р°СЃСЏ.");
+    throw new VisitScheduleError("guest_session_expired", 401, "Гостьова сесія завершилася.");
   }
 }
 
@@ -163,7 +163,7 @@ export async function listGuestTeacherDirectory(
     ]);
   } catch {
     await assertRateAvailable(db, scopeHash, nowDate, DIRECTORY_WINDOW_MS, DIRECTORY_LIMIT);
-    throw new VisitScheduleError("teacher_directory_unavailable", 503, "Р”РѕРІС–РґРЅРёРє С‚РёРјС‡Р°СЃРѕРІРѕ РЅРµРґРѕСЃС‚СѓРїРЅРёР№.");
+    throw new VisitScheduleError("teacher_directory_unavailable", 503, "Довідник тимчасово недоступний.");
   }
   const normalized = query.normalize("NFKC").trim().replace(/\s+/gu, " ");
   if (normalized.length < 3 || normalized.length > 80) {

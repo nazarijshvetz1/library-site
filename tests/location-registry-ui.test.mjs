@@ -16,6 +16,11 @@ test("librarian can manage cabinets without deleting inventory history", async (
   assert.match(workspace, /Закрити/u);
   assert.match(workspace, /Поновити/u);
   assert.match(workspace, /Видалити/u);
+  assert.match(workspace, /referenceRefreshToken/u);
+  assert.match(workspace, /onChanged=\{\(\) => \{ setReferenceState\("loading"\)/u);
+  assert.match(workspace, /message && state !== "error"/u);
+  assert.match(workspace, /const load = useCallback\(async \(preserveMessage = false\)/u);
+  assert.match(workspace, /await load\(true\)/u);
   assert.match(store, /totalReferences === 0/u);
   assert.match(store, /row\.type !== "library"/u);
   assert.match(store, /active_reservations/u);

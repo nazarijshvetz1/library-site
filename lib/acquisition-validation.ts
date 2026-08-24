@@ -197,7 +197,7 @@ export function validateAcquisitionActionInput(input: unknown): ValidationResult
   const message = readOptionalText(input.message, "message", errors, 1_000);
   if (action === "request_clarification" && !message) errors.message = "Напишіть, що потрібно уточнити.";
   if (action === "reject" && !message) errors.message = "Укажіть причину відхилення.";
-  if (action === "approve" && approvedQuantity === null) errors.approvedQuantity = "Укажіть погоджену кількість.";
+  if (action === "approve" && (approvedQuantity === null || approvedQuantity < 1)) errors.approvedQuantity = "Погоджена кількість має бути не меншою за 1.";
   if (action === "order" && orderedQuantity === null) errors.orderedQuantity = "Укажіть замовлену кількість.";
   if (action === "link_material" && !targetMaterialId) errors.targetMaterialId = "Укажіть CAT-ID створеного матеріалу.";
   if (action === "link_receipt") {
