@@ -12,6 +12,7 @@ import type {
   MaterialRequestIssueInput,
   MaterialRequestReadyInput,
   MaterialRequestReleaseInput,
+  NotificationDeleteInput,
   NotificationReadInput,
 } from "./teacher-material-request-validation.ts";
 
@@ -110,6 +111,13 @@ export type PortalNotificationProjection = {
   readAt: string | null;
   version: number;
   createdAt: string;
+};
+
+export type TeacherNotificationDeleteResult = {
+  notificationId: string;
+  deleted: true;
+  version: number;
+  deletedAt: string;
 };
 
 export type MaterialRequestPage = {
@@ -883,7 +891,7 @@ export async function listTeacherNotifications(
       SELECT id, type, title, message, entity_type, entity_id,
              read_at, version, created_at
       FROM portal_notifications
-      WHERE teacher_user_id = ? ${cursorClause}
+      WHERE teacher_user_id = ? AND deleted_at IS NULL ${cursorClause}
       ORDER BY created_at DESC, id DESC
       LIMIT ?
     `).bind(...notificationBindings).all<{
@@ -900,7 +908,7 @@ export async function listTeacherNotifications(
     db.prepare(`
       SELECT COUNT(*) AS unread_count
       FROM portal_notifications
-      WHERE teacher_user_id = ? AND read_at IS NULL
+      WHERE teacher_user_id = ? AND deleted_at IS NULL AND read_at IS NULL
     `).bind(teacherUserId).first<{ unread_count: number }>(),
   ]);
   const allNotifications = (response.results ?? []).map((row) => ({
@@ -955,7 +963,7 @@ export async function markTeacherNotificationRead(
     SELECT id, type, title, message, entity_type, entity_id,
            version, read_at, created_at
     FROM portal_notifications
-    WHERE id=? AND teacher_user_id=? LIMIT 1
+    WHERE id=? AND teacher_user_id=? AND deleted_at IS NULL LIMIT 1
   `).bind(notificationId, teacher.teacherUserId).first<{
     version: number;
     read_at: string | null;
@@ -1048,6 +1056,7 @@ export async function markTeacherNotificationRead(
       UPDATE portal_notifications
       SET read_at = ?, version = version + 1, updated_at = ?
       WHERE teacher_user_id = ? AND id = ? AND version = ? AND read_at IS NULL
+        AND deleted_at IS NULL
         AND EXISTS (
           SELECT 1 FROM audit_events
           WHERE id=? AND entity_type='portal_notification'
@@ -1077,6 +1086,160 @@ export async function markTeacherNotificationRead(
     return replayed ?? result;
   } catch (error) {
     if (error instanceof TeacherMaterialRequestError && error.code === "notification_update_conflict") {
+      await requireActiveTeacherPrincipal(db, teacher, new Date().toISOString());
+    }
+    throw error;
+  }
+}
+
+export async function deleteTeacherNotification(
+  db: TeacherMaterialRequestDatabase,
+  teacher: VisitTeacherIdentity,
+  notificationId: string,
+  input: NotificationDeleteInput,
+): Promise<TeacherNotificationDeleteResult> {
+  const requestHash = await mutationHash({
+    kind: "portal_notifications.delete",
+    actorUserId: teacher.teacherUserId,
+    notificationId,
+    input,
+  });
+  const replay = await replayCompletedCommand<TeacherNotificationDeleteResult>(
+    db,
+    input.requestId,
+    teacher.teacherUserId,
+    requestHash,
+  );
+  if (replay) return replay;
+  const now = new Date().toISOString();
+  await requireActiveTeacherPrincipal(db, teacher, now);
+  const existing = await db.prepare(`
+    SELECT id,type,title,message,entity_type,entity_id,version,read_at,created_at
+    FROM portal_notifications
+    WHERE id=? AND teacher_user_id=? AND deleted_at IS NULL LIMIT 1
+  `).bind(notificationId, teacher.teacherUserId).first<{
+    id: string;
+    type: string;
+    title: string;
+    message: string;
+    entity_type: string;
+    entity_id: string;
+    version: number;
+    read_at: string | null;
+    created_at: string;
+  }>();
+  if (!existing) {
+    throw new TeacherMaterialRequestError("notification_not_found", 404, "Сповіщення не знайдено.");
+  }
+  if (Number(existing.version) !== input.expectedVersion) {
+    throw new TeacherMaterialRequestError("notification_version_conflict", 409, "Сповіщення вже змінилося.");
+  }
+  const result: TeacherNotificationDeleteResult = {
+    notificationId,
+    deleted: true,
+    version: input.expectedVersion + 1,
+    deletedAt: now,
+  };
+  const auditId = `AUD-${crypto.randomUUID()}`;
+  const before = JSON.stringify({
+    id: existing.id,
+    type: existing.type,
+    title: existing.title,
+    message: existing.message,
+    entityType: existing.entity_type,
+    entityId: existing.entity_id,
+    readAt: existing.read_at,
+    version: Number(existing.version),
+    createdAt: existing.created_at,
+  });
+  const statements = [
+    insertCommandStatement(
+      db,
+      input.requestId,
+      requestHash,
+      teacher.teacherUserId,
+      "portal_notifications.delete",
+      "portal_notification",
+      notificationId,
+      now,
+    ),
+    db.prepare(`
+      INSERT INTO audit_events (
+        id,actor_user_id,actor_email,action,entity_type,entity_id,
+        request_id,before_json,after_json,metadata_json,created_at
+      ) VALUES (?,?,'teacher-code@local.invalid','portal_notifications.deleted',
+        'portal_notification',(
+          SELECT notification.id
+          FROM portal_notifications notification
+          JOIN users teacher ON teacher.id=notification.teacher_user_id
+            AND teacher.full_name=? AND teacher.status='active'
+          JOIN teacher_profiles profile ON profile.teacher_user_id=teacher.id AND profile.closed_at IS NULL
+          JOIN visit_teacher_credentials credential
+            ON credential.teacher_user_id=teacher.id AND credential.status='active'
+            AND credential.version=?
+          JOIN visit_teacher_sessions session
+            ON session.teacher_user_id=teacher.id
+            AND session.credential_version=credential.version
+            AND session.token_hash=? AND session.revoked_at IS NULL AND session.expires_at>?
+          JOIN mutation_commands command ON command.id=?
+            AND command.actor_user_id=notification.teacher_user_id
+            AND command.status='processing'
+            AND command.target_type='portal_notification'
+            AND command.target_id=notification.id
+            AND command.request_hash=?
+          WHERE notification.id=? AND notification.teacher_user_id=?
+            AND notification.version=? AND notification.deleted_at IS NULL
+        ),?,?,?,NULL,?)
+    `).bind(
+      auditId,
+      teacher.teacherUserId,
+      teacher.fullName,
+      teacher.credentialVersion,
+      teacher.tokenHash,
+      now,
+      input.requestId,
+      requestHash,
+      notificationId,
+      teacher.teacherUserId,
+      input.expectedVersion,
+      input.requestId,
+      before,
+      JSON.stringify({ deleted: true, deletedAt: now }),
+      now,
+    ),
+    db.prepare(`
+      UPDATE portal_notifications
+      SET deleted_at=?,version=version+1,updated_at=?
+      WHERE id=? AND teacher_user_id=? AND version=? AND deleted_at IS NULL
+        AND EXISTS (
+          SELECT 1 FROM audit_events
+          WHERE id=? AND entity_type='portal_notification'
+            AND entity_id=portal_notifications.id AND request_id=?
+        )
+    `).bind(
+      now,
+      now,
+      notificationId,
+      teacher.teacherUserId,
+      input.expectedVersion,
+      auditId,
+      input.requestId,
+    ),
+    completeCommandStatement(db, input.requestId, result, now),
+  ];
+  try {
+    const replayed = await executeIdempotentBatch<TeacherNotificationDeleteResult>(
+      db,
+      statements,
+      input.requestId,
+      teacher.teacherUserId,
+      requestHash,
+      "notification_delete_conflict",
+      "Не вдалося видалити сповіщення. Оновіть список і повторіть дію.",
+    );
+    return replayed ?? result;
+  } catch (error) {
+    if (error instanceof TeacherMaterialRequestError && error.code === "notification_delete_conflict") {
       await requireActiveTeacherPrincipal(db, teacher, new Date().toISOString());
     }
     throw error;

@@ -75,6 +75,16 @@ test("teacher directory uses frozen server paging, search and status contract", 
   assert.doesNotMatch(workspace, /DirectoryAttention/u);
 });
 
+test("teacher directory exposes a controlled curator-change approval queue", async () => {
+  const workspace = await read("app/librarian/teachers/teacher-management-workspace.tsx");
+  assert.match(workspace, /<TeacherCuratorRequestQueue/u);
+  assert.match(workspace, /\/api\/librarian\/teacher-curator-requests\?status=submitted&limit=100/u);
+  assert.match(workspace, /Зміни кураторства/u);
+  assert.match(workspace, /requestId: item\.id, expectedVersion: item\.version, decision/u);
+  assert.match(workspace, /Підтвердити/u);
+  assert.match(workspace, /Відхилити/u);
+});
+
 test("profile fields keep personnel and imported personal email out of the card", async () => {
   const [client, workspace] = await Promise.all([
     read("app/librarian/teachers/teacher-management-client.ts"),

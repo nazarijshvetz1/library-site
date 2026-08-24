@@ -521,6 +521,12 @@
   font: 650 clamp(31px, 4vw, 45px)/1 Georgia, serif;
 }
 
+/* The workspace moves focus here after a tool change for screen-reader context.
+   Keep that semantic focus without drawing the global interactive gold ring. */
+.titleRow h1:focus {
+  outline: none;
+}
+
 .titleRow > div > p:last-child {
   margin: 0;
   color: var(--muted);

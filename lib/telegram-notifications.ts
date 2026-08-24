@@ -27,6 +27,7 @@ const TELEGRAM_MAX_ATTEMPTS = 8;
 const TELEGRAM_DRAIN_LIMIT = 10;
 const TELEGRAM_API_TIMEOUT_MS = 6_000;
 const TELEGRAM_BOT_API = "https://api.telegram.org";
+const PUBLIC_CATALOG_URL = "https://nazarijshvetz1.github.io/library-site/";
 
 export class TelegramIntegrationError extends Error {
   readonly code: string;
@@ -1924,6 +1925,7 @@ async function bestEffortTeacherOnboardingMenu(
 ): Promise<void> {
   try {
     const origin = siteOrigin ? trustedSiteOrigin(siteOrigin) : null;
+    const configuration = telegramConfiguration();
     const heading = invitedTeacherName
       ? `Персональне запрошення для «${safePlainText(invitedTeacherName, 120)}» підтверджено.`
       : "Вітаємо в «Єдиній бібліотеці»!";
@@ -1943,7 +1945,12 @@ async function bestEffortTeacherOnboardingMenu(
               [{ text: "🔑 Увійти", web_app: { url: new URL("/teacher/telegram?mode=login", origin).toString() } }],
               [{ text: "✨ Активувати вперше", web_app: { url: new URL("/teacher/telegram?mode=activate", origin).toString() } }],
             ]),
-        [{ text: "📚 Переглянути каталог", url: "https://nazarijshvetz1.github.io/library-site/" }],
+        [{
+          text: "📚 Переглянути каталог",
+          ...(configuration.miniAppEnabled
+            ? { web_app: { url: PUBLIC_CATALOG_URL } }
+            : { url: PUBLIC_CATALOG_URL }),
+        }],
         [{ text: "📅 Переглянути графік", url: new URL("/visits", origin).toString() }],
       ],
     } : undefined;
@@ -2207,7 +2214,8 @@ function telegramRoleKeyboard(
   if (teacherCapability) {
     const buttons = [
       ["👤 Кабінет учителя", "/teacher/telegram?tab=overview"],
-      ["📚 Каталог і замовлення", "/teacher/telegram?tab=orders"],
+      ["📚 Каталог", PUBLIC_CATALOG_URL],
+      ["🛒 Замовлення", "/teacher/telegram?tab=orders"],
       ["➕ Запропонувати придбання", "/teacher/telegram?tab=acquisition"],
       ["📅 Записатися / мої відвідування", "/teacher/telegram?tab=visits"],
       ["📖 Мої посібники", "/teacher/telegram?tab=loans"],
@@ -2221,7 +2229,7 @@ function telegramRoleKeyboard(
   }
   if (role === "admin" || role === "librarian") {
     const buttons = [
-      ["🆕 Замовлення вчителів", "/librarian/telegram?target=visits", "/librarian/visits#request-inbox-title"],
+      ["🆕 Замовлення вчителів", "/librarian/telegram?target=teachers&tab=orders", "/librarian/orders"],
       ["➕ Комплектування фонду", "/librarian/telegram?target=acquisitions", "/librarian/acquisitions"],
       ["📅 Відвідування", "/librarian/telegram?target=visits", "/librarian/visits"],
       ["👩‍🏫 Вчителі", "/librarian/telegram?target=teachers", "/librarian/teachers"],

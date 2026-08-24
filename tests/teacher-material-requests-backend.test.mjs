@@ -12,6 +12,9 @@ const store = await import(
 const validation = await import(
   pathToFileURL(path.join(root, "lib/teacher-material-request-validation.ts")).href
 );
+const profileStore = await import(
+  pathToFileURL(path.join(root, "lib/teacher-profile-store.ts")).href
+);
 
 class PreparedStatement {
   constructor(database, sql, bindings = []) {
@@ -204,6 +207,67 @@ test("frozen request, ready and notification payloads validate with exact keys",
   assert.equal(validation.validateNotificationReadInput({
     requestId: commandId(), expectedVersion: 1, read: true,
   }).ok, true);
+  assert.equal(validation.validateNotificationDeleteInput({
+    requestId: commandId(), expectedVersion: 1,
+  }).ok, true);
+  assert.equal(validation.validateNotificationDeleteInput({
+    requestId: commandId(), expectedVersion: 1, confirmation: true,
+  }).ok, false);
+});
+
+test("teacher profile self-update is optimistic, audited and idempotent", async () => {
+  const context = openDatabase();
+  const requestId = commandId();
+  const input = {
+    requestId,
+    expectedVersion: 1,
+    subjectPosition: "Учитель математики",
+    primaryLocationId: "LOC-205",
+  };
+
+  const updated = await profileStore.updateTeacherOwnProfile(context.db, teacher, input);
+  const replay = await profileStore.updateTeacherOwnProfile(context.db, teacher, input);
+  assert.deepEqual(replay, updated);
+  assert.equal(updated.teacherUserId, "USR-T1");
+  assert.equal(updated.profileVersion, 2);
+  assert.deepEqual(
+    { ...context.sqlite.prepare(`SELECT subject_position,primary_location_id,version,
+      last_mutation_request_id,updated_by_user_id FROM teacher_profiles WHERE teacher_user_id='USR-T1'`).get() },
+    {
+      subject_position: "Учитель математики",
+      primary_location_id: "LOC-205",
+      version: 2,
+      last_mutation_request_id: requestId,
+      updated_by_user_id: "USR-T1",
+    },
+  );
+  assert.equal(
+    context.sqlite.prepare("SELECT action FROM audit_events WHERE request_id=?").get(requestId).action,
+    "teacher.profile.self_updated",
+  );
+  assert.equal(
+    context.sqlite.prepare("SELECT status FROM mutation_commands WHERE id=?").get(requestId).status,
+    "completed",
+  );
+
+  await assert.rejects(
+    () => profileStore.updateTeacherOwnProfile(context.db, teacher, {
+      ...input,
+      requestId: commandId(),
+      expectedVersion: 1,
+      subjectPosition: "Учитель алгебри",
+    }),
+    (error) => error.code === "teacher_profile_version_conflict" && error.status === 409,
+  );
+  await assert.rejects(
+    () => profileStore.updateTeacherOwnProfile(context.db, teacher, {
+      ...input,
+      requestId: commandId(),
+      expectedVersion: 2,
+      primaryLocationId: "LOC-MISSING",
+    }),
+    (error) => error.code === "teacher_profile_location_invalid" && error.status === 400,
+  );
 });
 
 test("teacher create is idempotent, bounded and returns the UI projection", async () => {
@@ -360,6 +424,60 @@ test("ready reserves without a loan, then physical issue creates the loan atomic
   assert.equal(
     context.sqlite.prepare("SELECT read_at FROM portal_notifications WHERE id=?").get(notification.id).read_at,
     marked.readAt,
+  );
+});
+
+test("teacher notification deletion is a hidden, idempotent soft-delete", async () => {
+  const context = openDatabase();
+  const request = await createRequest(context, 1);
+  await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
+    requestId: commandId(), expectedVersion: request.version, action: "start_review",
+  });
+  const before = await store.listTeacherNotifications(context.db, "USR-T1");
+  assert.equal(before.notifications.length, 1);
+  assert.equal(before.unreadCount, 1);
+  const notification = before.notifications[0];
+  const input = { requestId: commandId(), expectedVersion: notification.version };
+
+  const deleted = await store.deleteTeacherNotification(
+    context.db,
+    teacher,
+    notification.id,
+    input,
+  );
+  const replay = await store.deleteTeacherNotification(
+    context.db,
+    teacher,
+    notification.id,
+    input,
+  );
+  assert.deepEqual(replay, deleted);
+  assert.equal(deleted.deleted, true);
+  assert.equal(deleted.version, notification.version + 1);
+  const persisted = context.sqlite.prepare(`SELECT deleted_at,read_at,version
+    FROM portal_notifications WHERE id=?`).get(notification.id);
+  assert.equal(persisted.deleted_at, deleted.deletedAt);
+  assert.equal(persisted.read_at, null);
+  assert.equal(persisted.version, deleted.version);
+  assert.equal(
+    context.sqlite.prepare("SELECT COUNT(*) AS n FROM portal_notifications WHERE id=?").get(notification.id).n,
+    1,
+    "soft-delete must retain the audited row",
+  );
+  assert.equal(
+    context.sqlite.prepare("SELECT action FROM audit_events WHERE request_id=?").get(input.requestId).action,
+    "portal_notifications.deleted",
+  );
+
+  const after = await store.listTeacherNotifications(context.db, "USR-T1");
+  assert.deepEqual(after.notifications, []);
+  assert.equal(after.unreadCount, 0);
+  await assert.rejects(
+    () => store.markTeacherNotificationRead(context.db, teacher, notification.id, {
+      requestId: commandId(), expectedVersion: deleted.version, read: true,
+    }),
+    (error) => error instanceof store.TeacherMaterialRequestError
+      && error.code === "notification_not_found" && error.status === 404,
   );
 });
 

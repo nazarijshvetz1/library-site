@@ -123,6 +123,9 @@ test("authenticated teacher workflows use frozen routes and exact request fields
   assert.match(workspace, /cartRows\.length >= 10/u);
   assert.match(workspace, /\/api\/teacher\/notifications/u);
   assert.match(workspace, /expectedVersion: notification\.version, read: true/u);
+  assert.match(workspace, /kind: "notification-delete"/u);
+  assert.match(workspace, /method: intent\.kind === "notification-read" \? "PATCH" : "DELETE"/u);
+  assert.match(workspace, /expectedVersion: notification\.version/u);
   assert.match(workspace, /\/api\/teacher\/security\/code/u);
   assert.match(workspace, /currentCode: normalizedCurrentCode,[\s\S]*newPin: normalizedNewPin/u);
   assert.match(workspace, /teacherPinStrength\(newPin\)/u);
@@ -443,6 +446,10 @@ test("teacher profile shows assigned information and keeps photo access private 
   assert.match(workspace, /Обрати з галереї/u);
   assert.match(workspace, /normalizeCoverPhotoForUpload/u);
   assert.match(profileRoute, /requireVisitTeacherSession\(db, request\)/u);
+  assert.match(profileRoute, /export async function PATCH\(request: Request\)/u);
+  assert.match(profileRoute, /expectedKeys = \["requestId", "expectedVersion", "subjectPosition", "primaryLocationId"\]/u);
+  assert.match(profileRoute, /updateTeacherOwnProfile\(db, teacher/u);
+  assert.match(workspace, /expectedVersion: profile\.profileVersion,[\s\S]*subjectPosition: normalizedSubject,[\s\S]*primaryLocationId: nextLocation/u);
   assert.match(photoRoute, /requireVisitTeacherSession\(db, request\)/u);
   assert.equal((photoRoute.match(/isSameOriginRequest\(request\)/gu) ?? []).length, 2);
   assert.match(photoRoute, /"Cache-Control": "private/u);
@@ -450,6 +457,25 @@ test("teacher profile shows assigned information and keeps photo access private 
   assert.match(store, /teacher-photos\/\$\{safeTeacherKey/u);
   assert.match(librarianRoute, /authorizeTeacherRegistryRead/u);
   assert.match(librarianWorkspace, /teacher\.photoUrl/u);
+});
+
+test("teacher profile edits subject and room directly while curator changes stay librarian-approved", async () => {
+  const [workspace, curatorRoute, profileStore] = await Promise.all([
+    read("app/visits/visit-booking-workspace.tsx"),
+    read("app/api/teacher/profile/curator-request/route.ts"),
+    read("lib/teacher-profile-store.ts"),
+  ]);
+  assert.match(workspace, /Редагувати інформацію/u);
+  assert.match(workspace, /Зберегти профіль/u);
+  assert.match(workspace, /Змінити клас куратора/u);
+  assert.match(workspace, /зміну підтверджує бібліотекар/u);
+  assert.match(workspace, /expectedVersion: profile\.pendingCuratorRequest\?\.version \?\? null/u);
+  assert.match(workspace, /requestedClassYearId: curatorClassYearId/u);
+  assert.match(workspace, /method: "DELETE"[\s\S]*expectedVersion: pendingRequest\.version/u);
+  assert.match(curatorRoute, /expected = \["requestId", "expectedVersion", "requestedClassYearId", "teacherNote"\]/u);
+  assert.match(curatorRoute, /requireVisitTeacherSession\(db, request\)/u);
+  assert.match(profileStore, /teacher_curator_change_requests/u);
+  assert.match(profileStore, /options:[\s\S]*curatorClasses/u);
 });
 
 test("librarian Telegram Mini App revalidates D1 role and keeps cabinet navigation in Mini App", async () => {

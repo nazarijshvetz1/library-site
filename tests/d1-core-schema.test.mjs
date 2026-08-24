@@ -26,6 +26,7 @@ const migrationFiles = [
   "drizzle/0019_kindly_wolfsbane.sql",
   "drizzle/0020_pretty_squadron_sinister.sql",
   "drizzle/0021_optional_student_acquisition_metadata.sql",
+  "drizzle/0022_teacher_curator_change_requests.sql",
 ];
 
 async function migratedDatabase() {
@@ -40,7 +41,10 @@ async function migratedDatabase() {
 test("0021 keeps existing acquisition requests and child events while loosening only student metadata", async () => {
   const database = new DatabaseSync(":memory:");
   database.exec("PRAGMA foreign_keys = ON;");
-  for (const file of migrationFiles.slice(0, -1)) {
+  for (const file of migrationFiles.slice(
+    0,
+    migrationFiles.indexOf("drizzle/0021_optional_student_acquisition_metadata.sql"),
+  )) {
     database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
   }
   const now = "2026-08-23T10:00:00.000Z";
@@ -507,6 +511,11 @@ test("core migration extends the existing draft database without recreating it",
       .some((column) => column.name === "code_expires_at"),
     true,
   );
+  const notificationDeletedAt = database.prepare("PRAGMA table_info('portal_notifications')").all()
+    .find((column) => column.name === "deleted_at");
+  assert.ok(notificationDeletedAt, "portal notification soft-delete requires deleted_at");
+  assert.equal(notificationDeletedAt.notnull, 0, "deleted_at must remain nullable for visible notifications");
+  assert.equal(notificationDeletedAt.dflt_value, null, "existing notifications must remain visible after migration");
 
   const phaseOneSql = await readFile(
     new URL("../drizzle/0003_odd_the_order.sql", import.meta.url),

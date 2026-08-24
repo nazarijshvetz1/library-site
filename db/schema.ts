@@ -832,6 +832,62 @@ export const classYears = sqliteTable(
   ],
 );
 
+const teacherCuratorRequestStatuses = [
+  "submitted",
+  "approved",
+  "rejected",
+  "cancelled",
+] as const;
+
+/** Teacher-originated curator changes that require an explicit librarian decision. */
+export const teacherCuratorChangeRequests = sqliteTable(
+  "teacher_curator_change_requests",
+  {
+    id: text("id").primaryKey(),
+    teacherUserId: text("teacher_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    currentClassYearId: text("current_class_year_id").references(() => classYears.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    requestedClassYearId: text("requested_class_year_id")
+      .notNull()
+      .references(() => classYears.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    status: text("status", { enum: teacherCuratorRequestStatuses })
+      .notNull()
+      .default("submitted"),
+    teacherNote: text("teacher_note").notNull().default(""),
+    librarianNote: text("librarian_note").notNull().default(""),
+    version: integer("version").notNull().default(1),
+    lastMutationRequestId: text("last_mutation_request_id"),
+    resolvedByUserId: text("resolved_by_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    resolvedAt: text("resolved_at"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_teacher_curator_requests_open_teacher")
+      .on(table.teacherUserId)
+      .where(sql`${table.status} = 'submitted'`),
+    index("idx_teacher_curator_requests_status_created").on(table.status, table.createdAt, table.id),
+    index("idx_teacher_curator_requests_teacher_created").on(table.teacherUserId, table.createdAt, table.id),
+    check("teacher_curator_requests_status_valid", sql`${table.status} in ('submitted','approved','rejected','cancelled')`),
+    check("teacher_curator_requests_note_length", sql`length(${table.teacherNote}) <= 1000 and length(${table.librarianNote}) <= 2000`),
+    check("teacher_curator_requests_version_positive", sql`${table.version} > 0`),
+    check("teacher_curator_requests_changes_class", sql`${table.currentClassYearId} is null or ${table.currentClassYearId} != ${table.requestedClassYearId}`),
+    check(
+      "teacher_curator_requests_resolution_consistent",
+      sql`(${table.status} = 'submitted' and ${table.resolvedAt} is null and ${table.resolvedByUserId} is null)
+        or (${table.status} in ('approved','rejected') and ${table.resolvedAt} is not null and ${table.resolvedByUserId} is not null)
+        or (${table.status} = 'cancelled' and ${table.resolvedAt} is not null and ${table.resolvedByUserId} is null)`,
+    ),
+  ],
+);
+
 /**
  * Annual class-level circulation. This stays separate from teacher loans so
  * the existing teacher borrower invariant remains intact.
@@ -1995,6 +2051,7 @@ export const portalNotifications = sqliteTable(
     entityType: text("entity_type").notNull(),
     entityId: text("entity_id").notNull(),
     readAt: text("read_at"),
+    deletedAt: text("deleted_at"),
     version: integer("version").notNull().default(1),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),

@@ -948,6 +948,9 @@ function VisitBookingPanel({
   const [purpose, setPurpose] = useState("");
   const [publicDisplayConsent, setPublicDisplayConsent] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [profile, setProfile] = useState<TeacherOwnProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileError, setProfileError] = useState("");
 
   const load = useCallback(async (afterMutation = false) => {
     setLoading(true);
@@ -963,13 +966,29 @@ function VisitBookingPanel({
     }
   }, []);
 
+  const loadProfile = useCallback(async () => {
+    setProfileLoading(true);
+    try {
+      const response = await visitApi<TeacherProfileEnvelope>("/api/teacher/profile");
+      setProfile(response.profile);
+      setProfileError("");
+      return response.profile;
+    } catch (error) {
+      setProfileError(errorMessage(error));
+      return null;
+    } finally {
+      setProfileLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setPending(readVisitPendingIntent(window.sessionStorage, storageKey));
       void load();
+      void loadProfile();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [load, storageKey]);
+  }, [load, loadProfile, storageKey]);
 
   const selectTeacherTab = useCallback((tab: TeacherTab, historyMode: "push" | "replace" = "push") => {
     setActiveTab(tab);
@@ -1239,7 +1258,7 @@ function VisitBookingPanel({
         <div className={styles.teacherPortalLayout}>
           <aside className={styles.teacherSidebar} aria-label="Навігація Кабінету учителя">
             <div className={styles.teacherSidebarProfile}>
-              <span className={styles.teacherSidebarAvatar} aria-hidden="true">{teacherInitials(teacher.fullName)}</span>
+              <TeacherAvatar className={styles.teacherSidebarAvatar} fullName={teacher.fullName} photoUrl={profile?.photoUrl} decorative />
               <span><small>Персональний кабінет</small><strong>{teacher.fullName}</strong></span>
             </div>
             <nav className={styles.teacherSidebarNav} aria-label="Розділи кабінету">
@@ -1271,7 +1290,7 @@ function VisitBookingPanel({
                 <p>{activeDefinition.description}</p>
               </div>
               <div className={styles.teacherHeaderMeta}>
-                <span className={styles.teacherHeaderIdentity}><span aria-hidden="true">{teacherInitials(teacher.fullName)}</span><span><small>Ви увійшли як</small><strong>{teacher.fullName}</strong></span></span>
+                <span className={styles.teacherHeaderIdentity}><TeacherAvatar fullName={teacher.fullName} photoUrl={profile?.photoUrl} decorative /><span><small>Ви увійшли як</small><strong>{teacher.fullName}</strong></span></span>
                 <span className={styles.teacherSessionBadge}>{telegramMiniApp ? "У Telegram" : "Особистий простір"}</span>
               </div>
             </header>
@@ -1288,6 +1307,11 @@ function VisitBookingPanel({
             {activeTab === "overview" ? (
               <TeacherOverview
                 teacherName={teacher.fullName}
+                profile={profile}
+                profileLoading={profileLoading}
+                profileError={profileError}
+                onProfileReload={loadProfile}
+                onProfileChange={setProfile}
                 bookings={activeBookings}
                 loading={loading}
                 onOpenVisits={() => selectTeacherTab("visits")}
@@ -1392,7 +1416,7 @@ function VisitBookingPanel({
           <div className={styles.teacherMobileMenuBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setMobileMenuOpen(false); }}>
             <section id="teacher-mobile-menu" ref={mobileMenuRef} className={styles.teacherMobileMenu} role="dialog" aria-modal="true" aria-labelledby="teacher-mobile-menu-title">
               <header><div><span>Кабінет учителя</span><h2 id="teacher-mobile-menu-title">Усі розділи</h2></div><button type="button" onClick={() => setMobileMenuOpen(false)} aria-label="Закрити меню"><SiteIcon name="close" /></button></header>
-              <div className={styles.teacherMobileMenuIdentity}><span aria-hidden="true">{teacherInitials(teacher.fullName)}</span><div><small>Ви увійшли як</small><strong>{teacher.fullName}</strong></div></div>
+              <div className={styles.teacherMobileMenuIdentity}><TeacherAvatar fullName={teacher.fullName} photoUrl={profile?.photoUrl} decorative /><div><small>Ви увійшли як</small><strong>{teacher.fullName}</strong></div></div>
               <nav aria-label="Усі розділи">
                 {TEACHER_TABS.map((tab) => <button key={tab.id} type="button" aria-current={activeTab === tab.id ? "page" : undefined} data-telegram={tab.id === "telegram" || undefined} onClick={() => selectTeacherTab(tab.id)}><span aria-hidden="true"><SiteIcon name={tab.icon} /></span><strong>{tab.label}</strong></button>)}
               </nav>
@@ -1523,9 +1547,35 @@ type TeacherOwnProfile = {
   photoVersion: number;
   profileVersion: number;
   updatedAt: string;
+  options: {
+    locations: Array<{ id: string; name: string }>;
+    curatorClasses: Array<{
+      id: string;
+      className: string;
+      academicYearLabel: string;
+      location: { id: string; name: string } | null;
+      assignedTeacherName: string | null;
+    }>;
+  };
+  pendingCuratorRequest: {
+    id: string;
+    requestedClassYearId: string | null;
+    requestedClassName: string | null;
+    version: number;
+    createdAt: string;
+  } | null;
 };
 
 type TeacherProfileEnvelope = { schemaVersion: 1; success: true; profile: TeacherOwnProfile };
+type TeacherCuratorRequestEnvelope = {
+  schemaVersion: 1;
+  success: true;
+  request: {
+    id: string;
+    status: "submitted" | "approved" | "rejected" | "cancelled";
+    version: number;
+  };
+};
 
 function teacherTabTitle(tab: TeacherTab): string {
   if (tab === "visits") return "Мої відвідування";
@@ -1546,8 +1596,35 @@ function teacherFirstName(fullName: string): string {
   return parts[1] ?? parts[0] ?? "колего";
 }
 
+function TeacherAvatar({
+  fullName,
+  photoUrl,
+  className,
+  decorative = false,
+}: {
+  fullName: string;
+  photoUrl: string | null | undefined;
+  className?: string;
+  decorative?: boolean;
+}) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const usablePhoto = photoUrl && failedUrl !== photoUrl ? photoUrl : null;
+  return (
+    <span className={className} aria-hidden={decorative || undefined}>
+      {usablePhoto
+        ? <img src={usablePhoto} alt={decorative ? "" : `Фото ${fullName}`} onError={() => setFailedUrl(usablePhoto)} />
+        : teacherInitials(fullName)}
+    </span>
+  );
+}
+
 function TeacherOverview({
   teacherName,
+  profile,
+  profileLoading,
+  profileError,
+  onProfileReload,
+  onProfileChange,
   bookings,
   loading,
   onOpenVisits,
@@ -1556,6 +1633,11 @@ function TeacherOverview({
   onOpenLoans,
 }: {
   teacherName: string;
+  profile: TeacherOwnProfile | null;
+  profileLoading: boolean;
+  profileError: string;
+  onProfileReload: () => Promise<TeacherOwnProfile | null>;
+  onProfileChange: (profile: TeacherOwnProfile) => void;
   bookings: VisitBooking[];
   loading: boolean;
   onOpenVisits: () => void;
@@ -1564,30 +1646,118 @@ function TeacherOverview({
   onOpenLoans: () => void;
 }) {
   const nextBooking = bookings[0] ?? null;
-  const [profile, setProfile] = useState<TeacherOwnProfile | null>(null);
-  const [profileLoading, setProfileLoading] = useState(true);
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [subjectPosition, setSubjectPosition] = useState("");
+  const [primaryLocationId, setPrimaryLocationId] = useState("");
+  const [curatorClassYearId, setCuratorClassYearId] = useState("");
+  const [curatorNote, setCuratorNote] = useState("");
+  const [curatorBusy, setCuratorBusy] = useState(false);
   const [profileNotice, setProfileNotice] = useState("");
   const [profileNoticeTone, setProfileNoticeTone] = useState<"success" | "error">("success");
 
-  const loadProfile = useCallback(async () => {
-    setProfileLoading(true);
+  function toggleProfileEditor() {
+    if (!profile) return;
+    if (editingProfile) {
+      setEditingProfile(false);
+      return;
+    }
+    setSubjectPosition(profile.subjectPosition);
+    setPrimaryLocationId(profile.primaryLocation?.id ?? "");
+    setCuratorClassYearId(profile.pendingCuratorRequest?.requestedClassYearId ?? profile.curatedClasses[0]?.id ?? "");
+    setCuratorNote("");
+    setEditingProfile(true);
+    setProfileNotice("");
+  }
+
+  async function submitCuratorRequest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!profile || curatorBusy || !curatorClassYearId) return;
+    setCuratorBusy(true);
+    setProfileNotice("");
     try {
-      const response = await visitApi<TeacherProfileEnvelope>("/api/teacher/profile");
-      setProfile(response.profile);
-      setProfileNotice("");
+      await visitApi<TeacherCuratorRequestEnvelope>("/api/teacher/profile/curator-request", {
+        method: "POST",
+        body: JSON.stringify({
+          requestId: crypto.randomUUID(),
+          expectedVersion: profile.pendingCuratorRequest?.version ?? null,
+          requestedClassYearId: curatorClassYearId,
+          teacherNote: curatorNote.normalize("NFKC").trim().replace(/\s+/gu, " "),
+        }),
+      });
+      const refreshed = await onProfileReload();
+      setCuratorClassYearId(refreshed?.pendingCuratorRequest?.requestedClassYearId ?? curatorClassYearId);
+      setCuratorNote("");
+      setProfileNotice(profile.pendingCuratorRequest
+        ? "Заявку на зміну кураторства оновлено. Вона очікує рішення бібліотекаря."
+        : "Заявку на зміну кураторства надіслано бібліотекарю.");
+      setProfileNoticeTone("success");
     } catch (error) {
       setProfileNotice(errorMessage(error));
       setProfileNoticeTone("error");
+      if (error instanceof VisitApiError && error.status === 409) await onProfileReload();
     } finally {
-      setProfileLoading(false);
+      setCuratorBusy(false);
     }
-  }, []);
+  }
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => void loadProfile(), 0);
-    return () => window.clearTimeout(timer);
-  }, [loadProfile]);
+  async function cancelCuratorRequest() {
+    const pendingRequest = profile?.pendingCuratorRequest;
+    if (!pendingRequest || curatorBusy || !window.confirm("Скасувати заявку на зміну кураторства?")) return;
+    setCuratorBusy(true);
+    setProfileNotice("");
+    try {
+      await visitApi<TeacherCuratorRequestEnvelope>("/api/teacher/profile/curator-request", {
+        method: "DELETE",
+        body: JSON.stringify({ requestId: crypto.randomUUID(), expectedVersion: pendingRequest.version }),
+      });
+      const refreshed = await onProfileReload();
+      setCuratorClassYearId(refreshed?.curatedClasses[0]?.id ?? "");
+      setProfileNotice("Заявку на зміну кураторства скасовано.");
+      setProfileNoticeTone("success");
+    } catch (error) {
+      setProfileNotice(errorMessage(error));
+      setProfileNoticeTone("error");
+      if (error instanceof VisitApiError && error.status === 409) await onProfileReload();
+    } finally {
+      setCuratorBusy(false);
+    }
+  }
+
+  async function saveProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!profile || profileBusy) return;
+    const normalizedSubject = subjectPosition.normalize("NFKC").trim().replace(/\s+/gu, " ");
+    const nextLocation = primaryLocationId || null;
+    if (normalizedSubject === profile.subjectPosition && nextLocation === profile.primaryLocation?.id) {
+      setEditingProfile(false);
+      return;
+    }
+    setProfileBusy(true);
+    setProfileNotice("");
+    try {
+      const response = await visitApi<TeacherProfileEnvelope>("/api/teacher/profile", {
+        method: "PATCH",
+        body: JSON.stringify({
+          requestId: crypto.randomUUID(),
+          expectedVersion: profile.profileVersion,
+          subjectPosition: normalizedSubject,
+          primaryLocationId: nextLocation,
+        }),
+      });
+      onProfileChange(response.profile);
+      setEditingProfile(false);
+      setProfileNotice("Інформацію профілю збережено.");
+      setProfileNoticeTone("success");
+    } catch (error) {
+      setProfileNotice(errorMessage(error));
+      setProfileNoticeTone("error");
+      if (error instanceof VisitApiError && error.status === 409) await onProfileReload();
+    } finally {
+      setProfileBusy(false);
+    }
+  }
 
   async function uploadPhoto(file: File | null) {
     if (!file || !profile || photoBusy) return;
@@ -1600,7 +1770,7 @@ function TeacherOverview({
       form.set("requestId", crypto.randomUUID());
       form.set("expectedVersion", String(profile.profileVersion));
       await visitApi("/api/teacher/profile/photo", { method: "POST", body: form });
-      await loadProfile();
+      await onProfileReload();
       setProfileNotice("Фото профілю збережено.");
       setProfileNoticeTone("success");
     } catch (error) {
@@ -1620,7 +1790,7 @@ function TeacherOverview({
         method: "DELETE",
         body: JSON.stringify({ requestId: crypto.randomUUID(), expectedVersion: profile.profileVersion }),
       });
-      await loadProfile();
+      await onProfileReload();
       setProfileNotice("Фото профілю видалено.");
       setProfileNoticeTone("success");
     } catch (error) {
@@ -1636,9 +1806,7 @@ function TeacherOverview({
       <article className={`${styles.card} ${styles.welcomeCard}`}>
         <div className={styles.profileSummary}>
           <div className={styles.profilePortrait}>
-            {profile?.photoUrl
-              ? <img src={profile.photoUrl} alt={`Фото ${teacherName}`} />
-              : <span aria-hidden="true">{teacherInitials(teacherName)}</span>}
+            <TeacherAvatar className={styles.profilePortraitAvatar} fullName={teacherName} photoUrl={profile?.photoUrl} />
           </div>
           <div className={styles.profileDetails}>
             <span>Підтверджений профіль</span>
@@ -1665,7 +1833,51 @@ function TeacherOverview({
             Обрати з галереї
           </label>
           {profile?.photoUrl ? <button className={styles.danger} type="button" disabled={photoBusy} onClick={() => void deletePhoto()}>Видалити фото</button> : null}
+          {profile ? <button className={styles.quiet} type="button" disabled={profileBusy || photoBusy} onClick={toggleProfileEditor}>{editingProfile ? "Закрити редагування" : "Редагувати інформацію"}</button> : null}
         </div>
+        {editingProfile && profile ? (
+          <div className={styles.teacherProfileEditor}>
+            <form className={styles.teacherProfileForm} onSubmit={saveProfile}>
+              <label>Предмет / посада
+                <input maxLength={160} value={subjectPosition} onChange={(event) => setSubjectPosition(event.currentTarget.value)} placeholder="Наприклад, учитель математики" />
+              </label>
+              <label>Основний кабінет
+                <select value={primaryLocationId} onChange={(event) => setPrimaryLocationId(event.currentTarget.value)}>
+                  <option value="">Не вказано</option>
+                  {profile.options.locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
+                </select>
+              </label>
+              <div className={styles.teacherProfileFormActions}>
+                <button className={styles.quiet} type="button" disabled={profileBusy} onClick={() => setEditingProfile(false)}>Скасувати</button>
+                <button className={styles.primary} type="submit" disabled={profileBusy}>{profileBusy ? "Зберігаємо…" : "Зберегти профіль"}</button>
+              </div>
+            </form>
+            <form className={styles.curatorRequestPanel} onSubmit={submitCuratorRequest}>
+              <div>
+                <span>Кураторство класу</span>
+                <strong>{profile.pendingCuratorRequest ? "Заявка очікує рішення" : "Змінити клас куратора"}</strong>
+                <small>Щоб не порушити облік виданих класу матеріалів, зміну підтверджує бібліотекар.</small>
+              </div>
+              <label>Клас
+                <select required value={curatorClassYearId} onChange={(event) => setCuratorClassYearId(event.currentTarget.value)}>
+                  <option value="">Оберіть клас</option>
+                  {profile.options.curatorClasses.map((item) => {
+                    const assignedToOther = Boolean(item.assignedTeacherName && item.assignedTeacherName !== profile.fullName);
+                    return <option key={item.id} value={item.id} disabled={assignedToOther}>{item.className} · {item.academicYearLabel}{item.location?.name ? ` · ${item.location.name}` : ""}{assignedToOther ? ` · куратор ${item.assignedTeacherName}` : ""}</option>;
+                  })}
+                </select>
+              </label>
+              <label>Примітка бібліотекарю
+                <textarea maxLength={1000} value={curatorNote} onChange={(event) => setCuratorNote(event.currentTarget.value)} placeholder="Необов’язково" />
+              </label>
+              <div className={styles.curatorRequestActions}>
+                {profile.pendingCuratorRequest ? <button className={styles.danger} type="button" disabled={curatorBusy} onClick={() => void cancelCuratorRequest()}>Скасувати заявку</button> : null}
+                <button className={styles.primary} type="submit" disabled={curatorBusy || !curatorClassYearId}>{curatorBusy ? "Зберігаємо…" : profile.pendingCuratorRequest ? "Оновити заявку" : "Надіслати заявку"}</button>
+              </div>
+            </form>
+          </div>
+        ) : null}
+        {profileError ? <div className={styles.error} role="alert">{profileError}</div> : null}
         {profileNotice ? <div className={styles[profileNoticeTone]} role={profileNoticeTone === "error" ? "alert" : "status"}>{profileNotice}</div> : null}
         <div className={styles.profileAssurance}>
           <span><strong>Профіль підтверджено</strong><small>Дані беруться зі службової бази</small></span>
@@ -2085,12 +2297,19 @@ function TeacherCover({ item }: { item: TeacherCatalogItem }) {
     : <span className={styles.orderCoverFallback} aria-hidden="true">{item.title.slice(0, 1)}</span>;
 }
 
-type NotificationPendingIntent = {
-  kind: "notification-read";
-  requestId: string;
-  resourceId: string;
-  payload: { requestId: string; expectedVersion: number; read: true };
-};
+type NotificationPendingIntent =
+  | {
+      kind: "notification-read";
+      requestId: string;
+      resourceId: string;
+      payload: { requestId: string; expectedVersion: number; read: true };
+    }
+  | {
+      kind: "notification-delete";
+      requestId: string;
+      resourceId: string;
+      payload: { requestId: string; expectedVersion: number };
+    };
 
 function TeacherNotificationsPanel({ pendingScope }: { pendingScope: string }) {
   const [data, setData] = useState<NotificationsEnvelope | null>(null);
@@ -2115,7 +2334,7 @@ function TeacherNotificationsPanel({ pendingScope }: { pendingScope: string }) {
       setNotice("");
     } catch (error) {
       setNotice(afterMutation
-        ? "Позначку збережено, але список повідомлень не вдалося оновити. Натисніть «Оновити»."
+        ? "Дію збережено, але список повідомлень не вдалося оновити. Натисніть «Оновити»."
         : append
           ? "Не вдалося завантажити наступні повідомлення. Спробуйте ще раз."
           : errorMessage(error));
@@ -2127,13 +2346,13 @@ function TeacherNotificationsPanel({ pendingScope }: { pendingScope: string }) {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setPending(readPortalPendingIntent<NotificationPendingIntent>(window.sessionStorage, storageKey, ["notification-read"]));
+      setPending(readPortalPendingIntent<NotificationPendingIntent>(window.sessionStorage, storageKey, ["notification-read", "notification-delete"]));
       void load();
     }, 0);
     return () => window.clearTimeout(timer);
   }, [load, storageKey]);
 
-  async function sendRead(intent: NotificationPendingIntent) {
+  async function sendNotificationMutation(intent: NotificationPendingIntent) {
     if (!writePortalPendingIntent(window.sessionStorage, storageKey, intent)) {
       setNotice("Браузер не дозволив зберегти дію для повторної перевірки.");
       return;
@@ -2143,7 +2362,7 @@ function TeacherNotificationsPanel({ pendingScope }: { pendingScope: string }) {
     setNotice("");
     try {
       await visitApi(`/api/teacher/notifications/${encodeURIComponent(intent.resourceId)}`, {
-        method: "PATCH",
+        method: intent.kind === "notification-read" ? "PATCH" : "DELETE",
         body: JSON.stringify(intent.payload),
       });
       clearPortalPendingIntent(window.sessionStorage, storageKey);
@@ -2162,7 +2381,7 @@ function TeacherNotificationsPanel({ pendingScope }: { pendingScope: string }) {
 
   function markRead(notification: TeacherNotification) {
     const requestId = crypto.randomUUID();
-    void sendRead({
+    void sendNotificationMutation({
       kind: "notification-read",
       requestId,
       resourceId: notification.id,
@@ -2170,17 +2389,31 @@ function TeacherNotificationsPanel({ pendingScope }: { pendingScope: string }) {
     });
   }
 
+  function deleteNotification(notification: TeacherNotification) {
+    if (!window.confirm("Видалити це повідомлення з вашого кабінету?")) return;
+    const requestId = crypto.randomUUID();
+    void sendNotificationMutation({
+      kind: "notification-delete",
+      requestId,
+      resourceId: notification.id,
+      payload: { requestId, expectedVersion: notification.version },
+    });
+  }
+
   return (
     <div className={styles.notificationStack}>
       <section className={styles.card} aria-labelledby="notifications-title">
       <div className={styles.cardHeading}><div><span>{data?.unreadCount ?? 0} непрочитаних</span><h2 id="notifications-title">Повідомлення</h2></div><button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading || loadingMore || submitting}><SiteIcon name="refresh" size={18} /> Оновити</button></div>
-      {pending ? <div className={styles.pending} role="status"><span>Не вдалося підтвердити позначку «прочитано».</span><button type="button" onClick={() => void sendRead(pending)} disabled={submitting}>Перевірити результат</button></div> : null}
+      {pending ? <div className={styles.pending} role="status"><span>Не вдалося підтвердити попередню дію з повідомленням.</span><button type="button" onClick={() => void sendNotificationMutation(pending)} disabled={submitting}>Перевірити результат</button></div> : null}
       {notice ? <div className={styles.error} role="alert">{notice}</div> : null}
       {loading ? <p className={styles.empty}>Оновлюємо повідомлення…</p> : data?.notifications.length ? <div className={styles.notificationList}>{data.notifications.map((notification) => (
         <article key={notification.id} data-unread={!notification.read || undefined}>
           <span aria-hidden="true" />
           <div><header><strong>{notification.title}</strong><time dateTime={notification.createdAt}>{formatPortalDate(notification.createdAt)}</time></header><p>{notification.message}</p></div>
-          {!notification.read ? <button className={styles.quiet} type="button" onClick={() => markRead(notification)} disabled={submitting || Boolean(pending)}>Позначити прочитаним</button> : <small>Прочитано</small>}
+          <div className={styles.notificationActions}>
+            {!notification.read ? <button className={styles.quiet} type="button" onClick={() => markRead(notification)} disabled={submitting || Boolean(pending)}>Позначити прочитаним</button> : <small>Прочитано</small>}
+            <button className={styles.danger} type="button" aria-label={`Видалити повідомлення «${notification.title}»`} onClick={() => deleteNotification(notification)} disabled={submitting || Boolean(pending)}><SiteIcon name="delete" size={16} /> Видалити</button>
+          </div>
         </article>
       ))}</div> : <p className={styles.empty}>Повідомлень ще немає.</p>}
       {data?.page.hasMore && data.page.nextCursor ? <button className={styles.loadMore} type="button" onClick={() => void load(false, data.page.nextCursor)} disabled={loading || loadingMore || submitting}>{loadingMore ? "Завантажуємо…" : "Завантажити ще"}</button> : null}

@@ -119,7 +119,7 @@ export default function LibrarianShell({
           <img src={LIBRARY_EMBLEM_URL} alt="" width="48" height="48" />
           <span>
             <strong>Єдина бібліотека</strong>
-            <small>Кабінет бібліотекаря</small>
+            <small>Міжнародний ліцей МАУП</small>
           </span>
         </a>
 

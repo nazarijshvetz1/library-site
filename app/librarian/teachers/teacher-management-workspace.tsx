@@ -32,6 +32,34 @@ type MainTab = "overview" | "teachers" | "orders" | "visits" | "telegram";
 type DetailTab = "profile" | "orders" | "issued" | "visits";
 type DirectoryStatus = "active" | "inactive" | "all";
 
+const TAB_COPY: Record<MainTab, { eyebrow: string; title: string; description: string }> = {
+  overview: {
+    eyebrow: "Захищений робочий розділ",
+    title: "Вчителі та їхні звернення",
+    description: "Картки, доступ, замовлення, фактичні видачі й відвідування — в одному місці.",
+  },
+  teachers: {
+    eyebrow: "Довідник і доступ",
+    title: "Картки вчителів",
+    description: "Профілі, службові відомості, фото, коди доступу та історія роботи кожного вчителя.",
+  },
+  orders: {
+    eyebrow: "Заявки та видача",
+    title: "Замовлення вчителів",
+    description: "Перевіряйте заявки, готуйте резерв і фіксуйте фактичну видачу матеріалів.",
+  },
+  visits: {
+    eyebrow: "Розклад бібліотеки",
+    title: "Відвідування вчителів",
+    description: "Переглядайте майбутні записи й керуйте зайнятими проміжками бібліотеки.",
+  },
+  telegram: {
+    eyebrow: "Оперативні сповіщення",
+    title: "Telegram бібліотекаря",
+    description: "Окремо підключіть особистий чат із ботом і налаштуйте сповіщення.",
+  },
+};
+
 type TelegramStatus = {
   configured: boolean;
   linkingEnabled: boolean;
@@ -49,6 +77,22 @@ type TelegramStatus = {
 };
 type LibrarianTelegramEnvelope = { success: true; telegram: TelegramStatus; writesEnabled: boolean };
 type TelegramLinkEnvelope = { success: true; linkUrl: string; expiresAt: string; writesEnabled: boolean };
+type TeacherCuratorRequest = {
+  id: string;
+  teacher: { id: string; fullName: string };
+  currentClass: { id: string; className: string; academicYearLabel: string } | null;
+  requestedClass: { id: string; className: string; academicYearLabel: string };
+  status: "submitted" | "approved" | "rejected" | "cancelled";
+  teacherNote: string;
+  version: number;
+  createdAt: string;
+};
+type TeacherCuratorRequestsEnvelope = {
+  schemaVersion: 1;
+  success: true;
+  requests: TeacherCuratorRequest[];
+  writesEnabled: boolean;
+};
 
 type Props = {
   pendingScope: string;
@@ -98,6 +142,7 @@ export default function TeacherManagementWorkspace({
   }, [loadSummary]);
 
   const effectiveWrites = writesEnabled && directory?.writesEnabled !== false;
+  const pageCopy = TAB_COPY[tab];
 
   function openAttention(nextTab: MainTab) {
     setTab(nextTab);
@@ -117,9 +162,9 @@ export default function TeacherManagementWorkspace({
         <section className={styles.page}>
         <div className={styles.intro}>
           <div>
-            <p className={styles.eyebrow}>Захищений робочий розділ</p>
-            <h1>{tab === "telegram" ? "Telegram бібліотекаря" : "Вчителі та їхні звернення"}</h1>
-            <p>{tab === "telegram" ? "Окремо підключіть особистий чат із ботом і налаштуйте сповіщення." : "Картки, доступ, замовлення, фактичні видачі й відвідування — в одному місці."}</p>
+            <p className={styles.eyebrow}>{pageCopy.eyebrow}</p>
+            <h1>{pageCopy.title}</h1>
+            <p>{pageCopy.description}</p>
           </div>
           <button className={styles.refreshButton} type="button" onClick={() => void loadSummary()} disabled={loading}>
             <SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}
@@ -478,6 +523,7 @@ function TeacherDirectoryPanel({
 
   return (
     <div className={styles.directoryStack}>
+      <TeacherCuratorRequestQueue writesEnabled={writesEnabled} onNotice={onNotice} />
       <section className={styles.card} aria-labelledby="directory-title">
         <div className={styles.cardHeading}>
           <div><span>{data?.counters.active ?? 0} активних</span><h2 id="directory-title">Картки вчителів</h2></div>
@@ -544,6 +590,83 @@ function TeacherDirectoryPanel({
 
       <TeacherAccessAdmin writesEnabled={writesEnabled} refreshKey={accessRefreshKey} />
     </div>
+  );
+}
+
+function TeacherCuratorRequestQueue({
+  writesEnabled,
+  onNotice,
+}: {
+  writesEnabled: boolean;
+  onNotice: (message: string, tone?: "success" | "error" | "info") => void;
+}) {
+  const [requests, setRequests] = useState<TeacherCuratorRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await visitApi<TeacherCuratorRequestsEnvelope>("/api/librarian/teacher-curator-requests?status=submitted&limit=100");
+      setRequests(response.requests);
+    } catch (error) {
+      onNotice(errorMessage(error), "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [onNotice]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  async function decide(item: TeacherCuratorRequest, decision: "approve" | "reject") {
+    const verb = decision === "approve" ? "підтвердити" : "відхилити";
+    if (!window.confirm(`${verb[0].toUpperCase()}${verb.slice(1)} зміну кураторства для ${item.teacher.fullName}?`)) return;
+    setBusyId(item.id);
+    try {
+      await visitApi("/api/librarian/teacher-curator-requests", {
+        method: "PATCH",
+        body: JSON.stringify({ requestId: item.id, expectedVersion: item.version, decision }),
+      });
+      onNotice(decision === "approve"
+        ? `Клас ${item.requestedClass.className} закріплено за ${item.teacher.fullName}.`
+        : `Заявку ${item.teacher.fullName} відхилено.`);
+      await load();
+    } catch (error) {
+      onNotice(errorMessage(error), "error");
+      await load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <section className={`${styles.card} ${styles.curatorQueue}`} aria-labelledby="curator-request-title">
+      <div className={styles.cardHeading}>
+        <div><span>{requests.length} очікує</span><h2 id="curator-request-title">Зміни кураторства</h2></div>
+        <button type="button" onClick={() => void load()} disabled={loading}><SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}</button>
+      </div>
+      <p className={styles.curatorQueueHint}>Учитель може змінити предмет і кабінет самостійно. Клас куратора змінюється тут, щоб зберегти правильний облік виданих матеріалів.</p>
+      {loading ? <p className={styles.empty}>Перевіряємо заявки…</p> : requests.length ? (
+        <div className={styles.curatorRequestList}>
+          {requests.map((item) => (
+            <article key={item.id}>
+              <div>
+                <strong>{item.teacher.fullName}</strong>
+                <span>{item.currentClass ? `${item.currentClass.className} → ` : "Новий куратор: "}<b>{item.requestedClass.className}</b> · {item.requestedClass.academicYearLabel}</span>
+                {item.teacherNote ? <small>{item.teacherNote}</small> : null}
+              </div>
+              <div>
+                <button type="button" disabled={!writesEnabled || Boolean(busyId)} onClick={() => void decide(item, "reject")}>Відхилити</button>
+                <button className={styles.primaryButton} type="button" disabled={!writesEnabled || Boolean(busyId)} onClick={() => void decide(item, "approve")}>{busyId === item.id ? "Зберігаємо…" : "Підтвердити"}</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : <p className={styles.empty}>Нових заявок на зміну кураторства немає.</p>}
+    </section>
   );
 }
 

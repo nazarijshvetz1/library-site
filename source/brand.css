@@ -254,6 +254,7 @@ textarea { font-family: inherit; }
 
 /* Editorial statistics */
 .stats {
+  z-index: 3;
   max-width: 1240px;
   margin-top: -45px;
   padding: 28px 34px;
@@ -734,7 +735,7 @@ footer p { justify-self: end; max-width: 270px; margin: 0; color: #8fa79e; font-
   .hero-lead { font-size: 17px; }
   .hero-showcase { display: none; }
   .hero-assurances { display: grid; }
-  .stats { margin: -52px 16px 0; padding: 16px; border-radius: 24px; }
+  .stats { margin: 24px 16px 0; padding: 16px; border-radius: 24px; }
   .stats div { padding: 12px 8px; }
   .stats strong { font-size: 28px; }
   .visit-schedule-section {

@@ -56,7 +56,7 @@ test("LibrarianShell keeps the official emblem, full-page navigation, and access
   assert.equal(LIBRARY_EMBLEM_URL, "https://nazarijshvetz1.github.io/library-site/library-logo.png");
   assert.match(source, /<img src=\{LIBRARY_EMBLEM_URL\}/u);
   assert.match(source, /<strong>Єдина бібліотека<\/strong>/u);
-  assert.match(source, /<small>Кабінет бібліотекаря<\/small>/u);
+  assert.match(source, /<small>Міжнародний ліцей МАУП<\/small>/u);
   assert.doesNotMatch(source, /next\/link|<Link\b|<svg\b/iu);
   assert.match(source, /aria-current=\{active \? "page" : undefined\}/u);
   assert.match(source, /aria-expanded=\{drawerOpen\}/u);

@@ -244,7 +244,7 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(html, /id="titleSuggestions" role="listbox"/);
   assert.match(html, /<option value="">Усі<\/option>/);
   assert.match(html, /href="\/styles\.css\?v=20260824-1"/);
-  assert.match(html, /href="\/brand\.css\?v=20260823-3"/);
+  assert.match(html, /href="\/brand\.css\?v=20260824-1"/);
   assert.match(html, /type="module" src="\/app\.js\?v=20260824-1"/);
   assert.match(html, /class="icon-sprite"/u);
   assert.match(app, /const uiIcon =/u);
@@ -280,6 +280,8 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(css, /min-height:44px/);
   assert.match(brand, /\.hero \{[\s\S]*?z-index: 4;[\s\S]*?overflow: visible;/u);
   assert.match(brand, /\.hero-decoration \{[\s\S]*?overflow: hidden;[\s\S]*?pointer-events: none;/u);
+  assert.match(brand, /\.stats \{[\s\S]*?z-index: 3;/u);
+  assert.match(brand, /@media \(max-width: 820px\)[\s\S]*?\.stats \{ margin: 24px 16px 0;/u);
   assert.match(brand, /@media \(max-width: 820px\)[\s\S]*?\.site-header \{[\s\S]*?-webkit-backdrop-filter: none;[\s\S]*?backdrop-filter: none;/u);
   assert.match(brand, /@media \(max-width: 820px\)[\s\S]*?\.site-header \.site-nav \{[\s\S]*?position: fixed;/u);
   assert.match(css, /\.title-suggestions/);

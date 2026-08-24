@@ -297,11 +297,24 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
   assert.deepEqual(teacherResult, { outcome: "menu", duplicate: false });
   const teacherMessage = teacherBodies.find((body) => body.text);
   const menuButton = teacherBodies.find((body) => body.menu_button);
-  assert.equal(teacherMessage.reply_markup.inline_keyboard.length, 7);
+  assert.equal(teacherMessage.reply_markup.inline_keyboard.length, 8);
   assert.deepEqual(
-    teacherMessage.reply_markup.inline_keyboard.slice(0, 6).map((row) => row[0].web_app.url),
+    teacherMessage.reply_markup.inline_keyboard.slice(0, 7).map((row) => row[0].text),
+    [
+      "👤 Кабінет учителя",
+      "📚 Каталог",
+      "🛒 Замовлення",
+      "➕ Запропонувати придбання",
+      "📅 Записатися / мої відвідування",
+      "📖 Мої посібники",
+      "🔔 Мої повідомлення",
+    ],
+  );
+  assert.deepEqual(
+    teacherMessage.reply_markup.inline_keyboard.slice(0, 7).map((row) => row[0].web_app.url),
     [
       "https://library.example.test/teacher/telegram?tab=overview",
+      "https://nazarijshvetz1.github.io/library-site/",
       "https://library.example.test/teacher/telegram?tab=orders",
       "https://library.example.test/teacher/telegram?tab=acquisition",
       "https://library.example.test/teacher/telegram?tab=visits",
@@ -309,7 +322,8 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
       "https://library.example.test/teacher/telegram?tab=notifications",
     ],
   );
-  assert.equal(teacherMessage.reply_markup.inline_keyboard[6][0].callback_data, "telegram-notifications:off");
+  assert.equal(teacherMessage.reply_markup.inline_keyboard[1][0].url, undefined);
+  assert.equal(teacherMessage.reply_markup.inline_keyboard[7][0].callback_data, "telegram-notifications:off");
   assert.equal(menuButton.menu_button.type, "web_app");
   assert.equal(menuButton.chat_id, 7001);
   assert.equal(menuButton.menu_button.web_app.url, "https://library.example.test/teacher/telegram?tab=overview");
@@ -360,7 +374,7 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
   ), { outcome: "menu", duplicate: false });
   const mutedMenu = unlinkedBodies.find((body) => body.text);
   assert.match(mutedMenu.text, /вимкнено/u);
-  assert.equal(mutedMenu.reply_markup.inline_keyboard[6][0].callback_data, "telegram-notifications:on");
+  assert.equal(mutedMenu.reply_markup.inline_keyboard[7][0].callback_data, "telegram-notifications:on");
 
   const newTeacherPayload = {
     update_id: 98,
@@ -382,6 +396,10 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
   assert.equal(onboardingMessage.reply_markup.inline_keyboard[1][0].text, "✨ Активувати вперше");
   assert.equal(onboardingMessage.reply_markup.inline_keyboard[1][0].web_app.url,
     "https://library.example.test/teacher/telegram?mode=activate");
+  assert.equal(onboardingMessage.reply_markup.inline_keyboard[2][0].text, "📚 Переглянути каталог");
+  assert.equal(onboardingMessage.reply_markup.inline_keyboard[2][0].web_app.url,
+    "https://nazarijshvetz1.github.io/library-site/");
+  assert.equal(onboardingMessage.reply_markup.inline_keyboard[2][0].url, undefined);
   assert.equal(onboardingMenu.menu_button.web_app.url, "https://library.example.test/teacher/telegram?tab=overview");
   assert.deepEqual(
     { ...teacher.sqlite.prepare(`SELECT kind,teacher_user_id,bound_telegram_user_id,bound_chat_id
@@ -410,8 +428,9 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
   );
   assert.deepEqual(librarianResult, { outcome: "menu", duplicate: false });
   const librarianMessage = librarianBodies.find((body) => body.text);
+  assert.equal(librarianMessage.reply_markup.inline_keyboard[0][0].text, "🆕 Замовлення вчителів");
   assert.equal(librarianMessage.reply_markup.inline_keyboard[0][0].web_app.url,
-    "https://library.example.test/librarian/telegram?target=visits");
+    "https://library.example.test/librarian/telegram?target=teachers&tab=orders");
   assert.equal(librarianMessage.reply_markup.inline_keyboard.some((row) => row[0].web_app), true);
 
   const dualRole = await database();
@@ -447,16 +466,79 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
   ), { outcome: "menu", duplicate: false });
   const dualMessage = dualBodies.find((body) => body.text);
   const dualMenuButton = dualBodies.find((body) => body.menu_button);
-  assert.equal(dualMessage.reply_markup.inline_keyboard.length, 12);
+  assert.equal(dualMessage.reply_markup.inline_keyboard.length, 13);
   assert.equal(dualMessage.reply_markup.inline_keyboard[0][0].web_app.url,
     "https://library.example.test/teacher/telegram?tab=overview");
-  assert.equal(dualMessage.reply_markup.inline_keyboard[10][0].web_app.url,
+  assert.equal(dualMessage.reply_markup.inline_keyboard[7][0].web_app.url,
+    "https://library.example.test/librarian/telegram?target=teachers&tab=orders");
+  assert.equal(dualMessage.reply_markup.inline_keyboard[11][0].web_app.url,
     "https://library.example.test/librarian/telegram?target=home");
-  assert.equal(dualMessage.reply_markup.inline_keyboard[11][0].callback_data, "telegram-notifications:off");
+  assert.equal(dualMessage.reply_markup.inline_keyboard[12][0].callback_data, "telegram-notifications:off");
   assert.equal(dualMenuButton.menu_button.type, "web_app");
   teacher.sqlite.close();
   librarian.sqlite.close();
   dualRole.sqlite.close();
+});
+
+test("connected menus preserve ordinary-link fallbacks when Telegram Mini App is disabled", async () => {
+  const previousMiniAppFlag = globalThis.__TELEGRAM_TEST_ENV.TELEGRAM_MINI_APP_ENABLED;
+  let teacher = null;
+  let librarian = null;
+  globalThis.__TELEGRAM_TEST_ENV.TELEGRAM_MINI_APP_ENABLED = "false";
+  try {
+    teacher = await database();
+    addTeacherCredential(teacher);
+    teacher.sqlite.prepare(`INSERT INTO telegram_connections (
+      user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+      linked_at,disabled_at,created_at,updated_at
+    ) VALUES ('USR-TEACHER','7051','7051',NULL,'active',1,1,1,?,NULL,?,?)`)
+      .run(teacher.now, teacher.now, teacher.now);
+    const teacherBodies = [];
+    const teacherPayload = {
+      update_id: 7051,
+      message: { text: "/menu", chat: { id: 7051, type: "private" }, from: { id: 7051 } },
+    };
+    assert.deepEqual(await telegram.processTelegramWebhookUpdate(
+      teacher.db,
+      JSON.stringify(teacherPayload),
+      teacherPayload,
+      async (_url, init) => { teacherBodies.push(JSON.parse(init.body)); return telegramOk(57); },
+      "https://library.example.test",
+    ), { outcome: "menu", duplicate: false });
+    const teacherMenu = teacherBodies.find((body) => body.text).reply_markup.inline_keyboard;
+    assert.equal(teacherMenu[1][0].text, "📚 Каталог");
+    assert.equal(teacherMenu[1][0].url, "https://nazarijshvetz1.github.io/library-site/");
+    assert.equal(teacherMenu[1][0].web_app, undefined);
+    assert.equal(teacherMenu[2][0].text, "🛒 Замовлення");
+    assert.equal(teacherMenu[2][0].url, "https://library.example.test/teacher?tab=orders");
+
+    librarian = await database();
+    librarian.sqlite.prepare(`INSERT INTO telegram_connections (
+      user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+      linked_at,disabled_at,created_at,updated_at
+    ) VALUES ('USR-LIB','8051','8051',NULL,'active',1,1,1,?,NULL,?,?)`)
+      .run(librarian.now, librarian.now, librarian.now);
+    const librarianBodies = [];
+    const librarianPayload = {
+      update_id: 8051,
+      message: { text: "/menu", chat: { id: 8051, type: "private" }, from: { id: 8051 } },
+    };
+    assert.deepEqual(await telegram.processTelegramWebhookUpdate(
+      librarian.db,
+      JSON.stringify(librarianPayload),
+      librarianPayload,
+      async (_url, init) => { librarianBodies.push(JSON.parse(init.body)); return telegramOk(59); },
+      "https://library.example.test",
+    ), { outcome: "menu", duplicate: false });
+    const librarianMenu = librarianBodies.find((body) => body.text).reply_markup.inline_keyboard;
+    assert.equal(librarianMenu[0][0].text, "🆕 Замовлення вчителів");
+    assert.equal(librarianMenu[0][0].url, "https://library.example.test/librarian/orders");
+    assert.equal(librarianMenu[0][0].web_app, undefined);
+  } finally {
+    globalThis.__TELEGRAM_TEST_ENV.TELEGRAM_MINI_APP_ENABLED = previousMiniAppFlag;
+    teacher?.sqlite.close();
+    librarian?.sqlite.close();
+  }
 });
 
 test("bare start restores recoverable Telegram connections but respects explicit disconnects", async () => {
@@ -486,7 +568,7 @@ test("bare start restores recoverable Telegram connections but respects explicit
     ), { outcome: "menu", duplicate: false });
     assert.equal(context.sqlite.prepare("SELECT status FROM telegram_connections WHERE user_id='USR-TEACHER'").get().status, "active");
     assert.equal(context.sqlite.prepare("SELECT COUNT(*) n FROM audit_events WHERE action='telegram.connection.resume'").get().n, 1);
-    assert.equal(bodies.find((body) => body.text).reply_markup.inline_keyboard.length, 7);
+    assert.equal(bodies.find((body) => body.text).reply_markup.inline_keyboard.length, 8);
     context.sqlite.close();
   }
 
@@ -545,10 +627,14 @@ test("verified Mini App login refreshes only the exact connected teacher menu", 
   const message = requests.find(({ url }) => url.endsWith("/sendMessage")).body;
   const menuButton = requests.find(({ url }) => url.endsWith("/setChatMenuButton")).body;
   assert.match(message.text, /Telegram підключено до профілю/u);
-  assert.equal(message.reply_markup.inline_keyboard.length, 7);
+  assert.equal(message.reply_markup.inline_keyboard.length, 8);
   assert.equal(message.reply_markup.inline_keyboard[0][0].web_app.url,
     "https://library.example.test/teacher/telegram?tab=overview");
-  assert.equal(message.reply_markup.inline_keyboard[6][0].callback_data, "telegram-notifications:off");
+  assert.equal(message.reply_markup.inline_keyboard[1][0].web_app.url,
+    "https://nazarijshvetz1.github.io/library-site/");
+  assert.equal(message.reply_markup.inline_keyboard[2][0].web_app.url,
+    "https://library.example.test/teacher/telegram?tab=orders");
+  assert.equal(message.reply_markup.inline_keyboard[7][0].callback_data, "telegram-notifications:off");
   assert.equal(menuButton.chat_id, 7201);
   assert.equal(menuButton.menu_button.web_app.url,
     "https://library.example.test/teacher/telegram?tab=overview");

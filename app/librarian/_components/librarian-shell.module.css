@@ -492,7 +492,11 @@
 
 @media (max-width: 440px) {
   .brand small {
-    display: none;
+    display: block;
+    max-width: 190px;
+    font-size: 9px;
+    line-height: 1.15;
+    letter-spacing: .015em;
   }
 
   .account > a {

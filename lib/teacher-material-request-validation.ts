@@ -85,6 +85,11 @@ export type NotificationReadInput = {
   read: true;
 };
 
+export type NotificationDeleteInput = {
+  requestId: string;
+  expectedVersion: number;
+};
+
 export type ValidationResult<T> =
   | { ok: true; value: T }
   | { ok: false; fieldErrors: Record<string, string> };
@@ -267,6 +272,17 @@ export function validateNotificationReadInput(
   const expectedVersion = readInteger(input.expectedVersion, "expectedVersion", errors, 1, 1_000_000);
   if (input.read !== true) errors.read = "Підтвердіть прочитання.";
   return finish(errors, { requestId, expectedVersion, read: true });
+}
+
+export function validateNotificationDeleteInput(
+  input: unknown,
+): ValidationResult<NotificationDeleteInput> {
+  const errors: Record<string, string> = {};
+  if (!isRecord(input)) return invalid("body", "Очікується підтвердження видалення.");
+  exactKeys(input, ["requestId", "expectedVersion"], errors);
+  const requestId = readUuid(input.requestId, "requestId", errors);
+  const expectedVersion = readInteger(input.expectedVersion, "expectedVersion", errors, 1, 1_000_000);
+  return finish(errors, { requestId, expectedVersion });
 }
 
 function exactKeys(
