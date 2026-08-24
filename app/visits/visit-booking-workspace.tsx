@@ -12,6 +12,7 @@ import {
   useRef,
   useState,
 } from "react";
+import SiteIcon, { type SiteIconName } from "../_components/site-icon";
 
 import {
   busyPeriodParts,
@@ -84,19 +85,19 @@ type TeacherTabDefinition = {
   id: TeacherTab;
   label: string;
   shortLabel: string;
-  icon: string;
+  icon: SiteIconName;
   eyebrow: string;
   description: string;
 };
 
 const TEACHER_TABS: TeacherTabDefinition[] = [
-  { id: "overview", label: "Головна", shortLabel: "Головна", icon: "⌂", eyebrow: "Ваш простір", description: "Найважливіше про профіль, найближчий візит і бібліотечні справи — на одному екрані." },
-  { id: "visits", label: "Відвідування", shortLabel: "Графік", icon: "◷", eyebrow: "Планування", description: "Оберіть вільний час, запишіть клас і керуйте своїми майбутніми відвідуваннями." },
-  { id: "orders", label: "Замовлення", shortLabel: "Замовити", icon: "▤", eyebrow: "Матеріали", description: "Знайдіть потрібні видання, сформуйте кошик і стежте за виконанням замовлення." },
-  { id: "acquisition", label: "Запропонувати придбання", shortLabel: "Придбання", icon: "+", eyebrow: "Комплектування", description: "Повідомте бібліотекарю, яких навчальних матеріалів або книжок бракує фонду." },
-  { id: "loans", label: "Мої посібники", shortLabel: "Посібники", icon: "▥", eyebrow: "Облік", description: "Перегляньте матеріали, видані особисто вам і класам, за які ви відповідаєте." },
-  { id: "notifications", label: "Повідомлення", shortLabel: "Новини", icon: "●", eyebrow: "Оновлення", description: "Усі рішення бібліотекаря, зміни статусів і важливі повідомлення зібрані тут." },
-  { id: "telegram", label: "Telegram", shortLabel: "Telegram", icon: "➤", eyebrow: "Швидкий зв’язок", description: "Підключіть бота, керуйте сповіщеннями та відкривайте кабінет без зайвих кроків." },
+  { id: "overview", label: "Головна", shortLabel: "Головна", icon: "home", eyebrow: "Ваш простір", description: "Найважливіше про профіль, найближчий візит і бібліотечні справи — на одному екрані." },
+  { id: "visits", label: "Відвідування", shortLabel: "Графік", icon: "visits", eyebrow: "Планування", description: "Оберіть вільний час, запишіть клас і керуйте своїми майбутніми відвідуваннями." },
+  { id: "orders", label: "Замовлення", shortLabel: "Замовити", icon: "orders", eyebrow: "Матеріали", description: "Знайдіть потрібні видання, сформуйте кошик і стежте за виконанням замовлення." },
+  { id: "acquisition", label: "Запропонувати придбання", shortLabel: "Придбання", icon: "teacher-acquisition", eyebrow: "Комплектування", description: "Повідомте бібліотекарю, яких навчальних матеріалів або книжок бракує фонду." },
+  { id: "loans", label: "Мої посібники", shortLabel: "Посібники", icon: "loans", eyebrow: "Облік", description: "Перегляньте матеріали, видані особисто вам і класам, за які ви відповідаєте." },
+  { id: "notifications", label: "Повідомлення", shortLabel: "Новини", icon: "notifications", eyebrow: "Оновлення", description: "Усі рішення бібліотекаря, зміни статусів і важливі повідомлення зібрані тут." },
+  { id: "telegram", label: "Telegram", shortLabel: "Telegram", icon: "telegram", eyebrow: "Швидкий зв’язок", description: "Підключіть бота, керуйте сповіщеннями та відкривайте кабінет без зайвих кроків." },
 ];
 
 const TEACHER_MOBILE_TABS: TeacherTab[] = ["overview", "visits", "orders", "loans"];
@@ -201,7 +202,7 @@ export default function VisitBookingWorkspace({
               <span>Усе вже підготовлено</span>
               <strong>Оберіть своє ім’я та введіть 4-значний PIN</strong>
               <p>Email і складний пароль не потрібні. Якщо PIN забуто, бібліотекар видасть новий тимчасовий код.</p>
-              <a href="#teacher-access">Перейти до входу <span aria-hidden="true">↓</span></a>
+              <a href="#teacher-access">Перейти до входу <span aria-hidden="true"><SiteIcon name="expand" size={18} /></span></a>
             </aside>
           </div>
           <PublicVisitSchedule
@@ -279,7 +280,7 @@ function VisitShell({ children, telegramMiniApp = false }: { children: React.Rea
         </a>
         <div className={styles.headerActions}>
           <a className={styles.scheduleLink} href={telegramMiniApp ? "/teacher/telegram/cabinet?tab=visits" : "/teacher?tab=visits"}>Графік</a>
-          <a className={styles.catalogLink} href={PUBLIC_CATALOG_URL} target="_blank" rel="noreferrer">Публічний каталог <span aria-hidden="true">↗</span></a>
+          <a className={styles.catalogLink} href={PUBLIC_CATALOG_URL} target="_blank" rel="noreferrer">Публічний каталог <SiteIcon name="external" size={17} /></a>
         </div>
       </header>
       {children}
@@ -342,14 +343,14 @@ function PublicVisitSchedule({
             aria-label="Попередній тиждень"
             disabled={weekStart <= today || loading}
             onClick={() => setWeekStart(shiftVisitDate(weekStart, -7, today))}
-          >←</button>
+          ><SiteIcon name="previous" size={18} /></button>
           <strong>{formatWeek(dates)}</strong>
           <button
             type="button"
             aria-label="Наступний тиждень"
             disabled={weekStart >= lastPublicWeekStart(today) || loading}
             onClick={() => setWeekStart(shiftVisitDate(weekStart, 7, today))}
-          >→</button>
+          ><SiteIcon name="forward" size={18} /></button>
         </div>
       </div>
 
@@ -1250,15 +1251,15 @@ function VisitBookingPanel({
                   data-telegram={tab.id === "telegram" || undefined}
                   onClick={() => selectTeacherTab(tab.id)}
                 >
-                  <span className={styles.teacherNavIcon} aria-hidden="true">{tab.icon}</span>
+                  <span className={styles.teacherNavIcon} aria-hidden="true"><SiteIcon name={tab.icon} /></span>
                   <span><strong>{tab.label}</strong><small>{tab.eyebrow}</small></span>
                 </button>
               ))}
             </nav>
             <div className={styles.teacherSidebarUtilities}>
-              <button type="button" onClick={() => setSecurityOpen(true)} disabled={signingOut || submitting || Boolean(pending)}><span aria-hidden="true">◇</span> Безпека і PIN</button>
-              <a href={PUBLIC_CATALOG_URL} target="_blank" rel="noreferrer"><span aria-hidden="true">↗</span> Відкрити каталог</a>
-              <button type="button" className={styles.teacherSignOut} onClick={() => void onSignOut()} disabled={signingOut || submitting || Boolean(pending)}><span aria-hidden="true">→</span> {signingOut ? "Виходимо…" : "Вийти"}</button>
+              <button type="button" onClick={() => setSecurityOpen(true)} disabled={signingOut || submitting || Boolean(pending)}><SiteIcon name="security" size={18} /> Безпека і PIN</button>
+              <a href={PUBLIC_CATALOG_URL} target="_blank" rel="noreferrer"><SiteIcon name="external" size={18} /> Відкрити каталог</a>
+              <button type="button" className={styles.teacherSignOut} onClick={() => void onSignOut()} disabled={signingOut || submitting || Boolean(pending)}><SiteIcon name="logout" size={18} /> {signingOut ? "Виходимо…" : "Вийти"}</button>
             </div>
           </aside>
 
@@ -1358,7 +1359,7 @@ function VisitBookingPanel({
             </div>
 
             <section className={`${styles.card} ${styles.bookings}`} aria-labelledby="my-bookings-title">
-          <div className={styles.cardHeading}><div><span>Лише для вас</span><h2 id="my-bookings-title">Мої майбутні записи</h2></div><button type="button" className={styles.quiet} onClick={() => void load()} disabled={loading}>↻ Оновити</button></div>
+          <div className={styles.cardHeading}><div><span>Лише для вас</span><h2 id="my-bookings-title">Мої майбутні записи</h2></div><button type="button" className={styles.quiet} onClick={() => void load()} disabled={loading}><SiteIcon name="refresh" size={18} /> Оновити</button></div>
           {activeBookings.length ? <div className={styles.bookingList}>{activeBookings.map((booking) => (
             <article key={booking.id}>
               <div><strong>{formatVisitDateTime(`${booking.date}T${booking.startTime}`)}–{booking.endTime}</strong><span>{booking.classLabel || "Без класу"}{booking.purpose ? ` · ${booking.purpose}` : ""}</span></div>
@@ -1379,26 +1380,26 @@ function VisitBookingPanel({
         <nav className={styles.teacherMobileNav} aria-label="Основні розділи Кабінету учителя">
           {TEACHER_TABS.filter((tab) => TEACHER_MOBILE_TABS.includes(tab.id)).map((tab) => (
             <button key={tab.id} type="button" aria-current={activeTab === tab.id ? "page" : undefined} onClick={() => selectTeacherTab(tab.id)}>
-              <span aria-hidden="true">{tab.icon}</span><small>{tab.shortLabel}</small>
+              <span aria-hidden="true"><SiteIcon name={tab.icon} size={21} /></span><small>{tab.shortLabel}</small>
             </button>
           ))}
           <button ref={mobileMenuButtonRef} type="button" aria-expanded={mobileMenuOpen} aria-haspopup="dialog" aria-controls="teacher-mobile-menu" aria-current={mobileMoreActive ? "page" : undefined} onClick={() => setMobileMenuOpen(true)}>
-            <span aria-hidden="true">•••</span><small>Ще</small>
+            <span aria-hidden="true"><SiteIcon name="more" size={21} /></span><small>Ще</small>
           </button>
         </nav>
 
         {mobileMenuOpen ? (
           <div className={styles.teacherMobileMenuBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setMobileMenuOpen(false); }}>
             <section id="teacher-mobile-menu" ref={mobileMenuRef} className={styles.teacherMobileMenu} role="dialog" aria-modal="true" aria-labelledby="teacher-mobile-menu-title">
-              <header><div><span>Кабінет учителя</span><h2 id="teacher-mobile-menu-title">Усі розділи</h2></div><button type="button" onClick={() => setMobileMenuOpen(false)} aria-label="Закрити меню">×</button></header>
+              <header><div><span>Кабінет учителя</span><h2 id="teacher-mobile-menu-title">Усі розділи</h2></div><button type="button" onClick={() => setMobileMenuOpen(false)} aria-label="Закрити меню"><SiteIcon name="close" /></button></header>
               <div className={styles.teacherMobileMenuIdentity}><span aria-hidden="true">{teacherInitials(teacher.fullName)}</span><div><small>Ви увійшли як</small><strong>{teacher.fullName}</strong></div></div>
               <nav aria-label="Усі розділи">
-                {TEACHER_TABS.map((tab) => <button key={tab.id} type="button" aria-current={activeTab === tab.id ? "page" : undefined} data-telegram={tab.id === "telegram" || undefined} onClick={() => selectTeacherTab(tab.id)}><span aria-hidden="true">{tab.icon}</span><strong>{tab.label}</strong></button>)}
+                {TEACHER_TABS.map((tab) => <button key={tab.id} type="button" aria-current={activeTab === tab.id ? "page" : undefined} data-telegram={tab.id === "telegram" || undefined} onClick={() => selectTeacherTab(tab.id)}><span aria-hidden="true"><SiteIcon name={tab.icon} /></span><strong>{tab.label}</strong></button>)}
               </nav>
               <div className={styles.teacherMobileMenuUtilities}>
-                <button type="button" onClick={() => { setMobileMenuOpen(false); setSecurityOpen(true); }} disabled={signingOut || submitting || Boolean(pending)}>Безпека і PIN</button>
-                <a href={PUBLIC_CATALOG_URL} target="_blank" rel="noreferrer">Відкрити каталог ↗</a>
-                <button type="button" className={styles.teacherSignOut} onClick={() => void onSignOut()} disabled={signingOut || submitting || Boolean(pending)}>Вийти з кабінету</button>
+                <button type="button" onClick={() => { setMobileMenuOpen(false); setSecurityOpen(true); }} disabled={signingOut || submitting || Boolean(pending)}><SiteIcon name="security" size={18} /> Безпека і PIN</button>
+                <a href={PUBLIC_CATALOG_URL} target="_blank" rel="noreferrer"><SiteIcon name="external" size={18} /> Відкрити каталог</a>
+                <button type="button" className={styles.teacherSignOut} onClick={() => void onSignOut()} disabled={signingOut || submitting || Boolean(pending)}><SiteIcon name="logout" size={18} /> Вийти з кабінету</button>
               </div>
             </section>
           </div>
@@ -1673,30 +1674,30 @@ function TeacherOverview({
         <p className={styles.profilePrivacy}>Фото не публікується у відкритому каталозі чи графіку.</p>
       </article>
       <article className={`${styles.card} ${styles.overviewActionCard}`}>
-        <span className={styles.overviewActionIcon} aria-hidden="true">◷</span>
+        <span className={styles.overviewActionIcon} aria-hidden="true"><SiteIcon name="visits" size={23} /></span>
         <div className={styles.cardHeading}><div><span>Найближче</span><h2>Відвідування</h2></div></div>
         {loading ? <p className={styles.empty}>Оновлюємо…</p> : nextBooking ? (
           <p className={styles.nextVisit}><strong>{formatVisitDateTime(`${nextBooking.date}T${nextBooking.startTime}`)}–{nextBooking.endTime}</strong><span>{nextBooking.classLabel || "Без класу"}</span></p>
         ) : <p className={styles.empty}>Майбутніх записів немає.</p>}
-        <button className={styles.overviewActionLink} type="button" onClick={onOpenVisits}>Відкрити графік <span aria-hidden="true">→</span></button>
+        <button className={styles.overviewActionLink} type="button" onClick={onOpenVisits}>Відкрити графік <span aria-hidden="true"><SiteIcon name="next" size={18} /></span></button>
       </article>
       <article className={`${styles.card} ${styles.overviewActionCard}`}>
-        <span className={styles.overviewActionIcon} aria-hidden="true">▤</span>
+        <span className={styles.overviewActionIcon} aria-hidden="true"><SiteIcon name="orders" size={23} /></span>
         <div className={styles.cardHeading}><div><span>Каталог</span><h2>Потрібні матеріали</h2></div></div>
         <p className={styles.empty}>Знайдіть підручники або інші матеріали й надішліть одне замовлення бібліотекарю.</p>
-        <button className={styles.overviewActionLink} type="button" onClick={onOpenOrders}>Створити замовлення <span aria-hidden="true">→</span></button>
+        <button className={styles.overviewActionLink} type="button" onClick={onOpenOrders}>Створити замовлення <span aria-hidden="true"><SiteIcon name="next" size={18} /></span></button>
       </article>
       <article className={`${styles.card} ${styles.overviewActionCard}`}>
-        <span className={styles.overviewActionIcon} aria-hidden="true">+</span>
+        <span className={styles.overviewActionIcon} aria-hidden="true"><SiteIcon name="teacher-acquisition" size={23} /></span>
         <div className={styles.cardHeading}><div><span>Комплектування</span><h2>Запропонувати придбання</h2></div></div>
         <p className={styles.empty}>Дозамовте примірники, яких бракує, або запропонуйте нове видання для фонду.</p>
-        <button className={styles.overviewActionLink} type="button" onClick={onOpenAcquisition}>Створити пропозицію <span aria-hidden="true">→</span></button>
+        <button className={styles.overviewActionLink} type="button" onClick={onOpenAcquisition}>Створити пропозицію <span aria-hidden="true"><SiteIcon name="next" size={18} /></span></button>
       </article>
       <article className={`${styles.card} ${styles.overviewActionCard}`}>
-        <span className={styles.overviewActionIcon} aria-hidden="true">▥</span>
+        <span className={styles.overviewActionIcon} aria-hidden="true"><SiteIcon name="loans" size={23} /></span>
         <div className={styles.cardHeading}><div><span>Облік</span><h2>Видані посібники</h2></div></div>
         <p className={styles.empty}>Перегляньте все, що записано особисто на вас і на класи, за які ви відповідаєте.</p>
-        <button className={styles.overviewActionLink} type="button" onClick={onOpenLoans}>Переглянути посібники <span aria-hidden="true">→</span></button>
+        <button className={styles.overviewActionLink} type="button" onClick={onOpenLoans}>Переглянути посібники <span aria-hidden="true"><SiteIcon name="next" size={18} /></span></button>
       </article>
     </section>
   );
@@ -1769,7 +1770,7 @@ function TeacherLoansPanel() {
     <section className={styles.teacherLoans} aria-labelledby="teacher-loans-title">
       <div className={styles.cardHeading}>
         <div><span>Лише для вас</span><h2 id="teacher-loans-title">Що записано на вас</h2></div>
-        <button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading}>↻ Оновити</button>
+        <button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading}><SiteIcon name="refresh" size={18} /> Оновити</button>
       </div>
       {error ? <div className={styles.error} role="alert">{error}</div> : null}
       <div className={styles.loanCounters} aria-label="Підсумок виданих посібників">
@@ -2051,7 +2052,7 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
           <li key={item.id}>
             <span><strong>{item.title}</strong><small>{item.id}</small></span>
             <label>Кількість<input type="number" min="0" max={item.availableQuantity} value={quantity} onChange={(event) => updateQuantity(item.id, Number(event.currentTarget.value))} /></label>
-            <button type="button" onClick={() => updateQuantity(item.id, 0)} aria-label={`Прибрати ${item.title} з кошика`}>×</button>
+            <button type="button" onClick={() => updateQuantity(item.id, 0)} aria-label={`Прибрати ${item.title} з кошика`}><SiteIcon name="delete" size={18} /></button>
           </li>
         ))}</ul> : <p className={styles.empty}>Додайте матеріали з результатів пошуку.</p>}
         <label className={styles.portalSearch}>Примітка бібліотекарю
@@ -2062,7 +2063,7 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
       </aside>
       </div>
       <section className={`${styles.card} ${styles.requestHistory}`} aria-labelledby="request-history-title">
-        <div className={styles.cardHeading}><div><span>Лише для вас</span><h2 id="request-history-title">Історія замовлень</h2></div><button className={styles.quiet} type="button" onClick={() => void loadRequests()} disabled={historyLoading || historyLoadingMore || submitting}>↻ Оновити</button></div>
+        <div className={styles.cardHeading}><div><span>Лише для вас</span><h2 id="request-history-title">Історія замовлень</h2></div><button className={styles.quiet} type="button" onClick={() => void loadRequests()} disabled={historyLoading || historyLoadingMore || submitting}><SiteIcon name="refresh" size={18} /> Оновити</button></div>
         {historyLoading ? <p className={styles.empty}>Оновлюємо замовлення…</p> : requests.length ? <div className={styles.requestList}>{requests.map((request) => (
           <article key={request.id}>
             <header><span className={styles.requestStatus} data-status={request.status}>{materialRequestStatusLabel(request.status)}</span><time dateTime={request.createdAt}>{formatPortalDate(request.createdAt)}</time></header>
@@ -2172,7 +2173,7 @@ function TeacherNotificationsPanel({ pendingScope }: { pendingScope: string }) {
   return (
     <div className={styles.notificationStack}>
       <section className={styles.card} aria-labelledby="notifications-title">
-      <div className={styles.cardHeading}><div><span>{data?.unreadCount ?? 0} непрочитаних</span><h2 id="notifications-title">Повідомлення</h2></div><button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading || loadingMore || submitting}>↻ Оновити</button></div>
+      <div className={styles.cardHeading}><div><span>{data?.unreadCount ?? 0} непрочитаних</span><h2 id="notifications-title">Повідомлення</h2></div><button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading || loadingMore || submitting}><SiteIcon name="refresh" size={18} /> Оновити</button></div>
       {pending ? <div className={styles.pending} role="status"><span>Не вдалося підтвердити позначку «прочитано».</span><button type="button" onClick={() => void sendRead(pending)} disabled={submitting}>Перевірити результат</button></div> : null}
       {notice ? <div className={styles.error} role="alert">{notice}</div> : null}
       {loading ? <p className={styles.empty}>Оновлюємо повідомлення…</p> : data?.notifications.length ? <div className={styles.notificationList}>{data.notifications.map((notification) => (
@@ -2333,11 +2334,11 @@ function TeacherTelegramSettings() {
         {!loading && !telegram?.connected ? <div className={styles.info}>Спочатку скористайтеся кнопкою «Підключити Telegram» у блоці вище.</div> : null}
         {!loading && telegram?.connected ? (
           <>
-            <div className={styles.info}>Сповіщення про замовлення та відвідування: <strong>{notificationsOn ? "увімкнено 🔔" : "вимкнено 🔕"}</strong>. Бот і швидкий вхід залишаються підключеними в обох режимах.</div>
+            <div className={styles.info}>Сповіщення про замовлення та відвідування: <strong><SiteIcon name={notificationsOn ? "notifications" : "bell-off"} size={16} /> {notificationsOn ? "увімкнено" : "вимкнено"}</strong>. Бот і швидкий вхід залишаються підключеними в обох режимах.</div>
             {!telegram.notificationsEnabled ? <div className={styles.info}>Підключення готове, але надсилання повідомлень ще не ввімкнено бібліотекарем.</div> : null}
             <div className={styles.telegramActions}>
-              <button className={styles.primary} type="button" onClick={() => void toggleNotifications()} disabled={Boolean(busy)}>{busy === "toggle" ? "Змінюємо…" : notificationsOn ? "🔕 Вимкнути сповіщення" : "🔔 Увімкнути сповіщення"}</button>
-              <button className={styles.quiet} type="button" onClick={() => void sendTest()} disabled={Boolean(busy) || !telegram.notificationsEnabled || !notificationsOn}>{busy === "test" ? "Надсилаємо…" : "Надіслати тест"}</button>
+              <button className={styles.primary} type="button" onClick={() => void toggleNotifications()} disabled={Boolean(busy)}><SiteIcon name={notificationsOn ? "bell-off" : "notifications"} size={18} /> {busy === "toggle" ? "Змінюємо…" : notificationsOn ? "Вимкнути сповіщення" : "Увімкнути сповіщення"}</button>
+              <button className={styles.quiet} type="button" onClick={() => void sendTest()} disabled={Boolean(busy) || !telegram.notificationsEnabled || !notificationsOn}><SiteIcon name="telegram" size={18} /> {busy === "test" ? "Надсилаємо…" : "Надіслати тест"}</button>
             </div>
           </>
         ) : null}
@@ -2473,7 +2474,7 @@ function TeacherSecurityPanel({
       if (!required && event.target === event.currentTarget) onClose();
     }}>
       <section ref={dialogRef} className={`${styles.card} ${styles.securityDialog}`} role="dialog" aria-modal="true" aria-labelledby="security-title">
-        <div className={styles.cardHeading}><div><span>{required ? "Перший вхід" : "Безпека"}</span><h2 id="security-title">{required ? "Створіть власний PIN" : "Змінити PIN"}</h2></div>{!required ? <button className={styles.quiet} type="button" onClick={onClose} aria-label="Закрити" disabled={submitting}>×</button> : null}</div>
+        <div className={styles.cardHeading}><div><span>{required ? "Перший вхід" : "Безпека"}</span><h2 id="security-title">{required ? "Створіть власний PIN" : "Змінити PIN"}</h2></div>{!required ? <button className={styles.quiet} type="button" onClick={onClose} aria-label="Закрити" disabled={submitting}><SiteIcon name="close" size={18} /></button> : null}</div>
         <p className={styles.empty}>PIN складається з 4 цифр. Після зміни попередній код і старі сеанси перестануть працювати.</p>
         {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
         <form onSubmit={submitRotation}>

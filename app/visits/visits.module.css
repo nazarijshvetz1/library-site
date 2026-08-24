@@ -217,7 +217,7 @@
 .codeRules li[data-ok="true"]::before { content: "✓"; color: #2f684f; }
 .confirmCode { grid-template-columns: 20px minmax(0, 1fr)!important; align-items: start; }
 .confirmCode input { width: 18px!important; min-height: 18px!important; margin-top: 2px; padding: 0!important; }
-.primary, .danger, .quiet, .pending button { min-height: 44px; border-radius: 11px; padding: 0 16px; cursor: pointer; font-weight: 800; }
+.primary, .danger, .quiet, .pending button { min-height: 44px; border-radius: 11px; padding: 0 16px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; font-weight: 800; }
 .primary { width: 100%; margin-top: 20px; border: 0; background: var(--green-900); color: #fff; }
 .formActions { display: flex; align-items: flex-end; gap: 10px; }
 .formActions .primary { flex: 1; }
@@ -243,6 +243,7 @@
 .success { background: #e5f1e2; color: var(--green-900); }
 .error { background: #fff0ed; color: var(--danger); }
 .info { background: #eaf1f5; color: #345769; }
+.info strong { display: inline-flex; align-items: center; gap: 5px; }
 .adminFilters { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
 .adminFilters label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; font-weight: 800; }
 .adminFilters input, .adminFilters select { min-height: 42px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: white; }
@@ -477,7 +478,7 @@
 .teacherPortalContent .overviewActionCard .empty { margin: 0 0 22px; }
 .overviewActionIcon { position: absolute; top: 22px; left: 24px; width: 42px; height: 42px; display: grid; place-items: center; border-radius: 13px; color: #23583b; background: #e6f0e2; font-size: 18px; font-weight: 900; }
 .overviewActionLink { min-height: 44px; margin-top: auto; padding: 0; display: flex; align-items: center; justify-content: space-between; border: 0; border-top: 1px solid #e1e7df; background: transparent; color: #23583b; cursor: pointer; font-size: 13px; font-weight: 900; text-align: left; }
-.overviewActionLink span { font-size: 18px; transition: transform .18s ease; }
+.overviewActionLink span { display: grid; place-items: center; font-size: 18px; transition: transform .18s ease; }
 .overviewActionLink:hover span { transform: translateX(3px); }
 .teacherPortalContent .loanCounters article { min-height: 116px; border-radius: 18px; background: linear-gradient(145deg,#fffef9,#f4f7f1); }
 .teacherPortalContent .loanCounters strong { font-size: 40px; }
@@ -538,7 +539,7 @@
   .teacherPortalContent .profilePortrait { width: 108px; height: 108px; }
   .teacherMobileNav { position: fixed; z-index: 60; right: 12px; bottom: max(12px,env(safe-area-inset-bottom)); left: 12px; min-height: 70px; padding: 7px; display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 4px; border: 1px solid rgba(22,62,42,.12); border-radius: 22px; background: rgba(255,254,249,.94); box-shadow: 0 20px 52px rgba(12,45,29,.2); backdrop-filter: blur(18px) saturate(1.1); }
   .teacherMobileNav button { min-width: 0; min-height: 56px; padding: 5px 3px; display: grid; place-items: center; align-content: center; gap: 4px; border: 0; border-radius: 15px; background: transparent; color: #67756d; cursor: pointer; }
-  .teacherMobileNav button > span { font-size: 17px; font-weight: 900; line-height: 1; }
+  .teacherMobileNav button > span { display: grid; place-items: center; font-size: 17px; font-weight: 900; line-height: 1; }
   .teacherMobileNav button small { overflow: hidden; max-width: 100%; font-size: 9px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
   .teacherMobileNav button[aria-current="page"] { color: #fff; background: linear-gradient(145deg,#23583b,#163e2a); box-shadow: 0 7px 17px rgba(22,62,42,.18); }
   .teacherMobileMenuBackdrop { position: fixed; z-index: 100; inset: 0; padding: 24px 14px max(14px,env(safe-area-inset-bottom)); display: flex; align-items: flex-end; justify-content: center; background: rgba(7,31,24,.58); backdrop-filter: blur(4px); }
@@ -546,7 +547,7 @@
   .teacherMobileMenu > header { padding: 0 2px 15px; display: flex; align-items: flex-start; justify-content: space-between; border-bottom: 1px solid #e1e7df; }
   .teacherMobileMenu > header span { color: #39734d; font-size: 10px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; }
   .teacherMobileMenu > header h2 { margin: 5px 0 0; color: #163e2a; font: 650 28px/1 Georgia,serif; }
-  .teacherMobileMenu > header button { width: 44px; height: 44px; border: 1px solid #d8e1d7; border-radius: 13px; background: #fff; color: #23583b; cursor: pointer; font-size: 24px; }
+  .teacherMobileMenu > header button { width: 44px; height: 44px; border: 1px solid #d8e1d7; border-radius: 13px; display: grid; place-items: center; background: #fff; color: #23583b; cursor: pointer; font-size: 24px; }
   .teacherMobileMenuIdentity { margin: 14px 0; padding: 12px; display: grid; grid-template-columns: 46px minmax(0,1fr); gap: 11px; align-items: center; border-radius: 15px; background: #edf4e9; }
   .teacherMobileMenuIdentity > span { width: 46px; height: 46px; }
   .teacherMobileMenuIdentity div { min-width: 0; display: grid; gap: 3px; }
@@ -560,7 +561,7 @@
   .teacherMobileMenu > nav button[aria-current="page"] > span { color: #fff; background: rgba(255,255,255,.14); }
   .teacherMobileMenu > nav button[data-telegram="true"] { border-color: #c4e3f1; color: #1679a6; background: #eef8fc; }
   .teacherMobileMenuUtilities { margin-top: 14px; padding-top: 14px; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; border-top: 1px solid #e1e7df; }
-  .teacherMobileMenuUtilities :is(a,button) { min-height: 46px; padding: 0 12px; display: flex; align-items: center; justify-content: center; border: 1px solid #d8e1d7; border-radius: 13px; background: #fff; color: #23583b; cursor: pointer; font-size: 11px; font-weight: 850; text-align: center; }
+  .teacherMobileMenuUtilities :is(a,button) { min-height: 46px; padding: 0 12px; display: flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid #d8e1d7; border-radius: 13px; background: #fff; color: #23583b; cursor: pointer; font-size: 11px; font-weight: 850; text-align: center; }
   .teacherMobileMenuUtilities .teacherSignOut { grid-column: 1 / -1; color: #9b4635; border-color: #ecd0c9; background: #fff7f4; }
 }
 

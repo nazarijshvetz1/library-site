@@ -5,6 +5,7 @@ import {
   chatGPTSignOutPath,
   getChatGPTUser,
 } from "./chatgpt-auth";
+import SiteIcon from "./_components/site-icon";
 
 const PUBLIC_CATALOG_URL = "https://nazarijshvetz1.github.io/library-site/";
 const LOGO_URL = `${PUBLIC_CATALOG_URL}library-logo.png`;
@@ -27,7 +28,7 @@ export default async function Home() {
 
         <a className="nav-link" href={PUBLIC_CATALOG_URL}>
           Відкрити каталог
-          <span aria-hidden="true">↗</span>
+          <SiteIcon name="external" size={17} />
         </a>
       </nav>
 
@@ -49,7 +50,7 @@ export default async function Home() {
               <>
                 <a className="button button-primary" href="/librarian">
                   Перейти до кабінету
-                  <span aria-hidden="true">→</span>
+                  <SiteIcon name="next" size={18} />
                 </a>
                 <a className="button button-quiet" href={chatGPTSignOutPath("/")}>
                   Вийти
@@ -70,7 +71,7 @@ export default async function Home() {
           </div>
 
           <p className="privacy-note">
-            <span aria-hidden="true">●</span>
+            <SiteIcon name="security" size={18} />
             Кабінет доступний лише уповноваженим працівникам бібліотеки.
           </p>
         </div>
@@ -85,12 +86,12 @@ export default async function Home() {
             <span className="status-pill"><i /> захищено</span>
           </div>
           <div className="feature-grid">
-            <article><span aria-hidden="true">＋</span><strong>Новий матеріал</strong><small>Фактичний залишок, CAT-ID, опис і фото</small></article>
-            <article><span aria-hidden="true">⇄</span><strong>Рух фонду</strong><small>Надходження, переміщення, списання</small></article>
-            <article><span aria-hidden="true">→</span><strong>Видача вчителям і класам</strong><small>Пакетна видача й повернення</small></article>
-            <article><span aria-hidden="true">▣</span><strong>Роки й класи</strong><small>Відкриття, зміни та перехід</small></article>
+            <article><span aria-hidden="true"><SiteIcon name="new-material" size={22} /></span><strong>Новий матеріал</strong><small>Фактичний залишок, CAT-ID, опис і фото</small></article>
+            <article><span aria-hidden="true"><SiteIcon name="transfer" size={22} /></span><strong>Рух фонду</strong><small>Надходження, переміщення, списання</small></article>
+            <article><span aria-hidden="true"><SiteIcon name="circulation" size={22} /></span><strong>Видача вчителям і класам</strong><small>Пакетна видача й повернення</small></article>
+            <article><span aria-hidden="true"><SiteIcon name="academic-year" size={22} /></span><strong>Роки й класи</strong><small>Відкриття, зміни та перехід</small></article>
           </div>
-          <p className="draft-preview"><span aria-hidden="true">●</span> Підтверджені зміни відразу зберігаються у захищеній базі</p>
+          <p className="draft-preview"><SiteIcon name="success" size={17} /> Підтверджені зміни відразу зберігаються у захищеній базі</p>
         </aside>
       </section>
 

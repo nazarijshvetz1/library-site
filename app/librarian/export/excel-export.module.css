@@ -60,7 +60,7 @@
 .importLink { margin-top: 20px; padding: 15px; display: grid; gap: 5px; border-radius: 13px; background: #f2f3ee; }
 .importLink strong { font-size: 12px; }
 .importLink span { color: #68786e; font-size: 11px; line-height: 1.45; }
-.importLink a { margin-top: 5px; color: #2f7441; font-size: 12px; font-weight: 850; }
+.importLink a { margin-top: 5px; display: inline-flex; align-items: center; gap: 5px; color: #2f7441; font-size: 12px; font-weight: 850; }
 
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }

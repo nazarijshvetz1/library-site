@@ -30,6 +30,7 @@
   cursor: pointer;
   font-weight: 800;
 }
+.refreshButton, .primaryButton, .secondaryLink, .profileActions > *, .formActions button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 .primaryButton { border-color: var(--green-900); background: var(--green-900); color: white; }
 button:disabled { cursor: not-allowed; opacity: .55; }
 
@@ -105,7 +106,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .metricGrid button[data-tone="neutral"] { background: #f4f3ef; }
 .metricGrid strong { font: 650 34px/1 Georgia, serif; }
 .metricGrid span { font-weight: 850; }
-.metricGrid small { margin-top: 9px; color: var(--muted); }
+.metricGrid small { margin-top: 9px; display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
 
 .attentionList { margin: 0; padding: 0; display: grid; gap: 9px; list-style: none; }
 .attentionList li { min-height: 72px; padding: 12px 13px; display: flex; align-items: center; justify-content: space-between; gap: 14px; border: 1px solid var(--line); border-radius: 12px; }
@@ -128,6 +129,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .telegramHeading > strong { padding: 7px 10px; border-radius: 999px; color: #765616; background: #fff0ca; font-size: 9px; text-align: center; }
 .telegramHeading > strong[data-connected="true"] { color: #316536; background: #e4f2df; }
 .telegramPanel > .info, .telegramPanel > .success, .telegramPanel > .error { margin-top: 18px; }
+.telegramPanel > .info strong { display: inline-flex; align-items: center; gap: 5px; }
 .telegramPreferenceGrid { margin-top: 20px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .telegramPreferenceGrid label { padding: 14px; display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 10px; border: 1px solid var(--line); border-radius: 12px; background: #fafcf8; cursor: pointer; }
 .telegramPreferenceGrid input { width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--green-900); }

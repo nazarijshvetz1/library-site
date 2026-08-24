@@ -15,11 +15,27 @@
     <meta name="twitter:image" content="{{SITE_ORIGIN}}/og.png" />
     <title>Бібліотека Міжнародного ліцею МАУП</title>
     <link rel="icon" type="image/png" href="/library-logo.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260823-3" />
+    <link rel="stylesheet" href="/styles.css?v=20260824-1" />
     <link rel="stylesheet" href="/brand.css?v=20260823-3" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Перейти до основного вмісту</a>
+    <svg class="icon-sprite" aria-hidden="true" focusable="false">
+      <defs>
+        <symbol id="icon-external-link" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+        <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+        <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+        <symbol id="icon-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+        <symbol id="icon-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+        <symbol id="icon-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+        <symbol id="icon-circle-off" viewBox="0 0 24 24"><path d="m2 2 20 20"/><path d="M8.35 2.69A10 10 0 0 1 21.31 15.65"/><path d="M19.08 19.08A10 10 0 1 1 4.92 4.92"/></symbol>
+        <symbol id="icon-list-filter" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></symbol>
+        <symbol id="icon-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+        <symbol id="icon-sparkles" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/><path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/></symbol>
+        <symbol id="icon-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+        <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+      </defs>
+    </svg>
 
     <header class="site-header">
       <a class="brand" href="#top" aria-label="Єдина бібліотека ліцею — на головну">
@@ -44,7 +60,7 @@
         href="https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/librarian"
         target="_blank"
         rel="noopener noreferrer"
-      ><span aria-hidden="true">↗</span> Для бібліотекаря</a>
+      ><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-external-link"></use></svg> Для бібліотекаря</a>
     </header>
 
     <main id="main-content">
@@ -60,7 +76,7 @@
           <p class="hero-lead">Підручники, робочі зошити, атласи й методичні матеріали — в одному сучасному каталозі з актуальною наявністю.</p>
           <form class="hero-search" id="heroSearchForm" role="search">
             <label class="sr-only" for="heroSearch">Пошук у каталозі</label>
-            <span aria-hidden="true">⌕</span>
+            <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-search"></use></svg>
             <div class="hero-search-field">
               <input
                 id="heroSearch"
@@ -83,9 +99,9 @@
             <button type="button" data-quick="Математика">Математика</button>
           </div>
           <ul class="hero-assurances" aria-label="Переваги каталогу">
-            <li><span aria-hidden="true">✓</span> Перегляд без реєстрації</li>
-            <li><span aria-hidden="true">✓</span> Актуальна кількість примірників</li>
-            <li><span aria-hidden="true">✓</span> Замовлення через кабінет учителя</li>
+            <li><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-check"></use></svg> Перегляд без реєстрації</li>
+            <li><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-check"></use></svg> Актуальна кількість примірників</li>
+            <li><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-check"></use></svg> Замовлення через кабінет учителя</li>
           </ul>
         </div>
 
@@ -99,7 +115,7 @@
           <div class="showcase-footer">
             <span class="status-dot"></span>
             <span><strong>3 матеріали</strong><small>доступні просто зараз</small></span>
-            <button type="button" data-quick="7">Переглянути <span aria-hidden="true">→</span></button>
+            <button type="button" data-quick="7">Переглянути <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-arrow-right"></use></svg></button>
           </div>
         </aside>
       </section>
@@ -125,10 +141,10 @@
         </div>
 
         <div class="visit-toolbar" aria-label="Вибір тижня">
-          <button id="visitPrevWeek" type="button" aria-label="Попередній тиждень"><span aria-hidden="true">←</span></button>
+          <button id="visitPrevWeek" type="button" aria-label="Попередній тиждень"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-chevron-left"></use></svg></button>
           <p id="visitWeekLabel" aria-live="polite">Поточний тиждень</p>
           <button class="visit-today-button" id="visitThisWeek" type="button">Цей тиждень</button>
-          <button id="visitNextWeek" type="button" aria-label="Наступний тиждень"><span aria-hidden="true">→</span></button>
+          <button id="visitNextWeek" type="button" aria-label="Наступний тиждень"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-chevron-right"></use></svg></button>
         </div>
 
         <div class="visit-sync" id="visitScheduleStatus" data-state="loading" role="status" aria-live="polite">
@@ -150,11 +166,11 @@
           </div>
         </div>
         <div class="visit-empty" id="visitScheduleEmpty" hidden>
-          <span aria-hidden="true">○</span>
+          <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-circle-off"></use></svg>
           <h3>Графік ще не опубліковано</h3>
           <p>Бібліотекар додасть години відвідування найближчим часом.</p>
         </div>
-        <p class="visit-booking-note"><span aria-hidden="true">↗</span> Форма відкриється в кабінеті вчителя. Записатися можна також у гостьовому режимі без персонального коду.</p>
+        <p class="visit-booking-note"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-external-link"></use></svg> Форма відкриється в кабінеті вчителя. Записатися можна також у гостьовому режимі без персонального коду.</p>
       </section>
 
       <section class="collections-section" id="collections" aria-labelledby="collections-title">
@@ -182,7 +198,7 @@
           </div>
           <div class="catalog-actions">
             <span class="prototype-badge">Дані оновлюються автоматично</span>
-            <button class="filter-toggle" id="filterToggle" type="button" aria-expanded="false" aria-controls="filters"><span aria-hidden="true">☷</span> Фільтри</button>
+            <button class="filter-toggle" id="filterToggle" type="button" aria-expanded="false" aria-controls="filters"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-list-filter"></use></svg> Фільтри</button>
           </div>
         </div>
 
@@ -197,7 +213,7 @@
               <input id="availableFilter" type="checkbox" />
               <span><strong>Лише в наявності</strong><small>Приховати матеріали з нульовим залишком</small></span>
             </label>
-            <div class="filter-note"><span aria-hidden="true">i</span><p><strong>Дані захищені</strong>Каталог працює лише для перегляду. Зміни вносяться у кабінеті бібліотекаря.</p></div>
+            <div class="filter-note"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-info"></use></svg><p><strong>Дані захищені</strong>Каталог працює лише для перегляду. Зміни вносяться у кабінеті бібліотекаря.</p></div>
           </aside>
 
           <div class="results-panel">
@@ -215,7 +231,7 @@
             <div class="active-filters" id="activeFilters" aria-live="polite"></div>
             <div class="material-grid" id="materialGrid"></div>
             <div class="empty-state" id="emptyState" hidden>
-              <div aria-hidden="true">⌕</div><h3>Матеріалів не знайдено</h3><p>Спробуйте змінити пошуковий запит або очистити фільтри.</p><button type="button" data-clear>Очистити фільтри</button>
+              <div aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="#icon-search"></use></svg></div><h3>Матеріалів не знайдено</h3><p>Спробуйте змінити пошуковий запит або очистити фільтри.</p><button type="button" data-clear>Очистити фільтри</button>
             </div>
             <button class="load-more" id="loadMore" type="button">Показати ще матеріали</button>
           </div>
@@ -223,13 +239,13 @@
       </section>
 
       <section class="suggestion-cta" aria-labelledby="suggestion-title">
-        <span class="suggestion-mark" aria-hidden="true">✦</span>
+        <span class="suggestion-mark" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="#icon-sparkles"></use></svg></span>
         <div>
           <p class="eyebrow light"><span></span> Відкрита бібліотека</p>
           <h2 id="suggestion-title">Не знайшли потрібної книги?</h2>
           <p>Запропонуйте видання, яке варто додати до фонду. Достатньо вказати клас, своє ім’я, назву та автора книги.</p>
         </div>
-        <a href="https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/suggest-book">Запропонувати книгу <span aria-hidden="true">→</span></a>
+        <a href="https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/suggest-book">Запропонувати книгу <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-arrow-right"></use></svg></a>
       </section>
 
       <section class="how-it-works" id="how-it-works" aria-labelledby="how-title">
@@ -239,12 +255,12 @@
           <p class="how-intro">Каталог і графік відкриті для всіх. Особистий кабінет потрібен учителю для замовлень, власних записів, виданих матеріалів і сповіщень.</p>
         </div>
         <ol>
-          <li><span>01</span><strong>Знайдіть матеріал</strong><p>Введіть назву, автора, предмет або CAT-ID. За потреби уточніть клас, рубрику й тип видання.</p><a href="#catalog">Відкрити каталог <span aria-hidden="true">→</span></a></li>
-          <li><span>02</span><strong>Перевірте наявність</strong><p>Відкрийте картку матеріалу: у ній видно загальну та доступну кількість примірників, а також місця їх зберігання.</p><a href="#catalog">Перейти до матеріалів <span aria-hidden="true">→</span></a></li>
-          <li><span>03</span><strong>Замовте</strong><p>У картці натисніть «Замовити», увійдіть до кабінету вчителя, укажіть кількість і надішліть замовлення бібліотекарю.</p><a href="https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/teacher?tab=orders">Відкрити замовлення <span aria-hidden="true">→</span></a></li>
-          <li><span>04</span><strong>Запишіться до бібліотеки</strong><p>Перегляньте відкритий графік, оберіть вільні дату й час. Запис доступний із кабінету або в гостьовому режимі без коду.</p><a href="#visit-schedule">Переглянути графік <span aria-hidden="true">→</span></a></li>
-          <li><span>05</span><strong>Увійдіть до кабінету</strong><p>Оберіть себе у списку, введіть код бібліотекаря або свій PIN. Під час першого входу створіть новий чотиризначний PIN.</p><a href="https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/teacher">Увійти до кабінету <span aria-hidden="true">→</span></a></li>
-          <li><span>06</span><strong>Почніть у Telegram</strong><p>Натисніть Start у боті: там можна вперше активувати кабінет, переглядати матеріали, робити замовлення, записуватися й отримувати сповіщення.</p><a href="https://t.me/MAUP_Library_Bot" target="_blank" rel="noopener noreferrer">Відкрити Telegram-бот <span aria-hidden="true">↗</span></a></li>
+          <li><span>01</span><strong>Знайдіть матеріал</strong><p>Введіть назву, автора, предмет або CAT-ID. За потреби уточніть клас, рубрику й тип видання.</p><a href="#catalog">Відкрити каталог <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-arrow-right"></use></svg></a></li>
+          <li><span>02</span><strong>Перевірте наявність</strong><p>Відкрийте картку матеріалу: у ній видно загальну та доступну кількість примірників, а також місця їх зберігання.</p><a href="#catalog">Перейти до матеріалів <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-arrow-right"></use></svg></a></li>
+          <li><span>03</span><strong>Замовте</strong><p>У картці натисніть «Замовити», увійдіть до кабінету вчителя, укажіть кількість і надішліть замовлення бібліотекарю.</p><a href="https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/teacher?tab=orders">Відкрити замовлення <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-arrow-right"></use></svg></a></li>
+          <li><span>04</span><strong>Запишіться до бібліотеки</strong><p>Перегляньте відкритий графік, оберіть вільні дату й час. Запис доступний із кабінету або в гостьовому режимі без коду.</p><a href="#visit-schedule">Переглянути графік <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-arrow-right"></use></svg></a></li>
+          <li><span>05</span><strong>Увійдіть до кабінету</strong><p>Оберіть себе у списку, введіть код бібліотекаря або свій PIN. Під час першого входу створіть новий чотиризначний PIN.</p><a href="https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/teacher">Увійти до кабінету <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-arrow-right"></use></svg></a></li>
+          <li><span>06</span><strong>Почніть у Telegram</strong><p>Натисніть Start у боті: там можна вперше активувати кабінет, переглядати матеріали, робити замовлення, записуватися й отримувати сповіщення.</p><a href="https://t.me/MAUP_Library_Bot" target="_blank" rel="noopener noreferrer">Відкрити Telegram-бот <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-external-link"></use></svg></a></li>
         </ol>
       </section>
 
@@ -284,13 +300,13 @@
     </footer>
 
     <dialog class="material-dialog" id="materialDialog" aria-labelledby="material-dialog-title" aria-describedby="material-dialog-note">
-      <button class="dialog-close" type="button" aria-label="Закрити">×</button>
+      <button class="dialog-close" type="button" aria-label="Закрити"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-x"></use></svg></button>
       <div id="dialogContent"></div>
     </dialog>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="/config.js"></script>
     <script src="/catalog-data.js"></script>
     <script src="/balance-data.js"></script>
-    <script type="module" src="/app.js?v=20260823-3"></script>
+    <script type="module" src="/app.js?v=20260824-1"></script>
   </body>
 </html>

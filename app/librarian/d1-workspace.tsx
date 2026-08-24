@@ -46,6 +46,7 @@ import {
   librarianSectionHref,
   type LibrarianSection,
 } from "./_components/librarian-routes";
+import SiteIcon, { type SiteIconName } from "../_components/site-icon";
 
 import styles from "./d1-workspace.module.css";
 
@@ -416,12 +417,12 @@ function buildMaterialTitleSuggestionUrl(title: string): string {
   return `/api/librarian/materials/search?${params.toString()}`;
 }
 
-type ToolItem = { id: Tool; icon: string; label: string; hint: string };
+type ToolItem = { id: Tool; icon: SiteIconName; label: string; hint: string };
 type ToolGroup = { id: string; label: string; items: ToolItem[] };
 
 const DASHBOARD_TOOL: ToolItem = {
   id: "dashboard",
-  icon: "⌂",
+  icon: "home",
   label: "Головна",
   hint: "Огляд і швидкі дії",
 };
@@ -431,42 +432,42 @@ const TOOL_GROUPS: ToolGroup[] = [
     id: "fund",
     label: "Фонд",
     items: [
-      { id: "catalog", icon: "⌕", label: "Каталог", hint: "Пошук і картка" },
-      { id: "create", icon: "+", label: "Новий матеріал", hint: "Додати без чернетки" },
-      { id: "receipt", icon: "↓", label: "Надходження", hint: "Додати примірники" },
-      { id: "transfer", icon: "⇄", label: "Переміщення", hint: "Змінити розміщення" },
-      { id: "count", icon: "✓", label: "Фактична кількість", hint: "Звірити залишок" },
-      { id: "writeoff", icon: "−", label: "Списання", hint: "Зменшити залишок" },
+      { id: "catalog", icon: "catalog", label: "Каталог", hint: "Пошук і картка" },
+      { id: "create", icon: "new-material", label: "Новий матеріал", hint: "Додати без чернетки" },
+      { id: "receipt", icon: "receipt", label: "Надходження", hint: "Додати примірники" },
+      { id: "transfer", icon: "transfer", label: "Переміщення", hint: "Змінити розміщення" },
+      { id: "count", icon: "count", label: "Фактична кількість", hint: "Звірити залишок" },
+      { id: "writeoff", icon: "writeoff", label: "Списання", hint: "Зменшити залишок" },
     ],
   },
   {
     id: "circulation",
     label: "Видача й повернення",
     items: [
-      { id: "issue", icon: "→", label: "Видача вчителю", hint: "Оформити видачу" },
-      { id: "return", icon: "↩", label: "Повернення", hint: "Прийняти книги" },
-      { id: "class-issue", icon: "⇥", label: "Видача класу", hint: "Кілька матеріалів" },
-      { id: "class-return", icon: "⇤", label: "Повернення класу", hint: "Частково або повністю" },
+      { id: "issue", icon: "issue-teacher", label: "Видача вчителю", hint: "Оформити видачу" },
+      { id: "return", icon: "return", label: "Повернення", hint: "Прийняти книги" },
+      { id: "class-issue", icon: "issue-class", label: "Видача класу", hint: "Кілька матеріалів" },
+      { id: "class-return", icon: "return-class", label: "Повернення класу", hint: "Частково або повністю" },
     ],
   },
   {
     id: "academic",
     label: "Класи й навчальний рік",
     items: [
-      { id: "academic-year", icon: "▣", label: "Новий навчальний рік", hint: "Створити період" },
-      { id: "class-create", icon: "+", label: "Відкрити клас", hint: "Додати до року" },
-      { id: "class-update", icon: "↻", label: "Змінити клас", hint: "Керівник і кабінет" },
-      { id: "class-close", icon: "×", label: "Закрити клас", hint: "Зберегти історію" },
-      { id: "class-reopen", icon: "↺", label: "Поновити клас", hint: "Виправити закриття" },
-      { id: "rollover", icon: "⇢", label: "Перехід на новий рік", hint: "Перевести всі класи" },
+      { id: "academic-year", icon: "academic-year", label: "Новий навчальний рік", hint: "Створити період" },
+      { id: "class-create", icon: "class-create", label: "Відкрити клас", hint: "Додати до року" },
+      { id: "class-update", icon: "class-update", label: "Змінити клас", hint: "Керівник і кабінет" },
+      { id: "class-close", icon: "class-close", label: "Закрити клас", hint: "Зберегти історію" },
+      { id: "class-reopen", icon: "class-reopen", label: "Поновити клас", hint: "Виправити закриття" },
+      { id: "rollover", icon: "rollover", label: "Перехід на новий рік", hint: "Перевести всі класи" },
     ],
   },
   {
     id: "settings",
     label: "Налаштування",
     items: [
-      { id: "locations", icon: "⌂", label: "Кабінети", hint: "Додати, змінити або закрити" },
-      { id: "contacts", icon: "☎", label: "Контакти", hint: "Дані для відкритого сайту" },
+      { id: "locations", icon: "locations", label: "Кабінети", hint: "Додати, змінити або закрити" },
+      { id: "contacts", icon: "contacts", label: "Контакти", hint: "Дані для відкритого сайту" },
     ],
   },
 ];
@@ -770,7 +771,7 @@ export default function D1LibrarianWorkspace({
               aria-pressed={tool === DASHBOARD_TOOL.id}
               onClick={() => chooseTool(DASHBOARD_TOOL.id)}
             >
-              <span aria-hidden="true">{DASHBOARD_TOOL.icon}</span>
+              <span aria-hidden="true"><SiteIcon name={DASHBOARD_TOOL.icon} /></span>
               <span>
                 <strong>{DASHBOARD_TOOL.label}</strong>
                 <small>{DASHBOARD_TOOL.hint}</small>
@@ -787,7 +788,7 @@ export default function D1LibrarianWorkspace({
                     aria-pressed={tool === item.id}
                     onClick={() => chooseTool(item.id)}
                   >
-                    <span aria-hidden="true">{item.icon}</span>
+                    <span aria-hidden="true"><SiteIcon name={item.icon} /></span>
                     <span>
                       <strong>{item.label}</strong>
                       <small>{item.hint}</small>
@@ -828,7 +829,7 @@ export default function D1LibrarianWorkspace({
               onClick={() => void refreshSelected()}
               disabled={searchState === "loading" || detailState === "loading"}
             >
-              ↻ Оновити
+              <SiteIcon name="refresh" size={18} /> Оновити
             </button>
           </div>
 
@@ -840,7 +841,7 @@ export default function D1LibrarianWorkspace({
                 aria-label="Закрити повідомлення"
                 onClick={() => setWorkspaceNotice("")}
               >
-                ×
+                <SiteIcon name="close" size={17} />
               </button>
             </div>
           ) : null}
@@ -1151,7 +1152,7 @@ function DashboardPanel({
       <section className={styles.dashboardHero} aria-labelledby="dashboard-search-title">
         <div className={styles.dashboardHeroCopy}>
           <span className={writesEnabled ? styles.dashboardStatusOn : styles.dashboardStatusOff}>
-            <span aria-hidden="true">{writesEnabled ? "●" : "○"}</span>
+            <span aria-hidden="true"><SiteIcon name={writesEnabled ? "success" : "read-only"} size={16} /></span>
             {writesEnabled ? "Запис увімкнено" : "Лише перегляд"}
           </span>
           <h2 id="dashboard-search-title">Знайдіть матеріал або відскануйте ISBN</h2>
@@ -1198,9 +1199,9 @@ function DashboardPanel({
         <div className={styles.dashboardQuickGrid}>
           {quickActions.map((item) => (
             <button type="button" key={item.id} onClick={() => onChooseTool(item.id)}>
-              <span aria-hidden="true">{item.icon}</span>
+              <span aria-hidden="true"><SiteIcon name={item.icon} /></span>
               <span><strong>{item.label}</strong><small>{item.hint}</small></span>
-              <span aria-hidden="true">→</span>
+              <span aria-hidden="true"><SiteIcon name="next" size={18} /></span>
             </button>
           ))}
         </div>
@@ -1219,7 +1220,7 @@ function DashboardPanel({
                 <div>
                   {group.items.map((item) => (
                     <button type="button" key={item.id} onClick={() => onChooseTool(item.id)}>
-                      {item.label}<span aria-hidden="true">→</span>
+                      {item.label}<span aria-hidden="true"><SiteIcon name="next" size={16} /></span>
                     </button>
                   ))}
                 </div>
@@ -1233,9 +1234,9 @@ function DashboardPanel({
             <span>Черги</span>
             <h2 id="dashboard-queues-title">Потребує уваги</h2>
           </div>
-          <a href={librarianSectionHref("visits", telegramMiniApp)}><span><strong>Графік відвідувань</strong><small>Записи на сьогодні</small></span><span className={styles.dashboardQueueCount}>{attentionUnavailable ? "—" : attention?.visitsToday ?? "…"}</span><span aria-hidden="true">→</span></a>
-          <a href={librarianSectionHref("orders", telegramMiniApp)}><span><strong>Замовлення вчителів</strong><small>Нові заявки</small></span><span className={styles.dashboardQueueCount}>{attentionUnavailable ? "—" : attention?.newTeacherOrders ?? "…"}</span><span aria-hidden="true">→</span></a>
-          <a href={librarianSectionHref("acquisitions", telegramMiniApp)}><span><strong>Комплектування фонду</strong><small>Активні пропозиції й дозамовлення</small></span><span className={styles.dashboardQueueCount}>{attentionUnavailable ? "—" : attention?.activeAcquisitions ?? "…"}</span><span aria-hidden="true">→</span></a>
+          <a href={librarianSectionHref("visits", telegramMiniApp)}><span><strong>Графік відвідувань</strong><small>Записи на сьогодні</small></span><span className={styles.dashboardQueueCount}>{attentionUnavailable ? "—" : attention?.visitsToday ?? "…"}</span><span aria-hidden="true"><SiteIcon name="next" size={18} /></span></a>
+          <a href={librarianSectionHref("orders", telegramMiniApp)}><span><strong>Замовлення вчителів</strong><small>Нові заявки</small></span><span className={styles.dashboardQueueCount}>{attentionUnavailable ? "—" : attention?.newTeacherOrders ?? "…"}</span><span aria-hidden="true"><SiteIcon name="next" size={18} /></span></a>
+          <a href={librarianSectionHref("acquisitions", telegramMiniApp)}><span><strong>Комплектування фонду</strong><small>Активні пропозиції й дозамовлення</small></span><span className={styles.dashboardQueueCount}>{attentionUnavailable ? "—" : attention?.activeAcquisitions ?? "…"}</span><span aria-hidden="true"><SiteIcon name="next" size={18} /></span></a>
         </section>
       </div>
     </div>
@@ -1368,7 +1369,7 @@ function CatalogSearch({
       >
         <label className={styles.searchField}>
           <span className={styles.srOnly}>Пошук за назвою, автором, ISBN або CAT-ID</span>
-          <span aria-hidden="true">⌕</span>
+          <span aria-hidden="true"><SiteIcon name="search" /></span>
           <input
             type="search"
             role="combobox"
@@ -1548,7 +1549,7 @@ function CatalogSearch({
       {state === "error" ? <InlineMessage tone="error">{error}</InlineMessage> : null}
       {state === "ready" && items.length === 0 ? (
         <div className={styles.empty}>
-          <span aria-hidden="true">⌕</span>
+          <span aria-hidden="true"><SiteIcon name="search" size={22} /></span>
           <strong>Нічого не знайдено</strong>
           <p>Спробуйте коротшу назву або очистіть один із фільтрів.</p>
         </div>
@@ -1710,7 +1711,7 @@ function MaterialCard({
           <div className={styles.holdingList}>
             {detail.holdings.map((holding) => (
               <article key={holdingKey(holding)}>
-                <span aria-hidden="true">⌂</span>
+                <span aria-hidden="true"><SiteIcon name="location" size={18} /></span>
                 <div>
                   <strong>{holding.locationName}</strong>
                   <small>{conditionLabel(holding.condition)}</small>
@@ -1741,7 +1742,7 @@ function MaterialCard({
                 target="_blank"
                 rel="noreferrer"
               >
-                <span aria-hidden="true">↗</span>
+                <span aria-hidden="true"><SiteIcon name="external" size={18} /></span>
                 <span>
                   <strong>{link.label || linkKindLabel(link.kind)}</strong>
                   <small>{linkKindLabel(link.kind)}</small>
@@ -2156,7 +2157,7 @@ function MaterialEditForm({
           disabled={saving || archiving}
           onClick={onCancel}
         >
-          ×
+          <SiteIcon name="close" size={20} />
         </button>
       </div>
 
@@ -2625,7 +2626,7 @@ function MaterialCreatePanel({
         </div>
         {titleQuery.length >= 2 && titleSuggestionsState === "ready" && visibleTitleSuggestions.length > 0 ? (
           <div className={`${styles.fieldWide} ${styles.duplicateWarning}`} role="status" aria-live="polite">
-            <span aria-hidden="true">!</span>
+            <span aria-hidden="true"><SiteIcon name="error" size={18} /></span>
             <span>
               <strong>{duplicateCandidate ? "Такий матеріал уже є в каталозі" : "У каталозі є схожі назви"}</strong>
               <small>{duplicateCandidate
@@ -4464,7 +4465,7 @@ function ClassIssueWorkspace({
                     aria-label={`Прибрати ${item.materialTitle} з кошика`}
                     onClick={() => setCart((current) => current.filter((row) => row.key !== item.key))}
                   >
-                    ×
+                    <SiteIcon name="delete" size={18} />
                   </button>
                 </article>
               ))}
@@ -4592,7 +4593,7 @@ function LoanReturnWorkspace({
           setState("loading");
           setError("");
           setReloadToken((value) => value + 1);
-        }} title="Оновити">↻</button>
+        }} title="Оновити" aria-label="Оновити відкриті видачі"><SiteIcon name="refresh" size={18} /></button>
       </div>
 
       <label className={styles.returnFilter}>
@@ -4613,7 +4614,7 @@ function LoanReturnWorkspace({
       {completionMessage ? <InlineMessage tone="success">{completionMessage}</InlineMessage> : null}
       {state === "ready" && !loans.length ? (
         <div className={styles.noLoans}>
-          <span aria-hidden="true">✓</span>
+          <span aria-hidden="true"><SiteIcon name="success" size={20} /></span>
           <strong>Відкритих видач немає</strong>
           <p>Для вибраного вчителя все повернено.</p>
         </div>
@@ -4976,7 +4977,7 @@ function ClassReturnWorkspace({
             setReloadToken((value) => value + 1);
           }}
         >
-          ↻
+          <SiteIcon name="refresh" size={18} />
         </button>
       </div>
 
@@ -5021,7 +5022,7 @@ function ClassReturnWorkspace({
 
           {!filteredLoans.length ? (
             <div className={styles.noLoans}>
-              <span aria-hidden="true">✓</span>
+              <span aria-hidden="true"><SiteIcon name="success" size={20} /></span>
               <strong>Відкритих видач класу немає</strong>
               <p>Усі зафіксовані підручники вже повернено.</p>
             </div>
@@ -5372,7 +5373,7 @@ function LinkEditor({
           <strong>Посилання та електронні книги</strong>
           <small>Вони відображатимуться у картці матеріалу.</small>
         </span>
-        <button type="button" onClick={add} disabled={links.length >= 20}>+ Додати посилання</button>
+        <button type="button" onClick={add} disabled={links.length >= 20}><SiteIcon name="add" size={16} /> Додати посилання</button>
       </div>
       {links.map((link, index) => (
         <article key={link.key}>
@@ -5501,8 +5502,8 @@ function IsbnLookupAssist({
         </div>
       ) : null}
       <div className={styles.externalBookSearch}>
-        <a href={pidruchnykSearchUrl(isbn)} target="_blank" rel="noopener noreferrer">Шукати на Pidruchnyk.com.ua ↗</a>
-        <a href={yakabooSearchUrl(isbn)} target="_blank" rel="noopener noreferrer">Шукати на Yakaboo ↗</a>
+        <a href={pidruchnykSearchUrl(isbn)} target="_blank" rel="noopener noreferrer">Шукати на Pidruchnyk.com.ua <SiteIcon name="external" size={14} /></a>
+        <a href={yakabooSearchUrl(isbn)} target="_blank" rel="noopener noreferrer">Шукати на Yakaboo <SiteIcon name="external" size={14} /></a>
       </div>
     </section>
   );
@@ -5676,13 +5677,13 @@ function IsbnCameraScanner({ disabled, onDetected }: { disabled: boolean; onDete
   return (
     <>
       <button className={styles.secondaryButton} type="button" onClick={() => void start()} disabled={disabled || starting || open}>
-        <span aria-hidden="true">▣</span> {starting ? "Відкриваємо…" : "Сканувати ISBN"}
+        <span aria-hidden="true"><SiteIcon name={starting ? "loading" : "scan"} size={18} /></span> {starting ? "Відкриваємо…" : "Сканувати ISBN"}
       </button>
       {message ? <small className={styles.scannerMessage} role="status">{message}</small> : null}
       {open ? (
         <div className={styles.scannerOverlay} role="dialog" aria-modal="true" aria-labelledby="isbn-scanner-title">
           <div className={styles.scannerDialog}>
-            <header><div><p>Сканування ISBN</p><h2 id="isbn-scanner-title">Наведіть камеру на штрихкод книги</h2></div><button type="button" onClick={stop} aria-label="Закрити сканер">×</button></header>
+            <header><div><p>Сканування ISBN</p><h2 id="isbn-scanner-title">Наведіть камеру на штрихкод книги</h2></div><button type="button" onClick={stop} aria-label="Закрити сканер"><SiteIcon name="close" /></button></header>
             <div className={styles.scannerVideo}><video ref={videoRef} autoPlay muted playsInline /><span aria-hidden="true" /></div>
             <p>Тримайте код EAN-13 у рамці. Після розпізнавання опис буде знайдено автоматично.</p>
             <button className={styles.secondaryButton} type="button" onClick={stop}>Ввести ISBN вручну</button>
@@ -5845,7 +5846,7 @@ function LocationManagementPanel({ writesEnabled, onChanged }: { writesEnabled: 
       </form>
       {message && state !== "error" ? <InlineMessage tone={success ? "success" : "error"}>{message}</InlineMessage> : null}
       <section className={styles.locationDirectory} aria-labelledby="location-directory-title">
-        <div className={styles.formHeading}><div><p>{locations.length} місць</p><h2 id="location-directory-title">Усі кабінети й місця</h2><small>Закриті місця залишаються в історії, але зникають із робочих списків.</small></div><button type="button" title="Оновити" onClick={() => void load()} disabled={state === "loading"}>↻</button></div>
+        <div className={styles.formHeading}><div><p>{locations.length} місць</p><h2 id="location-directory-title">Усі кабінети й місця</h2><small>Закриті місця залишаються в історії, але зникають із робочих списків.</small></div><button type="button" title="Оновити" aria-label="Оновити список кабінетів" onClick={() => void load()} disabled={state === "loading"}><SiteIcon name="refresh" size={18} /></button></div>
         {state === "loading" ? <PanelLoading /> : null}
         {state === "error" ? <InlineMessage tone="error">{message}</InlineMessage> : null}
         {state === "ready" ? <div className={styles.locationList}>{locations.map((location) => (
@@ -5987,7 +5988,7 @@ function ContactsManagementPanel({ writesEnabled }: { writesEnabled: boolean }) 
           <h2>Контакти бібліотеки</h2>
           <small>Після збереження ці дані бачать усі у вкладці «Контакти». Не додавайте приватну інформацію, яку не хочете публікувати.</small>
         </div>
-        <button type="button" title="Оновити" onClick={() => void load()} disabled={saving}>↻</button>
+        <button type="button" title="Оновити" aria-label="Оновити контакти бібліотеки" onClick={() => void load()} disabled={saving}><SiteIcon name="refresh" size={18} /></button>
       </div>
       {message ? <InlineMessage tone={success ? "success" : "error"}>{message}</InlineMessage> : null}
       {state === "error" ? (
@@ -6056,7 +6057,7 @@ function ConditionSelect({ value, onValue }: { value: string; onValue: (value: s
 function ChooseMaterial() {
   return (
     <div className={styles.chooseMaterial}>
-      <span aria-hidden="true">☷</span>
+      <span aria-hidden="true"><SiteIcon name="catalog" size={28} /></span>
       <h2>Оберіть матеріал у результатах</h2>
       <p>Картка, посилання, примірники та робочі дії з’являться тут.</p>
     </div>

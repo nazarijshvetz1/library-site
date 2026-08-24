@@ -23,8 +23,8 @@ test("protected librarian teacher management has five focused work areas", async
   assert.match(workspace, /telegram>Telegram<\/TabButton>/u);
   assert.match(workspace, /Потребує уваги/u);
   assert.match(workspace, /const notificationsOn = Boolean\(telegram\?\.notifyOrders \|\| telegram\?\.notifyVisits\)/u);
-  assert.match(workspace, /🔕 Вимкнути сповіщення/u);
-  assert.match(workspace, /🔔 Увімкнути сповіщення/u);
+  assert.match(workspace, /name=\{notificationsOn \? "bell-off" : "notifications"\}/u);
+  assert.match(workspace, /notificationsOn \? "Вимкнути сповіщення" : "Увімкнути сповіщення"/u);
   assert.match(workspace, /confirmation: "disconnect_telegram"/u);
   assert.match(workspace, /Так, від’єднати/u);
   assert.doesNotMatch(workspace, /librarian-telegram-orders|librarian-telegram-visits/u);

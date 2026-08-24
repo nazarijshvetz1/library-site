@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-img-element -- the official emblem is hosted with the public catalog. */
 
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import SiteIcon from "../_components/site-icon";
 import styles from "./suggest-book.module.css";
 
 const PUBLIC_CATALOG_URL = "https://nazarijshvetz1.github.io/library-site/";
@@ -137,7 +138,7 @@ export default function SuggestBookForm() {
           <span><strong>Єдина бібліотека</strong><small>Міжнародний ліцей МАУП</small></span>
         </a>
         <nav aria-label="Основна навігація">
-          <a href={PUBLIC_CATALOG_URL}>Каталог <span aria-hidden="true">↗</span></a>
+          <a href={PUBLIC_CATALOG_URL}>Каталог <SiteIcon name="external" size={17} /></a>
           <a href={TEACHER_CABINET_URL}>Кабінет учителя</a>
         </nav>
       </header>
@@ -157,7 +158,7 @@ export default function SuggestBookForm() {
           </ol>
 
           <div className={styles.assurance}>
-            <span aria-hidden="true">✓</span>
+            <span aria-hidden="true"><SiteIcon name="success" size={20} /></span>
             <p><strong>Потрібні лише 4 поля</strong>Клас, ім’я, назва та автор книги. Телефон і електронна адреса не потрібні.</p>
           </div>
         </section>
@@ -178,8 +179,8 @@ export default function SuggestBookForm() {
           ) : null}
 
           <div ref={feedbackRef} tabIndex={-1} className={styles.feedback}>
-            {error ? <div className={styles.error} role="alert"><span aria-hidden="true">!</span><p>{error}</p></div> : null}
-            {success ? <div className={styles.success} role="status"><span aria-hidden="true">✓</span><p>{success}</p></div> : null}
+            {error ? <div className={styles.error} role="alert"><span aria-hidden="true"><SiteIcon name="error" size={20} /></span><p>{error}</p></div> : null}
+            {success ? <div className={styles.success} role="status"><span aria-hidden="true"><SiteIcon name="success" size={20} /></span><p>{success}</p></div> : null}
           </div>
 
           <form id="suggestion-form" onSubmit={submit} aria-busy={busy}>
@@ -231,16 +232,16 @@ export default function SuggestBookForm() {
             </fieldset>
 
             <button className={styles.submit} type="submit" disabled={busy || formUnavailable}>
-              <span>{busy ? "Надсилаємо…" : "Надіслати пропозицію"}</span><span aria-hidden="true">→</span>
+              <span>{busy ? "Надсилаємо…" : "Надіслати пропозицію"}</span><span aria-hidden="true"><SiteIcon name="next" size={18} /></span>
             </button>
-            <p className={styles.privacy}><span aria-hidden="true">●</span> Дані бачить лише бібліотекар. Вони не публікуються у відкритому каталозі.</p>
+            <p className={styles.privacy}><SiteIcon name="security" size={17} /> Дані бачить лише бібліотекар. Вони не публікуються у відкритому каталозі.</p>
           </form>
         </section>
       </main>
 
       <footer className={styles.footer}>
         <span>Єдина бібліотека · Міжнародний ліцей МАУП</span>
-        <a href={PUBLIC_CATALOG_URL}>Повернутися до каталогу <span aria-hidden="true">↗</span></a>
+        <a href={PUBLIC_CATALOG_URL}>Повернутися до каталогу <SiteIcon name="external" size={17} /></a>
       </footer>
     </div>
   );

@@ -15,6 +15,7 @@ import {
   librarianUtilityHref,
   type LibrarianSection,
 } from "./librarian-routes";
+import SiteIcon, { type SiteIconName } from "../../_components/site-icon";
 import styles from "./librarian-shell.module.css";
 
 export type LibrarianShellProps = {
@@ -31,21 +32,21 @@ type NavigationItem = {
   id: LibrarianSection;
   label: string;
   hint: string;
-  icon: string;
+  icon: SiteIconName;
 };
 
 const PRIMARY_ITEMS: NavigationItem[] = [
-  { id: "home", label: "Головна", hint: "Огляд кабінету", icon: "⌂" },
-  { id: "fund", label: "Фонд", hint: "Каталог і примірники", icon: "▤" },
-  { id: "circulation", label: "Видача", hint: "Видача та повернення", icon: "⇄" },
-  { id: "orders", label: "Заявки", hint: "Замовлення вчителів", icon: "▣" },
+  { id: "home", label: "Головна", hint: "Огляд кабінету", icon: "home" },
+  { id: "fund", label: "Фонд", hint: "Каталог і примірники", icon: "fund" },
+  { id: "circulation", label: "Видача", hint: "Видача та повернення", icon: "circulation" },
+  { id: "orders", label: "Заявки", hint: "Замовлення вчителів", icon: "requests" },
 ];
 
 const SECONDARY_ITEMS: NavigationItem[] = [
-  { id: "visits", label: "Відвідування", hint: "Графік бібліотеки", icon: "◷" },
-  { id: "teachers", label: "Вчителі", hint: "Картки та доступ", icon: "●" },
-  { id: "acquisitions", label: "Комплектування", hint: "Дозамовлення фонду", icon: "＋" },
-  { id: "management", label: "Керування", hint: "Кабінети й навчальний рік", icon: "⚙" },
+  { id: "visits", label: "Відвідування", hint: "Графік бібліотеки", icon: "visits" },
+  { id: "teachers", label: "Вчителі", hint: "Картки та доступ", icon: "teachers" },
+  { id: "acquisitions", label: "Комплектування", hint: "Дозамовлення фонду", icon: "acquisitions" },
+  { id: "management", label: "Керування", hint: "Кабінети й навчальний рік", icon: "management" },
 ];
 
 const ALL_ITEMS = [...PRIMARY_ITEMS, ...SECONDARY_ITEMS];
@@ -124,12 +125,12 @@ export default function LibrarianShell({
 
         <nav className={styles.utilityNav} aria-label="Службові посилання">
           <a href={publicCatalogHref ?? undefined} target="_blank" rel="noopener noreferrer">
-            Публічний каталог <span aria-hidden="true">↗</span>
+            Публічний каталог <SiteIcon name="external" size={16} />
           </a>
-          {excelExportHref ? <a href={excelExportHref}>Експорт <span aria-hidden="true">⇩</span></a> : null}
-          {excelImportHref ? <a href={excelImportHref}>Імпорт <span aria-hidden="true">⇧</span></a> : null}
+          {excelExportHref ? <a href={excelExportHref}>Експорт <SiteIcon name="export" size={16} /></a> : null}
+          {excelImportHref ? <a href={excelImportHref}>Імпорт <SiteIcon name="import" size={16} /></a> : null}
           <a href={telegramHref ?? undefined} className={styles.telegramLink}>
-            Telegram <span aria-hidden="true">➤</span>
+            Telegram <SiteIcon name="telegram" size={16} />
           </a>
         </nav>
 
@@ -156,14 +157,14 @@ export default function LibrarianShell({
             ))}
           </nav>
           <nav className={styles.sidebarUtilities} aria-label="Службові посилання кабінету">
-            <a href={publicCatalogHref ?? undefined} target="_blank" rel="noopener noreferrer">Публічний каталог ↗</a>
-            {excelExportHref ? <a href={excelExportHref}>Експорт в Excel</a> : null}
-            {excelImportHref ? <a href={excelImportHref}>Імпорт з Excel</a> : null}
-            <a href={telegramHref ?? undefined}>Telegram</a>
+            <a href={publicCatalogHref ?? undefined} target="_blank" rel="noopener noreferrer">Публічний каталог <SiteIcon name="external" size={15} /></a>
+            {excelExportHref ? <a href={excelExportHref}><SiteIcon name="export" size={15} /> Експорт в Excel</a> : null}
+            {excelImportHref ? <a href={excelImportHref}><SiteIcon name="import" size={15} /> Імпорт з Excel</a> : null}
+            <a href={telegramHref ?? undefined}><SiteIcon name="telegram" size={15} /> Telegram</a>
           </nav>
           {writesEnabled !== undefined ? (
             <div className={writesEnabled ? styles.writeEnabled : styles.readOnly} role="status">
-              <span aria-hidden="true">{writesEnabled ? "●" : "○"}</span>
+              <span aria-hidden="true"><SiteIcon name={writesEnabled ? "success" : "read-only"} size={16} /></span>
               <span>
                 <strong>{writesEnabled ? "Зміни дозволені" : "Лише перегляд"}</strong>
                 <small>{writesEnabled ? "Дані зберігаються одразу." : "Редагування тимчасово вимкнене."}</small>
@@ -182,7 +183,7 @@ export default function LibrarianShell({
             href={librarianSectionHref(item.id, telegramMiniApp)}
             aria-current={item.id === activeSection ? "page" : undefined}
           >
-            <span aria-hidden="true">{item.icon}</span>
+            <span aria-hidden="true"><SiteIcon name={item.icon} size={20} /></span>
             <strong>{item.label}</strong>
           </a>
         ))}
@@ -194,7 +195,7 @@ export default function LibrarianShell({
           aria-controls="librarian-more-menu"
           onClick={() => setDrawerOpen(true)}
         >
-          <span aria-hidden="true">•••</span>
+          <span aria-hidden="true"><SiteIcon name="more" size={20} /></span>
           <strong>Ще</strong>
         </button>
       </nav>
@@ -226,7 +227,7 @@ export default function LibrarianShell({
                 aria-label="Закрити меню"
                 onClick={() => closeDrawer(true)}
               >
-                ×
+                <SiteIcon name="close" size={20} />
               </button>
             </header>
             <nav className={styles.drawerNav} aria-label="Додаткові розділи кабінету бібліотекаря">
@@ -241,11 +242,11 @@ export default function LibrarianShell({
               ))}
             </nav>
             <div className={styles.drawerUtilities}>
-              <a href={publicCatalogHref ?? undefined} target="_blank" rel="noopener noreferrer">Публічний каталог ↗</a>
-              {excelExportHref ? <a href={excelExportHref}>Експорт в Excel</a> : null}
-              {excelImportHref ? <a href={excelImportHref}>Імпорт з Excel</a> : null}
-              <a href={telegramHref ?? undefined}>Telegram</a>
-              <a href={signOutHref}>{telegramMiniApp ? "Повернутися до бота" : "Вийти з кабінету"}</a>
+              <a href={publicCatalogHref ?? undefined} target="_blank" rel="noopener noreferrer">Публічний каталог <SiteIcon name="external" size={16} /></a>
+              {excelExportHref ? <a href={excelExportHref}><SiteIcon name="export" size={16} /> Експорт в Excel</a> : null}
+              {excelImportHref ? <a href={excelImportHref}><SiteIcon name="import" size={16} /> Імпорт з Excel</a> : null}
+              <a href={telegramHref ?? undefined}><SiteIcon name="telegram" size={16} /> Telegram</a>
+              <a href={signOutHref}><SiteIcon name={telegramMiniApp ? "external" : "logout"} size={16} /> {telegramMiniApp ? "Повернутися до бота" : "Вийти з кабінету"}</a>
             </div>
           </section>
         </div>
@@ -271,7 +272,7 @@ function SectionLink({
       href={librarianSectionHref(item.id, telegramMiniApp)}
       aria-current={active ? "page" : undefined}
     >
-      <span className={styles.sectionIcon} aria-hidden="true">{item.icon}</span>
+      <span className={styles.sectionIcon} aria-hidden="true"><SiteIcon name={item.icon} size={20} /></span>
       <span>
         <strong>{item.label}</strong>
         <small>{item.hint}</small>

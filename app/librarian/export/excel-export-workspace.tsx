@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import SiteIcon from "@/app/_components/site-icon";
 import LibrarianShell from "../_components/librarian-shell";
 import styles from "./excel-export.module.css";
 
@@ -200,7 +201,7 @@ export default function ExcelExportWorkspace({
             <div className={styles.importLink}>
               <strong>Потрібно завантажити дані на сайт?</strong>
               <span>Імпорт залишається окремим службовим інструментом.</span>
-              <a href="/librarian/import">Відкрити імпорт з Excel →</a>
+              <a href="/librarian/import">Відкрити імпорт з Excel <SiteIcon name="next" size={17} /></a>
             </div>
           </aside>
         </div>

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { BarcodeFormat, QRCodeWriter } from "@zxing/library";
 
 import { visitApi, VisitApiError } from "@/app/visits/visit-client";
+import SiteIcon from "@/app/_components/site-icon";
 import { teacherCodesCsv } from "./teacher-code-csv";
 import styles from "./visit-access-admin.module.css";
 
@@ -370,8 +371,8 @@ export default function TeacherAccessAdmin({
           <h2 id="teacher-access-title">PIN-коди та відновлення доступу</h2>
           <p>Бібліотекар видає тимчасовий код. Після першого входу вчитель створює власний 4-значний PIN. Забутий PIN тут можна лише скинути, але не переглянути.</p>
         </div>
-        <button className={styles.secondaryButton} type="button" onClick={() => void load()} disabled={loading || Boolean(busyAction)}>
-          ↻ Оновити
+        <button className={styles.secondaryButton} type="button" onClick={() => void load()} disabled={loading || Boolean(busyAction)} aria-busy={loading}>
+          <SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}
         </button>
       </div>
 
@@ -624,7 +625,7 @@ function TelegramInviteDialog({
       <section className={styles.inviteDialog}>
         <div className={styles.dialogHeading}>
           <div><span>Одноразовий доступ</span><h3 id={`${canvasId}-title`}>Особисте запрошення</h3></div>
-          <button ref={closeButtonRef} type="button" onClick={onClose} disabled={busy} aria-label="Закрити">×</button>
+          <button ref={closeButtonRef} type="button" onClick={onClose} disabled={busy} aria-label="Закрити"><SiteIcon name="close" size={18} /></button>
         </div>
         <p>Для: <strong>{invite.fullName}</strong></p>
         <canvas id={canvasId} className={styles.qrCanvas} width="280" height="280" aria-label="QR-код персонального Telegram-запрошення" />

@@ -451,10 +451,10 @@ const visitState = { weekStart: "", view: "week", schedule: null, loading: false
 const emptyStock = () => ({ total: 0, available: 0, library: 0, other: 0, loaned: 0, locations: [] });
 
 const COLLECTIONS = Object.freeze([
-  { id: "latest", symbol: "＋", title: "Останні додані до каталогу", description: "Останні записи за порядком CAT-ID" },
+  { id: "latest", icon: "plus", title: "Останні додані до каталогу", description: "Останні записи за порядком CAT-ID" },
   { id: "primary", symbol: "1–4", title: "Для початкової школи", description: "Матеріали для 1–4 класів" },
   { id: "languages", symbol: "Aa", title: "Іноземні мови", description: "Англійська, німецька, французька та інші" },
-  { id: "exams", symbol: "✓", title: "ЗНО і НМТ", description: "Матеріали для підготовки до іспитів" },
+  { id: "exams", icon: "check", title: "ЗНО і НМТ", description: "Матеріали для підготовки до іспитів" },
 ]);
 
 let materials = [];
@@ -489,6 +489,10 @@ const elements = {
 };
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#039;", '"': "&quot;" })[character]);
+const UI_ICON_NAMES = new Set(["external-link", "search", "check", "arrow-right", "chevron-left", "chevron-right", "circle-off", "list-filter", "info", "sparkles", "x", "plus"]);
+const uiIcon = (name, className = "") => UI_ICON_NAMES.has(name)
+  ? `<svg class="ui-icon${className ? ` ${escapeHtml(className)}` : ""}" aria-hidden="true" focusable="false"><use href="#icon-${name}"></use></svg>`
+  : "";
 const cleanText = (value, maximum = 500) => String(value ?? "").trim().slice(0, maximum);
 const nonNegativeInteger = (value) => {
   const number = Math.floor(Number(value));
@@ -736,9 +740,9 @@ function renderCollections() {
     const count = materialsForCollection(collection.id).length;
     const active = state.collection === collection.id;
     return `<button class="collection-card${active ? " active" : ""}" type="button" data-collection="${collection.id}" aria-pressed="${active}">
-      <span class="collection-symbol" aria-hidden="true">${collection.symbol}</span>
+      <span class="collection-symbol" aria-hidden="true">${collection.icon ? uiIcon(collection.icon) : escapeHtml(collection.symbol)}</span>
       <span class="collection-copy"><strong>${escapeHtml(collection.title)}</strong><small>${escapeHtml(collection.description)}</small></span>
-      <span class="collection-count">${count.toLocaleString("uk-UA")} матеріалів <i aria-hidden="true">→</i></span>
+      <span class="collection-count">${count.toLocaleString("uk-UA")} матеріалів ${uiIcon("arrow-right")}</span>
     </button>`;
   }).join("");
 }
@@ -813,14 +817,14 @@ function cardMarkup(item) {
   return `<article class="material-card"><button class="cover-wrap cover-button" type="button" data-details="${escapeHtml(item.id)}" aria-label="Відкрити інформацію про ${escapeHtml(item.title)}"><span class="class-badge">${escapeHtml(classLabel(item))}</span>${coverMarkup(item)}</button><div class="card-body">
     <div class="card-kicker"><span>${escapeHtml(item.subject)}</span><span class="availability ${available ? "" : "none"}">${available ? "У наявності" : "Немає"}</span></div>
     <h3>${escapeHtml(item.title)}</h3><p class="author-line">${escapeHtml(item.author)}${item.year ? ` · ${escapeHtml(item.year)}` : ""}</p>
-    <div class="card-footer"><div class="card-stock"><span class="quantity"><strong>${escapeHtml(item.quantity)}</strong><span>примірників</span></span><span class="quantity available-quantity${available ? "" : " none"}"><strong>${escapeHtml(item.availableQuantity)}</strong><span>Доступно</span></span></div><button class="details-button" type="button" data-details="${escapeHtml(item.id)}">Детальніше →</button></div>
+    <div class="card-footer"><div class="card-stock"><span class="quantity"><strong>${escapeHtml(item.quantity)}</strong><span>примірників</span></span><span class="quantity available-quantity${available ? "" : " none"}"><strong>${escapeHtml(item.availableQuantity)}</strong><span>Доступно</span></span></div><button class="details-button" type="button" data-details="${escapeHtml(item.id)}">Детальніше ${uiIcon("arrow-right")}</button></div>
   </div></article>`;
 }
 
 function renderChips() {
   const activeCollection = collectionById(state.collection);
   const chips = [["collection", activeCollection ? activeCollection.title : ""], ["search", state.search ? `Пошук: ${state.search}` : ""], ["grade", state.grade ? `${state.grade} клас` : ""], ["rubric", state.rubric], ["subject", state.subject], ["type", state.type], ["available", state.available ? "Лише в наявності" : ""]].filter(([, label]) => label);
-  elements.chips.innerHTML = chips.map(([key, label]) => `<span class="filter-chip">${escapeHtml(label)}<button type="button" data-remove="${key}" aria-label="Прибрати фільтр ${escapeHtml(label)}">×</button></span>`).join("");
+  elements.chips.innerHTML = chips.map(([key, label]) => `<span class="filter-chip">${escapeHtml(label)}<button type="button" data-remove="${key}" aria-label="Прибрати фільтр ${escapeHtml(label)}">${uiIcon("x")}</button></span>`).join("");
 }
 
 function render() {
@@ -921,7 +925,7 @@ function linksMarkup(item, { loadingDetail = false, detailError = false } = {}) 
   if (loadingDetail) return `<div class="material-links" aria-busy="true"><h3>Посилання</h3><p>Завантажуємо відкриті джерела…</p></div>`;
   if (detailError) return `<div class="material-links"><h3>Посилання</h3><p>Не вдалося завантажити посилання. Спробуйте відкрити картку ще раз.</p></div>`;
   if (!item.links.length) return "";
-  return `<div class="material-links"><h3>Посилання</h3><ul>${item.links.map((link) => `<li><a href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer"><span>${escapeHtml(link.label)}</span><i aria-hidden="true">↗</i></a></li>`).join("")}</ul></div>`;
+  return `<div class="material-links"><h3>Посилання</h3><ul>${item.links.map((link) => `<li><a href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer"><span>${escapeHtml(link.label)}</span>${uiIcon("external-link")}</a></li>`).join("")}</ul></div>`;
 }
 
 function directMaterialUrl(id) {
@@ -942,7 +946,7 @@ function renderMaterialDialog(item, detailState = {}) {
     ${linksMarkup(item, detailState)}
     <div class="dialog-order">
       ${canOrder
-        ? `<a class="order-material-button" href="${escapeHtml(orderUrl)}" target="_blank" rel="noopener noreferrer">Замовити <span aria-hidden="true">→</span></a><p>Матеріал буде додано до кошика в кабінеті учителя. Там можна змінити кількість і надіслати замовлення бібліотекарю.</p>`
+        ? `<a class="order-material-button" href="${escapeHtml(orderUrl)}" target="_blank" rel="noopener noreferrer">Замовити ${uiIcon("arrow-right")}</a><p>Матеріал буде додано до кошика в кабінеті учителя. Там можна змінити кількість і надіслати замовлення бібліотекарю.</p>`
         : `<span class="order-material-unavailable" aria-disabled="true">Зараз немає доступних примірників для замовлення</span><p>Перевірте картку пізніше — доступність оновлюється з бібліотечної бази.</p>`}
     </div>
     <div class="dialog-actions" aria-label="Дії з карткою">
@@ -1152,7 +1156,7 @@ function visitSegmentMarkup(segment, now, horizonEnd) {
   }
   const remainingSegment = { ...segment, startTime: selection.startTime };
   time = `${escapeHtml(remainingSegment.startTime)}–${escapeHtml(remainingSegment.endTime)}`;
-  return `<li class="visit-slot" data-status="free"><a data-visit-booking="true" data-visit-date="${segment.date}" data-visit-start="${segment.startTime}" data-visit-end="${segment.endTime}" href="${escapeHtml(visitsBookingUrl(config.visitsBookingUrl, selection, window.location.href))}" target="_blank" rel="noopener noreferrer" aria-label="${escapeHtml(visitSegmentLabel(remainingSegment))}"><strong>${time}</strong><span>Забронювати <i aria-hidden="true">↗</i></span></a></li>`;
+  return `<li class="visit-slot" data-status="free"><a data-visit-booking="true" data-visit-date="${segment.date}" data-visit-start="${segment.startTime}" data-visit-end="${segment.endTime}" href="${escapeHtml(visitsBookingUrl(config.visitsBookingUrl, selection, window.location.href))}" target="_blank" rel="noopener noreferrer" aria-label="${escapeHtml(visitSegmentLabel(remainingSegment))}"><strong>${time}</strong><span>Забронювати ${uiIcon("external-link")}</span></a></li>`;
 }
 
 function renderVisitSchedule() {

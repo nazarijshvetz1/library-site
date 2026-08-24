@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-img-element -- first-party catalog thumbnails are already resized by the catalog service. */
 
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import SiteIcon from "@/app/_components/site-icon";
 import styles from "./teacher-acquisition.module.css";
 
 type CatalogItem = {
@@ -171,7 +172,7 @@ export default function TeacherAcquisitionPanel() {
           <button className={styles.primary} type="submit" disabled={busy || (sourceKind === "catalog" && !selected)}>{busy ? "Надсилаємо…" : "Надіслати пропозицію"}</button>
         </form>
         <section className={styles.card} aria-labelledby="my-acquisition-title">
-          <div className={styles.heading}><div><span>Лише для вас</span><h3 id="my-acquisition-title">Мої пропозиції</h3></div><button type="button" onClick={() => void load()} disabled={loading}>↻ Оновити</button></div>
+          <div className={styles.heading}><div><span>Лише для вас</span><h3 id="my-acquisition-title">Мої пропозиції</h3></div><button type="button" onClick={() => void load()} disabled={loading} aria-busy={loading}><SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}</button></div>
           {loading ? <p className={styles.empty}>Оновлюємо історію…</p> : requests.length ? <div className={styles.history}>{requests.map((record) => <article key={record.id}>
             <header><span className={styles.status}>{STATUS_LABELS[record.status] ?? record.status}</span><small>{record.publicNumber}</small></header>
             <h4>{record.title}</h4><p>{record.author} · {record.publicationYear} · {record.requestedQuantity} прим.</p>

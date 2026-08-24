@@ -17,6 +17,7 @@ import {
   clearVisitPendingIntent,
 } from "@/app/visits/visit-client";
 import LibrarianShell from "../_components/librarian-shell";
+import SiteIcon from "@/app/_components/site-icon";
 import styles from "@/app/visits/visits.module.css";
 
 type Props = {
@@ -143,7 +144,7 @@ export default function LibrarianVisitWorkspace({
         <section className={styles.card}>
           <div className={styles.cardHeading}>
             <div><span>{bookings.length} записів</span><h2>Розклад</h2></div>
-            <button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading}>↻ Оновити</button>
+            <button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading} aria-busy={loading}><SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}</button>
           </div>
           <div className={styles.adminFilters}>
             <label>Дата<input type="date" value={date} onInput={(event) => setDate(event.currentTarget.value)} /></label>

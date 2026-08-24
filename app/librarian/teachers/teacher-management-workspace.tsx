@@ -8,6 +8,7 @@ import LibrarianShell from "../_components/librarian-shell";
 import { visitApi } from "@/app/visits/visit-client";
 import MaterialRequestInbox from "@/app/librarian/visits/material-request-inbox";
 import TeacherAccessAdmin from "@/app/librarian/visits/teacher-access-admin";
+import SiteIcon from "@/app/_components/site-icon";
 import TeacherCodeImport from "./teacher-code-import";
 import {
   changeTeacherStatus,
@@ -121,7 +122,7 @@ export default function TeacherManagementWorkspace({
             <p>{tab === "telegram" ? "Окремо підключіть особистий чат із ботом і налаштуйте сповіщення." : "Картки, доступ, замовлення, фактичні видачі й відвідування — в одному місці."}</p>
           </div>
           <button className={styles.refreshButton} type="button" onClick={() => void loadSummary()} disabled={loading}>
-            {loading ? "Оновлюємо…" : "↻ Оновити"}
+            <SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}
           </button>
         </div>
 
@@ -214,7 +215,7 @@ function OverviewPanel({
           <div className={styles.metricGrid}>
             {cards.map((card) => (
               <button type="button" key={card.label} data-tone={card.tone} onClick={() => onOpen(card.tab)}>
-                <strong>{card.value}</strong><span>{card.label}</span><small>Переглянути →</small>
+                <strong>{card.value}</strong><span>{card.label}</span><small>Переглянути <SiteIcon name="next" size={15} /></small>
               </button>
             ))}
           </div>
@@ -227,7 +228,7 @@ function OverviewPanel({
             <li key={item.label} data-empty={item.value === 0}>
               <span><strong>{item.label}</strong><small>{attentionHint(item.label)}</small></span>
               <button type="button" onClick={() => onOpen(item.tab)} aria-label={`${item.label}: ${item.value}. Переглянути`}>
-                {item.value}<span aria-hidden="true">→</span>
+                {item.value}<span aria-hidden="true"><SiteIcon name="next" size={17} /></span>
               </button>
             </li>
           ))}
@@ -338,7 +339,7 @@ function LibrarianTelegramPanel({ writesEnabled }: { writesEnabled: boolean }) {
       {notice ? <div className={`${styles[noticeTone]} ${styles.telegramGlobalNotice}`} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
       <section className={`${styles.card} ${styles.telegramPanel} ${styles.telegramConnectionCard}`} aria-labelledby="librarian-telegram-connection-title">
         <div className={styles.telegramHeading}>
-          <div className={styles.telegramMark} aria-hidden="true">➤</div>
+          <div className={styles.telegramMark} aria-hidden="true"><SiteIcon name="telegram" size={24} /></div>
           <div><span>Особистий чат із ботом</span><h2 id="librarian-telegram-connection-title">{telegram?.connected ? "Telegram підключено" : "Підключити Telegram"}</h2><p>Підключення відкриває режим бібліотекаря в боті та створює приватний канал для оперативної роботи.</p></div>
           <strong role="status" aria-live="polite" data-connected={telegram?.connected || undefined}>{loading ? "Перевіряємо…" : statusLabel}</strong>
         </div>
@@ -359,17 +360,17 @@ function LibrarianTelegramPanel({ writesEnabled }: { writesEnabled: boolean }) {
 
       <section className={`${styles.card} ${styles.telegramPanel}`} aria-labelledby="librarian-telegram-notifications-title">
         <div className={styles.telegramHeading}>
-          <div className={styles.telegramMark} aria-hidden="true">🔔</div>
+          <div className={styles.telegramMark} aria-hidden="true"><SiteIcon name="notifications" size={24} /></div>
           <div><span>Після підключення</span><h2 id="librarian-telegram-notifications-title">Сповіщення Telegram</h2><p>Окремо керуйте дублюванням нових замовлень і записів. Дані завжди залишаються в кабінеті бібліотекаря.</p></div>
           <strong data-connected={telegram?.connected && notificationsOn || undefined}>{loading ? "Перевіряємо…" : telegram?.connected ? notificationsOn ? "Увімкнено" : "Вимкнено" : "Спочатку підключіть"}</strong>
         </div>
         {!loading && !telegram?.connected ? <div className={styles.info}>Спочатку скористайтеся кнопкою «Підключити Telegram» у блоці вище.</div> : null}
         {!loading && telegram?.connected ? (
           <>
-            <div className={styles.info}>Сповіщення про замовлення та відвідування: <strong>{notificationsOn ? "увімкнено 🔔" : "вимкнено 🔕"}</strong>. Бот і режим бібліотекаря залишаються підключеними.</div>
+            <div className={styles.info}>Сповіщення про замовлення та відвідування: <strong><SiteIcon name={notificationsOn ? "notifications" : "bell-off"} size={16} /> {notificationsOn ? "увімкнено" : "вимкнено"}</strong>. Бот і режим бібліотекаря залишаються підключеними.</div>
             {!telegram.notificationsEnabled ? <div className={styles.info}>Бот підключено, але доставку повідомлень ще не ввімкнено в налаштуваннях сайту.</div> : null}
             <div className={styles.telegramActions}>
-              <button className={styles.primaryButton} type="button" onClick={() => void toggleNotifications()} disabled={!canWrite || Boolean(busy)}>{busy === "toggle" ? "Змінюємо…" : notificationsOn ? "🔕 Вимкнути сповіщення" : "🔔 Увімкнути сповіщення"}</button>
+              <button className={styles.primaryButton} type="button" onClick={() => void toggleNotifications()} disabled={!canWrite || Boolean(busy)}><SiteIcon name={notificationsOn ? "bell-off" : "notifications"} size={18} /> {busy === "toggle" ? "Змінюємо…" : notificationsOn ? "Вимкнути сповіщення" : "Увімкнути сповіщення"}</button>
               <button type="button" onClick={() => void sendTest()} disabled={!canWrite || Boolean(busy) || !telegram.notificationsEnabled || !notificationsOn}>{busy === "test" ? "Надсилаємо…" : "Надіслати тест"}</button>
             </div>
           </>
@@ -481,7 +482,7 @@ function TeacherDirectoryPanel({
         <div className={styles.cardHeading}>
           <div><span>{data?.counters.active ?? 0} активних</span><h2 id="directory-title">Картки вчителів</h2></div>
           <button className={styles.primaryButton} type="button" onClick={() => setCreating((value) => !value)} disabled={!writesEnabled}>
-            {creating ? "Закрити форму" : "+ Додати вчителя"}
+            <SiteIcon name={creating ? "close" : "add"} size={18} /> {creating ? "Закрити форму" : "Додати вчителя"}
           </button>
         </div>
 
@@ -535,7 +536,7 @@ function TeacherDirectoryPanel({
             <aside className={styles.detailRegion} aria-label="Картка вибраного вчителя">
               {detailLoading ? <p className={styles.empty}>Відкриваємо картку…</p> : detail ? (
                 <TeacherDetailCard detail={detail} locations={data.locations} writesEnabled={writesEnabled} onSaved={mutationSaved} onDeleted={async () => { selectedIdRef.current = null; setDetail(null); setSelectedId(null); onNotice("Порожню помилкову картку видалено."); await load(); }} />
-              ) : <div className={styles.detailPlaceholder}><span aria-hidden="true">👤</span><h3>Виберіть учителя</h3><p>Тут з’являться профіль, замовлення, фактичні видачі та відвідування.</p></div>}
+              ) : <div className={styles.detailPlaceholder}><span aria-hidden="true"><SiteIcon name="profile" size={28} /></span><h3>Виберіть учителя</h3><p>Тут з’являться профіль, замовлення, фактичні видачі та відвідування.</p></div>}
             </aside>
           </div>
         ) : <p className={styles.empty}>За цими фільтрами карток не знайдено.</p>}
@@ -685,7 +686,7 @@ function TeacherProfileForm({
 
   return (
     <form className={styles.profileForm} onSubmit={submit}>
-      <div className={styles.formHeading}><div><span>{mode === "create" ? "Нова картка" : "Профіль"}</span><h3>{mode === "create" ? "Додати вчителя" : "Редагувати інформацію"}</h3></div><button type="button" onClick={onCancel}>×</button></div>
+      <div className={styles.formHeading}><div><span>{mode === "create" ? "Нова картка" : "Профіль"}</span><h3>{mode === "create" ? "Додати вчителя" : "Редагувати інформацію"}</h3></div><button type="button" onClick={onCancel} aria-label="Закрити форму"><SiteIcon name="close" size={18} /></button></div>
       <p className={styles.formHint}>Показуються лише службові дані, які бібліотекар вводить свідомо. Особиста пошта автоматично не підтягується.</p>
       {error ? <div className={styles.error} role="alert">{error}</div> : null}
       <div className={styles.formGrid}>
@@ -754,7 +755,7 @@ function VisitManagementPanel({ telegramMiniApp }: { telegramMiniApp: boolean })
 
   return (
     <section className={styles.card} aria-labelledby="visits-title">
-      <div className={styles.cardHeading}><div><span>{data?.bookings.length ?? 0} записів</span><h2 id="visits-title">Відвідування бібліотеки</h2></div><a className={styles.secondaryLink} href={telegramMiniApp ? "/librarian/telegram/cabinet?target=visits" : "/librarian/visits"}>Повне керування розкладом →</a></div>
+      <div className={styles.cardHeading}><div><span>{data?.bookings.length ?? 0} записів</span><h2 id="visits-title">Відвідування бібліотеки</h2></div><a className={styles.secondaryLink} href={telegramMiniApp ? "/librarian/telegram/cabinet?target=visits" : "/librarian/visits"}>Повне керування розкладом <SiteIcon name="next" size={17} /></a></div>
       <div className={styles.filters}><label>Дата<input type="date" value={date} onChange={(event) => setDate(event.currentTarget.value)} /></label><label>Стан<select value={status} onChange={(event) => setStatus(event.currentTarget.value)}><option value="active">Активні</option><option value="cancelled">Скасовані</option><option value="">Усі</option></select></label></div>
       {error ? <div className={styles.error} role="alert">{error}</div> : loading ? <p className={styles.empty}>Оновлюємо розклад…</p> : data?.bookings.length ? <div className={styles.visitList}>{data.bookings.map((booking) => <article key={booking.id}><time>{booking.startTime}–{booking.endTime}</time><span><strong>{booking.surname}</strong><small>{[booking.classLabel, booking.purpose].filter(Boolean).join(" · ") || "Без додаткових відомостей"}</small></span><StatusPill value={booking.status} /></article>)}</div> : <p className={styles.empty}>На цю дату записів немає.</p>}
     </section>

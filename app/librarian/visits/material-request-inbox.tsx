@@ -11,6 +11,7 @@ import {
   VisitApiError,
   writePortalPendingIntent,
 } from "@/app/visits/visit-client";
+import SiteIcon from "@/app/_components/site-icon";
 import styles from "@/app/visits/visits.module.css";
 
 type RequestStatus = "submitted" | "in_review" | "ready" | "partially_ready" | "completed" | "rejected" | "cancelled";
@@ -246,7 +247,7 @@ export default function MaterialRequestInbox({
 
   return (
     <section className={`${styles.card} ${styles.requestInbox}`} aria-labelledby="request-inbox-title">
-      <div className={styles.cardHeading}><div><span>{data?.newCount ?? 0} нових</span><h2 id="request-inbox-title">Замовлення вчителів</h2></div><button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading || loadingMore || submitting}>↻ Оновити</button></div>
+      <div className={styles.cardHeading}><div><span>{data?.newCount ?? 0} нових</span><h2 id="request-inbox-title">Замовлення вчителів</h2></div><button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading || loadingMore || submitting} aria-busy={loading}><SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}</button></div>
       <div className={styles.adminFilters}><label>Стан<select value={status} onChange={(event) => changeStatus(event.currentTarget.value)} disabled={loading || loadingMore || submitting}><option value="">Усі</option><option value="submitted">Нові</option><option value="in_review">Опрацьовуються</option><option value="ready">Готові</option><option value="partially_ready">Частково готові</option><option value="completed">Виконані</option><option value="rejected">Відхилені</option></select></label></div>
       {pending ? <div className={styles.pending} role="status"><span>Результат дії із замовленням не підтверджено.</span><button type="button" onClick={() => void sendAction(pending)} disabled={submitting}>Перевірити результат</button></div> : null}
       {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
@@ -323,7 +324,7 @@ function ReservationActionForm({
   if (!action) return <div className={styles.inboxActions}><button className={styles.primary} type="button" onClick={() => setAction("issue")} disabled={disabled}>Фактично видати</button><button className={styles.quiet} type="button" onClick={() => setAction("release")} disabled={disabled}>Не забрано</button></div>;
   return (
     <form className={styles.readyForm} onSubmit={submit}>
-      <div className={styles.cardHeading}><div><span>{action === "issue" ? "Фактична видача" : "Звільнення резерву"}</span><h4>{action === "issue" ? "Передати примірники вчителю" : "Позначити як не забране"}</h4></div><button className={styles.quiet} type="button" onClick={() => { setAction(null); setNotice(""); }} disabled={disabled}>×</button></div>
+      <div className={styles.cardHeading}><div><span>{action === "issue" ? "Фактична видача" : "Звільнення резерву"}</span><h4>{action === "issue" ? "Передати примірники вчителю" : "Позначити як не забране"}</h4></div><button className={styles.quiet} type="button" onClick={() => { setAction(null); setNotice(""); }} disabled={disabled} aria-label="Закрити"><SiteIcon name="close" size={18} /></button></div>
       <p>{action === "issue" ? "Позика та рух залишків будуть створені лише після цієї дії." : "Фізичного руху примірників не буде: вони просто повернуться до доступного фонду."}</p>
       {notice ? <div className={styles.error} role="alert">{notice}</div> : null}
       {action === "issue" ? <div className={styles.fields}><label>Дата видачі *<input required type="date" max={todayInKyiv()} value={issuedAt} onChange={(event) => setIssuedAt(event.currentTarget.value)} /></label><label>Повернути до<input type="date" min={issuedAt} value={dueAt} onChange={(event) => setDueAt(event.currentTarget.value)} /></label></div> : <div className={styles.fields}><label>Причина *<textarea required maxLength={500} value={reason} onChange={(event) => setReason(event.currentTarget.value)} placeholder="Наприклад, учитель не забрав замовлення" /></label></div>}
@@ -404,7 +405,7 @@ function ReadyRequestForm({
   if (!open) return <button className={styles.quiet} type="button" onClick={() => void prepare()} disabled={disabled}>{request.status === "partially_ready" ? "Додати до резерву" : "Підготувати резерв"}</button>;
   return (
     <form className={styles.readyForm} onSubmit={submit}>
-      <div className={styles.cardHeading}><div><span>Резерв без видачі</span><h4>Підготувати замовлення</h4></div><button className={styles.quiet} type="button" onClick={() => setOpen(false)} disabled={disabled}>×</button></div>
+      <div className={styles.cardHeading}><div><span>Резерв без видачі</span><h4>Підготувати замовлення</h4></div><button className={styles.quiet} type="button" onClick={() => setOpen(false)} disabled={disabled} aria-label="Закрити"><SiteIcon name="close" size={18} /></button></div>
       {notice ? <div className={styles.error} role="alert">{notice}</div> : null}
       {loading ? <p className={styles.empty}>Перевіряємо фактичні залишки…</p> : <>
         <div className={styles.fields}><label>Місце отримання *<select required value={pickupLocationId} onChange={(event) => setPickupLocationId(event.currentTarget.value)}><option value="">Оберіть активне публічне місце</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label><label>Повернути до<input type="date" min={todayInKyiv()} value={dueAt} onChange={(event) => setDueAt(event.currentTarget.value)} /></label></div>

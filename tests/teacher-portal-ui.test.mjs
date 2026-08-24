@@ -241,7 +241,7 @@ test("teacher cabinet exposes Telegram as a separate highlighted connection area
   assert.match(miniPage, /boundedTeacherTab\(value\)/u);
   assert.match(routes, /"telegram"/u);
   assert.match(launch, /type TeacherTab = [^;]*"telegram"/u);
-  assert.match(workspace, /id: "telegram", label: "Telegram", shortLabel: "Telegram", icon: "➤"/u);
+  assert.match(workspace, /id: "telegram", label: "Telegram", shortLabel: "Telegram", icon: "telegram"/u);
   assert.match(workspace, /activeTab === "telegram" \? <TeacherTelegramSettings \/>/u);
   assert.match(workspace, /data-telegram=\{tab\.id === "telegram" \|\| undefined\}/u);
   assert.match(workspace, /teacher-telegram-connection-title/u);
@@ -379,8 +379,8 @@ test("Telegram Mini App launch is bounded, signed server-side and returns to cha
   assert.match(workspace, /visibilitychange/u);
   assert.match(workspace, /Я вже підключив\(ла\) — перевірити/u);
   assert.match(workspace, /const notificationsOn = Boolean\(telegram\?\.notifyOrders \|\| telegram\?\.notifyVisits\)/u);
-  assert.match(workspace, /🔕 Вимкнути сповіщення/u);
-  assert.match(workspace, /🔔 Увімкнути сповіщення/u);
+  assert.match(workspace, /name=\{notificationsOn \? "bell-off" : "notifications"\}/u);
+  assert.match(workspace, /notificationsOn \? "Вимкнути сповіщення" : "Увімкнути сповіщення"/u);
   assert.match(workspace, /confirmation: "disconnect_telegram"/u);
   assert.match(workspace, /Так, від’єднати/u);
   assert.doesNotMatch(workspace, /teacher-telegram-orders|teacher-telegram-visits/u);

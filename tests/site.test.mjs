@@ -243,9 +243,13 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.doesNotMatch(app, /contactsGrid\.innerHTML/u);
   assert.match(html, /id="titleSuggestions" role="listbox"/);
   assert.match(html, /<option value="">Усі<\/option>/);
-  assert.match(html, /href="\/styles\.css\?v=20260823-3"/);
+  assert.match(html, /href="\/styles\.css\?v=20260824-1"/);
   assert.match(html, /href="\/brand\.css\?v=20260823-3"/);
-  assert.match(html, /type="module" src="\/app\.js\?v=20260823-3"/);
+  assert.match(html, /type="module" src="\/app\.js\?v=20260824-1"/);
+  assert.match(html, /class="icon-sprite"/u);
+  assert.match(app, /const uiIcon =/u);
+  assert.doesNotMatch(html, /[⌕☷✓←→↗○✦×＋]/u);
+  assert.doesNotMatch(app, /[⌕☷✓←→↗○✦×＋]/u);
   assert.match(html, /class="hero-decoration"/u);
   assert.match(html, /href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/librarian"/);
   assert.match(html, /rel="noopener noreferrer"/);
@@ -267,7 +271,7 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(app, /class="quantity available-quantity\$\{available \? "" : " none"\}"/u);
   assert.match(app, /<strong>\$\{escapeHtml\(item\.availableQuantity\)\}<\/strong><span>Доступно<\/span>/u);
   assert.match(app, /class="order-material-button"/u);
-  assert.match(app, />Замовити <span aria-hidden="true">→<\/span>/u);
+  assert.match(app, /Замовити \$\{uiIcon\("arrow-right"\)\}/u);
   assert.match(app, /target="_blank" rel="noopener noreferrer"/);
   assert.match(app, /raw\.thumbnailUrl/);
   assert.match(app, /raw\.publicationType/);
