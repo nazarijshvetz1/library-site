@@ -244,7 +244,8 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(html, /id="titleSuggestions" role="listbox"/);
   assert.match(html, /<option value="">Усі<\/option>/);
   assert.match(html, /href="\/styles\.css\?v=20260824-1"/);
-  assert.match(html, /href="\/brand\.css\?v=20260824-1"/);
+  assert.match(html, /href="\/brand\.css\?v=20260824-2"/);
+  assert.match(brand, /\.stats\s*\{[^}]*margin-top:\s*24px;/s);
   assert.match(html, /type="module" src="\/app\.js\?v=20260824-1"/);
   assert.match(html, /class="icon-sprite"/u);
   assert.match(app, /const uiIcon =/u);

@@ -256,7 +256,7 @@ textarea { font-family: inherit; }
 .stats {
   z-index: 3;
   max-width: 1240px;
-  margin-top: -45px;
+  margin-top: 24px;
   padding: 28px 34px;
   border-color: rgba(18, 61, 50, .09);
   border-radius: 28px;
