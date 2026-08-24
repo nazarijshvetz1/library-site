@@ -109,7 +109,9 @@ test("librarian can issue local QR invitations and atomically protect a lost pho
   assert.match(access, /QR-реєстрація/u);
   assert.match(access, /QR-відновлення PIN/u);
   assert.match(access, /expectedCredentialVersion: teacher\.credential\?\.version \?\? 0/u);
-  assert.match(access, /teacher\.credential \? "QR-відновлення PIN" : "QR-реєстрація"/u);
+  assert.match(access, /!teacher\.credential \|\| teacher\.credential\.mustChangePin/u);
+  assert.match(access, /\? "QR-реєстрація"/u);
+  assert.match(access, /: "QR-відновлення PIN"/u);
   assert.doesNotMatch(access, /!teacher\.telegram\.connected && !teacher\.telegram\.activeInviteId/u);
   assert.match(access, /Чинний PIN працюватиме до успішної заміни/u);
   assert.match(access, /Копіювати посилання/u);

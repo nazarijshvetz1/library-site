@@ -214,7 +214,9 @@ export default function TeacherAccessAdmin({
   }
 
   async function createTelegramInvite(teacher: TeacherAccessRow) {
-    const purpose: ActivationInvitePurpose = teacher.credential ? "pin_reset" : "registration";
+    const purpose: ActivationInvitePurpose = !teacher.credential || teacher.credential.mustChangePin
+      ? "registration"
+      : "pin_reset";
     if (purpose === "pin_reset" && !window.confirm(
       `Створити одноразовий QR для заміни PIN учителя ${teacher.fullName}? Чинний PIN працюватиме до успішної заміни. Після неї старий PIN і попередні сеанси буде скасовано.`,
     )) return;
@@ -510,7 +512,9 @@ export default function TeacherAccessAdmin({
                       <button type="button" onClick={() => void createTelegramInvite(teacher)} disabled={!canWrite}>
                         {busyAction === `telegram-invite:${teacher.id}`
                           ? "Створюємо…"
-                          : teacher.credential ? "QR-відновлення PIN" : "QR-реєстрація"}
+                          : !teacher.credential || teacher.credential.mustChangePin
+                            ? "QR-реєстрація"
+                            : "QR-відновлення PIN"}
                       </button>
                     ) : null}
                     {teacher.telegram.activeInviteId ? (

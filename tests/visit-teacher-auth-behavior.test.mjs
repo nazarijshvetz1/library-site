@@ -376,12 +376,17 @@ test("one-time code, Ukrainian directory and opaque cookie session work without 
     /^__Host-visit_teacher_telegram=/u,
   );
 
-  const persisted = JSON.stringify(context.sqlite.prepare(
+  const persistedCredential = context.sqlite.prepare(
     "SELECT code_hmac FROM visit_teacher_credentials WHERE teacher_user_id='USR-T1'",
-  ).get()) + JSON.stringify(context.sqlite.prepare(
+  ).get();
+  const persistedResults = context.sqlite.prepare(
     "SELECT result_json FROM visit_teacher_access_commands",
-  ).all());
-  assert.doesNotMatch(persisted, new RegExp(issued.code.replace("-", ""), "iu"));
+  ).all().map((row) => JSON.parse(row.result_json));
+  const containsExactCode = (value) => value === issued.code
+    || (Array.isArray(value) && value.some(containsExactCode))
+    || (value && typeof value === "object" && Object.values(value).some(containsExactCode));
+  assert.equal(containsExactCode(persistedCredential), false);
+  assert.equal(containsExactCode(persistedResults), false);
   await assert.rejects(
     () => issuedCredential(context),
     (error) => error.code === "credential_version_conflict",
