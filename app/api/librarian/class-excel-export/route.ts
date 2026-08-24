@@ -88,7 +88,7 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 function downloadResponse(
-  bytes: Uint8Array,
+  bytes: Uint8Array<ArrayBuffer>,
   fileName: string,
   contentType: string,
   extraHeaders: Record<string, string>,

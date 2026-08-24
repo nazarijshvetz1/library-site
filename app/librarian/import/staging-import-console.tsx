@@ -394,7 +394,7 @@ function isExpired(value: string, nowMs: number): boolean {
   return Boolean(value) && Number.isFinite(Date.parse(value)) && Date.parse(value) <= nowMs;
 }
 
-async function readPlanFile(file: File): Promise<{ bytes: Uint8Array; sha256: string }> {
+async function readPlanFile(file: File): Promise<{ bytes: Uint8Array<ArrayBuffer>; sha256: string }> {
   if (file.size <= 0 || file.size > 6 * 1024 * 1024) {
     throw new Error("JSON-план має бути непорожнім і не перевищувати 6 МіБ.");
   }

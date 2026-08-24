@@ -12,14 +12,14 @@ import type {
 } from "./class-excel-export-store.ts";
 
 export type ClassExcelWorkbook = {
-  bytes: Uint8Array;
+  bytes: Uint8Array<ArrayBuffer>;
   fileName: string;
   sheetCount: 2;
   rowCount: number;
 };
 
 export type ClassExcelArchive = {
-  bytes: Uint8Array;
+  bytes: Uint8Array<ArrayBuffer>;
   fileName: string;
   documentCount: number;
   rowCount: number;

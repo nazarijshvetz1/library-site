@@ -29,7 +29,7 @@ type Cell = ExcelCell;
 type Sheet = ExcelSheet;
 
 export type LibraryExcelExport = {
-  bytes: Uint8Array;
+  bytes: Uint8Array<ArrayBuffer>;
   fileName: string;
   sheetCount: number;
   rowCount: number;
@@ -63,14 +63,14 @@ export function createExcelWorkbookBytes(
   sheets: ExcelSheet[],
   generatedAt: string,
   workbookTitle = "Єдина бібліотека — повний експорт",
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   return zipStore(workbookEntries(sheets, generatedAt, workbookTitle), generatedAt);
 }
 
 export function createStoredZipArchive(
   entries: Array<{ name: string; data: Uint8Array }>,
   generatedAt: string,
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   return zipStore(entries, generatedAt);
 }
 
@@ -700,7 +700,7 @@ function stylesXml(): string {
 </styleSheet>`;
 }
 
-function zipStore(entries: Array<{ name: string; data: Uint8Array }>, timestamp: string): Uint8Array {
+function zipStore(entries: Array<{ name: string; data: Uint8Array }>, timestamp: string): Uint8Array<ArrayBuffer> {
   const encoder = new TextEncoder();
   const localParts: Uint8Array[] = [];
   const centralParts: Uint8Array[] = [];
@@ -736,7 +736,7 @@ function zipStore(entries: Array<{ name: string; data: Uint8Array }>, timestamp:
   return concatBytes([...localParts, ...centralParts, end]);
 }
 
-function concatBytes(parts: Uint8Array[]): Uint8Array {
+function concatBytes(parts: Uint8Array[]): Uint8Array<ArrayBuffer> {
   const output = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
   let offset = 0;
   for (const part of parts) { output.set(part, offset); offset += part.length; }

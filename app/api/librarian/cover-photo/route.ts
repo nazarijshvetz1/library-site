@@ -50,7 +50,7 @@ export async function POST(request: Request) {
     }
   }
 
-  let uploadBody: Uint8Array;
+  let uploadBody: Uint8Array<ArrayBuffer>;
   try {
     uploadBody = await readLimitedRequestBody(request, MAX_COVER_UPLOAD_REQUEST_BYTES);
   } catch (error) {
@@ -219,7 +219,7 @@ function safeOriginalName(value: string): string {
   return /^[=+\-@]/.test(cleaned) ? `_${cleaned}` : cleaned;
 }
 
-async function readLimitedRequestBody(request: Request, limit: number): Promise<Uint8Array> {
+async function readLimitedRequestBody(request: Request, limit: number): Promise<Uint8Array<ArrayBuffer>> {
   if (!request.body) return new Uint8Array();
 
   const reader = request.body.getReader();

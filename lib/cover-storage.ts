@@ -24,7 +24,7 @@ export type OwnedCoverAttachment = {
   sha256: string;
   width: number;
   height: number;
-  bytes: Uint8Array;
+  bytes: Uint8Array<ArrayBuffer>;
   base64: string;
 };
 
@@ -210,7 +210,7 @@ export function jpegDimensions(bytes: Uint8Array): { width: number; height: numb
 async function readStoredCoverBytes(
   object: StoredCover,
   limit: number,
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   if (object.arrayBuffer) {
     const bytes = new Uint8Array(await object.arrayBuffer());
     if (bytes.byteLength > limit) {
