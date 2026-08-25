@@ -322,6 +322,7 @@ test("Telegram Mini App launch is bounded, signed server-side and returns to cha
     read("lib/telegram-api.ts"),
   ]);
   assert.match(page, /boundedTab\(params\?\.tab\)/u);
+  assert.match(page, /initialOrderMaterialId=\{boundedMaterialId\(params\?\.material\)\}/u);
   assert.match(page, /boundedMode\(params\?\.mode\)/u);
   assert.match(page, /returnToChat=\{launchMode !== null\}/u);
   assert.match(page, /robots: \{ index: false, follow: false \}/u);
@@ -360,7 +361,7 @@ test("Telegram Mini App launch is bounded, signed server-side and returns to cha
   assert.match(launch, /activation\.mode === "connected" \? "Telegram підтверджено"/u);
   assert.doesNotMatch(launch, /role="option"[\s\S]{0,120}<button/u);
   assert.doesNotMatch(launch, /localStorage|sessionStorage|URLSearchParams\([^)]*(?:code|pin)|console\./iu);
-  assert.match(launch, /\/teacher\/telegram\/cabinet\?tab=/u);
+  assert.match(launch, /teacherTelegramCabinetHref\(targetTab, initialOrderMaterialId\)/u);
   assert.match(cabinet, /telegramMiniApp/u);
   assert.match(route, /readVisitJson\(request\)/u);
   assert.match(route, /validateTelegramMiniAppInitData/u);

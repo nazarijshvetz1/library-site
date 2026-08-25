@@ -23,6 +23,7 @@ export default async function TelegramTeacherPage({ searchParams }: PageProps) {
   return (
     <TelegramTeacherLaunch
       targetTab={boundedTab(params?.tab)}
+      initialOrderMaterialId={boundedMaterialId(params?.material)}
       initialMode={launchMode ?? "login"}
       returnToChat={launchMode !== null}
       enabled={configuration.enabled}
@@ -37,4 +38,9 @@ function boundedMode(value: string | string[] | undefined): "login" | "activate"
 
 function boundedTab(value: string | string[] | undefined): TeacherPortalTab {
   return boundedTeacherTab(value);
+}
+
+function boundedMaterialId(value: string | string[] | undefined): string {
+  const candidate = typeof value === "string" ? value.trim().toUpperCase() : "";
+  return /^CAT-\d{4,}$/u.test(candidate) ? candidate : "";
 }

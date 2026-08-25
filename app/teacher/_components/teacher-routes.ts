@@ -35,3 +35,12 @@ export function teacherPortalHref(
 
   return `${path}?${params.toString()}`;
 }
+
+export function teacherTelegramCabinetHref(tab: TeacherPortalTab, materialId = ""): string {
+  const params = new URLSearchParams({ tab });
+  const normalizedMaterialId = materialId.trim().toUpperCase();
+  if (tab === "orders" && /^CAT-\d{4,}$/u.test(normalizedMaterialId)) {
+    params.set("material", normalizedMaterialId);
+  }
+  return `/teacher/telegram/cabinet?${params.toString()}`;
+}

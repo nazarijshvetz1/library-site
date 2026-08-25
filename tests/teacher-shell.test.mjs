@@ -6,6 +6,7 @@ import {
   boundedTeacherTab,
   TEACHER_PORTAL_TABS,
   teacherPortalHref,
+  teacherTelegramCabinetHref,
 } from "../app/teacher/_components/teacher-routes.ts";
 
 const root = new URL("../", import.meta.url);
@@ -23,6 +24,21 @@ test("teacher route helper keeps web and Telegram Mini App destinations bounded"
   assert.equal(boundedTeacherTab(["orders", "visits"]), "orders");
   assert.equal(boundedTeacherTab("unknown"), "overview");
   assert.equal(boundedTeacherTab(null), "overview");
+});
+
+test("Telegram launch target preserves only a bounded order material", () => {
+  assert.equal(
+    teacherTelegramCabinetHref("orders", "cat-0112"),
+    "/teacher/telegram/cabinet?tab=orders&material=CAT-0112",
+  );
+  assert.equal(
+    teacherTelegramCabinetHref("orders", "../CAT-0112"),
+    "/teacher/telegram/cabinet?tab=orders",
+  );
+  assert.equal(
+    teacherTelegramCabinetHref("visits", "CAT-0112"),
+    "/teacher/telegram/cabinet?tab=visits",
+  );
 });
 
 test("teacher route helper preserves only parameters relevant to the selected section", () => {

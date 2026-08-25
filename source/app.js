@@ -49,6 +49,33 @@ export function materialOrderUrl(value, materialId, baseUrl = "https://catalog.i
   return url.toString();
 }
 
+export function telegramMiniAppLaunchHash(value) {
+  const raw = String(value || "").trim().replace(/^#/, "");
+  if (!raw || raw.length > 12_000) return "";
+  const input = new URLSearchParams(raw);
+  const initData = input.get("tgWebAppData");
+  const version = input.get("tgWebAppVersion");
+  if (!initData || !version || initData.length > 8_192 || version.length > 32) return "";
+  const output = new URLSearchParams();
+  for (const key of ["tgWebAppData", "tgWebAppVersion", "tgWebAppPlatform", "tgWebAppThemeParams"]) {
+    const entry = input.get(key);
+    if (entry) output.set(key, entry);
+  }
+  return `#${output.toString()}`;
+}
+
+export function materialOrderDestination(value, materialId, launchHash = "", baseUrl = "https://catalog.invalid/") {
+  const browserUrl = materialOrderUrl(value, materialId, baseUrl);
+  if (!browserUrl) return { url: "", withinTelegram: false };
+  const telegramHash = telegramMiniAppLaunchHash(launchHash);
+  if (!telegramHash) return { url: browserUrl, withinTelegram: false };
+  const url = new URL(browserUrl);
+  if (url.pathname.replace(/\/$/, "") !== "/teacher") return { url: browserUrl, withinTelegram: false };
+  url.pathname = "/teacher/telegram";
+  url.hash = telegramHash.slice(1);
+  return { url: url.toString(), withinTelegram: true };
+}
+
 function normalizedSearchText(value) {
   return String(value || "")
     .toLocaleLowerCase("uk")
@@ -444,6 +471,7 @@ export function visitsBookingUrl(value, selection, baseUrl = "https://catalog.in
 if (typeof window !== "undefined" && typeof document !== "undefined") {
 
 const config = window.LIBRARY_CONFIG && typeof window.LIBRARY_CONFIG === "object" ? window.LIBRARY_CONFIG : {};
+const telegramLaunchHash = telegramMiniAppLaunchHash(window.location.hash);
 const balanceData = window.BALANCE_DATA && typeof window.BALANCE_DATA === "object" ? window.BALANCE_DATA : {};
 const collator = new Intl.Collator("uk", { sensitivity: "base", numeric: true });
 const state = { search: "", grade: "", rubric: "", subject: "", type: "", available: false, collection: "", sort: "recommended", limit: 18 };
@@ -934,8 +962,13 @@ function directMaterialUrl(id) {
 
 function renderMaterialDialog(item, detailState = {}) {
   const directUrl = directMaterialUrl(item.id);
-  const orderUrl = materialOrderUrl(config.teacherPortalUrl || config.visitsBookingUrl, item.id, window.location.href);
-  const canOrder = Boolean(orderUrl) && Number(item.availableQuantity) > 0;
+  const orderDestination = materialOrderDestination(
+    config.teacherPortalUrl || config.visitsBookingUrl,
+    item.id,
+    telegramLaunchHash,
+    window.location.href,
+  );
+  const canOrder = Boolean(orderDestination.url) && Number(item.availableQuantity) > 0;
   const secondaryMeta = [item.publisher, item.isbn ? `ISBN ${item.isbn}` : ""].filter(Boolean);
   elements.dialogContent.innerHTML = `<div class="dialog-layout"><div class="dialog-cover">${coverMarkup(item, true)}</div><div class="dialog-copy">
     <p class="dialog-id">${escapeHtml(item.id)} · ${escapeHtml(item.rubric)}</p><h2 id="material-dialog-title">${escapeHtml(item.title)}</h2>
@@ -946,7 +979,9 @@ function renderMaterialDialog(item, detailState = {}) {
     ${linksMarkup(item, detailState)}
     <div class="dialog-order">
       ${canOrder
-        ? `<a class="order-material-button" href="${escapeHtml(orderUrl)}" target="_blank" rel="noopener noreferrer">Замовити ${uiIcon("arrow-right")}</a><p>Матеріал буде додано до кошика в кабінеті учителя. Там можна змінити кількість і надіслати замовлення бібліотекарю.</p>`
+        ? `${orderDestination.withinTelegram
+          ? `<button class="order-material-button" type="button" data-order-material="${escapeHtml(item.id)}">Замовити ${uiIcon("arrow-right")}</button>`
+          : `<a class="order-material-button" href="${escapeHtml(orderDestination.url)}" target="_blank" rel="noopener noreferrer">Замовити ${uiIcon("arrow-right")}</a>`}<p>Матеріал буде додано до кошика в кабінеті учителя. Там можна змінити кількість і надіслати замовлення бібліотекарю.</p>`
         : `<span class="order-material-unavailable" aria-disabled="true">Зараз немає доступних примірників для замовлення</span><p>Перевірте картку пізніше — доступність оновлюється з бібліотечної бази.</p>`}
     </div>
     <div class="dialog-actions" aria-label="Дії з карткою">
@@ -1364,6 +1399,16 @@ document.addEventListener("click", (event) => {
   const copyMaterial = event.target.closest("[data-copy-material]"); if (copyMaterial) shareOrCopyMaterial(copyMaterial.dataset.copyMaterial, "copy");
   const shareMaterial = event.target.closest("[data-share-material]"); if (shareMaterial) shareOrCopyMaterial(shareMaterial.dataset.shareMaterial, "share");
   const reportError = event.target.closest("[data-report-error]"); if (reportError) shareOrCopyMaterial(reportError.dataset.reportError, "report");
+  const orderMaterial = event.target.closest("[data-order-material]");
+  if (orderMaterial) {
+    const destination = materialOrderDestination(
+      config.teacherPortalUrl || config.visitsBookingUrl,
+      orderMaterial.dataset.orderMaterial,
+      telegramLaunchHash,
+      window.location.href,
+    );
+    if (destination.withinTelegram) window.location.assign(destination.url);
+  }
   const quick = event.target.closest("[data-quick]");
   if (quick) {
     const value = quick.dataset.quick;

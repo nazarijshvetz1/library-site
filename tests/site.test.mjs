@@ -5,6 +5,7 @@ import worker from "../dist-catalog/server/index.js";
 import {
   catalogDetailApiUrl,
   materialIdFromUrl,
+  materialOrderDestination,
   materialOrderUrl,
   materialIssueText,
   materialShareText,
@@ -14,6 +15,7 @@ import {
   normalizeVisitSchedule,
   normalizeVisitsApiUrl,
   startOfVisitWeek,
+  telegramMiniAppLaunchHash,
   titleSuggestions,
   urlWithMaterial,
   urlWithoutMaterial,
@@ -33,6 +35,30 @@ test("builds a privacy-limited teacher order handoff URL", () => {
   assert.equal(materialOrderUrl("https://library.example/librarian", "CAT-0112"), "");
   assert.equal(materialOrderUrl("https://library.example/teacher", "bad-id"), "");
   assert.doesNotMatch(url, /[?&](?:name|email|teacher|class|purpose)=/u);
+});
+
+test("keeps catalog ordering inside the Telegram Mini App and preserves the selected material", () => {
+  const launchHash = "#tgWebAppData=query_id%3Ddemo%26auth_date%3D1787640000%26hash%3Dtest&tgWebAppVersion=8.0&tgWebAppPlatform=ios&tgWebAppThemeParams=%7B%22bg_color%22%3A%22%23ffffff%22%7D";
+  assert.equal(telegramMiniAppLaunchHash("#catalog"), "");
+  assert.equal(telegramMiniAppLaunchHash("#tgWebAppData=demo"), "");
+
+  const destination = materialOrderDestination(
+    "https://library.example/teacher",
+    "cat-0112",
+    launchHash,
+  );
+  const url = new URL(destination.url);
+  assert.equal(destination.withinTelegram, true);
+  assert.equal(url.pathname, "/teacher/telegram");
+  assert.equal(url.searchParams.get("tab"), "orders");
+  assert.equal(url.searchParams.get("material"), "CAT-0112");
+  const telegramParams = new URLSearchParams(url.hash.slice(1));
+  assert.equal(telegramParams.get("tgWebAppData"), "query_id=demo&auth_date=1787640000&hash=test");
+  assert.equal(telegramParams.get("tgWebAppVersion"), "8.0");
+
+  const browser = materialOrderDestination("https://library.example/teacher", "CAT-0112", "#catalog");
+  assert.equal(browser.withinTelegram, false);
+  assert.equal(browser.url, "https://library.example/teacher?tab=orders&material=CAT-0112");
 });
 
 test("offers bounded title suggestions with stable relevance", () => {
@@ -246,7 +272,7 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(html, /href="\/styles\.css\?v=20260824-1"/);
   assert.match(html, /href="\/brand\.css\?v=20260824-2"/);
   assert.match(brand, /\.stats\s*\{[^}]*margin-top:\s*24px;/s);
-  assert.match(html, /type="module" src="\/app\.js\?v=20260824-1"/);
+  assert.match(html, /type="module" src="\/app\.js\?v=20260825-1"/);
   assert.match(html, /class="icon-sprite"/u);
   assert.match(app, /const uiIcon =/u);
   assert.doesNotMatch(html, /[⌕☷✓←→↗○✦×＋]/u);
@@ -273,6 +299,12 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(app, /<strong>\$\{escapeHtml\(item\.availableQuantity\)\}<\/strong><span>Доступно<\/span>/u);
   assert.match(app, /class="order-material-button"/u);
   assert.match(app, /Замовити \$\{uiIcon\("arrow-right"\)\}/u);
+  assert.match(app, /data-order-material=/u);
+  assert.match(app, /window\.location\.assign\(destination\.url\)/u);
+  const orderRenderer = app.slice(app.indexOf("function renderMaterialDialog"), app.indexOf("async function loadMaterialDetail"));
+  assert.match(orderRenderer, /<button class="order-material-button" type="button" data-order-material=/u);
+  assert.match(orderRenderer, /<a class="order-material-button"[^>]+target="_blank" rel="noopener noreferrer"/u);
+  assert.doesNotMatch(orderRenderer, /Telegram\.WebApp\.openLink|window\.open/u);
   assert.match(app, /target="_blank" rel="noopener noreferrer"/);
   assert.match(app, /raw\.thumbnailUrl/);
   assert.match(app, /raw\.publicationType/);

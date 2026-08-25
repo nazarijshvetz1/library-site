@@ -23,6 +23,7 @@ import {
   type VisitTeacher,
   type VisitTeacherSearchEnvelope,
 } from "@/app/visits/visit-client";
+import { teacherTelegramCabinetHref } from "@/app/teacher/_components/teacher-routes";
 import { finishTelegramLogin } from "./telegram-login-finish";
 import styles from "./telegram.module.css";
 
@@ -59,12 +60,14 @@ declare global {
 
 export default function TelegramTeacherLaunch({
   targetTab,
+  initialOrderMaterialId,
   initialMode,
   returnToChat,
   enabled,
   botUsername,
 }: {
   targetTab: TeacherTab;
+  initialOrderMaterialId: string;
   initialMode: ActivationIntent;
   returnToChat: boolean;
   enabled: boolean;
@@ -81,8 +84,8 @@ export default function TelegramTeacherLaunch({
   const [activationIntent, setActivationIntent] = useState<ActivationIntent>(initialMode);
   const [initData, setInitData] = useState("");
   const targetUrl = useMemo(
-    () => `/teacher/telegram/cabinet?tab=${encodeURIComponent(targetTab)}`,
-    [targetTab],
+    () => teacherTelegramCabinetHref(targetTab, initialOrderMaterialId),
+    [initialOrderMaterialId, targetTab],
   );
 
   useEffect(() => {
