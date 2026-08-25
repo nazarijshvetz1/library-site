@@ -51,7 +51,7 @@
 .icon-sprite{position:absolute;width:0;height:0;overflow:hidden;pointer-events:none}
 .ui-icon{display:inline-block;flex:0 0 auto;width:1.1em;height:1.1em;overflow:visible;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-.16em}
 .hero-search>.ui-icon{width:24px;height:24px;color:#6c7d76}
-.hero-assurances li,.showcase-footer button,.filter-toggle,.details-button,.material-links a,.visit-slot span{display:inline-flex;align-items:center;gap:7px}
+.hero-assurances li,.showcase-footer button,.details-button,.material-links a,.visit-slot span{display:inline-flex;align-items:center;gap:7px}
 .hero-assurances .ui-icon{width:16px;height:16px;color:var(--lime)}
 .showcase-footer button .ui-icon,.details-button .ui-icon,.collection-count .ui-icon{width:16px;height:16px}
 .visit-toolbar button{display:grid;place-items:center}.visit-toolbar .ui-icon{width:20px;height:20px}

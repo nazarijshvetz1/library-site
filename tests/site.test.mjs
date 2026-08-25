@@ -278,9 +278,9 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.doesNotMatch(app, /contactsGrid\.innerHTML/u);
   assert.match(html, /id="titleSuggestions" role="listbox"/);
   assert.match(html, /<option value="">Усі<\/option>/);
-  assert.match(html, /href="\/styles\.css\?v=20260824-1"/);
+  assert.match(html, /href="\/styles\.css\?v=20260826-1"/);
   assert.match(html, /href="\/brand\.css\?v=20260824-2"/);
-  assert.match(html, /href="\/system\.css\?v=20260825-2"/);
+  assert.match(html, /href="\/system\.css\?v=20260826-1"/);
   assert.match(brand, /\.stats\s*\{[^}]*margin-top:\s*24px;/s);
   assert.match(html, /type="module" src="\/app\.js\?v=20260825-3"/);
   assert.match(html, /id="filterBackdrop" hidden/u);
@@ -289,6 +289,9 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(app, /event\.key !== "Escape"/u);
   assert.match(app, /elements\.filterBackdrop\.addEventListener\("click"/u);
   assert.match(app, /elements\.filterToggle\.setAttribute\("aria-expanded", String\(shouldOpen\)\)/u);
+  assert.match(css, /\.filter-toggle\{display:none;/u);
+  assert.match(css, /@media\(max-width:820px\)\{[^}]*?(?:\{[^}]*\}[^}]*)*?\.filter-toggle\{display:inline-flex\}/u);
+  assert.doesNotMatch(css, /\.showcase-footer button,\.filter-toggle,[^{]+\{display:inline-flex/u);
   assert.match(system, /\.filter-backdrop:not\(\[hidden\]\)/u);
   assert.match(system, /\.filter-close\s*\{/u);
   assert.match(html, /class="icon-sprite"/u);
