@@ -34,7 +34,8 @@ export async function PATCH(request: Request): Promise<Response> {
   if (!body.ok) return body.response;
   const keys = Object.keys(body.value);
   const expectedKeys = ["requestId", "expectedVersion", "subjectPosition", "primaryLocationId"];
-  if (keys.length !== expectedKeys.length || expectedKeys.some((key) => !keys.includes(key))) {
+  const acceptedKeys = new Set([...expectedKeys, "fullName"]);
+  if (expectedKeys.some((key) => !keys.includes(key)) || keys.some((key) => !acceptedKeys.has(key))) {
     return visitError(400, "validation_failed", "Форма профілю містить непідтримувані або пропущені поля.");
   }
   const requestId = typeof body.value.requestId === "string"
@@ -44,6 +45,11 @@ export async function PATCH(request: Request): Promise<Response> {
   const subjectPosition = typeof body.value.subjectPosition === "string"
     ? body.value.subjectPosition.normalize("NFKC").trim().replace(/\s+/gu, " ")
     : "";
+  const fullName = body.value.fullName === undefined
+    ? undefined
+    : typeof body.value.fullName === "string"
+      ? body.value.fullName.normalize("NFKC").trim().replace(/\s+/gu, " ")
+      : "";
   const primaryLocationId = body.value.primaryLocationId === null || body.value.primaryLocationId === ""
     ? null
     : typeof body.value.primaryLocationId === "string"
@@ -51,6 +57,7 @@ export async function PATCH(request: Request): Promise<Response> {
       : "";
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(requestId)
     || !Number.isSafeInteger(expectedVersion) || expectedVersion < 1
+    || (fullName !== undefined && (fullName.length < 3 || fullName.length > 120 || fullName.split(/\s+/u).length < 2))
     || subjectPosition.length > 160
     || (primaryLocationId !== null && !safeResourceId(primaryLocationId))) {
     return visitError(400, "validation_failed", "Перевірте предмет, посаду та обраний кабінет.");
@@ -61,6 +68,7 @@ export async function PATCH(request: Request): Promise<Response> {
     await updateTeacherOwnProfile(db, teacher, {
       requestId,
       expectedVersion,
+      ...(fullName === undefined ? {} : { fullName }),
       subjectPosition,
       primaryLocationId,
     });

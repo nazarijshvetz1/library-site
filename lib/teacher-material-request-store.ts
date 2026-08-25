@@ -42,6 +42,13 @@ export type MaterialRequestStatus =
   | "rejected"
   | "cancelled";
 
+export type TeacherMaterialRequestSort =
+  | "date_desc"
+  | "date_asc"
+  | "title_asc"
+  | "title_desc"
+  | "quantity_desc";
+
 export type MaterialRequestItemProjection = {
   id: string;
   materialId: string;
@@ -198,7 +205,13 @@ export class TeacherMaterialRequestError extends Error {
 export async function listTeacherMaterialRequests(
   db: TeacherMaterialRequestDatabase,
   teacherUserId: string,
-  options: { status?: MaterialRequestStatus | "all"; limit?: number; cursor?: string | null } = {},
+  options: {
+    status?: MaterialRequestStatus | "all";
+    limit?: number;
+    cursor?: string | null;
+    query?: string;
+    sort?: TeacherMaterialRequestSort;
+  } = {},
 ): Promise<MaterialRequestProjection[]> {
   return (await listTeacherMaterialRequestPage(db, teacherUserId, options)).requests;
 }
@@ -206,30 +219,50 @@ export async function listTeacherMaterialRequests(
 export async function listTeacherMaterialRequestPage(
   db: TeacherMaterialRequestDatabase,
   teacherUserId: string,
-  options: { status?: MaterialRequestStatus | "all"; limit?: number; cursor?: string | null } = {},
+  options: {
+    status?: MaterialRequestStatus | "all";
+    limit?: number;
+    cursor?: string | null;
+    query?: string;
+    sort?: TeacherMaterialRequestSort;
+  } = {},
 ): Promise<{ requests: MaterialRequestProjection[]; page: MaterialRequestPage }> {
   const status = options.status ?? "all";
+  const sort = options.sort ?? "date_desc";
+  const query = options.query?.trim().slice(0, 80) ?? "";
   const limit = boundedLimit(options.limit, 50, 100);
-  const cursor = decodeListCursor(options.cursor, "descending");
+  const offset = decodeOffsetCursor(options.cursor);
   const statusClause = status === "all" ? "" : "AND mr.status = ?";
-  const cursorClause = cursor
-    ? "AND (mr.created_at < ? OR (mr.created_at = ? AND mr.id < ?))"
+  const queryClause = query
+    ? `AND (
+        mr.id LIKE ? ESCAPE '\\'
+        OR mr.teacher_notes LIKE ? ESCAPE '\\'
+        OR EXISTS (
+          SELECT 1 FROM material_request_items search_item
+          WHERE search_item.request_id=mr.id
+            AND (search_item.title_snapshot LIKE ? ESCAPE '\\' OR search_item.author_snapshot LIKE ? ESCAPE '\\')
+        )
+      )`
     : "";
+  const orderClause = teacherMaterialRequestOrderClause(sort);
   const bindings: D1Value[] = [teacherUserId];
   if (status !== "all") bindings.push(status);
-  if (cursor) bindings.push(cursor.createdAt, cursor.createdAt, cursor.id);
-  bindings.push(limit + 1);
+  if (query) {
+    const pattern = `%${escapeSqlLike(query)}%`;
+    bindings.push(pattern, pattern, pattern, pattern);
+  }
+  bindings.push(limit + 1, offset);
   const response = await db.prepare(`
     WITH selected AS (
       SELECT mr.id
       FROM material_requests mr
-      WHERE mr.teacher_user_id = ? ${statusClause} ${cursorClause}
-      ORDER BY mr.created_at DESC, mr.id DESC
-      LIMIT ?
+      WHERE mr.teacher_user_id = ? ${statusClause} ${queryClause}
+      ORDER BY ${orderClause}
+      LIMIT ? OFFSET ?
     )
     ${requestProjectionSql()}
     WHERE mr.id IN (SELECT id FROM selected)
-    ORDER BY mr.created_at DESC, mr.id DESC, mri.sort_order, mri.id
+    ORDER BY ${orderClause}, mri.sort_order, mri.id
   `).bind(...bindings).all<RequestRow>();
   const allRequests = mapRequestRows(response.results ?? []);
   const hasMore = allRequests.length > limit;
@@ -239,11 +272,25 @@ export async function listTeacherMaterialRequestPage(
     page: {
       limit,
       hasMore,
-      nextCursor: hasMore && requests.length > 0
-        ? encodeListCursor({ createdAt: requests.at(-1)!.createdAt, id: requests.at(-1)!.id })
-        : null,
+      nextCursor: hasMore ? encodeOffsetCursor(offset + limit) : null,
     },
   };
+}
+
+function teacherMaterialRequestOrderClause(sort: TeacherMaterialRequestSort): string {
+  const firstTitle = "COALESCE((SELECT MIN(sort_item.title_snapshot) FROM material_request_items sort_item WHERE sort_item.request_id=mr.id), '')";
+  const totalQuantity = "COALESCE((SELECT SUM(sort_item.requested_quantity) FROM material_request_items sort_item WHERE sort_item.request_id=mr.id), 0)";
+  switch (sort) {
+    case "date_asc": return "mr.created_at ASC, mr.id ASC";
+    case "title_asc": return `${firstTitle} COLLATE NOCASE ASC, mr.created_at DESC, mr.id DESC`;
+    case "title_desc": return `${firstTitle} COLLATE NOCASE DESC, mr.created_at DESC, mr.id DESC`;
+    case "quantity_desc": return `${totalQuantity} DESC, mr.created_at DESC, mr.id DESC`;
+    default: return "mr.created_at DESC, mr.id DESC";
+  }
+}
+
+function escapeSqlLike(value: string): string {
+  return value.replace(/[\\%_]/gu, (character) => `\\${character}`);
 }
 
 export async function createTeacherMaterialRequest(
@@ -3086,6 +3133,33 @@ function requestLimitReachedError(): TeacherMaterialRequestError {
 }
 
 type ListCursor = { createdAt: string; id: string; rank?: number };
+
+function encodeOffsetCursor(offset: number): string {
+  return btoa(JSON.stringify({ v: 1, offset }))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/u, "");
+}
+
+function decodeOffsetCursor(value: string | null | undefined): number {
+  if (value === null || value === undefined || value === "") return 0;
+  try {
+    if (value.length > 128 || !/^[A-Za-z0-9_-]+$/u.test(value)) throw new Error("cursor syntax");
+    const base64 = value.replaceAll("-", "+").replaceAll("_", "/")
+      .padEnd(Math.ceil(value.length / 4) * 4, "=");
+    const parsed = JSON.parse(atob(base64)) as Record<string, unknown>;
+    if (parsed.v !== 1 || !Number.isInteger(parsed.offset) || Number(parsed.offset) < 0 || Number(parsed.offset) > 100_000) {
+      throw new Error("cursor shape");
+    }
+    return Number(parsed.offset);
+  } catch {
+    throw new TeacherMaterialRequestError(
+      "invalid_cursor",
+      400,
+      "Некоректний курсор сторінки. Оновіть список і спробуйте ще раз.",
+    );
+  }
+}
 
 function encodeListCursor(cursor: ListCursor): string {
   return btoa(JSON.stringify({ v: 1, ...cursor }))

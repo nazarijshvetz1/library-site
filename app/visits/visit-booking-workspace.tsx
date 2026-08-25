@@ -1252,7 +1252,8 @@ function VisitBookingPanel({
 
   const bookingEnabled = data?.bookingEnabled === true;
   const activeDefinition = teacherTabDefinition(activeTab);
-  const firstName = teacherFirstName(teacher.fullName);
+  const teacherDisplayName = profile?.fullName || teacher.fullName;
+  const firstName = teacherFirstName(teacherDisplayName);
   const mobileMoreActive = !TEACHER_MOBILE_TABS.includes(activeTab);
 
   return (
@@ -1261,8 +1262,8 @@ function VisitBookingPanel({
         <div className={styles.teacherPortalLayout}>
           <aside className={styles.teacherSidebar} aria-label="Навігація Кабінету учителя">
             <div className={styles.teacherSidebarProfile}>
-              <TeacherAvatar className={styles.teacherSidebarAvatar} fullName={teacher.fullName} photoUrl={profile?.photoUrl} decorative />
-              <span><small>Персональний кабінет</small><strong>{teacher.fullName}</strong></span>
+              <TeacherAvatar className={styles.teacherSidebarAvatar} fullName={teacherDisplayName} photoUrl={profile?.photoUrl} decorative />
+              <span><small>Персональний кабінет</small><strong>{teacherDisplayName}</strong></span>
             </div>
             <nav className={styles.teacherSidebarNav} aria-label="Розділи кабінету">
               {TEACHER_TABS.map((tab) => (
@@ -1293,7 +1294,7 @@ function VisitBookingPanel({
                 <p>{activeDefinition.description}</p>
               </div>
               <div className={styles.teacherHeaderMeta}>
-                <span className={styles.teacherHeaderIdentity}><TeacherAvatar fullName={teacher.fullName} photoUrl={profile?.photoUrl} decorative /><span><small>Ви увійшли як</small><strong>{teacher.fullName}</strong></span></span>
+                <span className={styles.teacherHeaderIdentity}><TeacherAvatar fullName={teacherDisplayName} photoUrl={profile?.photoUrl} decorative /><span><small>Ви увійшли як</small><strong>{teacherDisplayName}</strong></span></span>
                 <span className={styles.teacherSessionBadge}>{telegramMiniApp ? "У Telegram" : "Особистий простір"}</span>
               </div>
             </header>
@@ -1309,7 +1310,7 @@ function VisitBookingPanel({
 
             {activeTab === "overview" ? (
               <TeacherOverview
-                teacherName={teacher.fullName}
+                teacherName={teacherDisplayName}
                 profile={profile}
                 profileLoading={profileLoading}
                 profileError={profileError}
@@ -1332,7 +1333,7 @@ function VisitBookingPanel({
               <span className={bookingEnabled ? styles.enabled : styles.disabled}>{bookingEnabled ? "Запис відкрито" : "Запис призупинено"}</span>
             </div>
             <div className={styles.identityBanner}>
-              <span>Учитель</span><strong>{teacher.fullName}</strong><small>Ім’я підставляється з бази даних автоматично.</small>
+              <span>Учитель</span><strong>{teacherDisplayName}</strong><small>Ім’я підставляється з бази даних автоматично.</small>
             </div>
             <div className={styles.fields}>
               <label>Дата *
@@ -1419,7 +1420,7 @@ function VisitBookingPanel({
           <div className={styles.teacherMobileMenuBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setMobileMenuOpen(false); }}>
             <section id="teacher-mobile-menu" ref={mobileMenuRef} className={styles.teacherMobileMenu} role="dialog" aria-modal="true" aria-labelledby="teacher-mobile-menu-title">
               <header><div><span>Кабінет учителя</span><h2 id="teacher-mobile-menu-title">Усі розділи</h2></div><button type="button" onClick={() => setMobileMenuOpen(false)} aria-label="Закрити меню"><SiteIcon name="close" /></button></header>
-              <div className={styles.teacherMobileMenuIdentity}><TeacherAvatar fullName={teacher.fullName} photoUrl={profile?.photoUrl} decorative /><div><small>Ви увійшли як</small><strong>{teacher.fullName}</strong></div></div>
+              <div className={styles.teacherMobileMenuIdentity}><TeacherAvatar fullName={teacherDisplayName} photoUrl={profile?.photoUrl} decorative /><div><small>Ви увійшли як</small><strong>{teacherDisplayName}</strong></div></div>
               <nav aria-label="Усі розділи">
                 {TEACHER_TABS.map((tab) => <button key={tab.id} type="button" aria-current={activeTab === tab.id ? "page" : undefined} data-telegram={tab.id === "telegram" || undefined} onClick={() => selectTeacherTab(tab.id)}><span aria-hidden="true"><SiteIcon name={tab.icon} /></span><strong>{tab.label}</strong></button>)}
               </nav>
@@ -1652,6 +1653,7 @@ function TeacherOverview({
   const [photoBusy, setPhotoBusy] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
+  const [fullName, setFullName] = useState("");
   const [subjectPosition, setSubjectPosition] = useState("");
   const [primaryLocationId, setPrimaryLocationId] = useState("");
   const [curatorClassYearId, setCuratorClassYearId] = useState("");
@@ -1666,6 +1668,7 @@ function TeacherOverview({
       setEditingProfile(false);
       return;
     }
+    setFullName(profile.fullName);
     setSubjectPosition(profile.subjectPosition);
     setPrimaryLocationId(profile.primaryLocation?.id ?? "");
     setCuratorClassYearId(profile.pendingCuratorRequest?.requestedClassYearId ?? profile.curatedClasses[0]?.id ?? "");
@@ -1731,9 +1734,10 @@ function TeacherOverview({
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!profile || profileBusy) return;
+    const normalizedName = fullName.normalize("NFKC").trim().replace(/\s+/gu, " ");
     const normalizedSubject = subjectPosition.normalize("NFKC").trim().replace(/\s+/gu, " ");
     const nextLocation = primaryLocationId || null;
-    if (normalizedSubject === profile.subjectPosition && nextLocation === profile.primaryLocation?.id) {
+    if (normalizedName === profile.fullName && normalizedSubject === profile.subjectPosition && nextLocation === profile.primaryLocation?.id) {
       setEditingProfile(false);
       return;
     }
@@ -1745,6 +1749,7 @@ function TeacherOverview({
         body: JSON.stringify({
           requestId: crypto.randomUUID(),
           expectedVersion: profile.profileVersion,
+          fullName: normalizedName,
           subjectPosition: normalizedSubject,
           primaryLocationId: nextLocation,
         }),
@@ -1841,6 +1846,9 @@ function TeacherOverview({
         {editingProfile && profile ? (
           <div className={styles.teacherProfileEditor}>
             <form className={styles.teacherProfileForm} onSubmit={saveProfile}>
+              <label>Прізвище та ім’я
+                <input required minLength={3} maxLength={120} value={fullName} onChange={(event) => setFullName(event.currentTarget.value)} placeholder="Прізвище Ім’я По батькові" />
+              </label>
               <label>Предмет / посада
                 <input maxLength={160} value={subjectPosition} onChange={(event) => setSubjectPosition(event.currentTarget.value)} placeholder="Наприклад, учитель математики" />
               </label>
@@ -2059,27 +2067,42 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
   const [cart, setCart] = useState<Record<string, { item: TeacherCatalogItem; quantity: number }>>({});
   const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState("");
+  const [cartOpen, setCartOpen] = useState(false);
   const [requests, setRequests] = useState<MaterialRequest[]>([]);
   const [requestPage, setRequestPage] = useState<MaterialRequestsEnvelope["page"] | null>(null);
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [committedHistoryQuery, setCommittedHistoryQuery] = useState("");
+  const [historyStatus, setHistoryStatus] = useState<MaterialRequestStatus | "all">("all");
+  const [historySort, setHistorySort] = useState<"date_desc" | "date_asc" | "title_asc" | "title_desc" | "quantity_desc">("date_desc");
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [pending, setPending] = useState<OrderPendingIntent | null>(null);
   const initialMaterialApplied = useRef(false);
+  const historyLoadRef = useRef(0);
   const normalizedQuery = query.trim();
   const storageKey = `library.teacher.orders.pending.v1:${pendingScope}`;
 
   const loadRequests = useCallback(async (afterMutation = false, cursor: string | null = null) => {
+    const loadId = ++historyLoadRef.current;
     const append = Boolean(cursor);
     if (append) setHistoryLoadingMore(true);
-    else setHistoryLoading(true);
+    else {
+      setHistoryLoading(true);
+      setHistoryLoadingMore(false);
+    }
     try {
       const params = new URLSearchParams({ limit: "50" });
       if (cursor) params.set("cursor", cursor);
+      if (committedHistoryQuery) params.set("q", committedHistoryQuery);
+      if (historyStatus !== "all") params.set("status", historyStatus);
+      params.set("sort", historySort);
       const response = await visitApi<MaterialRequestsEnvelope>(`/api/teacher/material-requests?${params.toString()}`);
+      if (loadId !== historyLoadRef.current) return;
       setRequests((current) => append ? mergePortalPageById(current, response.requests) : response.requests);
       setRequestPage(response.page);
     } catch (error) {
+      if (loadId !== historyLoadRef.current) return;
       setNotice(afterMutation
         ? "Дію збережено, але історію замовлень не вдалося оновити. Натисніть «Оновити»."
         : append
@@ -2087,10 +2110,17 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
           : errorMessage(error));
       setNoticeTone(afterMutation ? "info" : "error");
     } finally {
-      if (append) setHistoryLoadingMore(false);
-      else setHistoryLoading(false);
+      if (loadId === historyLoadRef.current) {
+        if (append) setHistoryLoadingMore(false);
+        else setHistoryLoading(false);
+      }
     }
-  }, []);
+  }, [committedHistoryQuery, historySort, historyStatus]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setCommittedHistoryQuery(historyQuery.trim()), 280);
+    return () => window.clearTimeout(timer);
+  }, [historyQuery]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2117,6 +2147,7 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
             setCart((current) => current[selected.id]
               ? current
               : { ...current, [selected.id]: { item: selected, quantity: 1 } });
+            setCartOpen(true);
             setNotice(`«${selected.title}» додано до кошика. Перевірте кількість і надішліть замовлення.`);
             setNoticeTone("success");
           } else {
@@ -2175,6 +2206,7 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
         setCart({});
         setQuantityDrafts({});
         setNotes("");
+        setCartOpen(false);
       }
       await loadRequests(true);
     } catch (error) {
@@ -2219,6 +2251,7 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
       const quantity = Math.min(item.availableQuantity, (existing?.quantity ?? 0) + 1);
       return { ...current, [item.id]: { item, quantity } };
     });
+    setCartOpen(true);
     const nextQuantity = currentQuantity + 1;
     setNotice(currentQuantity
       ? `Кількість «${item.title}» у кошику збільшено до ${nextQuantity}.`
@@ -2264,6 +2297,7 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
   }
 
   const cartRows = Object.values(cart);
+  const cartQuantity = cartRows.reduce((sum, row) => sum + row.quantity, 0);
   return (
     <section aria-labelledby="orders-title">
       {pending ? <div className={styles.pending} role="status"><span>Результат попередньої дії із замовленням не підтверджено.</span><button type="button" onClick={() => void sendOrderIntent(pending)} disabled={submitting}>Перевірити результат</button></div> : null}
@@ -2287,8 +2321,9 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
           </article>
         })}</div> : null}
       </div>
-      <aside className={styles.card} aria-labelledby="cart-title">
-        <div className={styles.cardHeading}><div><span>Крок 2 · до 10 позицій</span><h2 id="cart-title">Кошик</h2></div><strong>{cartRows.length}/10</strong></div>
+      {cartOpen ? <button className={styles.cartBackdrop} type="button" aria-label="Закрити кошик" onClick={() => setCartOpen(false)} /> : null}
+      <aside className={`${styles.card} ${styles.orderCart} ${cartOpen ? styles.orderCartOpen : ""}`} aria-labelledby="cart-title">
+        <div className={styles.cardHeading}><div><span>Крок 2 · до 10 позицій</span><h2 id="cart-title">Кошик</h2></div><div className={styles.cartHeadingActions}><strong>{cartRows.length}/10</strong><button className={styles.cartClose} type="button" onClick={() => setCartOpen(false)} aria-label="Закрити кошик">×</button></div></div>
         {cartRows.length ? <ul className={styles.cartList}>{cartRows.map(({ item, quantity }) => (
           <li key={item.id}>
             <span><strong>{item.title}</strong><small>{item.id}</small></span>
@@ -2303,8 +2338,37 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
         <p className={styles.authHelp}>Фактичний залишок бібліотекар перевірить під час підготовки замовлення.</p>
       </aside>
       </div>
+      <button className={styles.mobileCartBar} type="button" onClick={() => setCartOpen(true)} disabled={!cartRows.length} aria-expanded={cartOpen}>
+        <span><SiteIcon name="orders" size={18} /><strong>Кошик</strong><small>{cartRows.length} поз. · {cartQuantity} прим.</small></span><b>Відкрити</b>
+      </button>
       <section className={`${styles.card} ${styles.requestHistory}`} aria-labelledby="request-history-title">
         <div className={styles.cardHeading}><div><span>Лише для вас</span><h2 id="request-history-title">Історія замовлень</h2></div><button className={styles.quiet} type="button" onClick={() => void loadRequests()} disabled={historyLoading || historyLoadingMore || submitting}><SiteIcon name="refresh" size={18} /> Оновити</button></div>
+        <div className={styles.historyToolbar}>
+          <label className={styles.historySearch}>Пошук
+            <input type="search" value={historyQuery} onChange={(event) => setHistoryQuery(event.currentTarget.value)} placeholder="Назва, автор або номер" autoComplete="off" />
+          </label>
+          <label>Статус
+            <select value={historyStatus} onChange={(event) => setHistoryStatus(event.currentTarget.value as MaterialRequestStatus | "all")}>
+              <option value="all">Усі статуси</option>
+              <option value="submitted">Надіслано</option>
+              <option value="in_review">Опрацьовується</option>
+              <option value="ready">Готово</option>
+              <option value="partially_ready">Частково готово</option>
+              <option value="completed">Завершено</option>
+              <option value="rejected">Відхилено</option>
+              <option value="cancelled">Скасовано</option>
+            </select>
+          </label>
+          <label>Сортування
+            <select value={historySort} onChange={(event) => setHistorySort(event.currentTarget.value as typeof historySort)}>
+              <option value="date_desc">Спочатку нові</option>
+              <option value="date_asc">Спочатку давні</option>
+              <option value="title_asc">Назва А–Я</option>
+              <option value="title_desc">Назва Я–А</option>
+              <option value="quantity_desc">Найбільша кількість</option>
+            </select>
+          </label>
+        </div>
         {historyLoading ? <p className={styles.empty}>Оновлюємо замовлення…</p> : requests.length ? <div className={styles.requestList}>{requests.map((request) => (
           <article key={request.id}>
             <header><span className={styles.requestStatus} data-status={request.status}>{materialRequestStatusLabel(request.status)}</span><time dateTime={request.createdAt}>{formatPortalDate(request.createdAt)}</time></header>

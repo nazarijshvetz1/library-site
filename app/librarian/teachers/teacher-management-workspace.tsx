@@ -548,14 +548,6 @@ function TeacherDirectoryPanel({
           />
         ) : null}
 
-        <TeacherCodeImport
-          writesEnabled={writesEnabled}
-          onImported={async () => {
-            await load();
-            setAccessRefreshKey((value) => value + 1);
-          }}
-        />
-
         <form className={styles.filters} role="search" onSubmit={search}>
           <label className={styles.searchField}>Пошук
             <span><input type="search" autoComplete="off" maxLength={100} value={queryInput} onChange={(event) => setQueryInput(event.currentTarget.value)} placeholder="Прізвище або ім’я" /><button type="submit">Знайти</button></span>
@@ -581,7 +573,7 @@ function TeacherDirectoryPanel({
             </div>
             <aside className={styles.detailRegion} aria-label="Картка вибраного вчителя">
               {detailLoading ? <p className={styles.empty}>Відкриваємо картку…</p> : detail ? (
-                <TeacherDetailCard detail={detail} locations={data.locations} writesEnabled={writesEnabled} onSaved={mutationSaved} onDeleted={async () => { selectedIdRef.current = null; setDetail(null); setSelectedId(null); onNotice("Порожню помилкову картку видалено."); await load(); }} />
+                <TeacherDetailCard detail={detail} locations={data.locations} writesEnabled={writesEnabled} onClose={() => { detailRequestRef.current += 1; selectedIdRef.current = null; setDetail(null); setSelectedId(null); }} onSaved={mutationSaved} onDeleted={async () => { selectedIdRef.current = null; setDetail(null); setSelectedId(null); onNotice("Порожню помилкову картку видалено."); await load(); }} />
               ) : <div className={styles.detailPlaceholder}><span aria-hidden="true"><SiteIcon name="profile" size={28} /></span><h3>Виберіть учителя</h3><p>Тут з’являться профіль, замовлення, фактичні видачі та відвідування.</p></div>}
             </aside>
           </div>
@@ -589,6 +581,16 @@ function TeacherDirectoryPanel({
       </section>
 
       <TeacherAccessAdmin writesEnabled={writesEnabled} refreshKey={accessRefreshKey} />
+      <section className={styles.bulkOperations} aria-labelledby="teacher-bulk-operations-title">
+        <div><span>Масові операції</span><h2 id="teacher-bulk-operations-title">Імпорт тимчасових кодів</h2><p>Службовий інструмент розміщено внизу, щоб він не заважав щоденній роботі з картками.</p></div>
+        <TeacherCodeImport
+          writesEnabled={writesEnabled}
+          onImported={async () => {
+            await load();
+            setAccessRefreshKey((value) => value + 1);
+          }}
+        />
+      </section>
     </div>
   );
 }
@@ -674,12 +676,14 @@ function TeacherDetailCard({
   detail,
   locations,
   writesEnabled,
+  onClose,
   onSaved,
   onDeleted,
 }: {
   detail: TeacherDetail;
   locations: TeacherLocation[];
   writesEnabled: boolean;
+  onClose: () => void;
   onSaved: (detail: TeacherDetail, message: string) => Promise<void>;
   onDeleted: () => Promise<void>;
 }) {
@@ -735,6 +739,7 @@ function TeacherDetailCard({
       <header>
         <TeacherAvatar teacher={teacher} size="large" />
         <div><p>{teacher.status === "active" ? "Активна картка" : "Картка закрита"}</p><h3>{teacher.fullName}</h3><small>{[teacher.subjectPosition || "Посаду або предмет не вказано", accountRoleLabel(teacher.accountRole)].join(" · ")}</small></div>
+        <button className={styles.detailClose} type="button" onClick={onClose} aria-label="Закрити картку"><SiteIcon name="close" size={18} /></button>
       </header>
       <nav className={styles.detailTabs} aria-label="Дані вчителя">
         {(["profile", "orders", "issued", "visits"] as const).map((item) => <button key={item} type="button" aria-pressed={tab === item} onClick={() => setTab(item)}>{detailTabLabel(item)}<span>{detailTabCount(item, detail)}</span></button>)}

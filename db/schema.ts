@@ -1923,6 +1923,7 @@ export const acquisitionRequests = sqliteTable(
     receivedAt: text("received_at"),
     rejectedAt: text("rejected_at"),
     cancelledAt: text("cancelled_at"),
+    teacherHiddenAt: text("teacher_hidden_at"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },

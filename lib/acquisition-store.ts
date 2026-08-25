@@ -62,6 +62,8 @@ export type AcquisitionProjection = {
   updatedAt: string;
 };
 
+export type TeacherAcquisitionSort = "date_desc" | "date_asc" | "title_asc" | "title_desc" | "quantity_desc";
+
 export type AcquisitionSummary = {
   total: number;
   active: number;
@@ -105,16 +107,41 @@ const ACTIVE_STATUSES: AcquisitionStatus[] = ["submitted", "in_review", "clarifi
 export async function listTeacherAcquisitionRequests(
   db: AcquisitionDatabase,
   teacherUserId: string,
-  status: AcquisitionStatus | "all" = "all",
-  limit = 100,
+  options: AcquisitionStatus | "all" | {
+    status?: AcquisitionStatus | "all";
+    query?: string;
+    sort?: TeacherAcquisitionSort;
+    limit?: number;
+  } = {},
 ): Promise<AcquisitionProjection[]> {
+  const normalized = typeof options === "string" ? { status: options } : options;
+  const status = normalized.status ?? "all";
+  const query = normalized.query?.trim().slice(0, 80) ?? "";
+  const sort = normalized.sort ?? "date_desc";
   const clause = status === "all" ? "" : "AND ar.status=?";
   const bindings: D1Value[] = [teacherUserId];
   if (status !== "all") bindings.push(status);
-  bindings.push(Math.min(Math.max(limit, 1), 100));
-  const rows = await db.prepare(`${projectionSql()} WHERE ar.teacher_user_id=? ${clause} ORDER BY ar.created_at DESC, ar.id DESC LIMIT ?`)
+  let queryClause = "";
+  if (query) {
+    queryClause = "AND (ar.title LIKE ? ESCAPE '\\' OR ar.author LIKE ? ESCAPE '\\' OR ar.public_number LIKE ? ESCAPE '\\')";
+    const needle = `%${query.replace(/[\\%_]/gu, "\\$&")}%`;
+    bindings.push(needle, needle, needle);
+  }
+  const order = teacherAcquisitionOrder(sort);
+  bindings.push(Math.min(Math.max(normalized.limit ?? 100, 1), 100));
+  const rows = await db.prepare(`${projectionSql()} WHERE ar.teacher_user_id=? AND ar.teacher_hidden_at IS NULL ${clause} ${queryClause} ORDER BY ${order} LIMIT ?`)
     .bind(...bindings).all<RequestRow>();
   return (rows.results ?? []).map(projectRequest);
+}
+
+function teacherAcquisitionOrder(sort: TeacherAcquisitionSort): string {
+  switch (sort) {
+    case "date_asc": return "ar.created_at ASC, ar.id ASC";
+    case "title_asc": return "ar.title COLLATE NOCASE ASC, ar.created_at DESC, ar.id DESC";
+    case "title_desc": return "ar.title COLLATE NOCASE DESC, ar.created_at DESC, ar.id DESC";
+    case "quantity_desc": return "ar.requested_quantity DESC, ar.created_at DESC, ar.id DESC";
+    default: return "ar.created_at DESC, ar.id DESC";
+  }
 }
 
 export async function listLibrarianAcquisitionRequests(
@@ -315,6 +342,31 @@ export async function cancelTeacherAcquisitionRequest(
   }
   if (!number(results[0]?.meta?.changes)) throw conflict(current.version);
   return requireRequest(db, requestId);
+}
+
+export async function hideTeacherAcquisitionRequest(
+  db: AcquisitionDatabase,
+  teacher: VisitTeacherIdentity,
+  requestId: string,
+  expectedVersion: number,
+  mutationId: string,
+): Promise<{ requestId: string; hidden: true; hiddenAt: string }> {
+  const now = new Date().toISOString();
+  await requireActiveTeacher(db, teacher, now);
+  const current = await requireRequest(db, requestId);
+  if (current.teacherUserId !== teacher.teacherUserId) throw new AcquisitionStoreError("request_not_found", 404, "Пропозицію не знайдено.");
+  if (current.version !== expectedVersion) throw conflict(current.version);
+  const results = await db.batch([
+    db.prepare(`UPDATE acquisition_requests SET teacher_hidden_at=? WHERE id=? AND teacher_user_id=? AND version=? AND teacher_hidden_at IS NULL`)
+      .bind(now, requestId, teacher.teacherUserId, expectedVersion),
+    db.prepare(`INSERT INTO audit_events (id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,before_json,after_json,metadata_json,created_at)
+      SELECT ?,?,?,'acquisition_request.hide_from_teacher','acquisition_request',id,?,NULL,?,NULL,?
+      FROM acquisition_requests WHERE id=? AND teacher_user_id=? AND teacher_hidden_at=?`)
+      .bind(`AUD-${crypto.randomUUID()}`, teacher.teacherUserId, `teacher:${teacher.teacherUserId}`, mutationId,
+        JSON.stringify({ hidden: true, hiddenAt: now }), now, requestId, teacher.teacherUserId, now),
+  ]);
+  if (!number(results[0]?.meta?.changes)) throw new AcquisitionStoreError("request_already_hidden", 409, "Пропозицію вже прибрано з вашої історії.");
+  return { requestId, hidden: true, hiddenAt: now };
 }
 
 export async function applyLibrarianAcquisitionAction(

@@ -310,3 +310,49 @@
 @media (prefers-reduced-motion: reduce) {
   .workspace * { transition-duration: .01ms!important; }
 }
+
+/* Unified compact acquisition workspace. */
+.workspace { gap: 10px; }
+.grid { grid-template-columns: minmax(0,1.45fr) minmax(320px,.72fr); gap: 12px; }
+.card { padding: 14px; border-radius: var(--system-radius-lg); box-shadow: var(--system-shadow-sm); }
+.grid > .card:last-child { top: 74px; }
+.segmented { margin-bottom: 10px; gap: 6px; }
+.segmented legend { margin-bottom: 5px; font-size: 11px; }
+.segmented label { min-height: 40px; padding: 7px 9px; border-radius: var(--system-radius-sm); font-size: 11px; }
+.fields { gap: 8px; }
+.fields label,
+.wide { gap: 5px; font-size: 11px; }
+.wide { margin-bottom: 9px; }
+.fields :is(input,select,textarea),
+.wide input { min-height: 38px; padding: 7px 9px; border-radius: var(--system-radius-sm); font-size: 12px; }
+.fields textarea { min-height: 70px; }
+.primary { min-height: 38px; margin-top: 10px; padding: 7px 10px; border-radius: var(--system-radius-sm); }
+.heading { margin-bottom: 10px; }
+.heading h3 { font-size: 19px; }
+.heading button,
+.danger,
+.hideAction { min-height: 34px; padding: 5px 8px; border-radius: var(--system-radius-sm); font-size: 11px; }
+.historyToolbar { margin-bottom: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.historyToolbar label { min-width: 0; display: grid; gap: 4px; color: #657169; font-size: 9px; font-weight: 800; }
+.historyToolbar :is(input,select) { width: 100%; min-height: 34px; padding: 5px 7px; border: 1px solid #d2dcd1; border-radius: 7px; color: #173d2e; background: #fff; font-size: 10px; }
+.historySearch { grid-column: 1 / -1; }
+.history { gap: 6px; max-height: calc(100dvh - 245px); }
+.history article { padding: 9px; border-radius: var(--system-radius-sm); }
+.history h4 { margin: 7px 0 2px; font-size: 12px; }
+.history p { font-size: 10px; line-height: 1.4; }
+.progress { margin: 6px 0; gap: 3px; }
+.progress span { padding: 3px 5px; font-size: 9px; }
+.historyActions { display: flex; flex-wrap: wrap; gap: 5px; }
+.danger { margin-top: 0; }
+.hideAction { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #d7dfd7; color: #57675e; background: #fff; cursor: pointer; font-weight: 800; }
+
+@media (max-width: 1080px) {
+  .grid { grid-template-columns: 1fr; }
+  .history { max-height: none; }
+}
+
+@media (max-width: 680px) {
+  .card { padding: 12px; }
+  .historyToolbar { grid-template-columns: 1fr; }
+  .historySearch { grid-column: auto; }
+}

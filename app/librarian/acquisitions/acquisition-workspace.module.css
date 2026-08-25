@@ -78,3 +78,65 @@
   :global(body.acquisition-student-qr-print) [data-student-qr-print] code{width:150mm;padding:3mm;font-size:10pt;background:#fff;border:1px solid #d7dfd5}
   :global(body.acquisition-student-qr-print) [data-qr-controls]{display:none!important}
 }
+
+/* Compact librarian acquisition queue. */
+.shell { min-height: calc(100dvh - 60px); background: var(--system-canvas); }
+.page { width: min(1500px,calc(100% - 28px)); padding: 16px 0 44px; }
+.hero { align-items: center; gap: 12px; }
+.hero > div { max-width: 1120px; }
+.hero h1 { margin: 3px 0; font-size: clamp(24px,3vw,31px); line-height: 1.06; letter-spacing: -.025em; }
+.hero p { margin: 3px 0; font-size: 11px; }
+.hero button,
+.filters button { min-height: 34px; padding: 5px 9px; border-radius: var(--system-radius-sm); font-size: 10px; }
+.metrics { grid-template-columns: repeat(5,minmax(0,1fr)); gap: 7px; margin: 10px 0; }
+.metrics article { min-height: 72px; padding: 9px; border-radius: var(--system-radius-md); }
+.metrics strong { font-size: 25px; }
+.metrics span { font-size: 9px; }
+.tools { gap: 8px; }
+.tools > div,
+.preview,
+.groups,
+.queue { padding: 12px; border-radius: var(--system-radius-lg); box-shadow: var(--system-shadow-sm); }
+.tools h2,
+.preview h2 { font-size: 18px; }
+.tools p { font-size: 10px; }
+.actions,
+.cardActions { gap: 5px; }
+.actions a,
+.actions button,
+.actions label,
+.preview button,
+.cardActions a,
+.cardActions button,
+.receipts button { min-height: 34px; padding: 5px 8px; border-radius: var(--system-radius-sm); font-size: 10px; }
+.preview,
+.groups { margin-top: 8px; }
+.filters { grid-template-columns: 160px 160px minmax(220px,1fr); gap: 6px; margin-bottom: 8px; }
+.filters select,
+.filters input,
+.receipts select,
+.receipts input { min-height: 34px; padding: 5px 8px; border-radius: var(--system-radius-sm); font-size: 10px; }
+.list { gap: 7px; }
+.request { padding: 10px; border-radius: var(--system-radius-md); }
+.requestBody { gap: 9px; }
+.requestBody h2 { margin: 5px 0 2px; font-size: 17px; }
+.requestBody p { margin: 3px 0; font-size: 10px; }
+.request dl { gap: 5px; }
+.request dl div { padding: 6px; border-radius: 7px; }
+.request dt { font-size: 8px; }
+.request dd { font-size: 10px; }
+.note { padding: 7px; }
+.receipts { margin-top: 6px; padding: 7px; }
+
+@media (max-width: 980px) {
+  .metrics { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .tools,
+  .requestBody { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 650px) {
+  .page { width: min(100% - 18px,1240px); padding: 10px 0 72px; }
+  .metrics { grid-template-columns: 1fr 1fr; }
+  .filters { grid-template-columns: 1fr; }
+  .request dl { grid-template-columns: 1fr; }
+}

@@ -17,6 +17,7 @@
     <link rel="icon" type="image/png" href="/library-logo.png" />
     <link rel="stylesheet" href="/styles.css?v=20260824-1" />
     <link rel="stylesheet" href="/brand.css?v=20260824-2" />
+    <link rel="stylesheet" href="/system.css?v=20260825-2" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Перейти до основного вмісту</a>
@@ -203,8 +204,13 @@
         </div>
 
         <div class="catalog-layout">
+          <div class="filter-backdrop" id="filterBackdrop" hidden></div>
           <aside class="filters" id="filters" aria-label="Фільтри каталогу">
-            <div class="filter-header"><span><strong>Фільтри</strong><small>Уточніть свій пошук</small></span><button type="button" id="clearFilters">Очистити</button></div>
+            <div class="filter-header">
+              <span><strong>Фільтри</strong><small>Уточніть свій пошук</small></span>
+              <button type="button" id="clearFilters">Очистити</button>
+              <button class="filter-close" id="filterClose" type="button" aria-label="Закрити фільтри"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-x"></use></svg></button>
+            </div>
             <label>Клас<select id="gradeFilter"><option value="">Усі класи</option></select></label>
             <label>Рубрика<select id="rubricFilter"><option value="">Усі</option></select></label>
             <label>Предмет<select id="subjectFilter"><option value="">Усі предмети</option></select></label>
@@ -307,6 +313,6 @@
     <script src="/config.js"></script>
     <script src="/catalog-data.js"></script>
     <script src="/balance-data.js"></script>
-    <script type="module" src="/app.js?v=20260825-2"></script>
+    <script type="module" src="/app.js?v=20260825-3"></script>
   </body>
 </html>

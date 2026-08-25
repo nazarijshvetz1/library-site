@@ -636,3 +636,159 @@
   .teacherPortalPage *,
   .teacherLandingPage * { scroll-behavior: auto!important; transition-duration: .01ms!important; animation-duration: .01ms!important; }
 }
+
+/* Unified compact system foundation. */
+.shell { background: var(--system-canvas); }
+.header {
+  min-height: 60px;
+  padding: 6px max(18px, calc((100vw - 1500px) / 2));
+  border-color: var(--system-line);
+  background: rgba(255,255,255,.96);
+}
+.brand img { width: 40px; height: 40px; box-shadow: var(--system-shadow-sm); }
+.brand strong { font-size: 16px; letter-spacing: -.015em; }
+.brand small { font-size: 10px; }
+.catalogLink,
+.scheduleLink { min-height: 36px; border-radius: var(--system-radius-sm); }
+.page { width: min(1500px, calc(100% - 32px)); padding: 24px 0 48px; }
+.intro { max-width: 900px; margin-bottom: 16px; }
+.intro h1 { margin: 5px 0 7px; font-size: clamp(26px, 3vw, 34px); line-height: 1.1; letter-spacing: -.025em; }
+.teacherPortalPage { width: min(1600px, 100%); min-height: calc(100dvh - 60px); padding: 0; }
+.teacherPageHeader {
+  min-height: 0;
+  margin-bottom: 14px;
+  padding: 0;
+  align-items: center;
+}
+.teacherPageHeader h1 { margin: 4px 0 5px; font-size: clamp(24px, 2.4vw, 30px); line-height: 1.1; letter-spacing: -.025em; }
+.teacherPageHeader > div:first-child > p:last-child { font-size: 13px; line-height: 1.45; }
+.teacherPortalContent .card,
+.teacherLandingPage .publicSchedule.card,
+.teacherLandingPage .accessModes .card {
+  padding: 16px;
+  border-radius: var(--system-radius-lg);
+  box-shadow: var(--system-shadow-sm);
+}
+.teacherPortalContent .cardHeading { margin-bottom: 12px; }
+.teacherPortalContent .cardHeading h2 { margin-top: 2px; font-size: 18px; letter-spacing: -.015em; }
+.teacherPortalContent .overviewGrid { gap: 12px; }
+.teacherPortalContent .overviewActionCard { min-height: 148px; padding-top: 48px; }
+.teacherPortalContent .profileSummary { grid-template-columns: 88px minmax(0,1fr); gap: 16px; }
+.teacherPortalContent .profilePortrait { width: 88px; height: 88px; }
+.teacherPortalContent .welcomeCard h2 { font-size: 24px; }
+.teacherPortalContent .profileDetails dl { gap: 6px; }
+.teacherPortalContent .profileDetails dl div { min-height: 54px; padding: 8px 10px; border-radius: var(--system-radius-sm); }
+.teacherPortalContent .loanCounters article { min-height: 78px; padding: 12px; border-radius: var(--system-radius-md); }
+.teacherPortalContent .loanCounters strong { font-size: 28px; }
+.teacherPortalContent .fields :is(input,select,textarea),
+.teacherPortalContent .portalSearch :is(input,textarea),
+.teacherPortalContent .comboboxField > input { min-height: 38px; border-radius: var(--system-radius-sm); font-size: 13px; }
+.teacherPortalContent :is(.primary,.danger,.quiet,.loadMore,.pending button) { min-height: 36px; border-radius: var(--system-radius-sm); font-size: 12px; }
+.teacherPortalContent .orderLayout { grid-template-columns: minmax(0,1.6fr) minmax(286px,.62fr); gap: 12px; }
+.orderCart { position: sticky; top: 74px; }
+.cartHeadingActions { display: flex; align-items: center; gap: 8px; }
+.cartClose,
+.mobileCartBar,
+.cartBackdrop { display: none; }
+.historyToolbar {
+  margin-bottom: 12px;
+  display: grid;
+  grid-template-columns: minmax(220px,1fr) minmax(150px,.38fr) minmax(190px,.48fr);
+  gap: 8px;
+  align-items: end;
+}
+.historyToolbar label { min-width: 0; display: grid; gap: 5px; color: var(--system-muted); font-size: 10px; font-weight: 750; }
+.historyToolbar :is(input,select) {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--system-line-strong);
+  border-radius: var(--system-radius-sm);
+  color: var(--system-ink);
+  background: #fff;
+  font-size: 12px;
+}
+.teacherPortalContent .requestList { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+.teacherPortalContent .requestList > article { padding: 11px; gap: 8px; border-radius: var(--system-radius-md); }
+.teacherPortalContent .requestList li { font-size: 10px; }
+
+@media (max-width: 840px) {
+  .header { min-height: 60px; padding: 6px 12px; }
+  .teacherPortalPage { min-height: calc(100dvh - 60px); padding: 14px 12px 88px; }
+  .teacherPageHeader h1 { font-size: 24px; }
+  .teacherPageHeader > div:first-child > p:last-child { font-size: 12px; }
+  .teacherMobileNav {
+    right: 8px;
+    bottom: max(8px,env(safe-area-inset-bottom));
+    left: 8px;
+    min-height: 62px;
+    border-radius: 14px;
+    box-shadow: var(--system-shadow-md);
+  }
+  .teacherMobileNav button { min-height: 50px; border-radius: 10px; }
+  .teacherPortalContent .orderLayout { grid-template-columns: 1fr; }
+  .orderCart {
+    position: fixed!important;
+    z-index: 82;
+    right: 8px;
+    bottom: max(8px,env(safe-area-inset-bottom));
+    left: 8px;
+    max-height: min(72dvh,720px);
+    overflow-y: auto;
+    visibility: hidden;
+    opacity: 0;
+    transform: translateY(calc(100% + 24px));
+    transition: transform .2s ease, opacity .2s ease, visibility .2s ease;
+    box-shadow: 0 28px 80px rgba(7,31,24,.28)!important;
+  }
+  .orderCartOpen { visibility: visible; opacity: 1; transform: translateY(0); }
+  .cartBackdrop {
+    position: fixed;
+    z-index: 81;
+    inset: 0;
+    display: block;
+    border: 0;
+    background: rgba(7,31,24,.5);
+    backdrop-filter: blur(3px);
+  }
+  .cartClose { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--system-line); border-radius: 9px; color: var(--system-ink); background: #fff; cursor: pointer; font-size: 20px; line-height: 1; }
+  .mobileCartBar {
+    position: fixed;
+    z-index: 61;
+    right: 12px;
+    bottom: calc(max(8px,env(safe-area-inset-bottom)) + 70px);
+    left: 12px;
+    min-height: 52px;
+    padding: 7px 9px 7px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid rgba(255,255,255,.25);
+    border-radius: 13px;
+    color: #fff;
+    background: #173f2b;
+    box-shadow: var(--system-shadow-md);
+    cursor: pointer;
+  }
+  .mobileCartBar:disabled { display: none; }
+  .mobileCartBar > span { min-width: 0; display: grid; grid-template-columns: auto auto; gap: 1px 7px; align-items: center; text-align: left; }
+  .mobileCartBar svg { grid-row: 1 / 3; }
+  .mobileCartBar strong { font-size: 12px; }
+  .mobileCartBar small { color: #bfd1c3; font-size: 9px; }
+  .mobileCartBar b { min-height: 34px; padding: 0 11px; display: inline-flex; align-items: center; border-radius: 9px; color: #173f2b; background: #e2eca8; font-size: 10px; }
+  .historyToolbar { grid-template-columns: 1fr 1fr; }
+  .historySearch { grid-column: 1 / -1; }
+  .teacherPortalContent .requestList { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+
+@media (max-width: 620px) {
+  .header { min-height: 60px; }
+  .brand img { width: 38px; height: 38px; }
+  .teacherPortalContent .card { padding: 14px 12px; border-radius: var(--system-radius-lg); }
+  .teacherPortalContent .overviewGrid { gap: 10px; }
+  .teacherPortalContent .card.overviewActionCard { min-height: 132px; padding-top: 44px; }
+  .teacherPortalContent .requestList { grid-template-columns: 1fr; }
+  .historyToolbar { grid-template-columns: 1fr; }
+  .historySearch { grid-column: auto; }
+}

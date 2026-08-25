@@ -262,11 +262,12 @@ test("bounds public week navigation and API reads to the 90-day booking horizon"
 });
 
 test("wires teacher collections, sharing, error reporting, and mobile dialog safety", async () => {
-  const [html, app, css, brand] = await Promise.all([
+  const [html, app, css, brand, system] = await Promise.all([
     readFile(new URL("../source/index.html", import.meta.url), "utf8"),
     readFile(new URL("../source/app.js", import.meta.url), "utf8"),
     readFile(new URL("../source/styles.css", import.meta.url), "utf8"),
     readFile(new URL("../source/brand.css", import.meta.url), "utf8"),
+    readFile(new URL("../source/system.css", import.meta.url), "utf8"),
   ]);
   assert.match(html, /id="collectionGrid"/);
   assert.match(html, /href="#contacts"[^>]*>Контакти<\/a>/u);
@@ -279,8 +280,17 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(html, /<option value="">Усі<\/option>/);
   assert.match(html, /href="\/styles\.css\?v=20260824-1"/);
   assert.match(html, /href="\/brand\.css\?v=20260824-2"/);
+  assert.match(html, /href="\/system\.css\?v=20260825-2"/);
   assert.match(brand, /\.stats\s*\{[^}]*margin-top:\s*24px;/s);
-  assert.match(html, /type="module" src="\/app\.js\?v=20260825-2"/);
+  assert.match(html, /type="module" src="\/app\.js\?v=20260825-3"/);
+  assert.match(html, /id="filterBackdrop" hidden/u);
+  assert.match(html, /id="filterClose"[^>]+aria-label="Закрити фільтри"/u);
+  assert.match(app, /function setFilterDrawerOpen\(open/u);
+  assert.match(app, /event\.key !== "Escape"/u);
+  assert.match(app, /elements\.filterBackdrop\.addEventListener\("click"/u);
+  assert.match(app, /elements\.filterToggle\.setAttribute\("aria-expanded", String\(shouldOpen\)\)/u);
+  assert.match(system, /\.filter-backdrop:not\(\[hidden\]\)/u);
+  assert.match(system, /\.filter-close\s*\{/u);
   assert.match(html, /class="icon-sprite"/u);
   assert.match(app, /const uiIcon =/u);
   assert.doesNotMatch(html, /[⌕☷✓←→↗○✦×＋]/u);

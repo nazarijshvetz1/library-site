@@ -3,7 +3,7 @@ import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 const sourceRoot = new URL("../source/", import.meta.url);
 const outputRoot = new URL("../dist-pages/", import.meta.url);
 const siteOrigin = "https://nazarijshvetz1.github.io/library-site";
-const textAssets = ["styles.css", "brand.css", "config.js", "app.js", "catalog-data.js", "balance-data.js"];
+const textAssets = ["styles.css", "brand.css", "system.css", "config.js", "app.js", "catalog-data.js", "balance-data.js"];
 const binaryAssets = ["library-logo.png", "og.png"];
 
 await rm(outputRoot, { recursive: true, force: true });

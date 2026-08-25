@@ -56,6 +56,7 @@ test("GitHub Pages artifact contains only the public catalog", async () => {
     "dist-pages/library-logo.png",
     "dist-pages/og.png",
     "dist-pages/styles.css",
+    "dist-pages/system.css",
   ]);
 
   const pagesBuilder = await read("scripts/build-pages.mjs");

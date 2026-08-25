@@ -75,3 +75,47 @@
   .checkList { grid-template-columns: 1fr; }
   .classActions { grid-template-columns: 1fr; }
 }
+
+/* Compact export workspace while retaining the established Georgia headings. */
+.page { width: min(1500px, calc(100% - 28px)); padding: 16px 0 44px; }
+.intro { max-width: 960px; }
+.intro p,
+.cardHeading p { margin-bottom: 4px; font-size: 10px; }
+.intro h1 { font-size: clamp(28px, 4vw, 31px); line-height: 1.05; }
+.intro > span { margin-top: 6px; font-size: 12px; line-height: 1.45; }
+.layout { margin-top: 12px; gap: 8px; }
+.primaryCard,
+.sideCard,
+.classExportCard { padding: 13px; border-radius: var(--system-radius-lg); box-shadow: var(--system-shadow-sm); }
+.classExportCard { margin-top: 8px; }
+.cardHeading { gap: 10px; }
+.cardHeading h2,
+.sideCard h2 { font-size: 21px; }
+.cardHeading > span { min-width: 48px; min-height: 34px; border-radius: var(--system-radius-sm); }
+.description { margin-top: 8px; font-size: 12px; line-height: 1.45; }
+.checkList { margin: 10px 0; gap: 6px 12px; }
+.checkList li { font-size: 11px; }
+.safetyNote,
+.importLink { padding: 9px; border-radius: var(--system-radius-sm); }
+.downloadButton,
+.secondaryButton { min-height: 38px; margin-top: 9px; border-radius: var(--system-radius-sm); font-size: 12px; }
+.classExportGrid { margin-top: 9px; gap: 8px; }
+.classSelect { gap: 5px; }
+.classSelect select,
+.classDetails { min-height: 38px; border-radius: var(--system-radius-sm); font-size: 11px; }
+.classActions { gap: 8px; }
+.error,
+.success { margin-top: 8px; padding: 8px 10px; border-radius: var(--system-radius-sm); }
+.sideCard ol { gap: 6px; margin-top: 9px; }
+.sideCard li { padding: 8px 0 8px 36px; }
+.sideCard li::before { top: 6px; }
+
+@media (max-width: 620px) {
+  .page { width: min(100% - 18px, 1500px); padding: 10px 0 72px; }
+  .primaryCard,
+  .sideCard,
+  .classExportCard { padding: 10px; }
+  .downloadButton,
+  .secondaryButton,
+  .classSelect select { min-height: 44px; }
+}

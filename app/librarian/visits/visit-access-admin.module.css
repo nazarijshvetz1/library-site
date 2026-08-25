@@ -567,3 +567,48 @@
     overflow: visible;
   }
 }
+
+/* Compact protected workspace, aligned with the redesigned librarian shell. */
+.accessCard {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: var(--system-radius-lg);
+  background: var(--system-surface);
+  box-shadow: var(--system-shadow-sm);
+}
+.heading { gap: 10px; margin-bottom: 10px; }
+.heading h2 { font-size: 22px; line-height: 1.08; }
+.heading h3 { font-size: 19px; line-height: 1.1; }
+.success,
+.error,
+.info { margin: 0 0 8px; padding: 8px 10px; border-radius: var(--system-radius-sm); }
+.codeReveal { margin-bottom: 10px; padding: 12px; border-radius: var(--system-radius-md); }
+.summary { gap: 6px; margin-bottom: 8px; }
+.summary > * { padding: 8px; border-radius: var(--system-radius-sm); }
+.summary strong { font-size: 20px; }
+.toolbar { gap: 6px; margin-bottom: 8px; }
+.toolbar input,
+.toolbar select,
+.toolbar button,
+.searchLabel input { min-height: 36px; border-radius: var(--system-radius-sm); }
+.tableRegion { border-radius: var(--system-radius-md); }
+.accessTable { font-size: 11px; }
+.accessTable th,
+.accessTable td { padding: 8px 7px; }
+.rowActions { gap: 4px; }
+.rowActions button,
+.bulkButton,
+.secondaryButton { min-height: 34px; padding: 5px 8px; border-radius: var(--system-radius-sm); }
+.inviteDialog { padding: 16px; border-radius: var(--system-radius-lg); }
+.qrCanvas { width: min(230px, 68vw); height: auto; aspect-ratio: 1; }
+
+@media (max-width: 760px) {
+  .accessCard { padding: 10px; }
+  .toolbar input,
+  .toolbar select,
+  .toolbar button,
+  .searchLabel input,
+  .rowActions button,
+  .bulkButton,
+  .secondaryButton { min-height: 44px; }
+}

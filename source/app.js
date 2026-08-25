@@ -511,6 +511,7 @@ const elements = {
   available: document.querySelector("#availableFilter"), sort: document.querySelector("#sortSelect"), chips: document.querySelector("#activeFilters"),
   dialog: document.querySelector("#materialDialog"), dialogContent: document.querySelector("#dialogContent"), toast: document.querySelector("#toast"),
   filters: document.querySelector("#filters"), filterToggle: document.querySelector("#filterToggle"),
+  filterClose: document.querySelector("#filterClose"), filterBackdrop: document.querySelector("#filterBackdrop"),
   materialStat: document.querySelector("#materialStat"), copiesStat: document.querySelector("#copiesStat"),
   locationsStat: document.querySelector("#locationsStat"), rubricsStat: document.querySelector("#rubricsStat"),
   dataSync: document.querySelector("#dataSync"), dataSyncText: document.querySelector("#dataSyncText"), syncRetry: document.querySelector("#syncRetry"),
@@ -1442,7 +1443,33 @@ window.addEventListener("popstate", () => {
   if (linkedId) openLinkedMaterial();
   else closeMaterial({ fromHistory: true });
 });
-elements.filterToggle.addEventListener("click", () => { const open = elements.filters.classList.toggle("open"); elements.filterToggle.setAttribute("aria-expanded", String(open)); });
+const mobileFilterDrawer = window.matchMedia("(max-width: 820px)");
+function setFilterDrawerOpen(open, { restoreFocus = false } = {}) {
+  const shouldOpen = Boolean(open) && mobileFilterDrawer.matches;
+  elements.filters.classList.toggle("open", shouldOpen);
+  elements.filterToggle.setAttribute("aria-expanded", String(shouldOpen));
+  elements.filterBackdrop.hidden = !shouldOpen;
+  if (shouldOpen) {
+    elements.filters.setAttribute("role", "dialog");
+    elements.filters.setAttribute("aria-modal", "true");
+    elements.filterClose.focus({ preventScroll: true });
+  } else {
+    elements.filters.removeAttribute("role");
+    elements.filters.removeAttribute("aria-modal");
+    if (restoreFocus && mobileFilterDrawer.matches) elements.filterToggle.focus({ preventScroll: true });
+  }
+}
+elements.filterToggle.addEventListener("click", () => setFilterDrawerOpen(!elements.filters.classList.contains("open")));
+elements.filterClose.addEventListener("click", () => setFilterDrawerOpen(false, { restoreFocus: true }));
+elements.filterBackdrop.addEventListener("click", () => setFilterDrawerOpen(false, { restoreFocus: true }));
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !elements.filters.classList.contains("open")) return;
+  event.preventDefault();
+  setFilterDrawerOpen(false, { restoreFocus: true });
+});
+mobileFilterDrawer.addEventListener("change", (event) => {
+  if (!event.matches) setFilterDrawerOpen(false);
+});
 elements.visitRetry.addEventListener("click", synchronizeVisitSchedule);
 elements.visitPrevWeek.addEventListener("click", () => selectVisitWeek(-1));
 elements.visitNextWeek.addEventListener("click", () => selectVisitWeek(1));

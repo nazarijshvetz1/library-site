@@ -84,6 +84,23 @@ test("teacher proposal is idempotent and catalog snapshots are authoritative",as
   assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM audit_events WHERE entity_type='acquisition_request'").get().n,1);
 });
 
+test("teacher proposal history searches, sorts and hides without deleting the librarian record",async()=>{
+  const {sqlite,db}=context();
+  const manual=(title,requestedQuantity)=>({...createInput(),requestId:crypto.randomUUID(),sourceKind:"manual",materialId:null,title,author:"Автор",requestedQuantity});
+  const first=await store.createTeacherAcquisitionRequest(db,teacher,manual("Фізика для ліцею",2));
+  const second=await store.createTeacherAcquisitionRequest(db,teacher,manual("Геометрія для ліцею",7));
+  const sorted=await store.listTeacherAcquisitionRequests(db,teacher.teacherUserId,{sort:"quantity_desc"});
+  assert.deepEqual(sorted.map((request)=>request.id),[second.id,first.id]);
+  const searched=await store.listTeacherAcquisitionRequests(db,teacher.teacherUserId,{query:"Геометрія"});
+  assert.deepEqual(searched.map((request)=>request.id),[second.id]);
+  const hidden=await store.hideTeacherAcquisitionRequest(db,teacher,first.id,first.version,crypto.randomUUID());
+  assert.equal(hidden.hidden,true);
+  assert.deepEqual((await store.listTeacherAcquisitionRequests(db,teacher.teacherUserId)).map((request)=>request.id),[second.id]);
+  assert.equal((await store.listLibrarianAcquisitionRequests(db,{query:"Фізика"})).requests[0].id,first.id);
+  assert.ok(sqlite.prepare("SELECT teacher_hidden_at FROM acquisition_requests WHERE id=?").get(first.id).teacher_hidden_at);
+  assert.equal(sqlite.prepare("SELECT action FROM audit_events WHERE entity_id=? ORDER BY created_at DESC LIMIT 1").get(first.id).action,"acquisition_request.hide_from_teacher");
+});
+
 test("librarian workflow cannot receive stock without a posted receipt allocation",async()=>{
   const {sqlite,db}=context();let request=await store.createTeacherAcquisitionRequest(db,teacher,createInput());
   await assert.rejects(()=>store.applyLibrarianAcquisitionAction(db,librarian,request.id,{mutationId:crypto.randomUUID(),expectedVersion:request.version,action:"approve",approvedQuantity:0,orderedQuantity:null,targetMaterialId:null,receiptLineId:"",allocatedQuantity:null,message:""}),error=>error instanceof store.AcquisitionStoreError&&error.code==="invalid_quantity");
@@ -144,6 +161,8 @@ test("acquisition interfaces expose catalog metadata, optional student fields an
   const librarianCss=fs.readFileSync(path.join(root,"app/librarian/acquisitions/acquisition-workspace.module.css"),"utf8");
   assert.match(teacherUi,/thumbnailUrl/u);assert.match(teacherUi,/classFrom/u);assert.match(teacherUi,/\/api\/catalog-v2\/\$\{encodeURIComponent\(item\.id\)\}/u);
   assert.match(teacherUi,/setSourceUrl\(detail\.links\.find/u);assert.match(teacherUi,/required=\{!existingCatalogMaterial\}/u);
+  assert.match(teacherUi,/historyRequest = useRef\(0\)/u);assert.match(teacherUi,/requestId !== historyRequest\.current/u);
+  assert.match(teacherUi,/action: "hide"/u);assert.match(teacherUi,/Бібліотекар і далі бачитиме цю пропозицію/u);
   assert.match(studentUi,/publicationYear:year\.trim\(\)\?Number\(year\):null/u);assert.match(studentUi,/requestedQuantity:quantity\.trim\(\)\?Number\(quantity\):null/u);
   assert.match(studentUi,/Автор <em>\*<\/em>[\s\S]*?name="author"[\s\S]*?required minLength=\{2\}/u);assert.doesNotMatch(studentUi,/Покликання на книгу \*<input/u);
   assert.match(studentUi,/Потрібні лише 4 поля/u);

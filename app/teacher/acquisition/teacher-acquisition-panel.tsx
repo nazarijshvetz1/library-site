@@ -37,21 +37,38 @@ export default function TeacherAcquisitionPanel() {
   const [sourceUrl, setSourceUrl] = useState(""); const [subject, setSubject] = useState("");
   const [targetClass, setTargetClass] = useState(""); const [note, setNote] = useState("");
   const [requests, setRequests] = useState<Acquisition[]>([]);
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [committedHistoryQuery, setCommittedHistoryQuery] = useState("");
+  const [historyStatus, setHistoryStatus] = useState("all");
+  const [historySort, setHistorySort] = useState("date_desc");
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [notice, setNotice] = useState(""); const [error, setError] = useState("");
   const detailRequest = useRef(0);
+  const historyRequest = useRef(0);
 
   const load = useCallback(async () => {
+    const requestId = ++historyRequest.current;
     setLoading(true); setError("");
     try {
-      const response = await fetch("/api/teacher/acquisition-requests", { cache: "no-store" });
+      const params = new URLSearchParams({ status: historyStatus, sort: historySort });
+      if (committedHistoryQuery) params.set("q", committedHistoryQuery);
+      const response = await fetch(`/api/teacher/acquisition-requests?${params}`, { cache: "no-store" });
       const body = await response.json() as { success?: boolean; requests?: Acquisition[]; error?: string };
       if (!response.ok) throw new Error(body.error || "Не вдалося завантажити пропозиції.");
+      if (requestId !== historyRequest.current) return;
       setRequests(body.requests ?? []);
-    } catch (loadError) { setError(message(loadError)); } finally { setLoading(false); }
-  }, []);
+    } catch (loadError) {
+      if (requestId === historyRequest.current) setError(message(loadError));
+    } finally {
+      if (requestId === historyRequest.current) setLoading(false);
+    }
+  }, [committedHistoryQuery, historySort, historyStatus]);
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setCommittedHistoryQuery(historyQuery.trim()), 280);
+    return () => window.clearTimeout(timer);
+  }, [historyQuery]);
 
   useEffect(() => {
     if (sourceKind !== "catalog" || selected || query.trim().length < 2) {
@@ -137,6 +154,21 @@ export default function TeacherAcquisitionPanel() {
     } catch (cancelError) { setError(message(cancelError)); } finally { setBusy(false); }
   }
 
+  async function hide(record: Acquisition) {
+    if (!window.confirm(`Прибрати «${record.title}» лише з вашої історії? Бібліотекар і далі бачитиме цю пропозицію.`)) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(`/api/teacher/acquisition-requests/${encodeURIComponent(record.id)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "hide", mutationId: crypto.randomUUID(), expectedVersion: record.version }),
+      });
+      const body = await response.json() as JsonError;
+      if (!response.ok) throw new Error(body.error || "Не вдалося прибрати пропозицію з історії.");
+      setRequests((current) => current.filter((item) => item.id !== record.id));
+      setNotice("Пропозицію прибрано з вашої історії. У бібліотекаря вона збережена.");
+    } catch (hideError) { setError(message(hideError)); } finally { setBusy(false); }
+  }
+
   return (
     <section className={styles.workspace} aria-label="Комплектування фонду">
       {error ? <div className={styles.error} role="alert">{error}</div> : null}
@@ -173,14 +205,19 @@ export default function TeacherAcquisitionPanel() {
         </form>
         <section className={styles.card} aria-labelledby="my-acquisition-title">
           <div className={styles.heading}><div><span>Лише для вас</span><h3 id="my-acquisition-title">Мої пропозиції</h3></div><button type="button" onClick={() => void load()} disabled={loading} aria-busy={loading}><SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}</button></div>
+          <div className={styles.historyToolbar}>
+            <label className={styles.historySearch}>Пошук<input type="search" value={historyQuery} onChange={(event) => setHistoryQuery(event.currentTarget.value)} placeholder="Назва, автор або номер" /></label>
+            <label>Статус<select value={historyStatus} onChange={(event) => setHistoryStatus(event.currentTarget.value)}><option value="all">Усі</option>{Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            <label>Сортування<select value={historySort} onChange={(event) => setHistorySort(event.currentTarget.value)}><option value="date_desc">Спочатку нові</option><option value="date_asc">Спочатку давні</option><option value="title_asc">Назва А–Я</option><option value="title_desc">Назва Я–А</option><option value="quantity_desc">Найбільша кількість</option></select></label>
+          </div>
           {loading ? <p className={styles.empty}>Оновлюємо історію…</p> : requests.length ? <div className={styles.history}>{requests.map((record) => <article key={record.id}>
-            <header><span className={styles.status}>{STATUS_LABELS[record.status] ?? record.status}</span><small>{record.publicNumber}</small></header>
+            <header><span className={styles.status}>{STATUS_LABELS[record.status] ?? record.status}</span><small>{record.publicNumber} · {new Intl.DateTimeFormat("uk-UA", { day: "2-digit", month: "2-digit", year: "2-digit" }).format(new Date(record.updatedAt))}</small></header>
             <h4>{record.title}</h4><p>{record.author} · {record.publicationYear} · {record.requestedQuantity} прим.</p>
             {record.clarificationMessage ? <p className={styles.attention}><strong>Уточнення:</strong> {record.clarificationMessage}</p> : null}
             {record.librarianNote && !record.clarificationMessage ? <p>{record.librarianNote}</p> : null}
             {record.rejectionReason ? <p className={styles.attention}>{record.rejectionReason}</p> : null}
             <div className={styles.progress}><span>погоджено {record.approvedQuantity ?? 0}</span><span>замовлено {record.orderedQuantity}</span><span>отримано {record.receivedQuantity}</span></div>
-            {["submitted","in_review","clarification","approved","planned"].includes(record.status) ? <button type="button" className={styles.danger} disabled={busy} onClick={() => void cancel(record)}>Скасувати</button> : null}
+            <div className={styles.historyActions}>{["submitted","in_review","clarification","approved","planned"].includes(record.status) ? <button type="button" className={styles.danger} disabled={busy} onClick={() => void cancel(record)}>Скасувати</button> : null}<button type="button" className={styles.hideAction} disabled={busy} onClick={() => void hide(record)}><SiteIcon name="delete" size={16} /> Прибрати</button></div>
           </article>)}</div> : <p className={styles.empty}>Ви ще не надсилали пропозицій до комплектування.</p>}
         </section>
       </div>

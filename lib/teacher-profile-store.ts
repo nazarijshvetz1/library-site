@@ -1,6 +1,7 @@
 import type { VisitTeacherIdentity } from "./visit-teacher-auth.ts";
 import { VisitScheduleError, type VisitD1Database } from "./visit-schedule-store.ts";
 import type { CoverBucket } from "./cover-storage.ts";
+import { normalizeTeacherName, teacherSortName } from "./teacher-registry-validation.ts";
 
 type ProfileRow = {
   teacher_user_id: string;
@@ -84,6 +85,7 @@ export type TeacherOwnProfile = {
 export type TeacherProfileUpdateInput = {
   requestId: string;
   expectedVersion: number;
+  fullName?: string;
   subjectPosition: string;
   primaryLocationId: string | null;
 };
@@ -174,7 +176,19 @@ export async function updateTeacherOwnProfile(
       throw new VisitScheduleError("teacher_profile_location_invalid", 400, "Оберіть активний кабінет зі списку.");
     }
   }
-  if (current.subject_position === input.subjectPosition
+  const fullName = input.fullName === undefined ? current.full_name : normalizeTeacherName(input.fullName);
+  if (fullName.length < 3 || fullName.length > 120 || fullName.split(/\s+/u).length < 2) {
+    throw new VisitScheduleError("teacher_profile_name_invalid", 400, "Укажіть прізвище та ім’я (до 120 символів).");
+  }
+  if (teacherSortName(fullName) !== teacherSortName(current.full_name)) {
+    const duplicate = await db.prepare(`SELECT id FROM users WHERE sort_name=? AND id<>? LIMIT 1`)
+      .bind(teacherSortName(fullName), teacher.teacherUserId).first<{ id: string }>();
+    if (duplicate) {
+      throw new VisitScheduleError("teacher_profile_name_duplicate", 409, "Учитель із таким ПІБ уже є у базі. Зверніться до бібліотекаря.");
+    }
+  }
+  if (current.full_name === fullName
+    && current.subject_position === input.subjectPosition
     && current.primary_location_id === input.primaryLocationId) {
     throw new VisitScheduleError("teacher_profile_no_changes", 400, "Нові дані не відрізняються від поточних.");
   }
@@ -185,11 +199,13 @@ export async function updateTeacherOwnProfile(
     updatedAt: now,
   };
   const before = {
+    fullName: current.full_name,
     subjectPosition: current.subject_position,
     primaryLocationId: current.primary_location_id,
     version: current.version,
   };
   const after = {
+    fullName,
     subjectPosition: input.subjectPosition,
     primaryLocationId: input.primaryLocationId,
     version: result.profileVersion,
@@ -220,6 +236,23 @@ export async function updateTeacherOwnProfile(
         teacher.teacherUserId,
         teacher.fullName,
         input.expectedVersion,
+      ),
+    db.prepare(`UPDATE users SET full_name=?,sort_name=?,updated_at=?
+      WHERE id=? AND full_name=? AND status='active'
+        AND EXISTS(SELECT 1 FROM teacher_profiles profile
+          WHERE profile.teacher_user_id=users.id AND profile.version=? AND profile.closed_at IS NULL)
+        AND EXISTS(SELECT 1 FROM mutation_commands command
+          WHERE command.id=? AND command.actor_user_id=users.id
+            AND command.status='processing' AND command.request_hash=?)`)
+      .bind(
+        fullName,
+        teacherSortName(fullName),
+        now,
+        teacher.teacherUserId,
+        current.full_name,
+        input.expectedVersion,
+        input.requestId,
+        requestHash,
       ),
     db.prepare(`UPDATE teacher_profiles
       SET subject_position=?,primary_location_id=?,version=version+1,

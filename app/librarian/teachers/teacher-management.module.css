@@ -294,3 +294,90 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 @media (prefers-reduced-motion: reduce) {
   .shell * { scroll-behavior: auto !important; }
 }
+
+/* Compact directory and always-visible teacher inspector. */
+.shell { background: var(--system-canvas); }
+.page { width: min(1500px,calc(100% - 28px)); padding: 16px 0 44px; }
+.intro { margin-bottom: 12px; align-items: center; }
+.intro h1 { margin: 3px 0 5px; font-size: clamp(24px,2.7vw,31px); line-height: 1.08; }
+.intro > div > p:last-child { font-size: 11px; line-height: 1.45; }
+.refreshButton,
+.primaryButton,
+.secondaryLink,
+.loadMore,
+.profileActions > *,
+.formActions button { min-height: 34px; padding: 0 10px; border-radius: var(--system-radius-sm); font-size: 10px; }
+.tabs { margin-bottom: 10px; padding: 3px; border-radius: var(--system-radius-md); }
+.tabs button { min-height: 34px; padding: 0 10px; border-radius: 7px; font-size: 10px; }
+.overviewStack,
+.directoryStack,
+.ordersStack { gap: 10px; }
+.overviewGrid { gap: 10px; }
+.card { padding: 14px; border-radius: var(--system-radius-lg); box-shadow: var(--system-shadow-sm); }
+.cardHeading { margin-bottom: 10px; }
+.cardHeading h2,
+.formHeading h3 { font-size: 19px; }
+.metricGrid { gap: 7px; }
+.metricGrid button { min-height: 78px; padding: 10px; border-radius: var(--system-radius-md); }
+.metricGrid strong { font-size: 27px; }
+.attentionList li { min-height: 52px; padding: 8px; border-radius: var(--system-radius-sm); }
+.curatorQueue .cardHeading > button,
+.curatorRequestList article button { min-height: 34px; padding: 0 9px; border-radius: var(--system-radius-sm); font-size: 10px; }
+.curatorRequestList { gap: 5px; }
+.curatorRequestList article { padding: 8px 9px; border-radius: var(--system-radius-sm); }
+.filters { margin-bottom: 10px; grid-template-columns: minmax(260px,1fr) 160px; gap: 7px; }
+.filters label,
+.profileForm label { gap: 4px; font-size: 9px; }
+.filters input,
+.filters select,
+.profileForm input,
+.profileForm select,
+.profileForm textarea { min-height: 36px; padding: 6px 8px; border-radius: var(--system-radius-sm); font-size: 11px; }
+.directoryLayout { grid-template-columns: minmax(300px,.68fr) minmax(540px,1.32fr); gap: 10px; }
+.teacherList { gap: 4px; }
+.teacherList > button:not(.loadMore) { min-height: 56px; padding: 7px; grid-template-columns: 36px minmax(0,1fr) auto; gap: 7px; border-radius: var(--system-radius-sm); }
+.avatar { width: 36px; height: 36px; }
+.teacherIdentity { gap: 2px; }
+.teacherIdentity strong { font-size: 11px; }
+.teacherIdentity small { font-size: 8px; }
+.activeBadge,
+.closedBadge,
+.missingBadge,
+.warningBadge { padding: 3px 5px; font-size: 8px; }
+.detailRegion { top: 72px; max-height: calc(100dvh - 84px); overflow-y: auto; overscroll-behavior: contain; }
+.detailCard { border-radius: var(--system-radius-md); }
+.detailCard > header { position: relative; padding: 11px; gap: 9px; }
+.largeAvatar { width: 46px; height: 46px; }
+.detailCard > header h3 { font-size: 17px; }
+.detailCard > header small { font-size: 9px; }
+.detailClose { width: 32px; height: 32px; margin-left: auto; display: grid; place-items: center; flex: 0 0 auto; border: 1px solid var(--system-line); border-radius: var(--system-radius-sm); color: var(--green-900); background: #fff; cursor: pointer; }
+.detailTabs { padding: 3px; }
+.detailTabs button { min-height: 32px; padding: 0 7px; }
+.profilePane { padding: 10px; }
+.profilePane dl { gap: 6px; }
+.profilePane dl div { min-height: 48px; padding: 7px; border-radius: 7px; }
+.profilePane dd { margin-top: 3px; font-size: 10px; line-height: 1.35; }
+.profileActions,
+.formActions { margin-top: 9px; gap: 5px; }
+.recordList { padding: 8px; gap: 4px; }
+.recordList article,
+.visitList article { min-height: 48px; padding: 7px 8px; border-radius: 7px; }
+.profileForm { margin-bottom: 10px; padding: 10px; border-radius: var(--system-radius-md); }
+.bulkOperations { padding: 12px; border: 1px solid var(--system-line); border-radius: var(--system-radius-lg); background: #eef1ed; }
+.bulkOperations > div { margin-bottom: 8px; }
+.bulkOperations span { color: var(--green-700); font-size: 8px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
+.bulkOperations h2 { margin: 3px 0; color: var(--green-950); font: 650 18px/1.1 Georgia,serif; }
+.bulkOperations p { margin: 0; color: var(--muted); font-size: 9px; }
+
+@media (max-width: 980px) {
+  .directoryLayout { grid-template-columns: 1fr; }
+  .detailRegion:has(.detailCard) { position: fixed; z-index: 95; inset: 68px 8px 76px; max-height: none; padding: 5px; overflow-y: auto; border-radius: var(--system-radius-lg); background: #f3f5ef; box-shadow: 0 24px 80px rgba(10,31,20,.3); }
+}
+
+@media (max-width: 700px) {
+  .page { width: min(100% - 18px,1240px); padding-top: 10px; }
+  .intro h1 { font-size: 24px; }
+  .card { padding: 11px; }
+  .teacherList { grid-template-columns: 1fr; }
+  .filters { grid-template-columns: 1fr; }
+}

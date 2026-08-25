@@ -634,3 +634,97 @@
   .submit { transition: none; }
   .referenceStatus span { animation-duration: 1.5s; }
 }
+
+/* Compact form-first system layout. */
+.shell { background: var(--system-canvas); }
+.header {
+  min-height: 60px;
+  padding: 6px clamp(16px,4vw,48px);
+  border-color: var(--system-line);
+  background: rgba(255,255,255,.96);
+}
+.header::after { display: none; }
+.brand img { width: 40px; height: 40px; box-shadow: var(--system-shadow-sm); }
+.brand > span { gap: 2px; }
+.brand strong { font-size: 16px; }
+.brand small { font-size: 9px; }
+.header nav { padding: 2px; border-radius: var(--system-radius-sm); }
+.header nav a { min-height: 36px; padding: 0 11px; border-radius: 6px; font-size: 10px; }
+.main {
+  width: min(1440px,calc(100% - 32px));
+  margin: 18px auto 28px;
+  grid-template-columns: minmax(280px,.5fr) minmax(0,1.5fr);
+  border-radius: var(--system-radius-lg);
+  box-shadow: var(--system-shadow-sm);
+}
+.story { min-height: 0; padding: 28px 24px; }
+.story::before { width: 360px; height: 360px; }
+.story::after { width: 300px; height: 300px; }
+.eyebrow { margin-bottom: 12px; font-size: 9px; letter-spacing: 1.2px; }
+.eyebrow span { width: 22px; }
+.story h1 { font-size: clamp(30px,3.2vw,42px); line-height: 1.02; letter-spacing: -.035em; }
+.lead { margin-top: 13px; font-size: 12px; line-height: 1.5; }
+.steps { margin-top: 20px; gap: 0; }
+.steps li { min-height: 0; padding: 10px 0; grid-template-columns: 32px 1fr; gap: 9px; }
+.steps li > span { font-size: 9px; }
+.steps strong { font-size: 13px; }
+.steps p { font-size: 10px; line-height: 1.4; }
+.assurance { margin-top: 18px; padding: 11px; border-radius: var(--system-radius-sm); }
+.assurance > span { width: 32px; height: 32px; border-radius: var(--system-radius-xs); }
+.assurance p { font-size: 10px; }
+.assurance strong { font-size: 11px; }
+.formPanel { padding: 24px clamp(20px,3vw,40px); background-size: 24px 24px; }
+.formHeading { margin-bottom: 16px; }
+.kicker { font-size: 9px; }
+.formHeading h2 { margin-top: 5px; font-size: clamp(25px,2.7vw,34px); letter-spacing: -.025em; }
+.formHeading > p:last-child { margin-top: 6px; font-size: 11px; }
+.referenceStatus,
+.referenceError,
+.error,
+.success { margin-bottom: 12px; padding: 9px 11px; border-radius: var(--system-radius-sm); }
+.academicYear { min-height: 42px; margin-bottom: 14px; padding: 8px 11px; border-radius: var(--system-radius-sm); }
+.academicYear strong { font-size: 14px; }
+.formPanel form { gap: 18px; }
+.formPanel fieldset { gap: 12px; }
+.formPanel legend { margin-bottom: 10px; font-size: 16px; }
+.formPanel legend span { font-size: 9px; }
+.fields { gap: 10px 12px; }
+.fields label { gap: 5px; font-size: 11px; }
+.fields small { font-size: 9px; }
+.fields input,
+.fields select,
+.fields textarea { min-height: 40px; padding: 8px 10px; border-radius: var(--system-radius-sm); font-size: 13px; }
+.fields textarea { min-height: 72px; }
+.optional { padding: 8px 9px; border-radius: var(--system-radius-sm); }
+.submit { min-height: 42px; margin-top: 0; border-radius: var(--system-radius-sm); box-shadow: none; }
+.privacy { margin-top: 10px; font-size: 9px; }
+.footer { width: min(1440px,calc(100% - 32px)); min-height: 48px; padding: 10px 0 18px; }
+
+@media (max-width: 900px) {
+  .main { grid-template-columns: 1fr; }
+  .formPanel { order: 1; }
+  .story { order: 2; }
+  .steps { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; border: 0; }
+  .steps li { padding: 10px; grid-template-columns: 1fr; border: 1px solid rgba(255,255,255,.12); border-radius: var(--system-radius-sm); }
+}
+
+@media (max-width: 620px) {
+  .header { min-height: 58px; padding: 6px 10px; }
+  .brand img { width: 38px; height: 38px; }
+  .brand small { display: block; }
+  .main { width: calc(100% - 16px); margin: 8px auto 18px; border-radius: var(--system-radius-lg); }
+  .formPanel { padding: 18px 14px; }
+  .formHeading h2 { font-size: 25px; }
+  .fields { grid-template-columns: 1fr; gap: 10px; }
+  .wide { grid-column: auto; }
+  .fields input,
+  .fields select,
+  .fields textarea { min-height: 44px; font-size: 16px; }
+  .submit { min-height: 48px; }
+  .story { padding: 20px 16px; }
+  .story h1 { font-size: 28px; }
+  .steps { grid-template-columns: 1fr; margin-top: 14px; }
+  .steps li { grid-template-columns: 30px 1fr; }
+  .assurance { margin-top: 12px; }
+  .footer { width: calc(100% - 20px); padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+}

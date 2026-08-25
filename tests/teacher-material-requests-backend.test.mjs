@@ -221,6 +221,7 @@ test("teacher profile self-update is optimistic, audited and idempotent", async 
   const input = {
     requestId,
     expectedVersion: 1,
+    fullName: "Шевченко Олена Вікторівна",
     subjectPosition: "Учитель математики",
     primaryLocationId: "LOC-205",
   };
@@ -230,6 +231,10 @@ test("teacher profile self-update is optimistic, audited and idempotent", async 
   assert.deepEqual(replay, updated);
   assert.equal(updated.teacherUserId, "USR-T1");
   assert.equal(updated.profileVersion, 2);
+  assert.deepEqual(
+    { ...context.sqlite.prepare("SELECT full_name,sort_name FROM users WHERE id='USR-T1'").get() },
+    { full_name: "Шевченко Олена Вікторівна", sort_name: "шевченко олена вікторівна" },
+  );
   assert.deepEqual(
     { ...context.sqlite.prepare(`SELECT subject_position,primary_location_id,version,
       last_mutation_request_id,updated_by_user_id FROM teacher_profiles WHERE teacher_user_id='USR-T1'`).get() },
@@ -973,8 +978,8 @@ test("teacher requests, librarian queue, and notifications paginate without gaps
     requestContext.sqlite.prepare(`INSERT INTO material_request_items (
       id,request_id,material_id,title_snapshot,author_snapshot,requested_quantity,
       approved_quantity,fulfilled_quantity,sort_order,created_at,updated_at
-    ) VALUES (?,?,'CAT-0001','Алгебра 7 клас','Автор',1,NULL,0,?, ?, ?)`)
-      .run(`MRI-PAGE-${index}`, requestId, index, now, now);
+    ) VALUES (?,?,'CAT-0001',?,'Автор',?,NULL,0,?, ?, ?)`)
+      .run(`MRI-PAGE-${index}`, requestId, `Назва ${index}`, index + 1, index, now, now);
   }
   const teacherFirst = await store.listTeacherMaterialRequestPage(
     requestContext.db, "USR-T1", { limit: 2 },
@@ -990,6 +995,17 @@ test("teacher requests, librarian queue, and notifications paginate without gaps
   assert.equal(new Set(teacherIds).size, 5);
   assert.equal(teacherThird.page.hasMore, false);
   assert.equal(teacherThird.page.nextCursor, null);
+  const teacherQuantitySort = await store.listTeacherMaterialRequestPage(
+    requestContext.db, "USR-T1", { limit: 2, sort: "quantity_desc" },
+  );
+  assert.deepEqual(
+    teacherQuantitySort.requests.map((request) => request.items[0].requestedQuantity),
+    [5, 4],
+  );
+  const teacherSearch = await store.listTeacherMaterialRequestPage(
+    requestContext.db, "USR-T1", { query: "Назва 4" },
+  );
+  assert.deepEqual(teacherSearch.requests.map((request) => request.id), ["MRQ-PAGE-04"]);
 
   const librarianFirst = await store.listLibrarianMaterialRequests(requestContext.db, { limit: 2 });
   const librarianSecond = await store.listLibrarianMaterialRequests(requestContext.db, {

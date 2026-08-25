@@ -1,0 +1,1 @@
+ALTER TABLE `acquisition_requests` ADD `teacher_hidden_at` text;

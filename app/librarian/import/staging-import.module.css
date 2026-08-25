@@ -306,3 +306,48 @@
   .reportActions { flex-direction: column; }
   .reportActions button { width: 100%; }
 }
+
+/* Dense import workspace; data and safeguards stay unchanged. */
+.shell { padding: 16px 14px 44px; background: var(--system-canvas); }
+.card { width: min(1180px, 100%); padding: 16px; border-radius: var(--system-radius-lg); box-shadow: var(--system-shadow-sm); }
+.heading { gap: 8px; }
+.heading h1 { font-size: clamp(28px, 4vw, 31px); line-height: 1.05; }
+.heading p { font-size: 11px; }
+.warning,
+.productionWarning,
+.message { margin-top: 10px; padding: 10px; border-radius: var(--system-radius-sm); }
+.identity { margin: 10px 0; gap: 6px; }
+.identity > * { padding: 8px; border-radius: var(--system-radius-sm); }
+.uploadBox,
+.resetBox,
+.templateBox,
+.confirmBox,
+.preview,
+.issues,
+.report { margin-top: 9px; padding: 11px; border-radius: var(--system-radius-md); }
+.steps { gap: 6px; margin-top: 10px; }
+.steps > * { min-height: 54px; padding: 9px; border-radius: var(--system-radius-sm); }
+.templateBox a,
+.reportActions button { min-height: 36px; padding: 7px 10px; border-radius: var(--system-radius-sm); }
+.previewHeading,
+.issues > div:first-child { gap: 10px; }
+.previewHeading h2,
+.issues h2 { font-size: 20px; }
+.metrics { gap: 6px; margin: 10px 0; }
+.metrics div { padding: 8px; border-radius: var(--system-radius-sm); }
+.metrics dd { font-size: 20px; }
+.sheetTable { font-size: 11px; }
+.sheetTable th,
+.sheetTable td { padding: 7px 8px; }
+.issues ul { gap: 6px; margin-top: 9px; }
+.issues li { padding: 8px 10px; border-radius: var(--system-radius-sm); }
+.confirmBox label { padding: 9px; border-radius: var(--system-radius-sm); }
+
+@media (max-width: 760px) {
+  .shell { padding: 10px 9px 72px; }
+  .card { padding: 10px; }
+  .templateBox a,
+  .reportActions button,
+  .uploadBox button,
+  .resetBox button { min-height: 44px; }
+}

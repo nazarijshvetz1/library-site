@@ -2809,3 +2809,86 @@
 @media (prefers-reduced-motion: reduce) {
   .loading i { animation: none; }
 }
+
+/* Unified compact workspace. The global librarian shell owns the primary rail. */
+.shell { min-height: calc(100dvh - 60px); background: var(--system-canvas); }
+.body { max-width: none; min-height: auto; }
+.workspace { padding: 16px 18px 44px; }
+.titleRow { margin-bottom: 12px; align-items: center; gap: 14px; }
+.titleRow h1 { margin: 3px 0; font-size: clamp(24px,2.5vw,30px); line-height: 1.08; letter-spacing: -.02em; }
+.titleRow > div > p:last-child { font-size: 10px; }
+.refresh { min-height: 34px; padding: 0 10px; border-radius: var(--system-radius-sm); }
+.dashboard { gap: 10px; }
+.dashboardHero { padding: 16px; grid-template-columns: minmax(280px,.82fr) minmax(360px,1.18fr); gap: 16px; border-radius: var(--system-radius-lg); box-shadow: var(--system-shadow-sm); }
+.dashboardHeroCopy h2 { margin: 7px 0 5px; font-size: clamp(22px,2.7vw,29px); }
+.dashboardHeroCopy p { font-size: 11px; }
+.dashboardStatusOn,
+.dashboardStatusOff { padding: 5px 8px; font-size: 9px; }
+.dashboardSearch { padding: 10px; gap: 7px; border-radius: var(--system-radius-md); }
+.dashboardSearch label { gap: 4px; font-size: 10px; }
+.dashboardSearch input { min-height: 38px; padding: 0 10px; border-radius: var(--system-radius-sm); font-size: 12px; }
+.dashboardSearch > button { min-height: 36px; border-radius: var(--system-radius-sm); font-size: 10px; }
+.dashboardMetrics { gap: 7px; }
+.dashboardMetrics article { min-height: 74px; padding: 10px; border-radius: var(--system-radius-md); box-shadow: var(--system-shadow-sm); }
+.dashboardMetrics strong { font-size: 26px; }
+.dashboardMetrics span { font-size: 9px; }
+.dashboardSection { padding: 13px; border-radius: var(--system-radius-lg); box-shadow: var(--system-shadow-sm); }
+.dashboardSectionHeading { margin-bottom: 9px; }
+.dashboardSectionHeading h2 { font-size: 19px; }
+.workGrid { grid-template-columns: minmax(300px,.62fr) minmax(470px,1.38fr); gap: 10px; }
+.workGridCreate { gap: 10px; }
+.searchPane,
+.actionPane { border-radius: var(--system-radius-lg); box-shadow: var(--system-shadow-sm); }
+.searchPane { padding: 12px; }
+.actionPane { min-height: 520px; padding: 14px; }
+.paneHeading h2,
+.formHeading h2 { font-size: 18px; }
+.searchCombobox { margin-top: 9px; }
+.searchField input { height: 38px; border-radius: var(--system-radius-sm); }
+.formGrid { gap: 8px; }
+.formGrid :is(input,select,textarea) { min-height: 38px; border-radius: var(--system-radius-sm); }
+.message { margin: 8px 0; padding: 8px 10px; border-radius: var(--system-radius-sm); }
+
+@media (min-width: 1401px) {
+  .body { display: block; }
+  .sidebar {
+    position: sticky;
+    z-index: 18;
+    top: 60px;
+    padding: 6px 12px;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--system-line);
+    background: rgba(246,247,244,.96);
+    backdrop-filter: blur(12px);
+  }
+  .sidebarLabel,
+  .toolGroup h2,
+  .tool small { display: none; }
+  .toolNav { width: max-content; min-width: 100%; display: flex; gap: 3px; }
+  .toolGroup { padding: 0 0 0 4px; display: flex; gap: 3px; border-top: 0; border-left: 1px solid var(--system-line); }
+  .tool,
+  .toolActive { width: auto; min-height: 36px; padding: 3px 7px; grid-template-columns: 26px auto; gap: 6px; border-radius: var(--system-radius-sm); white-space: nowrap; }
+  .tool > span:first-child,
+  .toolActive > span:first-child { width: 26px; height: 26px; border-radius: 7px; font-size: 15px; }
+  .tool strong,
+  .toolActive strong { font-size: 10px; }
+}
+
+@media (max-width: 1400px) {
+  .workspace { padding-top: 12px; }
+  .mobileTools { position: sticky; z-index: 17; top: 60px; margin: -12px -18px 12px; padding: 7px 18px; grid-template-columns: auto minmax(220px,420px); align-items: center; gap: 8px; border-bottom: 1px solid var(--system-line); background: rgba(246,247,244,.96); backdrop-filter: blur(12px); font-size: 9px; }
+  .mobileTools select { min-height: 36px; border-radius: var(--system-radius-sm); font-size: 11px; }
+}
+
+@media (max-width: 720px) {
+  .workspace { padding: 10px 9px 70px; }
+  .mobileTools { top: 60px; margin: -10px -9px 10px; padding: 6px 9px; grid-template-columns: 1fr; }
+  .mobileTools > span { display: none; }
+  .titleRow h1 { font-size: 24px; }
+  .dashboardHero { grid-template-columns: 1fr; padding: 12px; }
+  .dashboardMetrics article { min-height: 68px; padding: 8px; }
+  .searchPane,
+  .actionPane { border-radius: var(--system-radius-md); }
+  .actionPane { padding: 11px; }
+}

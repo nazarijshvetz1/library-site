@@ -11,6 +11,7 @@ import {
   createTeacherMaterialRequest,
   listTeacherMaterialRequestPage,
   type MaterialRequestStatus,
+  type TeacherMaterialRequestSort,
   type TeacherMaterialRequestDatabase,
 } from "@/lib/teacher-material-request-store";
 import { validateMaterialRequestCreateInput } from "@/lib/teacher-material-request-validation";
@@ -32,6 +33,14 @@ const STATUSES = new Set<MaterialRequestStatus | "all">([
   "cancelled",
 ]);
 
+const SORTS = new Set<TeacherMaterialRequestSort>([
+  "date_desc",
+  "date_asc",
+  "title_asc",
+  "title_desc",
+  "quantity_desc",
+]);
+
 export async function GET(request: Request): Promise<Response> {
   const gate = teacherPortalGate(); if (gate) return gate;
   const db = env.DB as unknown as TeacherMaterialRequestDatabase & VisitD1Database;
@@ -39,15 +48,19 @@ export async function GET(request: Request): Promise<Response> {
     const teacher = await requireVisitTeacherSession(db, request);
     const url = new URL(request.url);
     const status = (url.searchParams.get("status") ?? "all") as MaterialRequestStatus | "all";
+    const sort = (url.searchParams.get("sort") ?? "date_desc") as TeacherMaterialRequestSort;
+    const query = (url.searchParams.get("q") ?? "").trim();
     const limit = parseBoundedLimit(url.searchParams.get("limit"), 50, 100);
     const cursor = url.searchParams.get("cursor");
-    if (!STATUSES.has(status) || limit === null) {
-      return materialRequestError(400, "validation_failed", "Некоректний статус або ліміт.");
+    if (!STATUSES.has(status) || !SORTS.has(sort) || query.length > 80 || limit === null) {
+      return materialRequestError(400, "validation_failed", "Некоректні параметри пошуку, сортування або сторінки.");
     }
     const result = await listTeacherMaterialRequestPage(db, teacher.teacherUserId, {
       status,
       limit,
       cursor,
+      query,
+      sort,
     });
     return materialRequestJson({
       schemaVersion: 1,
