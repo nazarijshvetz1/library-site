@@ -27,6 +27,7 @@ const migrationFiles = [
   "drizzle/0020_pretty_squadron_sinister.sql",
   "drizzle/0021_optional_student_acquisition_metadata.sql",
   "drizzle/0022_teacher_curator_change_requests.sql",
+  "drizzle/0023_guest_public_teacher_name_consent.sql",
 ];
 
 async function migratedDatabase() {
@@ -511,6 +512,11 @@ test("core migration extends the existing draft database without recreating it",
       .some((column) => column.name === "code_expires_at"),
     true,
   );
+  const publicTeacherNameConsent = database.prepare("PRAGMA table_info('visit_bookings')").all()
+    .find((column) => column.name === "public_teacher_name_consent");
+  assert.ok(publicTeacherNameConsent, "guest-name publication requires an explicit consent column");
+  assert.equal(publicTeacherNameConsent.notnull, 1);
+  assert.equal(publicTeacherNameConsent.dflt_value, "0");
   const notificationDeletedAt = database.prepare("PRAGMA table_info('portal_notifications')").all()
     .find((column) => column.name === "deleted_at");
   assert.ok(notificationDeletedAt, "portal notification soft-delete requires deleted_at");

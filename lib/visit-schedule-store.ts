@@ -42,6 +42,7 @@ export type PublicVisitBooking = {
   endTime: string;
   displayName: string;
   identityVerified: boolean;
+  directoryMatched: boolean;
 };
 export type VisitClassYear = { id: string; label: string; version: number };
 
@@ -158,10 +159,14 @@ export async function readVisitSchedule(
       ORDER BY visit_date, start_time, id LIMIT 3001
     `).bind(range.from, range.to).all<ClosureRow>(),
     db.prepare(`
-      SELECT owner_kind, surname, visit_date, start_time, end_time, public_display_consent
-      FROM visit_bookings
-      WHERE visit_date BETWEEN ? AND ? AND status = 'active'
-      ORDER BY visit_date, start_time, id LIMIT 3001
+      SELECT b.owner_kind, b.surname, b.visit_date, b.start_time, b.end_time,
+             b.public_display_consent, b.public_teacher_name_consent,
+             CASE WHEN u.status='active' AND p.closed_at IS NULL THEN u.full_name ELSE NULL END AS selected_teacher_name
+      FROM visit_bookings b
+      LEFT JOIN users u ON u.id=b.selected_teacher_user_id
+      LEFT JOIN teacher_profiles p ON p.teacher_user_id=u.id
+      WHERE b.visit_date BETWEEN ? AND ? AND b.status = 'active'
+      ORDER BY b.visit_date, b.start_time, b.id LIMIT 3001
     `).bind(range.from, range.to).all<{
       owner_kind: "teacher" | "guest" | "legacy";
       surname: string;
@@ -169,6 +174,8 @@ export async function readVisitSchedule(
       start_time: string;
       end_time: string;
       public_display_consent: number;
+      public_teacher_name_consent: number;
+      selected_teacher_name: string | null;
     }>(),
   ]);
   assertScheduleBound(closureRows.results, "закриттів");
@@ -992,14 +999,25 @@ function publicVisitBooking(row: {
   visit_date: string;
   start_time: string;
   end_time: string;
+  public_teacher_name_consent: number;
+  selected_teacher_name: string | null;
 }): PublicVisitBooking {
   const identityVerified = row.owner_kind === "teacher";
+  const directoryMatched = identityVerified
+    || (row.owner_kind === "guest"
+      && Number(row.public_teacher_name_consent) === 1
+      && Boolean(row.selected_teacher_name));
   return {
     date: row.visit_date,
     startTime: row.start_time,
     endTime: row.end_time,
-    displayName: identityVerified ? row.surname : "Непідтверджений гостьовий запис",
+    displayName: identityVerified
+      ? row.surname
+      : directoryMatched
+        ? row.selected_teacher_name!
+        : "Непідтверджений гостьовий запис",
     identityVerified,
+    directoryMatched,
   };
 }
 

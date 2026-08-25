@@ -38,6 +38,7 @@ export type VisitGuestTeacher = {
 
 export type VisitGuestBooking = Omit<VisitBooking, "surname"> & {
   teacher: VisitGuestTeacher;
+  publicTeacherNameConsent: boolean;
 };
 
 export type GuestVisitsEnvelope = Omit<TeacherVisitsEnvelope, "bookingEnabled" | "bookings"> & {
@@ -76,7 +77,29 @@ export type VisitPublicBooking = {
   endTime: string;
   displayName: string;
   identityVerified: boolean;
+  directoryMatched: boolean;
 };
+
+export const UNVERIFIED_GUEST_VISIT_LABEL = "Непідтверджений гостьовий запис";
+
+export function publicVisitDisplayLabel(
+  booking: Pick<VisitPublicBooking, "displayName" | "identityVerified" | "directoryMatched">,
+): string {
+  const displayName = typeof booking.displayName === "string"
+    ? booking.displayName.normalize("NFKC").trim().replace(/\s+/gu, " ")
+    : "";
+  const hasControl = Array.from(displayName).some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || code === 127;
+  });
+  const safeName = displayName.length >= 2 && displayName.length <= 120
+    && !hasControl;
+  if (booking.identityVerified === true) return safeName ? displayName : "Заброньовано";
+  if (booking.identityVerified === false && booking.directoryMatched === true && safeName) {
+    return `Заявлено: ${displayName} · гостьовий запис · особу не підтверджено`;
+  }
+  return UNVERIFIED_GUEST_VISIT_LABEL;
+}
 
 export type PublicVisitsEnvelope = {
   success: true;
@@ -126,7 +149,12 @@ export type VisitCancelPayload = {
 
 export type VisitPatchPayload = VisitCreatePayload & { expectedVersion: number };
 
-export type VisitGuestCreatePayload = VisitCreatePayload & { teacherRef: string };
+export type VisitGuestCreatePayload = VisitCreatePayload & {
+  teacherRef: string;
+  publicTeacherNameConsent: true;
+};
+
+export type VisitGuestPatchPayload = VisitPatchPayload & { publicTeacherNameConsent: true };
 
 export type VisitPendingIntent =
   | { kind: "create"; requestId: string; payload: VisitCreatePayload }

@@ -15,7 +15,7 @@ import { VisitScheduleError, type VisitD1Database } from "./visit-schedule-store
 import type {
   GuestVisitCancelInput,
   GuestVisitCreateInput,
-  VisitBookingUpdateInput,
+  GuestVisitUpdateInput,
 } from "./visit-portal-validation.ts";
 import { queueTelegramForLibrariansStatement } from "./telegram-outbox.ts";
 
@@ -26,6 +26,7 @@ export type GuestVisitBooking = {
   endTime: string;
   teacher: { teacherRef: string; fullName: string };
   publicDisplayConsent: boolean;
+  publicTeacherNameConsent: boolean;
   classYearId: string | null;
   classLabel: string | null;
   purpose: string | null;
@@ -46,6 +47,7 @@ type GuestBookingRow = {
   start_time: string;
   end_time: string;
   public_display_consent: number;
+  public_teacher_name_consent: number;
   purpose: string;
   status: "active" | "cancelled";
   version: number;
@@ -67,7 +69,7 @@ export async function listOwnGuestVisits(
   range: { from: string; to: string },
 ): Promise<GuestVisitBooking[]> {
   const rows = await db.prepare(`SELECT id,guest_owner_id,selected_teacher_user_id,surname,
-      class_year_id,class_label,visit_date,start_time,end_time,public_display_consent,purpose,status,version,
+      class_year_id,class_label,visit_date,start_time,end_time,public_display_consent,public_teacher_name_consent,purpose,status,version,
       created_at,updated_at,cancelled_at
     FROM visit_bookings
     WHERE owner_kind='guest' AND guest_owner_id=? AND visit_date BETWEEN ? AND ?
@@ -109,6 +111,7 @@ export async function createGuestVisitBooking(
     endTime: input.endTime,
     teacher: { teacherRef: input.teacherRef, fullName: teacher.fullName },
     publicDisplayConsent: input.publicDisplayConsent,
+    publicTeacherNameConsent: input.publicTeacherNameConsent,
     classYearId: classYear?.id ?? null,
     classLabel: classYear?.class_name ?? null,
     purpose: input.purpose,
@@ -124,12 +127,12 @@ export async function createGuestVisitBooking(
     insertCommand(db, input.requestId, ownerKey, "visit_guest_create", requestHash, id, now),
     db.prepare(`INSERT INTO visit_bookings (
       id,owner_kind,owner_user_id,owner_auth_user_id,owner_email,guest_owner_id,selected_teacher_user_id,
-      surname,class_year_id,class_label,visit_date,start_time,end_time,public_display_consent,purpose,status,cancel_reason,
+      surname,class_year_id,class_label,visit_date,start_time,end_time,public_display_consent,public_teacher_name_consent,purpose,status,cancel_reason,
       cancelled_by_auth_user_id,cancelled_by_user_id,cancelled_by_guest_owner_id,last_mutation_request_id,
       version,created_at,updated_at,cancelled_at
     ) SELECT
       ?,'guest',NULL,NULL,NULL,?,?,
-      ?,?,?,?,?,?,?,?,'active','',NULL,NULL,NULL,?,1,?,?,NULL
+      ?,?,?,?,?,?,?,?,?,'active','',NULL,NULL,NULL,?,1,?,?,NULL
       WHERE EXISTS (SELECT 1 FROM visit_guest_sessions
         WHERE id=? AND token_hash=? AND revoked_at IS NULL AND expires_at>?)
       AND EXISTS (SELECT 1 FROM users u JOIN teacher_profiles p
@@ -146,7 +149,8 @@ export async function createGuestVisitBooking(
       .bind(
         id, guest.guestOwnerId, teacher.id, teacher.fullName, classYear?.id ?? null,
         classYear?.class_name ?? null, input.date, input.startTime, input.endTime,
-        input.publicDisplayConsent === true ? 1 : 0, input.purpose ?? "",
+        input.publicDisplayConsent === true ? 1 : 0, input.publicTeacherNameConsent === true ? 1 : 0,
+        input.purpose ?? "",
         input.requestId, now, now, guest.guestOwnerId, guest.tokenHash, now,
         teacher.id, teacher.fullName, input.classYearId, input.classYearId,
         guest.guestOwnerId, localNow.date, VISIT_MAX_ACTIVE_BOOKINGS,
@@ -191,7 +195,7 @@ export async function updateGuestVisitBooking(
   db: VisitD1Database,
   guest: VisitGuestIdentity,
   bookingId: string,
-  input: VisitBookingUpdateInput,
+  input: GuestVisitUpdateInput,
 ): Promise<GuestVisitBooking> {
   const ownerKey = `guest:${guest.guestOwnerId}`;
   const requestHash = await mutationHash({ kind: "visit_guest_update", ownerKey, bookingId, input });
@@ -216,6 +220,7 @@ export async function updateGuestVisitBooking(
     endTime: input.endTime,
     teacher: { teacherRef: await guestTeacherRef(row.selected_teacher_user_id), fullName: row.surname },
     publicDisplayConsent: input.publicDisplayConsent,
+    publicTeacherNameConsent: input.publicTeacherNameConsent,
     classYearId: classYear?.id ?? null,
     classLabel: classYear?.class_name ?? null,
     purpose: input.purpose,
@@ -237,7 +242,7 @@ export async function updateGuestVisitBooking(
     )`).bind(bookingId, bookingId, guest.guestOwnerId, input.expectedVersion,
       guest.guestOwnerId, guest.tokenHash, now),
     db.prepare(`UPDATE visit_bookings SET class_year_id=?,class_label=?,visit_date=?,start_time=?,end_time=?,
-        public_display_consent=?,purpose=?,last_mutation_request_id=?,version=version+1,updated_at=?
+        public_display_consent=?,public_teacher_name_consent=?,purpose=?,last_mutation_request_id=?,version=version+1,updated_at=?
       WHERE id=? AND owner_kind='guest' AND guest_owner_id=? AND status='active' AND version=?
         AND ${sessionGuard}
         AND EXISTS (SELECT 1 FROM users u JOIN teacher_profiles p
@@ -251,7 +256,8 @@ export async function updateGuestVisitBooking(
             AND ? BETWEEN 1 AND 5 AND ?>=? AND ?<=?))`)
       .bind(
         classYear?.id ?? null, classYear?.class_name ?? null, input.date, input.startTime,
-        input.endTime, input.publicDisplayConsent === true ? 1 : 0, input.purpose ?? "",
+        input.endTime, input.publicDisplayConsent === true ? 1 : 0,
+        input.publicTeacherNameConsent === true ? 1 : 0, input.purpose ?? "",
         input.requestId, now, bookingId, guest.guestOwnerId,
         input.expectedVersion, guest.guestOwnerId, guest.tokenHash, now,
         input.classYearId, input.classYearId,
@@ -378,7 +384,7 @@ export async function cancelGuestVisitBooking(
 
 async function ownGuestBooking(db: VisitD1Database, guestOwnerId: string, bookingId: string) {
   return db.prepare(`SELECT id,guest_owner_id,selected_teacher_user_id,surname,class_year_id,class_label,
-      visit_date,start_time,end_time,public_display_consent,purpose,status,version,created_at,updated_at,cancelled_at
+      visit_date,start_time,end_time,public_display_consent,public_teacher_name_consent,purpose,status,version,created_at,updated_at,cancelled_at
     FROM visit_bookings WHERE id=? AND owner_kind='guest' AND guest_owner_id=? LIMIT 1`)
     .bind(bookingId, guestOwnerId).first<GuestBookingRow>();
 }
@@ -449,6 +455,7 @@ async function mapGuestBooking(row: GuestBookingRow): Promise<GuestVisitBooking>
     endTime: row.end_time,
     teacher: { teacherRef: await guestTeacherRef(row.selected_teacher_user_id), fullName: row.surname },
     publicDisplayConsent: Number(row.public_display_consent) === 1,
+    publicTeacherNameConsent: Number(row.public_teacher_name_consent) === 1,
     classYearId: row.class_year_id,
     classLabel: row.class_label,
     purpose: row.purpose || null,

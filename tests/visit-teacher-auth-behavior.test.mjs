@@ -86,6 +86,7 @@ async function database() {
     "0017_fresh_robbie_robertson.sql",
     "0018_yielding_skaar.sql",
     "0019_kindly_wolfsbane.sql",
+    "0023_guest_public_teacher_name_consent.sql",
   ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
   const now = new Date().toISOString();
   insertUser(sqlite, "USR-LIB", "Бібліотекар", "library@example.test", "auth-library", "librarian", now);
@@ -611,17 +612,20 @@ test("guest token owns unverified canonical bookings and atomic reschedule rolls
   const date = futureWeekday();
   const input = {
     requestId: commandId(), teacherRef: directory[0].teacherRef, date,
-    startTime: "09:00", endTime: "09:20", publicDisplayConsent: true, classYearId: null, purpose: "Lesson",
+    startTime: "09:00", endTime: "09:20", publicDisplayConsent: true,
+    publicTeacherNameConsent: true, classYearId: null, purpose: "Lesson",
   };
   const created = await guestStore.createGuestVisitBooking(context.db, opened.identity, input);
   assert.deepEqual(await guestStore.createGuestVisitBooking(context.db, opened.identity, input), created);
   const persisted = context.sqlite.prepare(`SELECT owner_kind,owner_user_id,owner_auth_user_id,
-    owner_email,guest_owner_id,selected_teacher_user_id,surname,public_display_consent,status,version
+    owner_email,guest_owner_id,selected_teacher_user_id,surname,public_display_consent,
+    public_teacher_name_consent,status,version
     FROM visit_bookings WHERE id=?`).get(created.id);
   assert.deepEqual({ ...persisted }, {
     owner_kind: "guest", owner_user_id: null, owner_auth_user_id: null, owner_email: null,
     guest_owner_id: opened.identity.guestOwnerId, selected_teacher_user_id: "USR-T1",
-    surname: fullName, public_display_consent: 1, status: "active", version: 1,
+    surname: fullName, public_display_consent: 1, public_teacher_name_consent: 1,
+    status: "active", version: 1,
   });
   assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM visit_slot_claims WHERE booking_id=?")
     .get(created.id).n, 4);
@@ -648,18 +652,49 @@ test("guest token owns unverified canonical bookings and atomic reschedule rolls
     date,
     startTime: "09:00",
     endTime: "09:20",
-    displayName: "Непідтверджений гостьовий запис",
+    displayName: fullName,
     identityVerified: false,
+    directoryMatched: true,
   }]);
   const publicJson = JSON.stringify(publicSchedule.publicBookings);
-  assert.doesNotMatch(publicJson, /Portal Teacher|guest_owner|USR-T1|Lesson/iu);
+  assert.match(publicJson, new RegExp(fullName, "u"));
+  assert.doesNotMatch(publicJson, /guest_owner|USR-T1|Lesson/iu);
+
+  const updateInput = {
+    requestId: commandId(), expectedVersion: 1, date,
+    startTime: "10:00", endTime: "10:20", publicDisplayConsent: true,
+    publicTeacherNameConsent: true, classYearId: null, purpose: "Updated",
+  };
+  const updated = await guestStore.updateGuestVisitBooking(
+    context.db, opened.identity, created.id, updateInput,
+  );
+  assert.deepEqual(
+    await guestStore.updateGuestVisitBooking(context.db, opened.identity, created.id, updateInput),
+    updated,
+  );
+  assert.equal(updated.version, 2);
+  assert.equal(updated.publicTeacherNameConsent, true);
+  assert.deepEqual({ ...context.sqlite.prepare(
+    "SELECT start_time,end_time,public_teacher_name_consent,version FROM visit_bookings WHERE id=?",
+  ).get(created.id) }, {
+    start_time: "10:00", end_time: "10:20", public_teacher_name_consent: 1, version: 2,
+  });
+  assert.deepEqual((await store.readVisitSchedule(context.db, { from: date, to: date })).publicBookings, [{
+    date,
+    startTime: "10:00",
+    endTime: "10:20",
+    displayName: fullName,
+    identityVerified: false,
+    directoryMatched: true,
+  }]);
 
   const other = await guestAuth.createVisitGuestSession(context.db, guestRequest("203.0.113.211"));
   assert.deepEqual(await guestStore.listOwnGuestVisits(context.db, other.identity, { from: date, to: date }), []);
   await assert.rejects(
     () => guestStore.updateGuestVisitBooking(context.db, other.identity, created.id, {
-      requestId: commandId(), expectedVersion: 1, date,
-      startTime: "09:30", endTime: "09:50", publicDisplayConsent: true, classYearId: null, purpose: null,
+      requestId: commandId(), expectedVersion: 2, date,
+      startTime: "09:30", endTime: "09:50", publicDisplayConsent: true,
+      publicTeacherNameConsent: true, classYearId: null, purpose: null,
     }),
     (error) => error.code === "booking_not_found",
   );
@@ -679,8 +714,9 @@ test("guest token owns unverified canonical bookings and atomic reschedule rolls
   };
   await assert.rejects(
     () => guestStore.updateGuestVisitBooking(context.db, opened.identity, created.id, {
-      requestId: commandId(), expectedVersion: 1, date,
-      startTime: "09:30", endTime: "09:50", publicDisplayConsent: true, classYearId: null, purpose: "Changed",
+      requestId: commandId(), expectedVersion: 2, date,
+      startTime: "09:30", endTime: "09:50", publicDisplayConsent: true,
+      publicTeacherNameConsent: true, classYearId: null, purpose: "Changed",
     }),
     (error) => error.code === "slot_unavailable",
   );
@@ -689,13 +725,13 @@ test("guest token owns unverified canonical bookings and atomic reschedule rolls
   ).all(created.id).map((row) => row.segment_key), oldClaims);
   assert.deepEqual({ ...context.sqlite.prepare(
     "SELECT start_time,end_time,version FROM visit_bookings WHERE id=?",
-  ).get(created.id) }, { start_time: "09:00", end_time: "09:20", version: 1 });
+  ).get(created.id) }, { start_time: "10:00", end_time: "10:20", version: 2 });
 
   const cancelled = await guestStore.cancelGuestVisitBooking(context.db, opened.identity, created.id, {
-    requestId: commandId(), expectedVersion: 1, reason: "Changed plans",
+    requestId: commandId(), expectedVersion: 2, reason: "Changed plans",
   });
   assert.equal(cancelled.status, "cancelled");
-  assert.equal(cancelled.version, 2);
+  assert.equal(cancelled.version, 3);
   assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM visit_slot_claims WHERE booking_id=?")
     .get(created.id).n, 0);
   assert.equal(context.sqlite.prepare(
@@ -734,7 +770,7 @@ test("guest create reasserts the 20-active-booking cap inside the atomic batch",
   await assert.rejects(
     () => guestStore.createGuestVisitBooking(context.db, opened.identity, {
       requestId, teacherRef, date, startTime: "11:00", endTime: "11:20",
-      publicDisplayConsent: true, classYearId: null, purpose: null,
+      publicDisplayConsent: true, publicTeacherNameConsent: true, classYearId: null, purpose: null,
     }),
     (error) => error.code === "booking_limit_reached",
   );

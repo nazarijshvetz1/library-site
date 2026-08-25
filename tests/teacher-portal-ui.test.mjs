@@ -9,6 +9,7 @@ import {
   normalizedTeacherAccessCode,
   normalizedTeacherPin,
   publicVisitsUrl,
+  publicVisitDisplayLabel,
   readPortalPendingIntent,
   teacherAccessCodeComplete,
   teacherOrderQuantityEdit,
@@ -50,19 +51,51 @@ test("public teacher entry renders a privacy-limited schedule through the full 9
   assert.match(workspace, /function bookableSlotStart/u);
   assert.match(workspace, /timeMinutes\(slot\.endTime\) - start >= 20/u);
   assert.match(workspace, /Графік відкритий для всіх без входу/u);
-  assert.match(workspace, /Для підтверджених записів видно ім’я вчителя й точний час/u);
+  assert.match(workspace, /видно ПІБ та точний час/u);
   assert.match(workspace, /Клас, мета візиту та контактні дані не публікуються/u);
   assert.match(workspace, /slot\.displayName \|\| "Заброньовано"/u);
-  assert.match(workspace, /item\.identityVerified === false \? "Непідтверджений гостьовий запис" : item\.displayName/u);
+  assert.match(workspace, /displayName: publicVisitDisplayLabel\(item\)/u);
   assert.match(workspace, /previous\.sourceKey === sourceKey/u);
   const publicBookingType = client.slice(client.indexOf("export type VisitPublicBooking"), client.indexOf("export type PublicVisitsEnvelope"));
-  assert.match(publicBookingType, /date: string;[\s\S]*startTime: string;[\s\S]*endTime: string;[\s\S]*displayName: string;[\s\S]*identityVerified: boolean;/u);
+  assert.match(publicBookingType, /date: string;[\s\S]*startTime: string;[\s\S]*endTime: string;[\s\S]*displayName: string;[\s\S]*identityVerified: boolean;[\s\S]*directoryMatched: boolean;/u);
   assert.doesNotMatch(publicBookingType, /\bid\b|class|purpose|email|owner/u);
   assert.doesNotMatch(workspace, /data\.bookings.*surname|data\.bookings.*purpose/u);
   assert.equal(publicVisitsUrl("2026-09-01", "2026-09-07"), "/api/visits/public?from=2026-09-01&to=2026-09-07");
   assert.equal(visitHorizonEnd("2026-09-01"), "2026-11-30");
   assert.doesNotMatch(workspace, /if \(checkingSession\) \{\s*return/u);
   assert.ok(workspace.indexOf("<PublicVisitSchedule") < workspace.indexOf("{checkingSession"), "public schedule must render before private session controls settle");
+});
+
+test("public schedule labels canonical directory guests without trusting arbitrary names", () => {
+  assert.equal(publicVisitDisplayLabel({
+    displayName: "Галака Наталія Григорівна",
+    identityVerified: false,
+    directoryMatched: true,
+  }), "Заявлено: Галака Наталія Григорівна · гостьовий запис · особу не підтверджено");
+  assert.equal(publicVisitDisplayLabel({
+    displayName: "Чуже ім’я",
+    identityVerified: false,
+    directoryMatched: false,
+  }), "Непідтверджений гостьовий запис");
+  assert.equal(publicVisitDisplayLabel({
+    displayName: "Підтверджений Учитель",
+    identityVerified: true,
+    directoryMatched: true,
+  }), "Підтверджений Учитель");
+  assert.equal(publicVisitDisplayLabel({
+    displayName: "Невідомий стан",
+    directoryMatched: true,
+  }), "Непідтверджений гостьовий запис");
+  assert.equal(publicVisitDisplayLabel({
+    displayName: "А".repeat(81),
+    identityVerified: false,
+    directoryMatched: true,
+  }), `Заявлено: ${"А".repeat(81)} · гостьовий запис · особу не підтверджено`);
+  assert.equal(publicVisitDisplayLabel({
+    displayName: "Б".repeat(121),
+    identityVerified: false,
+    directoryMatched: true,
+  }), "Непідтверджений гостьовий запис");
 });
 
 test("every guest and authenticated booking explicitly consents to the limited public display", async () => {
@@ -75,7 +108,7 @@ test("every guest and authenticated booking explicitly consents to the limited p
   assert.match(workspace, /publicDisplayConsent: true/u);
   assert.match(workspace, /booking\.publicDisplayConsent === true/u);
   assert.match(workspace, /Я погоджуюся, що моє ім’я та точний час цього запису будуть видимі всім/u);
-  assert.match(workspace, /Ім’я обраного вчителя, клас і мета візиту не публікуватимуться/u);
+  assert.match(workspace, /будуть видимі ПІБ обраного вчителя, точний час і позначка «гостьовий запис»/u);
   assert.match(workspace, /checked=\{publicDisplayConsent\}/u);
   assert.match(workspace, /disabled=\{submitting \|\| !bookingEnabled \|\| !publicDisplayConsent/u);
   assert.match(workspace, /disabled=\{!selectedTeacher \|\| !publicDisplayConsent/u);
@@ -88,6 +121,8 @@ test("guest booking is explicitly unverified, canonical, controlled, and retry-s
   assert.match(workspace, /guestTeacherKeyDown/u);
   assert.match(workspace, /aria-activedescendant=\{activeTeacherIndex/u);
   assert.match(workspace, /teacherRef: selectedTeacher\.teacherRef/u);
+  assert.match(workspace, /publicTeacherNameConsent: true/u);
+  assert.match(workspace, /booking\.publicTeacherNameConsent === true/u);
   assert.doesNotMatch(workspace, /surname:/u);
   assert.match(workspace, /VISIT_PURPOSES\.map/u);
   assert.match(workspace, /const method = intent\.kind === "guest-create" \? "POST" : intent\.kind === "guest-patch" \? "PATCH" : "DELETE"/u);

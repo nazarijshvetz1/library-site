@@ -322,6 +322,7 @@ function normalizeVisitPublicBookings(items, from, to) {
     const date = isoDateValue(raw && raw.date);
     const interval = normalizeVisitInterval(raw);
     const identityVerified = raw && raw.identityVerified;
+    const directoryMatched = raw && raw.directoryMatched === true;
     const rawName = String(raw && raw.displayName || "");
     const hasControl = Array.from(rawName).some((character) => {
       const code = character.charCodeAt(0);
@@ -329,10 +330,10 @@ function normalizeVisitPublicBookings(items, from, to) {
     });
     const normalizedName = rawName.normalize("NFKC").trim().replace(/\s+/gu, " ");
     if (!date || !interval || (from && date < from) || (to && date > to)
-      || typeof identityVerified !== "boolean" || hasControl
-      || (identityVerified && (normalizedName.length < 2 || normalizedName.length > 80))) {
+      || typeof identityVerified !== "boolean") {
       throw new Error("Некоректний публічний запис графіка");
     }
+    const safeName = !hasControl && normalizedName.length >= 2 && normalizedName.length <= 120;
     return {
       date,
       startTime: interval.startTime,
@@ -340,8 +341,15 @@ function normalizeVisitPublicBookings(items, from, to) {
       start: interval.start,
       end: interval.end,
       status: "busy",
-      displayName: identityVerified ? normalizedName : "Непідтверджений гостьовий запис",
+      displayName: identityVerified && safeName
+        ? normalizedName
+        : !identityVerified && directoryMatched && safeName
+          ? `Заявлено: ${normalizedName} · гостьовий запис · особу не підтверджено`
+          : identityVerified
+            ? "Заброньовано"
+            : "Непідтверджений гостьовий запис",
       identityVerified,
+      directoryMatched,
     };
   }).sort((left, right) => left.date.localeCompare(right.date) || left.start - right.start || left.end - right.end)
     .map((booking, index) => ({ ...booking, sourceKey: `public-booking-${index}` }));
@@ -431,6 +439,7 @@ export function visitSegmentsForDate(schedule, value) {
         status,
         displayName: status === "busy" ? publicBooking && publicBooking.displayName : undefined,
         identityVerified: status === "busy" ? publicBooking && publicBooking.identityVerified : undefined,
+        directoryMatched: status === "busy" ? publicBooking && publicBooking.directoryMatched : undefined,
         sourceKey: status === "busy" ? publicBooking && publicBooking.sourceKey : undefined,
       });
     }

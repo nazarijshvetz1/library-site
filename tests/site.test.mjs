@@ -167,18 +167,23 @@ test("normalizes the privacy-safe weekly visit schedule and derives free interva
   assert.throws(() => normalizeVisitSchedule({ ...schedule, timeZone: "UTC" }), /відповідь/);
 });
 
-test("keeps adjacent public bookings separate and hides unverified guest-selected names", () => {
+test("keeps adjacent public bookings separate, shows directory guests, and masks unmatched guests", () => {
+  const longCanonicalName = "А".repeat(81);
+  const invalidCanonicalName = "Б".repeat(121);
   const schedule = normalizeVisitSchedule({
     schemaVersion: 1,
     success: true,
     timeZone: "Europe/Kyiv",
     slotMinutes: 5,
-    hours: { 1: [{ startTime: "08:00", endTime: "11:00" }], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [] },
+    hours: { 1: [{ startTime: "08:00", endTime: "12:00" }], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [] },
     closures: [],
     busy: [{ date: "2026-08-10", startTime: "09:00", endTime: "10:00", status: "busy" }],
     publicBookings: [
       { date: "2026-08-10", startTime: "09:00", endTime: "09:30", displayName: "Іваненко Олена", identityVerified: true },
-      { date: "2026-08-10", startTime: "09:30", endTime: "10:00", displayName: "Чуже ім’я", identityVerified: false },
+      { date: "2026-08-10", startTime: "09:30", endTime: "10:00", displayName: "Галака Наталія Григорівна", identityVerified: false, directoryMatched: true },
+      { date: "2026-08-10", startTime: "10:00", endTime: "10:30", displayName: "Чуже ім’я", identityVerified: false },
+      { date: "2026-08-10", startTime: "10:30", endTime: "11:00", displayName: longCanonicalName, identityVerified: false, directoryMatched: true },
+      { date: "2026-08-10", startTime: "11:00", endTime: "11:30", displayName: invalidCanonicalName, identityVerified: false, directoryMatched: true },
     ],
   }, "2026-08-10", "2026-08-16");
 
@@ -188,7 +193,10 @@ test("keeps adjacent public bookings separate and hides unverified guest-selecte
       .map(({ startTime, endTime, displayName, identityVerified }) => ({ startTime, endTime, displayName, identityVerified })),
     [
       { startTime: "09:00", endTime: "09:30", displayName: "Іваненко Олена", identityVerified: true },
-      { startTime: "09:30", endTime: "10:00", displayName: "Непідтверджений гостьовий запис", identityVerified: false },
+      { startTime: "09:30", endTime: "10:00", displayName: "Заявлено: Галака Наталія Григорівна · гостьовий запис · особу не підтверджено", identityVerified: false },
+      { startTime: "10:00", endTime: "10:30", displayName: "Непідтверджений гостьовий запис", identityVerified: false },
+      { startTime: "10:30", endTime: "11:00", displayName: `Заявлено: ${longCanonicalName} · гостьовий запис · особу не підтверджено`, identityVerified: false },
+      { startTime: "11:00", endTime: "11:30", displayName: "Непідтверджений гостьовий запис", identityVerified: false },
     ],
   );
 });
@@ -272,7 +280,7 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(html, /href="\/styles\.css\?v=20260824-1"/);
   assert.match(html, /href="\/brand\.css\?v=20260824-2"/);
   assert.match(brand, /\.stats\s*\{[^}]*margin-top:\s*24px;/s);
-  assert.match(html, /type="module" src="\/app\.js\?v=20260825-1"/);
+  assert.match(html, /type="module" src="\/app\.js\?v=20260825-2"/);
   assert.match(html, /class="icon-sprite"/u);
   assert.match(app, /const uiIcon =/u);
   assert.doesNotMatch(html, /[⌕☷✓←→↗○✦×＋]/u);
@@ -361,7 +369,7 @@ test("ships an accessible responsive public visit schedule and protected handoff
   assert.match(html, /https:\/\/t\.me\/MAUP_Library_Bot/);
   assert.match(html, /id="visit-schedule" aria-labelledby="visit-schedule-title"/);
   assert.match(html, /Графік доступний усім без входу/);
-  assert.match(html, /видно ім’я вчителя й точний час/);
+  assert.match(html, /видно ПІБ та точний час/);
   assert.match(html, /id="visitScheduleStatus"[^>]*role="status"[^>]*aria-live="polite"/);
   assert.match(html, /id="visitScheduleContent"[^>]*aria-busy="true"/);
   assert.match(html, /data-visit-status="free"[\s\S]*Вільно/);
@@ -374,6 +382,7 @@ test("ships an accessible responsive public visit schedule and protected handoff
   assert.match(app, /publicBookings: normalizeVisitPublicBookings/u);
   assert.match(app, /segment\.displayName \|\| "Заброньовано"/u);
   assert.match(app, /Непідтверджений гостьовий запис/u);
+  assert.match(app, /Заявлено: \$\{normalizedName\} · гостьовий запис · особу не підтверджено/u);
   assert.match(app, /elements\.visitPrevWeek\.disabled = !navigation\.canPrevious/);
   assert.match(app, /data-visit-booking="true"/);
   assert.doesNotMatch(app, /localStorage.*visit|sessionStorage.*visit|fetch\([^\n]*method:\s*"POST"/);

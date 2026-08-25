@@ -49,6 +49,7 @@ async function visitDatabase() {
     "0017_fresh_robbie_robertson.sql",
     "0018_yielding_skaar.sql",
     "0019_kindly_wolfsbane.sql",
+    "0023_guest_public_teacher_name_consent.sql",
   ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
   const now = new Date().toISOString();
   sqlite.prepare(`INSERT INTO users
@@ -145,13 +146,29 @@ test("guest and portal validators require exact versioned mutation bodies", () =
   const guest = {
     requestId: "16161616-1616-4616-8616-161616161616",
     teacherRef: "a".repeat(64), date: "2026-09-01", startTime: "09:00", endTime: "09:20",
-    publicDisplayConsent: true, classYearId: null, purpose: null,
+    publicDisplayConsent: true, publicTeacherNameConsent: true, classYearId: null, purpose: null,
   };
   assert.equal(portalValidation.validateGuestVisitCreateInput(guest).ok, true);
   assert.equal(portalValidation.validateGuestVisitCreateInput({ ...guest, surname: "Injected" }).ok, false);
   assert.equal(portalValidation.validateGuestVisitCreateInput(
     Object.fromEntries(Object.entries(guest).filter(([key]) => key !== "purpose")),
   ).ok, false);
+  const oldGuest = { ...guest };
+  delete oldGuest.publicTeacherNameConsent;
+  assert.deepEqual(portalValidation.validateGuestVisitCreateInput(oldGuest), {
+    ok: true,
+    value: {
+      requestId: guest.requestId,
+      teacherRef: guest.teacherRef,
+      date: guest.date,
+      startTime: guest.startTime,
+      endTime: guest.endTime,
+      publicDisplayConsent: true,
+      publicTeacherNameConsent: false,
+      classYearId: null,
+      purpose: null,
+    },
+  });
   const update = {
     requestId: "17171717-1717-4717-8717-171717171717", expectedVersion: 3,
     date: "2026-09-01", startTime: "10:00", endTime: "10:20",
@@ -160,6 +177,14 @@ test("guest and portal validators require exact versioned mutation bodies", () =
   assert.equal(portalValidation.validateVisitBookingUpdateInput(update).ok, true);
   assert.equal(portalValidation.validateVisitBookingUpdateInput({ ...update, expectedVersion: 0 }).ok, false);
   assert.equal(portalValidation.validateVisitBookingUpdateInput({ ...update, ownerId: "USR-X" }).ok, false);
+  assert.equal(portalValidation.validateGuestVisitUpdateInput({
+    ...update, publicTeacherNameConsent: true,
+  }).ok, true);
+  assert.equal(portalValidation.validateGuestVisitUpdateInput(update).ok, true);
+  assert.equal(portalValidation.validateGuestVisitUpdateInput(update).value.publicTeacherNameConsent, false);
+  assert.equal(portalValidation.validateGuestVisitUpdateInput({
+    ...update, publicTeacherNameConsent: "yes",
+  }).ok, false);
   assert.equal(portalValidation.validateGuestVisitCancelInput({
     requestId: "18181818-1818-4818-8818-181818181818", expectedVersion: 1, reason: null,
   }).ok, true);
@@ -612,13 +637,13 @@ test("public schedule exposes only consented verified names alongside generic bu
   const schedule = await store.readVisitSchedule(db, { from: date, to: date });
   assert.deepEqual(schedule.busy, [{ date, startTime: "09:00", endTime: "09:20", status: "busy" }]);
   assert.deepEqual(schedule.publicBookings, [{
-    date, startTime: "09:00", endTime: "09:20", displayName: "Учитель", identityVerified: true,
+    date, startTime: "09:00", endTime: "09:20", displayName: "Учитель", identityVerified: true, directoryMatched: true,
   }]);
   assert.equal("bookings" in schedule, false);
   assert.doesNotMatch(JSON.stringify(schedule), /Шевченко|Приватна мета|teacher@example|VIS-|classLabel|purpose/);
 });
 
-test("public schedule never attributes an unverified guest booking to the selected teacher", async () => {
+test("public schedule shows the canonical directory teacher for a labelled guest booking", async () => {
   const { sqlite, db } = await visitDatabase();
   const date = futureWeekday();
   const now = new Date().toISOString();
@@ -628,19 +653,39 @@ test("public schedule never attributes an unverified guest booking to the select
     .run("d".repeat(64), "guest-public-scope", "e".repeat(64), now, now);
   sqlite.prepare(`INSERT INTO visit_bookings (
     id,owner_kind,guest_owner_id,selected_teacher_user_id,surname,visit_date,start_time,end_time,
+    public_display_consent,public_teacher_name_consent,purpose,status,cancel_reason,version,created_at,updated_at
+  ) VALUES ('VIS-GUEST-PUBLIC','guest','GUEST-PUBLIC','USR-TEACHER','Старе ім’я',?,'09:00','09:20',
+    1,1,'Приватна мета','active','',1,?,?)`).run(date, now, now);
+  sqlite.prepare(`INSERT INTO visit_bookings (
+    id,owner_kind,guest_owner_id,selected_teacher_user_id,surname,visit_date,start_time,end_time,
     public_display_consent,purpose,status,cancel_reason,version,created_at,updated_at
-  ) VALUES ('VIS-GUEST-PUBLIC','guest','GUEST-PUBLIC','USR-TEACHER','Учитель',?,'09:00','09:20',
-    1,'Приватна мета','active','',1,?,?)`).run(date, now, now);
+  ) VALUES ('VIS-GUEST-HISTORICAL','guest','GUEST-PUBLIC','USR-TEACHER','Учитель',?,'09:20','09:40',
+    1,'Стара приватна мета','active','',1,?,?)`).run(date, now, now);
+  assert.throws(
+    () => sqlite.prepare("UPDATE visit_bookings SET public_teacher_name_consent=2 WHERE id='VIS-GUEST-PUBLIC'").run(),
+    /public_teacher_name_consent|CHECK constraint failed/iu,
+  );
 
   const schedule = await store.readVisitSchedule(db, { from: date, to: date });
-  assert.deepEqual(schedule.publicBookings, [{
-    date,
-    startTime: "09:00",
-    endTime: "09:20",
-    displayName: "Непідтверджений гостьовий запис",
-    identityVerified: false,
-  }]);
-  assert.doesNotMatch(JSON.stringify(schedule.publicBookings), /Учитель|Приватна мета|GUEST|VIS-/u);
+  assert.deepEqual(schedule.publicBookings, [
+    {
+      date,
+      startTime: "09:00",
+      endTime: "09:20",
+      displayName: "Учитель",
+      identityVerified: false,
+      directoryMatched: true,
+    },
+    {
+      date,
+      startTime: "09:20",
+      endTime: "09:40",
+      displayName: "Непідтверджений гостьовий запис",
+      identityVerified: false,
+      directoryMatched: false,
+    },
+  ]);
+  assert.doesNotMatch(JSON.stringify(schedule.publicBookings), /Старе ім’я|Приватна мета|GUEST|VIS-|USR-TEACHER/u);
 });
 
 test("teacher list omits elapsed visits and teacher cannot cancel visit history", async () => {

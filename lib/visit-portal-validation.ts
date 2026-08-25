@@ -4,8 +4,12 @@ import {
   type VisitBookingCreateInput,
 } from "./visit-schedule-validation.ts";
 
-export type GuestVisitCreateInput = VisitBookingCreateInput & { teacherRef: string };
+export type GuestVisitCreateInput = VisitBookingCreateInput & {
+  teacherRef: string;
+  publicTeacherNameConsent: boolean;
+};
 export type VisitBookingUpdateInput = VisitBookingCreateInput & { expectedVersion: number };
+export type GuestVisitUpdateInput = VisitBookingUpdateInput & { publicTeacherNameConsent: boolean };
 export type GuestVisitCancelInput = { requestId: string; expectedVersion: number; reason: string | null };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -14,7 +18,7 @@ const TEACHER_REF_RE = /^[0-9a-f]{64}$/u;
 export function validateGuestVisitCreateInput(input: unknown): ValidationResult<GuestVisitCreateInput> {
   if (!record(input)) return invalid("body", "Очікуються дані бронювання.");
   const errors: Record<string, string> = {};
-  exact(input, ["requestId", "teacherRef", "date", "startTime", "endTime", "publicDisplayConsent", "classYearId", "purpose"], errors);
+  exact({ ...input, publicTeacherNameConsent: input.publicTeacherNameConsent ?? false }, ["requestId", "teacherRef", "date", "startTime", "endTime", "publicDisplayConsent", "publicTeacherNameConsent", "classYearId", "purpose"], errors);
   const base = validateVisitBookingCreateInput({
     requestId: input.requestId,
     date: input.date,
@@ -27,8 +31,9 @@ export function validateGuestVisitCreateInput(input: unknown): ValidationResult<
   if (!base.ok) Object.assign(errors, base.fieldErrors);
   const teacherRef = typeof input.teacherRef === "string" ? input.teacherRef.trim().toLowerCase() : "";
   if (!TEACHER_REF_RE.test(teacherRef)) errors.teacherRef = "Оберіть учителя зі списку.";
+  const publicTeacherNameConsent = optionalPublicTeacherNameConsent(input.publicTeacherNameConsent, errors);
   if (Object.keys(errors).length || !base.ok) return { ok: false, fieldErrors: errors };
-  return { ok: true, value: { ...base.value, teacherRef } };
+  return { ok: true, value: { ...base.value, teacherRef, publicTeacherNameConsent } };
 }
 
 export function validateVisitBookingUpdateInput(input: unknown): ValidationResult<VisitBookingUpdateInput> {
@@ -51,6 +56,26 @@ export function validateVisitBookingUpdateInput(input: unknown): ValidationResul
   }
   if (Object.keys(errors).length || !base.ok) return { ok: false, fieldErrors: errors };
   return { ok: true, value: { ...base.value, expectedVersion } };
+}
+
+export function validateGuestVisitUpdateInput(input: unknown): ValidationResult<GuestVisitUpdateInput> {
+  if (!record(input)) return invalid("body", "Очікуються оновлені дані бронювання.");
+  const errors: Record<string, string> = {};
+  exact({ ...input, publicTeacherNameConsent: input.publicTeacherNameConsent ?? false }, ["requestId", "expectedVersion", "date", "startTime", "endTime", "publicDisplayConsent", "publicTeacherNameConsent", "classYearId", "purpose"], errors);
+  const base = validateVisitBookingUpdateInput({
+    requestId: input.requestId,
+    expectedVersion: input.expectedVersion,
+    date: input.date,
+    startTime: input.startTime,
+    endTime: input.endTime,
+    publicDisplayConsent: input.publicDisplayConsent,
+    classYearId: input.classYearId,
+    purpose: input.purpose,
+  });
+  if (!base.ok) Object.assign(errors, base.fieldErrors);
+  const publicTeacherNameConsent = optionalPublicTeacherNameConsent(input.publicTeacherNameConsent, errors);
+  if (Object.keys(errors).length || !base.ok) return { ok: false, fieldErrors: errors };
+  return { ok: true, value: { ...base.value, publicTeacherNameConsent } };
 }
 
 export function validateGuestVisitCancelInput(input: unknown): ValidationResult<GuestVisitCancelInput> {
@@ -82,6 +107,15 @@ function optionalText(value: unknown, key: string, errors: Record<string, string
   const result = value.normalize("NFKC").trim().replace(/\s+/gu, " ");
   if (result.length > max || hasControl) errors[key] = `Не більше ${max} символів без службових знаків.`;
   return result || null;
+}
+
+function optionalPublicTeacherNameConsent(value: unknown, errors: Record<string, string>): boolean {
+  if (value === undefined) return false;
+  if (typeof value !== "boolean") {
+    errors.publicTeacherNameConsent = "Некоректне підтвердження публічного показу ПІБ.";
+    return false;
+  }
+  return value;
 }
 
 function record(value: unknown): value is Record<string, unknown> {

@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { isSameOriginRequest } from "@/lib/librarian-api";
 import { enforceGuestMutationRate, requireVisitGuestSession } from "@/lib/visit-guest-auth";
 import { cancelGuestVisitBooking, safeVisitResourceId, updateGuestVisitBooking } from "@/lib/visit-guest-store";
-import { validateGuestVisitCancelInput, validateVisitBookingUpdateInput } from "@/lib/visit-portal-validation";
+import { validateGuestVisitCancelInput, validateGuestVisitUpdateInput } from "@/lib/visit-portal-validation";
 import { guestFeatureGate, readVisitJson, visitError, visitJson, visitStoreError } from "@/lib/visit-schedule-api";
 import type { VisitD1Database } from "@/lib/visit-schedule-store";
 import { scheduleTelegramOutboxDrain } from "@/lib/telegram-delivery-runtime";
@@ -26,7 +26,7 @@ async function mutate(request: Request, context: Context, kind: "update" | "canc
   if (!safeVisitResourceId(id)) return visitError(400, "validation_failed", "Некоректний ідентифікатор бронювання.");
   const body = await readVisitJson(request); if (!body.ok) return body.response;
   const validated = kind === "update"
-    ? validateVisitBookingUpdateInput(body.value)
+    ? validateGuestVisitUpdateInput(body.value)
     : validateGuestVisitCancelInput(body.value);
   if (!validated.ok) return visitError(400, "validation_failed", "Перевірте дані зміни.", { fieldErrors: validated.fieldErrors });
   const db = env.DB as unknown as VisitD1Database;
@@ -34,7 +34,7 @@ async function mutate(request: Request, context: Context, kind: "update" | "canc
     const guest = await requireVisitGuestSession(db, request);
     await enforceGuestMutationRate(db, request, guest);
     const result = kind === "update"
-      ? await updateGuestVisitBooking(db, guest, id, validated.value as ReturnType<typeof validateVisitBookingUpdateInput> extends { value: infer T } ? T : never)
+      ? await updateGuestVisitBooking(db, guest, id, validated.value as ReturnType<typeof validateGuestVisitUpdateInput> extends { value: infer T } ? T : never)
       : await cancelGuestVisitBooking(db, guest, id, validated.value as ReturnType<typeof validateGuestVisitCancelInput> extends { value: infer T } ? T : never);
     scheduleTelegramOutboxDrain(db, request.url);
     return visitJson({ schemaVersion: 1, success: true, result });

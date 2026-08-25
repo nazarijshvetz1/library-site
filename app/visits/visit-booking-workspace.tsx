@@ -27,6 +27,7 @@ import {
   readPortalPendingIntent,
   readVisitPendingIntent,
   publicVisitsUrl,
+  publicVisitDisplayLabel,
   teacherSearchUrl,
   teacherSessionUrl,
   teacherAccessCodeComplete,
@@ -41,6 +42,7 @@ import {
   type VisitCreatePayload,
   type VisitGuestBooking,
   type VisitGuestCreatePayload,
+  type VisitGuestPatchPayload,
   type VisitGuestSessionEnvelope,
   type VisitGuestTeacher,
   type VisitPatchPayload,
@@ -355,7 +357,7 @@ function PublicVisitSchedule({
         </div>
       </div>
 
-      <p className={styles.publicPrivacy}>Графік відкритий для всіх без входу. Для підтверджених записів видно ім’я вчителя й точний час. Клас, мета візиту та контактні дані не публікуються.</p>
+      <p className={styles.publicPrivacy}>Графік відкритий для всіх без входу. Для підтверджених записів і нових гостьових записів, створених після згоди, видно ПІБ та точний час; гостьові записи позначені окремо. Клас, мета візиту та контактні дані не публікуються.</p>
       {notice ? <div className={styles.error} role="alert">{notice} <button type="button" onClick={() => void load()}>Повторити</button></div> : null}
       {loading ? <p className={styles.empty} role="status">Оновлюємо графік…</p> : null}
       {!loading && data ? (
@@ -400,7 +402,7 @@ function PublicVisitSchedule({
 
 type GuestPendingIntent =
   | { kind: "guest-create"; requestId: string; payload: VisitGuestCreatePayload }
-  | { kind: "guest-patch"; requestId: string; resourceId: string; payload: VisitPatchPayload }
+  | { kind: "guest-patch"; requestId: string; resourceId: string; payload: VisitGuestPatchPayload }
   | { kind: "guest-cancel"; requestId: string; resourceId: string; payload: VisitCancelPayload };
 
 const GUEST_PENDING_KINDS = ["guest-create", "guest-patch", "guest-cancel"] as const;
@@ -588,10 +590,10 @@ function GuestBookingPanel({
     if (!selectedTeacher || !publicDisplayConsent || !validVisitDuration(startTime, endTime) || pending) return;
     const requestId = crypto.randomUUID();
     if (editing) {
-      const payload: VisitPatchPayload = { requestId, expectedVersion: editing.version, date, startTime, endTime, classYearId: classYearId || null, purpose: purpose || null, publicDisplayConsent: true };
+      const payload: VisitGuestPatchPayload = { requestId, expectedVersion: editing.version, date, startTime, endTime, classYearId: classYearId || null, purpose: purpose || null, publicDisplayConsent: true, publicTeacherNameConsent: true };
       void sendGuestIntent({ kind: "guest-patch", requestId, resourceId: editing.id, payload });
     } else {
-      const payload: VisitGuestCreatePayload = { requestId, teacherRef: selectedTeacher.teacherRef, date, startTime, endTime, classYearId: classYearId || null, purpose: purpose || null, publicDisplayConsent: true };
+      const payload: VisitGuestCreatePayload = { requestId, teacherRef: selectedTeacher.teacherRef, date, startTime, endTime, classYearId: classYearId || null, purpose: purpose || null, publicDisplayConsent: true, publicTeacherNameConsent: true };
       void sendGuestIntent({ kind: "guest-create", requestId, payload });
     }
   }
@@ -605,7 +607,7 @@ function GuestBookingPanel({
     setEndTime(booking.endTime);
     setClassYearId(booking.classYearId || "");
     setPurpose(booking.purpose || "");
-    setPublicDisplayConsent(booking.publicDisplayConsent === true);
+    setPublicDisplayConsent(booking.publicDisplayConsent === true && booking.publicTeacherNameConsent === true);
   }
 
   function cancelGuestBooking(booking: VisitGuestBooking) {
@@ -658,7 +660,7 @@ function GuestBookingPanel({
   return (
     <section className={`${styles.card} ${styles.guestCard}`} aria-labelledby="guest-title">
       <div className={styles.cardHeading}><div><span>Швидкий запис без коду</span><h2 id="guest-title">Гостьовий режим</h2></div></div>
-      <div className={styles.unverifiedNote} role="note"><strong>Особу не підтверджено.</strong> Ви лише заявляєте, від імені якого вчителя створюєте запис. Для підтвердженої особи та замовлень увійдіть персональним кодом.</div>
+      <div className={styles.unverifiedNote} role="note"><strong>Особу не підтверджено.</strong> ПІБ обраного зі службового списку вчителя буде видно у відкритому графіку з позначкою «гостьовий запис». Для підтвердженої особи та замовлень увійдіть персональним кодом.</div>
       {!activated ? <button className={styles.primary} type="button" aria-expanded="false" aria-controls="guest-booking-form" onClick={() => void activateGuestBooking()}>Записатися без коду</button> : null}
       {initializing ? <p className={styles.empty} role="status">Готуємо гостьовий запис…</p> : null}
       {activated && !initializing && !session ? <button className={styles.quiet} type="button" onClick={() => void activateGuestBooking()}>Спробувати відкрити гостьовий запис ще раз</button> : null}
@@ -680,7 +682,7 @@ function GuestBookingPanel({
             <label>Завершення *<input required type="time" step={300} value={endTime} onChange={(event) => setEndTime(event.currentTarget.value)} /></label>
             <label>Клас<select value={classYearId} onChange={(event) => setClassYearId(event.currentTarget.value)}><option value="">Без класу</option>{(data?.classYears ?? []).map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
             <label className={styles.wide}>Мета візиту<select value={purpose} onChange={(event) => setPurpose(event.currentTarget.value)}><option value="">Не вказувати</option>{VISIT_PURPOSES.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
-            <label className={`${styles.wide} ${styles.publicConsent}`}><input required type="checkbox" checked={publicDisplayConsent} onChange={(event) => setPublicDisplayConsent(event.currentTarget.checked)} /><span>Я розумію, що у відкритому графіку всі бачитимуть час і позначку «Непідтверджений гостьовий запис». Ім’я обраного вчителя, клас і мета візиту не публікуватимуться.</span></label>
+            <label className={`${styles.wide} ${styles.publicConsent}`}><input required type="checkbox" checked={publicDisplayConsent} onChange={(event) => setPublicDisplayConsent(event.currentTarget.checked)} /><span>Я погоджуюся, що у відкритому графіку будуть видимі ПІБ обраного вчителя, точний час і позначка «гостьовий запис». Клас і мета візиту не публікуватимуться.</span></label>
           </div>
           <div className={styles.guestActions}>
             {editing ? <button className={styles.quiet} type="button" onClick={resetGuestForm} disabled={submitting}>Не редагувати</button> : null}
@@ -2810,7 +2812,7 @@ function publicSlots(data: PublicVisitsEnvelope, date: string): PublicScheduleSl
     .map((item, index) => ({
       ...item,
       status: "busy" as const,
-      displayName: item.identityVerified === false ? "Непідтверджений гостьовий запис" : item.displayName,
+      displayName: publicVisitDisplayLabel(item),
       sourceKey: `booking-${index}-${item.startTime}-${item.endTime}`,
     }));
   const blockers = [
