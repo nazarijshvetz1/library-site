@@ -11,6 +11,7 @@ import {
   publicVisitsUrl,
   readPortalPendingIntent,
   teacherAccessCodeComplete,
+  teacherOrderQuantityEdit,
   teacherPinStrength,
   visitHorizonEnd,
   writePortalPendingIntent,
@@ -224,11 +225,23 @@ test("teacher orders and notifications page with the frozen opaque cursor", asyn
   assert.match(orders, /currentQuantity >= item\.availableQuantity/u);
   assert.match(orders, /maximumInCart \? "У кошику" : cartQuantity > 0 \? "Додати ще" : "Додати"/u);
   assert.match(orders, /Кількість «\$\{item\.title\}» у кошику збільшено до \$\{nextQuantity\}/u);
+  assert.doesNotMatch(orders, /Number\(event\.currentTarget\.value\)/u);
+  assert.match(orders, /quantityDrafts\[item\.id\] \?\? String\(quantity\)/u);
+  assert.match(orders, /onBlur=\{\(\) => finishQuantityEdit\(item\.id\)\}/u);
+  assert.match(orders, /onClick=\{\(\) => removeFromCart\(item\.id\)\}/u);
   assert.match(orders, /Завантажити ще/u);
   assert.match(notifications, /params\.set\("cursor", cursor\)/u);
   assert.match(notifications, /mergePortalPageById\(current\.notifications, response\.notifications\)/u);
   assert.match(notifications, /data\.page\.nextCursor/u);
   assert.match(notifications, /Завантажити ще/u);
+});
+
+test("teacher cart keeps its quantity field mounted through the empty mobile edit state", () => {
+  assert.deepEqual(teacherOrderQuantityEdit(1, "", 54), { draft: "", quantity: 1 });
+  assert.deepEqual(teacherOrderQuantityEdit(1, "2", 54), { draft: "2", quantity: 2 });
+  assert.deepEqual(teacherOrderQuantityEdit(2, "0", 54), { draft: "0", quantity: 2 });
+  assert.deepEqual(teacherOrderQuantityEdit(2, "2.5", 54), { draft: "2.5", quantity: 2 });
+  assert.deepEqual(teacherOrderQuantityEdit(2, "99", 54), { draft: "54", quantity: 54 });
 });
 
 test("teacher cabinet exposes Telegram as a separate highlighted connection area", async () => {

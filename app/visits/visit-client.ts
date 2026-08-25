@@ -185,6 +185,36 @@ export function teacherPinStrength(value: string): TeacherPinStrength {
   return { complete, strong: complete };
 }
 
+export type TeacherOrderQuantityEdit = {
+  draft: string;
+  quantity: number;
+};
+
+export function teacherOrderQuantityEdit(
+  currentQuantity: number,
+  rawValue: string,
+  availableQuantity: number,
+): TeacherOrderQuantityEdit {
+  const maximum = Number.isSafeInteger(availableQuantity) && availableQuantity > 0
+    ? availableQuantity
+    : 1;
+  const fallback = Number.isSafeInteger(currentQuantity) && currentQuantity > 0
+    ? Math.min(currentQuantity, maximum)
+    : 1;
+
+  if (rawValue === "" || !/^\d+$/u.test(rawValue)) {
+    return { draft: rawValue, quantity: fallback };
+  }
+
+  const parsed = Number(rawValue);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    return { draft: rawValue, quantity: fallback };
+  }
+
+  const quantity = Math.min(parsed, maximum);
+  return { draft: String(quantity), quantity };
+}
+
 export class VisitApiError extends Error {
   status: number;
   code: string;

@@ -30,6 +30,7 @@ import {
   teacherSearchUrl,
   teacherSessionUrl,
   teacherAccessCodeComplete,
+  teacherOrderQuantityEdit,
   teacherPinStrength,
   teacherVisitsUrl,
   type PublicVisitsEnvelope,
@@ -2054,6 +2055,7 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"success" | "error" | "info">("info");
   const [cart, setCart] = useState<Record<string, { item: TeacherCatalogItem; quantity: number }>>({});
+  const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState("");
   const [requests, setRequests] = useState<MaterialRequest[]>([]);
   const [requestPage, setRequestPage] = useState<MaterialRequestsEnvelope["page"] | null>(null);
@@ -2169,6 +2171,7 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
       setNoticeTone("success");
       if (intent.kind === "order-create") {
         setCart({});
+        setQuantityDrafts({});
         setNotes("");
       }
       await loadRequests(true);
@@ -2225,13 +2228,37 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
     setCart((current) => {
       const existing = current[id];
       if (!existing) return current;
-      if (quantity <= 0) {
-        const next = { ...current };
-        delete next[id];
-        return next;
-      }
-      return { ...current, [id]: { ...existing, quantity: Math.min(existing.item.availableQuantity, quantity) } };
+      const nextQuantity = Math.max(1, Math.min(existing.item.availableQuantity, quantity));
+      if (nextQuantity === existing.quantity) return current;
+      return { ...current, [id]: { ...existing, quantity: nextQuantity } };
     });
+  }
+
+  function changeQuantityDraft(id: string, rawValue: string) {
+    const existing = cart[id];
+    if (!existing) return;
+    const edit = teacherOrderQuantityEdit(existing.quantity, rawValue, existing.item.availableQuantity);
+    setQuantityDrafts((current) => ({ ...current, [id]: edit.draft }));
+    if (edit.quantity !== existing.quantity) updateQuantity(id, edit.quantity);
+  }
+
+  function finishQuantityEdit(id: string) {
+    setQuantityDrafts((current) => {
+      if (!(id in current)) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+  }
+
+  function removeFromCart(id: string) {
+    setCart((current) => {
+      if (!current[id]) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    finishQuantityEdit(id);
   }
 
   const cartRows = Object.values(cart);
@@ -2263,8 +2290,8 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
         {cartRows.length ? <ul className={styles.cartList}>{cartRows.map(({ item, quantity }) => (
           <li key={item.id}>
             <span><strong>{item.title}</strong><small>{item.id}</small></span>
-            <label>Кількість<input type="number" min="0" max={item.availableQuantity} value={quantity} onChange={(event) => updateQuantity(item.id, Number(event.currentTarget.value))} /></label>
-            <button type="button" onClick={() => updateQuantity(item.id, 0)} aria-label={`Прибрати ${item.title} з кошика`}><SiteIcon name="delete" size={18} /></button>
+            <label>Кількість<input type="number" inputMode="numeric" min="1" step="1" max={item.availableQuantity} value={quantityDrafts[item.id] ?? String(quantity)} onChange={(event) => changeQuantityDraft(item.id, event.currentTarget.value)} onBlur={() => finishQuantityEdit(item.id)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }} /></label>
+            <button type="button" onClick={() => removeFromCart(item.id)} aria-label={`Прибрати ${item.title} з кошика`}><SiteIcon name="delete" size={18} /></button>
           </li>
         ))}</ul> : <p className={styles.empty}>Додайте матеріали з результатів пошуку.</p>}
         <label className={styles.portalSearch}>Примітка бібліотекарю
