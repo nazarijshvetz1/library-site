@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { authorizeLibrarianApi } from "@/lib/librarian-api";
 import { acquisitionError, acquisitionJson, acquisitionStoreError, readAcquisitionJson, safeAcquisitionId } from "@/lib/acquisition-api";
-import { applyLibrarianAcquisitionAction, type AcquisitionDatabase } from "@/lib/acquisition-store";
+import { applyLibrarianAcquisitionAction, setLibrarianAcquisitionVisibility, type AcquisitionDatabase } from "@/lib/acquisition-store";
 import { validateAcquisitionActionInput } from "@/lib/acquisition-validation";
 import { scheduleTelegramOutboxDrain } from "@/lib/telegram-delivery-runtime";
 
@@ -16,6 +16,13 @@ export async function PATCH(request: Request, context: Context): Promise<Respons
   if (!safeAcquisitionId(id)) return acquisitionError(400, "validation_failed", "Некоректний номер заявки.", { writesEnabled: true });
   try {
     const body = await readAcquisitionJson(request, { writesEnabled: true }); if (!body.ok) return body.response;
+    const raw = body.value as Record<string, unknown>;
+    if (raw.action === "hide" || raw.action === "restore") {
+      const mutationId = typeof raw.mutationId === "string" ? raw.mutationId : "";
+      if (!/^[0-9a-f-]{36}$/iu.test(mutationId)) return acquisitionError(400, "validation_failed", "Не вдалося підтвердити зміну видимості.", { writesEnabled: true });
+      const result = await setLibrarianAcquisitionVisibility(env.DB as unknown as AcquisitionDatabase, user, id, raw.action === "hide", mutationId);
+      return acquisitionJson({ schemaVersion: 1, success: true, result, writesEnabled: true });
+    }
     const validated = validateAcquisitionActionInput(body.value);
     if (!validated.ok) return acquisitionError(400, "validation_failed", "Перевірте дію та кількість.", { fieldErrors: validated.fieldErrors, writesEnabled: true });
     const record = await applyLibrarianAcquisitionAction(env.DB as unknown as AcquisitionDatabase, user, id, validated.value);

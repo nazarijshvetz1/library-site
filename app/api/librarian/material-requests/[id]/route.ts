@@ -11,6 +11,7 @@ import {
 import {
   applyLibrarianMaterialRequestAction,
   getMaterialRequest,
+  setLibrarianMaterialRequestVisibility,
   type TeacherMaterialRequestDatabase,
 } from "@/lib/teacher-material-request-store";
 import { validateMaterialRequestActionInput } from "@/lib/teacher-material-request-validation";
@@ -38,6 +39,15 @@ export async function PATCH(
   }
   const body = await readMaterialRequestJson(request, true);
   if (!body.ok) return body.response;
+  const raw = body.value as Record<string, unknown>;
+  if (raw.action === "hide" || raw.action === "restore") {
+    const mutationId = typeof raw.mutationId === "string" ? raw.mutationId : "";
+    if (!/^[0-9a-f-]{36}$/iu.test(mutationId)) return materialRequestError(400, "validation_failed", "Не вдалося підтвердити зміну видимості.", { writesEnabled: true });
+    try {
+      const result = await setLibrarianMaterialRequestVisibility(env.DB as unknown as TeacherMaterialRequestDatabase, user, id, raw.action === "hide", mutationId);
+      return materialRequestJson({ schemaVersion: 1, success: true, result, writesEnabled: true });
+    } catch (error) { return materialRequestStoreError(error, "material_request_visibility_unavailable", true); }
+  }
   const validated = validateMaterialRequestActionInput(body.value);
   if (!validated.ok) {
     return materialRequestError(400, "validation_failed", "Перевірте дію та дані видачі.", {

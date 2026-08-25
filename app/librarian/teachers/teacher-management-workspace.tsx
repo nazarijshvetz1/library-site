@@ -29,7 +29,7 @@ import {
 import styles from "./teacher-management.module.css";
 
 type MainTab = "overview" | "teachers" | "orders" | "visits" | "telegram";
-type DetailTab = "profile" | "orders" | "issued" | "visits";
+type DetailTab = "profile" | "access" | "orders" | "issued" | "visits";
 type DirectoryStatus = "active" | "inactive" | "all";
 
 const TAB_COPY: Record<MainTab, { eyebrow: string; title: string; description: string }> = {
@@ -446,7 +446,6 @@ function TeacherDirectoryPanel({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<TeacherDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [accessRefreshKey, setAccessRefreshKey] = useState(0);
   const listRequestRef = useRef(0);
   const detailRequestRef = useRef(0);
   const selectedIdRef = useRef<string | null>(null);
@@ -580,14 +579,12 @@ function TeacherDirectoryPanel({
         ) : <p className={styles.empty}>За цими фільтрами карток не знайдено.</p>}
       </section>
 
-      <TeacherAccessAdmin writesEnabled={writesEnabled} refreshKey={accessRefreshKey} />
       <section className={styles.bulkOperations} aria-labelledby="teacher-bulk-operations-title">
         <div><span>Масові операції</span><h2 id="teacher-bulk-operations-title">Імпорт тимчасових кодів</h2><p>Службовий інструмент розміщено внизу, щоб він не заважав щоденній роботі з картками.</p></div>
         <TeacherCodeImport
           writesEnabled={writesEnabled}
           onImported={async () => {
             await load();
-            setAccessRefreshKey((value) => value + 1);
           }}
         />
       </section>
@@ -742,7 +739,7 @@ function TeacherDetailCard({
         <button className={styles.detailClose} type="button" onClick={onClose} aria-label="Закрити картку"><SiteIcon name="close" size={18} /></button>
       </header>
       <nav className={styles.detailTabs} aria-label="Дані вчителя">
-        {(["profile", "orders", "issued", "visits"] as const).map((item) => <button key={item} type="button" aria-pressed={tab === item} onClick={() => setTab(item)}>{detailTabLabel(item)}<span>{detailTabCount(item, detail)}</span></button>)}
+        {(["profile", "access", "orders", "issued", "visits"] as const).map((item) => <button key={item} type="button" aria-pressed={tab === item} onClick={() => setTab(item)}>{detailTabLabel(item)}{detailTabCount(item, detail) !== null ? <span>{detailTabCount(item, detail)}</span> : null}</button>)}
       </nav>
       {actionError ? <div className={styles.error} role="alert">{actionError}</div> : null}
       {tab === "profile" ? editing ? (
@@ -750,12 +747,11 @@ function TeacherDetailCard({
       ) : (
         <div className={styles.profilePane}>
           <dl><div><dt>Предмет / посада</dt><dd>{teacher.subjectPosition || "—"}</dd></div><div><dt>Обліковий рівень</dt><dd>{accountRoleLabel(teacher.accountRole)}</dd></div><div><dt>Основний кабінет</dt><dd>{teacher.primaryLocation?.name || "—"}</dd></div><div><dt>Службовий контакт</dt><dd>{teacher.serviceContact || "—"}</dd></div><div><dt>Внутрішня примітка</dt><dd>{teacher.librarianNote || "—"}</dd></div></dl>
-          <div className={styles.profileActions}><button type="button" onClick={() => setEditing(true)} disabled={!writesEnabled || busy}>Редагувати</button><a href="#teacher-access-title" title={`У блоці кодів нижче знайдіть ${teacher.fullName}`}>Код і доступ</a><button type="button" onClick={() => void changeStatus()} disabled={!writesEnabled || busy || (teacher.status === "active" && closeBlockers.length > 0)}>{teacher.status === "active" ? "Закрити картку" : "Поновити картку"}</button><button className={styles.dangerButton} type="button" onClick={() => void remove()} disabled={!writesEnabled || busy || !deletionAllowed} title={teacher.accountRole !== "teacher" ? "Обліковий запис адміністратора або бібліотекаря не видаляється; картку учителя можна лише закрити" : deletionAllowed ? "Безповоротно видалити порожню помилкову картку" : "Картка має пов’язані дані, тому її можна лише закрити"}>Видалити картку</button></div>
-          <p className={styles.accessHint}>Для керування кодом перейдіть до блоку нижче та знайдіть ПІБ: <strong>{teacher.fullName}</strong>.</p>
+          <div className={styles.profileActions}><button type="button" onClick={() => setEditing(true)} disabled={!writesEnabled || busy}>Редагувати</button><button type="button" onClick={() => setTab("access")}>Код і доступ</button><button type="button" onClick={() => void changeStatus()} disabled={!writesEnabled || busy || (teacher.status === "active" && closeBlockers.length > 0)}>{teacher.status === "active" ? "Закрити картку" : "Поновити картку"}</button><button className={styles.dangerButton} type="button" onClick={() => void remove()} disabled={!writesEnabled || busy || !deletionAllowed} title={teacher.accountRole !== "teacher" ? "Обліковий запис адміністратора або бібліотекаря не видаляється; картку учителя можна лише закрити" : deletionAllowed ? "Безповоротно видалити порожню помилкову картку" : "Картка має пов’язані дані, тому її можна лише закрити"}>Видалити картку</button></div>
           {closeBlockers.length ? <p className={styles.closeGuard}>Щоб закрити картку, спочатку: {closeBlockers.join("; ")}.</p> : null}
           {!deletionAllowed && deletionBlockers.length ? <p className={styles.deleteGuard}>Картку не можна видалити: {deletionBlockers.join(", ")}. Її можна лише закрити.</p> : null}
         </div>
-      ) : tab === "orders" ? <CompactRecords kind="orders" detail={detail} /> : tab === "issued" ? <CompactRecords kind="issued" detail={detail} /> : <CompactRecords kind="visits" detail={detail} />}
+      ) : tab === "access" ? <TeacherAccessAdmin key={teacher.id} writesEnabled={writesEnabled} teacherId={teacher.id} embedded /> : tab === "orders" ? <CompactRecords kind="orders" detail={detail} /> : tab === "issued" ? <CompactRecords kind="issued" detail={detail} /> : <CompactRecords kind="visits" detail={detail} />}
     </article>
   );
 }
@@ -925,7 +921,7 @@ function teacherInitials(fullName: string) {
 }
 
 function detailTabLabel(tab: DetailTab) {
-  return ({ profile: "Профіль", orders: "Замовлення", issued: "Видано", visits: "Відвідування" } as const)[tab];
+  return ({ profile: "Профіль", access: "Доступ", orders: "Замовлення", issued: "Видано", visits: "Відвідування" } as const)[tab];
 }
 
 function detailTabCount(tab: DetailTab, detail: TeacherDetail) {

@@ -96,9 +96,19 @@ test("teacher proposal history searches, sorts and hides without deleting the li
   const hidden=await store.hideTeacherAcquisitionRequest(db,teacher,first.id,first.version,crypto.randomUUID());
   assert.equal(hidden.hidden,true);
   assert.deepEqual((await store.listTeacherAcquisitionRequests(db,teacher.teacherUserId)).map((request)=>request.id),[second.id]);
+  assert.deepEqual((await store.listTeacherAcquisitionRequests(db,teacher.teacherUserId,{visibility:"hidden"})).map((request)=>request.id),[first.id]);
   assert.equal((await store.listLibrarianAcquisitionRequests(db,{query:"Фізика"})).requests[0].id,first.id);
   assert.ok(sqlite.prepare("SELECT teacher_hidden_at FROM acquisition_requests WHERE id=?").get(first.id).teacher_hidden_at);
   assert.equal(sqlite.prepare("SELECT action FROM audit_events WHERE entity_id=? ORDER BY created_at DESC LIMIT 1").get(first.id).action,"acquisition_request.hide_from_teacher");
+  await store.restoreTeacherAcquisitionRequest(db,teacher,first.id,first.version,crypto.randomUUID());
+  assert.deepEqual((await store.listTeacherAcquisitionRequests(db,teacher.teacherUserId)).map((request)=>request.id),[second.id,first.id]);
+  sqlite.prepare("UPDATE acquisition_requests SET status='cancelled',cancelled_at=? WHERE id=?").run(new Date().toISOString(),first.id);
+  const librarianHidden=await store.setLibrarianAcquisitionVisibility(db,librarian,first.id,true,crypto.randomUUID());
+  assert.equal(librarianHidden.hidden,true);
+  assert.equal((await store.listLibrarianAcquisitionRequests(db,{query:"Фізика"})).requests.length,0);
+  assert.equal((await store.listLibrarianAcquisitionRequests(db,{query:"Фізика",visibility:"all"})).requests[0].id,first.id);
+  await store.setLibrarianAcquisitionVisibility(db,librarian,first.id,false,crypto.randomUUID());
+  assert.equal((await store.listLibrarianAcquisitionRequests(db,{query:"Фізика"})).requests[0].id,first.id);
 });
 
 test("librarian workflow cannot receive stock without a posted receipt allocation",async()=>{
@@ -162,7 +172,8 @@ test("acquisition interfaces expose catalog metadata, optional student fields an
   assert.match(teacherUi,/thumbnailUrl/u);assert.match(teacherUi,/classFrom/u);assert.match(teacherUi,/\/api\/catalog-v2\/\$\{encodeURIComponent\(item\.id\)\}/u);
   assert.match(teacherUi,/setSourceUrl\(detail\.links\.find/u);assert.match(teacherUi,/required=\{!existingCatalogMaterial\}/u);
   assert.match(teacherUi,/historyRequest = useRef\(0\)/u);assert.match(teacherUi,/requestId !== historyRequest\.current/u);
-  assert.match(teacherUi,/action: "hide"/u);assert.match(teacherUi,/Бібліотекар і далі бачитиме цю пропозицію/u);
+  assert.match(teacherUi,/action: hidden \? "hide" : "restore"/u);assert.match(teacherUi,/Бібліотекар і далі бачитиме цю пропозицію/u);
+  assert.match(teacherUi,/Показати приховані/u);assert.match(teacherUi,/Приховати всі завершені/u);assert.match(teacherUi,/Згорнути/u);
   assert.match(studentUi,/publicationYear:year\.trim\(\)\?Number\(year\):null/u);assert.match(studentUi,/requestedQuantity:quantity\.trim\(\)\?Number\(quantity\):null/u);
   assert.match(studentUi,/Автор <em>\*<\/em>[\s\S]*?name="author"[\s\S]*?required minLength=\{2\}/u);assert.doesNotMatch(studentUi,/Покликання на книгу \*<input/u);
   assert.match(studentUi,/Потрібні лише 4 поля/u);
@@ -179,6 +190,7 @@ test("acquisition interfaces expose catalog metadata, optional student fields an
   assert.match(studentUi,/name="className"/u);assert.match(studentUi,/autoComplete="name"/u);assert.match(studentUi,/aria-describedby="class-help"/u);
   assert.match(librarianUi,/new URL\("\/suggest-book", window\.location\.origin\)/u);assert.match(librarianUi,/QRCodeWriter/u);
   assert.match(librarianUi,/loadRequestRef = useRef\(0\)/u);assert.match(librarianUi,/requestScope !== loadScopeRef\.current/u);
+  assert.match(librarianUi,/Показати приховані/u);assert.match(librarianUi,/Прізвище А–Я/u);assert.match(librarianUi,/Приховати всі завершені/u);
   assert.match(librarianUi,/key=\{`\$\{record\.id\}:\$\{record\.version\}`\}/u);
   assert.match(librarianUi,/selectedMaximum = Math\.min/u);assert.match(librarianUi,/loadError \? <span role="alert">/u);
   assert.match(librarianUi,/promptNumber\("Погоджена кількість", record\.requestedQuantity, 1\)/u);

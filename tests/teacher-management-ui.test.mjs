@@ -125,17 +125,19 @@ test("teacher mutations match the exact backend contract and protect history", a
   assert.match(workspace, /Картку закрито без втрати історії/u);
 });
 
-test("selected teacher exposes profile, material history, visits and access anchor", async () => {
+test("selected teacher exposes profile, material history, visits and an embedded access tab", async () => {
   const workspace = await read("app/librarian/teachers/teacher-management-workspace.tsx");
   assert.match(workspace, /detail\.requests/u);
   assert.match(workspace, /detail\.loans/u);
   assert.match(workspace, /detail\.futureVisits/u);
   assert.match(workspace, /item\.title_snapshot/u);
   assert.match(workspace, /item\.outstanding_quantity/u);
-  assert.match(workspace, /href="#teacher-access-title"/u);
+  assert.match(workspace, /type DetailTab = "profile" \| "access"/u);
+  assert.match(workspace, /setTab\("access"\)/u);
+  assert.match(workspace, /teacherId=\{teacher\.id\} embedded/u);
   assert.match(workspace, /<TeacherCodeImport/u);
-  assert.match(workspace, /setAccessRefreshKey/u);
-  assert.match(workspace, /<TeacherAccessAdmin writesEnabled=\{writesEnabled\} refreshKey=\{accessRefreshKey\} \/>/u);
+  assert.doesNotMatch(workspace, /href="#teacher-access-title"/u);
+  assert.doesNotMatch(workspace, /setAccessRefreshKey/u);
   assert.match(workspace, /listRequestRef = useRef\(0\)/u);
   assert.match(workspace, /detailRequestRef = useRef\(0\)/u);
   assert.match(workspace, /selectedIdRef = useRef<string \| null>\(null\)/u);

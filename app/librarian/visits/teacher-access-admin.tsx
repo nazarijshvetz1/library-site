@@ -99,9 +99,13 @@ const BULK_CONFIRMATION = "ISSUE_MISSING_ONLY";
 export default function TeacherAccessAdmin({
   writesEnabled,
   refreshKey = 0,
+  teacherId,
+  embedded = false,
 }: {
   writesEnabled: boolean;
   refreshKey?: number;
+  teacherId?: string;
+  embedded?: boolean;
 }) {
   const [data, setData] = useState<TeacherAccessEnvelope | null>(null);
   const [loading, setLoading] = useState(true);
@@ -133,8 +137,8 @@ export default function TeacherAccessAdmin({
   }, [load, refreshKey]);
 
   const teachers = useMemo(
-    () => (data?.teachers ?? []).filter((teacher) => teacher.status === "active"),
-    [data],
+    () => (data?.teachers ?? []).filter((teacher) => teacherId ? teacher.id === teacherId : teacher.status === "active"),
+    [data, teacherId],
   );
   const missingCount = useMemo(
     () => teachers.filter((teacher) => teacher.credential === null).length,
@@ -376,12 +380,12 @@ export default function TeacherAccessAdmin({
   }
 
   return (
-    <section className={styles.accessCard} aria-labelledby="teacher-access-title">
+    <section className={`${styles.accessCard} ${embedded ? styles.embeddedAccess : ""}`} aria-labelledby="teacher-access-title">
       <div className={styles.heading}>
         <div>
-          <span>Вхід без email</span>
-          <h2 id="teacher-access-title">PIN-коди та відновлення доступу</h2>
-          <p>Бібліотекар видає тимчасовий код. Після першого входу вчитель створює власний 4-значний PIN. Забутий PIN тут можна лише скинути, але не переглянути.</p>
+          <span>{embedded ? "Безпека картки" : "Вхід без email"}</span>
+          <h2 id="teacher-access-title">{embedded ? "Доступ, PIN і відновлення" : "PIN-коди та відновлення доступу"}</h2>
+          <p>{embedded ? "Усі дії доступу цього вчителя зібрані в його картці. Чинний PIN ніколи не відображається." : "Бібліотекар видає тимчасовий код. Після першого входу вчитель створює власний 4-значний PIN. Забутий PIN тут можна лише скинути, але не переглянути."}</p>
         </div>
         <button className={styles.secondaryButton} type="button" onClick={() => void load()} disabled={loading || Boolean(busyAction)} aria-busy={loading}>
           <SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}
@@ -435,7 +439,7 @@ export default function TeacherAccessAdmin({
         />
       ) : null}
 
-      <div className={styles.summary} aria-label="Стан доступу вчителів">
+      {!embedded ? <><div className={styles.summary} aria-label="Стан доступу вчителів">
         <div><strong>{teachers.length}</strong><span>активних учителів</span></div>
         <div><strong>{missingCount}</strong><span>ще без коду</span></div>
         <div><strong>{teachers.filter((teacher) => teacher.credential?.status === "locked").length}</strong><span>тимчасово заблоковано</span></div>
@@ -473,7 +477,7 @@ export default function TeacherAccessAdmin({
           {busyAction === "bulk-issue" ? "Створюємо…" : `Видати тимчасові коди (${missingCount})`}
         </button>
       </div>
-      <p className={styles.bulkHint}>Масова видача створює тимчасові коди лише для вчителів без доступу. Чинні PIN-коди не змінюються.</p>
+      <p className={styles.bulkHint}>Масова видача створює тимчасові коди лише для вчителів без доступу. Чинні PIN-коди не змінюються.</p></> : null}
 
       {loading ? <p className={styles.empty}>Оновлюємо список учителів…</p> : filteredTeachers.length ? (
         <div className={styles.tableRegion} role="region" aria-label="Коди доступу вчителів">

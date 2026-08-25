@@ -792,3 +792,54 @@
   .historyToolbar { grid-template-columns: 1fr; }
   .historySearch { grid-column: auto; }
 }
+
+/* Stable teacher cards: icons participate in layout instead of covering headings. */
+.teacherPortalContent .overviewActionCard { padding-top: 16px; }
+.overviewActionIcon {
+  position: static;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+}
+
+.adminFilters { align-items: end; }
+.adminFilters > label:first-child { flex: 1 1 250px; }
+.adminFilters .visibilityToggle {
+  min-height: 42px;
+  padding: 8px 10px;
+  display: flex;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  background: #f1f7ed;
+}
+.adminFilters .visibilityToggle input { width: 16px; min-height: 0; height: 16px; padding: 0; accent-color: #23583b; }
+.hiddenRecordBadge { margin-left: 6px; padding: 4px 7px; border-radius: 999px; color: #56645c; background: #e7ebe5; font-size: 9px; font-weight: 850; }
+
+@media (max-width: 840px) {
+  .teacherPortalPage,
+  .teacherPortalContent,
+  .teacherPortalContent > *,
+  .teacherPortalContent :is(.card,.fields,.orderLayout,.portalSearch,.comboboxField) { min-width: 0; max-width: 100%; }
+  .teacherPortalContent :is(input,select,textarea),
+  .teacherPortalPage :is(input,select,textarea) { font-size: 16px!important; }
+  .teacherPortalPage:has(input:focus,textarea:focus,select:focus) .teacherMobileNav,
+  .teacherPortalPage:has(input:focus,textarea:focus,select:focus) .mobileCartBar {
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(calc(100% + 24px));
+  }
+  .orderCart { overscroll-behavior: contain; }
+}
+
+@media (max-width: 620px) {
+  .teacherPortalContent .card.overviewActionCard { padding-top: 12px; }
+  .adminFilters { display: grid; grid-template-columns: 1fr; }
+  .adminFilters > * { width: 100%; }
+}

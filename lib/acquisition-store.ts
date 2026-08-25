@@ -60,9 +60,13 @@ export type AcquisitionProjection = {
   version: number;
   submittedAt: string;
   updatedAt: string;
+  teacherHiddenAt: string | null;
+  librarianHiddenAt: string | null;
 };
 
 export type TeacherAcquisitionSort = "date_desc" | "date_asc" | "title_asc" | "title_desc" | "quantity_desc";
+export type AcquisitionVisibility = "visible" | "hidden" | "all";
+export type LibrarianAcquisitionSort = "date_desc" | "date_asc" | "requester_asc" | "requester_desc" | "status_asc" | "status_desc";
 
 export type AcquisitionSummary = {
   total: number;
@@ -87,6 +91,7 @@ type RequestRow = {
   requester_note: string; librarian_note: string; clarification_message: string;
   rejection_reason: string; status: AcquisitionStatus; duplicate_key: string;
   academic_year_label: string; version: number; submitted_at: string; updated_at: string;
+  teacher_hidden_at: string | null; librarian_hidden_at: string | null;
   duplicate_count: number;
 };
 
@@ -103,6 +108,7 @@ export class AcquisitionStoreError extends Error {
 }
 
 const ACTIVE_STATUSES: AcquisitionStatus[] = ["submitted", "in_review", "clarification", "approved", "planned", "ordered", "partially_received"];
+const TERMINAL_STATUSES: AcquisitionStatus[] = ["received", "rejected", "cancelled"];
 
 export async function listTeacherAcquisitionRequests(
   db: AcquisitionDatabase,
@@ -112,12 +118,14 @@ export async function listTeacherAcquisitionRequests(
     query?: string;
     sort?: TeacherAcquisitionSort;
     limit?: number;
+    visibility?: AcquisitionVisibility;
   } = {},
 ): Promise<AcquisitionProjection[]> {
   const normalized = typeof options === "string" ? { status: options } : options;
   const status = normalized.status ?? "all";
   const query = normalized.query?.trim().slice(0, 80) ?? "";
   const sort = normalized.sort ?? "date_desc";
+  const visibility = normalized.visibility ?? "visible";
   const clause = status === "all" ? "" : "AND ar.status=?";
   const bindings: D1Value[] = [teacherUserId];
   if (status !== "all") bindings.push(status);
@@ -129,7 +137,8 @@ export async function listTeacherAcquisitionRequests(
   }
   const order = teacherAcquisitionOrder(sort);
   bindings.push(Math.min(Math.max(normalized.limit ?? 100, 1), 100));
-  const rows = await db.prepare(`${projectionSql()} WHERE ar.teacher_user_id=? AND ar.teacher_hidden_at IS NULL ${clause} ${queryClause} ORDER BY ${order} LIMIT ?`)
+  const visibilityClause = visibility === "hidden" ? "AND ar.teacher_hidden_at IS NOT NULL" : visibility === "all" ? "" : "AND ar.teacher_hidden_at IS NULL";
+  const rows = await db.prepare(`${projectionSql()} WHERE ar.teacher_user_id=? ${visibilityClause} ${clause} ${queryClause} ORDER BY ${order} LIMIT ?`)
     .bind(...bindings).all<RequestRow>();
   return (rows.results ?? []).map(projectRequest);
 }
@@ -146,11 +155,13 @@ function teacherAcquisitionOrder(sort: TeacherAcquisitionSort): string {
 
 export async function listLibrarianAcquisitionRequests(
   db: AcquisitionDatabase,
-  options: { status?: AcquisitionStatus | "active" | "all"; requesterKind?: "teacher" | "student" | "all"; query?: string; limit?: number } = {},
+  options: { status?: AcquisitionStatus | "active" | "all"; requesterKind?: "teacher" | "student" | "all"; query?: string; limit?: number; visibility?: AcquisitionVisibility; sort?: LibrarianAcquisitionSort } = {},
 ): Promise<{ requests: AcquisitionProjection[]; summary: AcquisitionSummary; procurementGroups: Array<{ duplicateKey: string; title: string; author: string; publicationYear: number | null; requestCount: number; requestedQuantity: number; orderedQuantity: number; receivedQuantity: number }> }> {
   const status = options.status ?? "all";
   const requesterKind = options.requesterKind ?? "all";
   const query = (options.query ?? "").trim().slice(0, 120);
+  const visibility = options.visibility ?? "visible";
+  const sort = options.sort ?? "date_desc";
   const clauses: string[] = [];
   const bindings: D1Value[] = [];
   if (status === "active") {
@@ -164,13 +175,15 @@ export async function listLibrarianAcquisitionRequests(
     clauses.push("ar.requester_kind=?");
     bindings.push(requesterKind);
   }
+  if (visibility === "visible") clauses.push("ar.librarian_hidden_at IS NULL");
+  else if (visibility === "hidden") clauses.push("ar.librarian_hidden_at IS NOT NULL");
   if (query) {
     clauses.push("(ar.title LIKE ? ESCAPE '\\' OR ar.author LIKE ? ESCAPE '\\' OR ar.requester_name LIKE ? ESCAPE '\\' OR ar.public_number LIKE ? ESCAPE '\\' OR ar.material_id LIKE ? ESCAPE '\\')");
     const needle = `%${query.replace(/[\\%_]/gu, "\\$&")}%`; bindings.push(needle, needle, needle, needle, needle);
   }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   bindings.push(Math.min(Math.max(options.limit ?? 200, 1), 500));
-  const result = await db.prepare(`${projectionSql()} ${where} ORDER BY ar.updated_at DESC, ar.id DESC LIMIT ?`).bind(...bindings).all<RequestRow>();
+  const result = await db.prepare(`${projectionSql()} ${where} ORDER BY ${librarianAcquisitionOrder(sort)} LIMIT ?`).bind(...bindings).all<RequestRow>();
   const requests = (result.results ?? []).map(projectRequest);
   const summaryRow = await db.prepare(`
     SELECT COUNT(*) total,
@@ -208,6 +221,20 @@ export async function listLibrarianAcquisitionRequests(
       requestedQuantity: number(row.requested_quantity), orderedQuantity: number(row.ordered_quantity), receivedQuantity: number(row.received_quantity),
     })),
   };
+}
+
+function librarianAcquisitionOrder(sort: LibrarianAcquisitionSort): string {
+  const statusRank = `CASE ar.status WHEN 'submitted' THEN 0 WHEN 'in_review' THEN 1 WHEN 'clarification' THEN 2
+    WHEN 'approved' THEN 3 WHEN 'planned' THEN 4 WHEN 'ordered' THEN 5 WHEN 'partially_received' THEN 6
+    WHEN 'received' THEN 7 WHEN 'rejected' THEN 8 ELSE 9 END`;
+  switch (sort) {
+    case "date_asc": return "ar.updated_at ASC, ar.id ASC";
+    case "requester_asc": return "ar.requester_name COLLATE NOCASE ASC, ar.updated_at DESC, ar.id DESC";
+    case "requester_desc": return "ar.requester_name COLLATE NOCASE DESC, ar.updated_at DESC, ar.id DESC";
+    case "status_asc": return `${statusRank} ASC, ar.updated_at DESC, ar.id DESC`;
+    case "status_desc": return `${statusRank} DESC, ar.updated_at DESC, ar.id DESC`;
+    default: return "ar.updated_at DESC, ar.id DESC";
+  }
 }
 
 export async function createTeacherAcquisitionRequest(
@@ -367,6 +394,96 @@ export async function hideTeacherAcquisitionRequest(
   ]);
   if (!number(results[0]?.meta?.changes)) throw new AcquisitionStoreError("request_already_hidden", 409, "Пропозицію вже прибрано з вашої історії.");
   return { requestId, hidden: true, hiddenAt: now };
+}
+
+export async function restoreTeacherAcquisitionRequest(
+  db: AcquisitionDatabase,
+  teacher: VisitTeacherIdentity,
+  requestId: string,
+  expectedVersion: number,
+  mutationId: string,
+): Promise<{ requestId: string; hidden: false; hiddenAt: null }> {
+  const now = new Date().toISOString();
+  await requireActiveTeacher(db, teacher, now);
+  const current = await requireRequest(db, requestId);
+  if (current.teacherUserId !== teacher.teacherUserId) throw new AcquisitionStoreError("request_not_found", 404, "Пропозицію не знайдено.");
+  if (current.version !== expectedVersion) throw conflict(current.version);
+  if (!current.teacherHiddenAt) throw new AcquisitionStoreError("request_already_visible", 409, "Пропозиція вже відображається у вашій історії.");
+  const results = await db.batch([
+    db.prepare(`UPDATE acquisition_requests SET teacher_hidden_at=NULL WHERE id=? AND teacher_user_id=? AND version=? AND teacher_hidden_at IS NOT NULL`)
+      .bind(requestId, teacher.teacherUserId, expectedVersion),
+    db.prepare(`INSERT INTO audit_events (id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,before_json,after_json,metadata_json,created_at)
+      SELECT ?,?,?,'acquisition_request.restore_for_teacher','acquisition_request',id,?,?,?,NULL,?
+      FROM acquisition_requests WHERE id=? AND teacher_user_id=? AND teacher_hidden_at IS NULL AND changes()=1`)
+      .bind(`AUD-${crypto.randomUUID()}`, teacher.teacherUserId, `teacher:${teacher.teacherUserId}`, mutationId,
+        JSON.stringify({ hidden: true }), JSON.stringify({ hidden: false }), now, requestId, teacher.teacherUserId),
+  ]);
+  if (!number(results[0]?.meta?.changes)) throw new AcquisitionStoreError("request_already_visible", 409, "Пропозиція вже відображається у вашій історії.");
+  return { requestId, hidden: false, hiddenAt: null };
+}
+
+export async function hideCompletedTeacherAcquisitionRequests(
+  db: AcquisitionDatabase,
+  teacher: VisitTeacherIdentity,
+  mutationId: string,
+): Promise<{ hiddenCount: number }> {
+  const now = new Date().toISOString();
+  await requireActiveTeacher(db, teacher, now);
+  const results = await db.batch([
+    db.prepare(`INSERT INTO audit_events (id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,before_json,after_json,metadata_json,created_at)
+      SELECT 'AUD-' || lower(hex(randomblob(16))),?,?,'acquisition_request.hide_completed_for_teacher','acquisition_request',id,?,NULL,?,NULL,?
+      FROM acquisition_requests WHERE teacher_user_id=? AND teacher_hidden_at IS NULL AND status IN ('received','rejected','cancelled')`)
+      .bind(teacher.teacherUserId, `teacher:${teacher.teacherUserId}`, mutationId, JSON.stringify({ hidden: true, hiddenAt: now }), now, teacher.teacherUserId),
+    db.prepare(`UPDATE acquisition_requests SET teacher_hidden_at=? WHERE teacher_user_id=? AND teacher_hidden_at IS NULL AND status IN ('received','rejected','cancelled')`)
+      .bind(now, teacher.teacherUserId),
+  ]);
+  return { hiddenCount: number(results[1]?.meta?.changes) };
+}
+
+export async function setLibrarianAcquisitionVisibility(
+  db: AcquisitionDatabase,
+  user: ChatGPTUser,
+  requestId: string,
+  hidden: boolean,
+  mutationId: string,
+): Promise<{ requestId: string; hidden: boolean; hiddenAt: string | null }> {
+  const actor = actorFromUser(user);
+  const current = await requireRequest(db, requestId);
+  if (hidden && !TERMINAL_STATUSES.includes(current.status)) {
+    throw new AcquisitionStoreError("request_not_terminal", 409, "Приховати можна лише завершену, відхилену або скасовану заявку.");
+  }
+  if (hidden === Boolean(current.librarianHiddenAt)) {
+    throw new AcquisitionStoreError(hidden ? "request_already_hidden" : "request_already_visible", 409, hidden ? "Заявку вже приховано." : "Заявка вже відображається.");
+  }
+  const now = new Date().toISOString();
+  const update = hidden
+    ? db.prepare(`UPDATE acquisition_requests SET librarian_hidden_at=?,librarian_hidden_by_user_id=? WHERE id=? AND librarian_hidden_at IS NULL`).bind(now, actor.id, requestId)
+    : db.prepare(`UPDATE acquisition_requests SET librarian_hidden_at=NULL,librarian_hidden_by_user_id=NULL WHERE id=? AND librarian_hidden_at IS NOT NULL`).bind(requestId);
+  const audit = db.prepare(`INSERT INTO audit_events (id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,before_json,after_json,metadata_json,created_at)
+    VALUES (?,?,?,?, 'acquisition_request',?,?,?,?,NULL,?)`)
+    .bind(`AUD-${crypto.randomUUID()}`, actor.id, actor.email, hidden ? "acquisition_request.hide_for_librarian" : "acquisition_request.restore_for_librarian",
+      requestId, mutationId, JSON.stringify({ hidden: !hidden }), JSON.stringify({ hidden, hiddenAt: hidden ? now : null }), now);
+  const results = await db.batch([update, audit]);
+  if (!number(results[0]?.meta?.changes)) throw new AcquisitionStoreError("visibility_conflict", 409, "Список уже змінився. Оновіть сторінку.");
+  return { requestId, hidden, hiddenAt: hidden ? now : null };
+}
+
+export async function hideCompletedLibrarianAcquisitionRequests(
+  db: AcquisitionDatabase,
+  user: ChatGPTUser,
+  mutationId: string,
+): Promise<{ hiddenCount: number }> {
+  const actor = actorFromUser(user);
+  const now = new Date().toISOString();
+  const results = await db.batch([
+    db.prepare(`INSERT INTO audit_events (id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,before_json,after_json,metadata_json,created_at)
+      SELECT 'AUD-' || lower(hex(randomblob(16))),?,?, 'acquisition_request.hide_completed_for_librarian','acquisition_request',id,?,NULL,?,NULL,?
+      FROM acquisition_requests WHERE librarian_hidden_at IS NULL AND status IN ('received','rejected','cancelled')`)
+      .bind(actor.id, actor.email, mutationId, JSON.stringify({ hidden: true, hiddenAt: now }), now),
+    db.prepare(`UPDATE acquisition_requests SET librarian_hidden_at=?,librarian_hidden_by_user_id=?
+      WHERE librarian_hidden_at IS NULL AND status IN ('received','rejected','cancelled')`).bind(now, actor.id),
+  ]);
+  return { hiddenCount: number(results[1]?.meta?.changes) };
 }
 
 export async function applyLibrarianAcquisitionAction(
@@ -672,7 +789,7 @@ function projectionSql(): string {
     ar.category,ar.source_kind,ar.literature_kind,ar.material_id,ar.title,ar.author,ar.publication_year,
     ar.requested_quantity,ar.approved_quantity,ar.ordered_quantity,ar.received_quantity,ar.source_url,ar.subject,ar.target_class,
     ar.requester_note,ar.librarian_note,ar.clarification_message,ar.rejection_reason,ar.status,ar.duplicate_key,
-    ar.academic_year_label,ar.version,ar.submitted_at,ar.updated_at,
+    ar.academic_year_label,ar.version,ar.submitted_at,ar.updated_at,ar.teacher_hidden_at,ar.librarian_hidden_at,
     (SELECT COUNT(*) FROM acquisition_requests dup WHERE dup.academic_year_id=ar.academic_year_id AND dup.duplicate_key=ar.duplicate_key) duplicate_count
     FROM acquisition_requests ar`;
 }
@@ -688,6 +805,7 @@ function projectRequest(row: RequestRow): AcquisitionProjection {
     clarificationMessage: row.clarification_message, rejectionReason: row.rejection_reason, status: row.status,
     duplicateKey: row.duplicate_key, duplicateCount: number(row.duplicate_count), academicYearLabel: row.academic_year_label,
     version: number(row.version), submittedAt: row.submitted_at, updatedAt: row.updated_at,
+    teacherHiddenAt: row.teacher_hidden_at, librarianHiddenAt: row.librarian_hidden_at,
   };
 }
 

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { acquisitionError, acquisitionJson, acquisitionStoreError, readAcquisitionJson, safeAcquisitionId } from "@/lib/acquisition-api";
-import { cancelTeacherAcquisitionRequest, hideTeacherAcquisitionRequest, type AcquisitionDatabase } from "@/lib/acquisition-store";
+import { cancelTeacherAcquisitionRequest, hideTeacherAcquisitionRequest, restoreTeacherAcquisitionRequest, type AcquisitionDatabase } from "@/lib/acquisition-store";
 import { validateAcquisitionCancelInput } from "@/lib/acquisition-validation";
 import { requireVisitTeacherSession } from "@/lib/visit-teacher-auth";
 import type { VisitD1Database } from "@/lib/visit-schedule-store";
@@ -34,13 +34,15 @@ export async function PATCH(request: Request, context: Context): Promise<Respons
     const value = body.value as Record<string, unknown>;
     const expectedVersion = Number(value.expectedVersion);
     const mutationId = typeof value.mutationId === "string" ? value.mutationId : "";
-    if (value.action !== "hide" || !Number.isInteger(expectedVersion) || expectedVersion < 1 || !/^[0-9a-f-]{36}$/iu.test(mutationId)) {
-      return acquisitionError(400, "validation_failed", "Не вдалося підтвердити приховування пропозиції.");
+    if (!["hide", "restore"].includes(String(value.action)) || !Number.isInteger(expectedVersion) || expectedVersion < 1 || !/^[0-9a-f-]{36}$/iu.test(mutationId)) {
+      return acquisitionError(400, "validation_failed", "Не вдалося підтвердити зміну видимості пропозиції.");
     }
     return acquisitionJson({
       schemaVersion: 1,
       success: true,
-      result: await hideTeacherAcquisitionRequest(db, teacher, id, expectedVersion, mutationId),
+      result: value.action === "restore"
+        ? await restoreTeacherAcquisitionRequest(db, teacher, id, expectedVersion, mutationId)
+        : await hideTeacherAcquisitionRequest(db, teacher, id, expectedVersion, mutationId),
     });
   } catch (error) { return acquisitionStoreError(error, "acquisition_request_hide_unavailable"); }
 }

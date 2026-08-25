@@ -50,6 +50,7 @@ type LibrarianRequest = {
   version: number;
   createdAt: string;
   updatedAt: string;
+  librarianHiddenAt: string | null;
   items: RequestItem[];
 };
 
@@ -125,22 +126,30 @@ export default function MaterialRequestInbox({
   const [submitting, setSubmitting] = useState(false);
   const [pending, setPending] = useState<RequestActionIntent | null>(null);
   const [status, setStatus] = useState("");
+  const [sort, setSort] = useState("date_desc");
+  const [query, setQuery] = useState("");
+  const [committedQuery, setCommittedQuery] = useState("");
+  const [showHidden, setShowHidden] = useState(false);
   const loadRequestRef = useRef(0);
-  const statusRef = useRef(status);
+  const filterScope = `${status}\u001e${sort}\u001e${committedQuery}\u001e${showHidden}`;
+  const statusRef = useRef(filterScope);
   useEffect(() => {
-    statusRef.current = status;
-  }, [status]);
+    statusRef.current = filterScope;
+  }, [filterScope]);
   const storageKey = `library.librarian.requests.pending.v1:${pendingScope}`;
 
   const load = useCallback(async (afterMutation = false, cursor: string | null = null) => {
     const requestSequence = ++loadRequestRef.current;
-    const requestStatus = status;
+    const requestStatus = filterScope;
     const append = Boolean(cursor);
     if (append) setLoadingMore(true);
     else { setLoading(true); setLoadingMore(false); }
     try {
       const params = new URLSearchParams({ limit: "100" });
       if (status) params.set("status", status);
+      params.set("sort", sort);
+      params.set("visibility", showHidden ? "all" : "visible");
+      if (committedQuery) params.set("q", committedQuery);
       if (cursor) params.set("cursor", cursor);
       if (append) {
         const requestResponse = await visitApi<RequestsEnvelope>(`/api/librarian/material-requests?${params.toString()}`);
@@ -171,7 +180,12 @@ export default function MaterialRequestInbox({
         else setLoading(false);
       }
     }
-  }, [status]);
+  }, [committedQuery, filterScope, showHidden, sort, status]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setCommittedQuery(query.trim()), 280);
+    return () => window.clearTimeout(timer);
+  }, [query]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -243,17 +257,54 @@ export default function MaterialRequestInbox({
     setNotice("");
   }
 
+  async function changeVisibility(request: LibrarianRequest, hidden: boolean) {
+    setSubmitting(true); setNotice("");
+    try {
+      await visitApi(`/api/librarian/material-requests/${encodeURIComponent(request.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action: hidden ? "hide" : "restore", mutationId: crypto.randomUUID() }),
+      });
+      setNotice(hidden ? "Виконане замовлення приховано з робочого списку." : "Замовлення повернуто до робочого списку.");
+      setNoticeTone("success");
+      await load(true);
+    } catch (error) {
+      setNotice(errorMessage(error)); setNoticeTone("error");
+    } finally { setSubmitting(false); }
+  }
+
+  async function hideCompleted() {
+    if (!window.confirm("Приховати всі виконані, відхилені та скасовані замовлення? Історія та видачі не видаляються.")) return;
+    setSubmitting(true); setNotice("");
+    try {
+      const result = await visitApi<{ result: { hiddenCount: number } }>("/api/librarian/material-requests", {
+        method: "PATCH",
+        body: JSON.stringify({ action: "hide_completed", mutationId: crypto.randomUUID() }),
+      });
+      setNotice(result.result.hiddenCount ? `Приховано завершених замовлень: ${result.result.hiddenCount}.` : "Нових завершених замовлень для приховування немає.");
+      setNoticeTone("success");
+      await load(true);
+    } catch (error) {
+      setNotice(errorMessage(error)); setNoticeTone("error");
+    } finally { setSubmitting(false); }
+  }
+
   const requests = useMemo(() => data?.requests ?? [], [data]);
 
   return (
     <section className={`${styles.card} ${styles.requestInbox}`} aria-labelledby="request-inbox-title">
       <div className={styles.cardHeading}><div><span>{data?.newCount ?? 0} нових</span><h2 id="request-inbox-title">Замовлення вчителів</h2></div><button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading || loadingMore || submitting} aria-busy={loading}><SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}</button></div>
-      <div className={styles.adminFilters}><label>Стан<select value={status} onChange={(event) => changeStatus(event.currentTarget.value)} disabled={loading || loadingMore || submitting}><option value="">Усі</option><option value="submitted">Нові</option><option value="in_review">Опрацьовуються</option><option value="ready">Готові</option><option value="partially_ready">Частково готові</option><option value="completed">Виконані</option><option value="rejected">Відхилені</option></select></label></div>
+      <div className={styles.adminFilters}>
+        <label>Пошук<input type="search" value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="Учитель, назва або автор" /></label>
+        <label>Стан<select value={status} onChange={(event) => changeStatus(event.currentTarget.value)} disabled={loading || loadingMore || submitting}><option value="">Усі</option><option value="submitted">Нові</option><option value="in_review">Опрацьовуються</option><option value="ready">Готові</option><option value="partially_ready">Частково готові</option><option value="completed">Виконані</option><option value="rejected">Відхилені</option><option value="cancelled">Скасовані</option></select></label>
+        <label>Сортування<select value={sort} onChange={(event) => setSort(event.currentTarget.value)} disabled={loading || loadingMore || submitting}><option value="date_desc">Дата: спочатку нові</option><option value="date_asc">Дата: спочатку давні</option><option value="teacher_asc">Прізвище А–Я</option><option value="teacher_desc">Прізвище Я–А</option><option value="status_asc">Статус: робочі першими</option><option value="status_desc">Статус: завершені першими</option></select></label>
+        <label className={styles.visibilityToggle}><input type="checkbox" checked={showHidden} onChange={(event) => setShowHidden(event.currentTarget.checked)} /> Показати приховані</label>
+        <button className={styles.quiet} type="button" onClick={() => void hideCompleted()} disabled={!writesEnabled || submitting}><SiteIcon name="hidden" size={16} /> Приховати всі завершені</button>
+      </div>
       {pending ? <div className={styles.pending} role="status"><span>Результат дії із замовленням не підтверджено.</span><button type="button" onClick={() => void sendAction(pending)} disabled={submitting}>Перевірити результат</button></div> : null}
       {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
       {loading ? <p className={styles.empty}>Оновлюємо замовлення…</p> : requests.length ? <div className={styles.inboxList}>{requests.map((request) => (
         <article key={request.id}>
-          <header><div><span className={styles.requestStatus} data-status={request.status}>{statusLabel(request.status)}</span><h3>{request.teacher.fullName}</h3><time dateTime={request.createdAt}>{formatDate(request.createdAt)}</time></div><strong>{request.items.length} поз.</strong></header>
+          <header><div><span className={styles.requestStatus} data-status={request.status}>{statusLabel(request.status)}</span>{request.librarianHiddenAt ? <span className={styles.hiddenRecordBadge}>Приховано</span> : null}<h3>{request.teacher.fullName}</h3><time dateTime={request.createdAt}>{formatDate(request.createdAt)}</time></div><strong>{request.items.length} поз.</strong></header>
           {request.teacherNotes ? <p>{request.teacherNotes}</p> : null}
           <ul>{request.items.map((item) => <li key={item.id}><span><strong>{item.material.title}</strong><small>{[item.material.author, item.material.year, item.material.id].filter(Boolean).join(" · ")}</small></span><span>{item.requestedQuantity} запитано{item.reservedQuantity ? ` · ${item.reservedQuantity} у резерві` : ""}{item.fulfilledQuantity ? ` · ${item.fulfilledQuantity} видано` : ""}</span></li>)}</ul>
           {request.pickupLocation ? <p>Місце отримання: <strong>{request.pickupLocation.name}</strong></p> : null}
@@ -263,6 +314,7 @@ export default function MaterialRequestInbox({
             {request.status === "submitted" || request.status === "in_review" ? <button className={styles.danger} type="button" onClick={() => reject(request)} disabled={!writesEnabled || !data?.writesEnabled || submitting || Boolean(pending)}>Відхилити</button> : null}
             {(request.status === "ready" || request.status === "partially_ready") && request.items.some((item) => item.reservations.some((reservation) => reservation.remainingQuantity > 0)) ? <ReservationActionForm request={request} disabled={!writesEnabled || !data?.writesEnabled || submitting || Boolean(pending)} onSubmit={sendAction} /> : null}
             {(request.status === "ready" || request.status === "partially_ready") && request.resultingLoanId && !request.items.some((item) => item.reservations.length > 0) ? <button className={styles.primary} type="button" onClick={() => completeLegacyRequest(request)} disabled={!writesEnabled || !data?.writesEnabled || submitting || Boolean(pending)}>Підтвердити отримання старої видачі</button> : null}
+            {["completed", "rejected", "cancelled"].includes(request.status) ? <button className={styles.quiet} type="button" onClick={() => void changeVisibility(request, !request.librarianHiddenAt)} disabled={!writesEnabled || !data?.writesEnabled || submitting}><SiteIcon name={request.librarianHiddenAt ? "visible" : "hidden"} size={16} /> {request.librarianHiddenAt ? "Повернути" : "Приховати"}</button> : null}
           </div>
         </article>
       ))}</div> : <p className={styles.empty}>За цим фільтром замовлень немає.</p>}

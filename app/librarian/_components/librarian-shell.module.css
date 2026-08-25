@@ -9,6 +9,8 @@
   --lib-line: #d8e1d7;
   --lib-gold: #dcae3d;
   min-height: 100vh;
+  max-width: 100%;
+  overflow-x: clip;
   color: var(--lib-ink);
   background: var(--lib-canvas);
 }
@@ -127,6 +129,8 @@
   margin-inline: auto;
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .sidebar {
@@ -252,7 +256,10 @@
 }
 
 .content {
+  width: 100%;
   min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
 }
 
 .mobileNav,

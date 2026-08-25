@@ -16,6 +16,7 @@ type RequestRecord = {
   orderedQuantity: number; receivedQuantity: number; sourceUrl: string; subject: string; targetClass: string; requesterNote: string;
   librarianNote: string; clarificationMessage: string; rejectionReason: string; status: string; duplicateCount: number;
   academicYearLabel: string; version: number; updatedAt: string;
+  librarianHiddenAt: string | null;
 };
 type Summary = { total: number; active: number; submitted: number; ordered: number; received: number; requestedCopies: number; orderedCopies: number; receivedCopies: number; duplicateGroups: number };
 type Group = { duplicateKey: string; title: string; author: string; publicationYear: number | null; requestCount: number; requestedQuantity: number; orderedQuantity: number; receivedQuantity: number };
@@ -28,11 +29,12 @@ export default function AcquisitionWorkspace({ displayName, role = "librarian", 
   const [data, setData] = useState<Envelope | null>(null); const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [notice, setNotice] = useState("");
   const [status, setStatus] = useState("active"); const [requester, setRequester] = useState("all"); const [query, setQuery] = useState("");
+  const [sort, setSort] = useState("date_desc"); const [showHidden, setShowHidden] = useState(false);
   const [workbook, setWorkbook] = useState<ParsedAcquisitionWorkbook | null>(null); const [preview, setPreview] = useState<Preview | null>(null);
   const [importId, setImportId] = useState("");
   const handoffHandled = useRef(false);
   const loadRequestRef = useRef(0);
-  const loadScope = `${status}\u001e${requester}\u001e${query.trim()}`;
+  const loadScope = `${status}\u001e${requester}\u001e${query.trim()}\u001e${sort}\u001e${showHidden}`;
   const loadScopeRef = useRef(loadScope);
   useEffect(() => {
     loadScopeRef.current = loadScope;
@@ -40,10 +42,10 @@ export default function AcquisitionWorkspace({ displayName, role = "librarian", 
 
   const load = useCallback(async () => {
     const requestSequence = ++loadRequestRef.current;
-    const requestScope = `${status}\u001e${requester}\u001e${query.trim()}`;
+    const requestScope = `${status}\u001e${requester}\u001e${query.trim()}\u001e${sort}\u001e${showHidden}`;
     setLoading(true); setError("");
     try {
-      const params = new URLSearchParams({ status, requester, q: query.trim() });
+      const params = new URLSearchParams({ status, requester, q: query.trim(), sort, visibility: showHidden ? "all" : "visible" });
       const response = await fetch(`/api/librarian/acquisition-requests?${params}`, { cache: "no-store" });
       const body = await response.json() as Envelope & { error?: string };
       if (!response.ok) throw new Error(body.error || "Не вдалося завантажити комплектування.");
@@ -54,7 +56,7 @@ export default function AcquisitionWorkspace({ displayName, role = "librarian", 
     } finally {
       if (requestSequence === loadRequestRef.current && requestScope === loadScopeRef.current) setLoading(false);
     }
-  }, [query, requester, status]);
+  }, [query, requester, showHidden, sort, status]);
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
   useEffect(() => {
     if (!data || handoffHandled.current) return;
@@ -113,6 +115,32 @@ export default function AcquisitionWorkspace({ displayName, role = "librarian", 
     } catch (actionError) { setError(message(actionError)); } finally { setBusy(false); }
   }
 
+  async function changeVisibility(record: RequestRecord, hidden: boolean) {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(`/api/librarian/acquisition-requests/${encodeURIComponent(record.id)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: hidden ? "hide" : "restore", mutationId: crypto.randomUUID() }),
+      });
+      const body = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(body.error || "Не вдалося змінити видимість заявки.");
+      setNotice(hidden ? "Завершену заявку приховано з робочого списку." : "Заявку повернуто до робочого списку.");
+      await load();
+    } catch (visibilityError) { setError(message(visibilityError)); } finally { setBusy(false); }
+  }
+
+  async function hideCompleted() {
+    if (!window.confirm("Приховати всі отримані, відхилені та скасовані заявки? Історія не видаляється.")) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/librarian/acquisition-requests", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "hide_completed", mutationId: crypto.randomUUID() }) });
+      const body = await response.json() as { result?: { hiddenCount?: number }; error?: string };
+      if (!response.ok) throw new Error(body.error || "Не вдалося приховати завершені заявки.");
+      setNotice(body.result?.hiddenCount ? `Приховано завершених заявок: ${body.result.hiddenCount}.` : "Нових завершених заявок для приховування немає.");
+      await load();
+    } catch (hideError) { setError(message(hideError)); } finally { setBusy(false); }
+  }
+
   async function chooseWorkbook(file: File | null) {
     setWorkbook(null); setPreview(null); setError(""); setNotice("");
     if (!file) return;
@@ -159,8 +187,8 @@ export default function AcquisitionWorkspace({ displayName, role = "librarian", 
       {preview ? <section className={styles.preview}><h2>Перевірка файла</h2><p>{preview.totals.rows} рядків · {preview.totals.valid} готові · {preview.totals.errors} з помилками · {preview.totals.duplicates} збігаються з наявними пропозиціями{preview.totals.existing ? ` · ${preview.totals.existing} уже існують і будуть пропущені` : ""}</p>{preview.rows.filter((row) => !row.valid).slice(0, 20).map((row) => <p key={`${row.sourceSheet}-${row.sourceRow}`} className={styles.errorLine}>{row.sourceSheet}, рядок {row.sourceRow}: {row.errors.join(" ")}</p>)}<button type="button" disabled={!preview.valid || busy || !writesEnabled} onClick={() => void commitImport()}>Підтвердити імпорт</button></section> : null}
       {data?.procurementGroups.length ? <details className={styles.groups}><summary>Повторні запити: {data.procurementGroups.length} груп</summary><div>{data.procurementGroups.map((group) => <article key={group.duplicateKey}><strong>{group.title}</strong><span>{metadataLine(group.author, group.publicationYear)}</span><small>{group.requestCount} заявок · запитано {group.requestedQuantity} · замовлено {group.orderedQuantity} · отримано {group.receivedQuantity}</small></article>)}</div></details> : null}
       <section className={styles.queue}>
-        <div className={styles.filters}><select value={status} onChange={(event) => setStatus(event.currentTarget.value)}><option value="active">Активні</option><option value="all">Усі</option>{Object.entries(STATUS).map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select><select value={requester} onChange={(event) => setRequester(event.currentTarget.value)}><option value="all">Усі заявники</option><option value="teacher">Учителі</option><option value="student">Учні</option></select><input value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="Назва, автор, ім’я або номер" /></div>
-        {loading ? <p className={styles.empty}>Оновлюємо чергу…</p> : data?.requests.length ? <div className={styles.list}>{data.requests.map((record) => <RequestCard key={record.id} record={record} busy={busy || !writesEnabled} telegramMiniApp={telegramMiniApp} onAction={act} onSend={sendAction} />)}</div> : <p className={styles.empty}>За цими фільтрами заявок немає.</p>}
+        <div className={styles.filters}><select aria-label="Статус" value={status} onChange={(event) => setStatus(event.currentTarget.value)}><option value="active">Активні</option><option value="all">Усі</option>{Object.entries(STATUS).map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select><select aria-label="Заявник" value={requester} onChange={(event) => setRequester(event.currentTarget.value)}><option value="all">Усі заявники</option><option value="teacher">Учителі</option><option value="student">Учні</option></select><select aria-label="Сортування" value={sort} onChange={(event) => setSort(event.currentTarget.value)}><option value="date_desc">Дата: спочатку нові</option><option value="date_asc">Дата: спочатку давні</option><option value="requester_asc">Прізвище А–Я</option><option value="requester_desc">Прізвище Я–А</option><option value="status_asc">Статус: робочі першими</option><option value="status_desc">Статус: завершені першими</option></select><input value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="Назва, автор, ім’я або номер" /><label className={styles.visibilityToggle}><input type="checkbox" checked={showHidden} onChange={(event) => setShowHidden(event.currentTarget.checked)} /> Показати приховані</label><button type="button" disabled={busy || !writesEnabled} onClick={() => void hideCompleted()}><SiteIcon name="hidden" size={16} /> Приховати всі завершені</button></div>
+        {loading ? <p className={styles.empty}>Оновлюємо чергу…</p> : data?.requests.length ? <div className={styles.list}>{data.requests.map((record) => <RequestCard key={record.id} record={record} busy={busy || !writesEnabled} telegramMiniApp={telegramMiniApp} onAction={act} onSend={sendAction} onVisibility={changeVisibility} />)}</div> : <p className={styles.empty}>За цими фільтрами заявок немає.</p>}
       </section>
       </section>
     </main>
@@ -230,7 +258,7 @@ function StudentSuggestionQr({ onNotice, onError }: { onNotice: (value: string) 
   </div>;
 }
 
-function RequestCard({ record, busy, telegramMiniApp, onAction, onSend }: { record: RequestRecord; busy: boolean; telegramMiniApp: boolean; onAction: (record: RequestRecord, action: string) => Promise<void>; onSend: (record: RequestRecord, fields: Record<string, unknown>) => Promise<void> }) {
+function RequestCard({ record, busy, telegramMiniApp, onAction, onSend, onVisibility }: { record: RequestRecord; busy: boolean; telegramMiniApp: boolean; onAction: (record: RequestRecord, action: string) => Promise<void>; onSend: (record: RequestRecord, fields: Record<string, unknown>) => Promise<void>; onVisibility: (record: RequestRecord, hidden: boolean) => Promise<void> }) {
   const [receiptOpen, setReceiptOpen] = useState(false);
   const librarianToolBase = telegramMiniApp ? "/librarian/telegram/cabinet?target=home&" : "/librarian?";
   const createParams = new URLSearchParams({ tool: "create", title: record.title, subject: record.subject, acquisition: record.id });
@@ -240,7 +268,7 @@ function RequestCard({ record, busy, telegramMiniApp, onAction, onSend }: { reco
   const createHref = `${librarianToolBase}${createParams.toString()}`;
   const receiptHref = `${librarianToolBase}tool=receipt&material=${encodeURIComponent(record.materialId ?? "")}&acquisition=${encodeURIComponent(record.id)}`;
   return <article className={styles.request}>
-    <header><div><span className={`${styles.badge} ${record.status === "clarification" ? styles.alertBadge : ""}`}>{STATUS[record.status] ?? record.status}</span>{record.duplicateCount > 1 ? <span className={styles.duplicate}>Ще {record.duplicateCount - 1} схожих</span> : null}</div><small>{record.publicNumber} · {record.academicYearLabel}</small></header>
+    <header><div><span className={`${styles.badge} ${record.status === "clarification" ? styles.alertBadge : ""}`}>{STATUS[record.status] ?? record.status}</span>{record.librarianHiddenAt ? <span className={styles.hiddenBadge}>Приховано</span> : null}{record.duplicateCount > 1 ? <span className={styles.duplicate}>Ще {record.duplicateCount - 1} схожих</span> : null}</div><small>{record.publicNumber} · {record.academicYearLabel}</small></header>
     <div className={styles.requestBody}><div><h2>{record.title}</h2><p>{metadataLine(record.author, record.publicationYear)}{record.materialId ? ` · ${record.materialId}` : " · нового запису в каталозі ще немає"}</p>{record.sourceUrl ? <a href={record.sourceUrl} target="_blank" rel="noreferrer">Відкрити покликання <SiteIcon name="external" size={15} /></a> : <span className={styles.missingMetadata}>Покликання не вказано</span>}</div><dl><div><dt>Заявник</dt><dd>{record.requesterName}{record.requesterClassName ? ` · ${record.requesterClassName}` : ""}</dd></div><div><dt>Потрібно</dt><dd>{record.requestedQuantity} прим.</dd></div><div><dt>Погоджено</dt><dd>{record.approvedQuantity ?? "—"}</dd></div><div><dt>Замовлено / отримано</dt><dd>{record.orderedQuantity} / {record.receivedQuantity}</dd></div>{record.subject || record.targetClass ? <div><dt>Предмет і клас</dt><dd>{[record.subject, record.targetClass].filter(Boolean).join(" · ")}</dd></div> : null}</dl></div>
     {record.requesterNote ? <p className={styles.note}><strong>Примітка заявника:</strong> {record.requesterNote}</p> : null}{record.clarificationMessage ? <p className={styles.note}><strong>Запитано уточнення:</strong> {record.clarificationMessage}</p> : null}{record.rejectionReason ? <p className={styles.note}><strong>Причина:</strong> {record.rejectionReason}</p> : null}
     <div className={styles.cardActions}>
@@ -252,6 +280,7 @@ function RequestCard({ record, busy, telegramMiniApp, onAction, onSend }: { reco
       {!record.materialId && ["approved","planned","ordered"].includes(record.status) ? <><a href={createHref}>Створити матеріал</a><button disabled={busy} onClick={() => void onAction(record,"link_material")}>Прив’язати CAT-ID</button></> : null}
       {record.materialId && ["ordered","partially_received"].includes(record.status) ? <><a href={receiptHref}>Оформити надходження</a><button disabled={busy} onClick={() => setReceiptOpen((value) => !value)}>Зарахувати надходження</button></> : null}
       {["submitted","in_review","clarification","approved","planned","ordered"].includes(record.status) ? <button className={styles.danger} disabled={busy} onClick={() => void onAction(record,"reject")}>Відхилити</button> : null}
+      {["received", "rejected", "cancelled"].includes(record.status) ? <button disabled={busy} onClick={() => void onVisibility(record, !record.librarianHiddenAt)}><SiteIcon name={record.librarianHiddenAt ? "visible" : "hidden"} size={15} /> {record.librarianHiddenAt ? "Повернути" : "Приховати"}</button> : null}
     </div>
     {receiptOpen ? <ReceiptAllocator key={`${record.id}:${record.version}`} record={record} disabled={busy} onSend={onSend} /> : null}
   </article>;

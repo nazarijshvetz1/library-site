@@ -15,6 +15,7 @@ type Acquisition = {
   id: string; publicNumber: string; title: string; author: string; publicationYear: number; requestedQuantity: number;
   approvedQuantity: number | null; orderedQuantity: number; receivedQuantity: number; status: string; version: number;
   requesterNote: string; librarianNote: string; clarificationMessage: string; rejectionReason: string; sourceUrl: string; updatedAt: string;
+  teacherHiddenAt: string | null;
 };
 type JsonError = { error?: string; fieldErrors?: Record<string, string> };
 
@@ -41,6 +42,8 @@ export default function TeacherAcquisitionPanel() {
   const [committedHistoryQuery, setCommittedHistoryQuery] = useState("");
   const [historyStatus, setHistoryStatus] = useState("all");
   const [historySort, setHistorySort] = useState("date_desc");
+  const [showHidden, setShowHidden] = useState(false);
+  const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [notice, setNotice] = useState(""); const [error, setError] = useState("");
@@ -51,7 +54,7 @@ export default function TeacherAcquisitionPanel() {
     const requestId = ++historyRequest.current;
     setLoading(true); setError("");
     try {
-      const params = new URLSearchParams({ status: historyStatus, sort: historySort });
+      const params = new URLSearchParams({ status: historyStatus, sort: historySort, visibility: showHidden ? "all" : "visible" });
       if (committedHistoryQuery) params.set("q", committedHistoryQuery);
       const response = await fetch(`/api/teacher/acquisition-requests?${params}`, { cache: "no-store" });
       const body = await response.json() as { success?: boolean; requests?: Acquisition[]; error?: string };
@@ -63,7 +66,7 @@ export default function TeacherAcquisitionPanel() {
     } finally {
       if (requestId === historyRequest.current) setLoading(false);
     }
-  }, [committedHistoryQuery, historySort, historyStatus]);
+  }, [committedHistoryQuery, historySort, historyStatus, showHidden]);
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
   useEffect(() => {
     const timer = window.setTimeout(() => setCommittedHistoryQuery(historyQuery.trim()), 280);
@@ -154,18 +157,33 @@ export default function TeacherAcquisitionPanel() {
     } catch (cancelError) { setError(message(cancelError)); } finally { setBusy(false); }
   }
 
-  async function hide(record: Acquisition) {
-    if (!window.confirm(`Прибрати «${record.title}» лише з вашої історії? Бібліотекар і далі бачитиме цю пропозицію.`)) return;
+  async function changeVisibility(record: Acquisition, hidden: boolean) {
+    if (hidden && !window.confirm(`Прибрати «${record.title}» лише з вашої історії? Бібліотекар і далі бачитиме цю пропозицію.`)) return;
     setBusy(true); setError(""); setNotice("");
     try {
       const response = await fetch(`/api/teacher/acquisition-requests/${encodeURIComponent(record.id)}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "hide", mutationId: crypto.randomUUID(), expectedVersion: record.version }),
+        body: JSON.stringify({ action: hidden ? "hide" : "restore", mutationId: crypto.randomUUID(), expectedVersion: record.version }),
       });
       const body = await response.json() as JsonError;
-      if (!response.ok) throw new Error(body.error || "Не вдалося прибрати пропозицію з історії.");
-      setRequests((current) => current.filter((item) => item.id !== record.id));
-      setNotice("Пропозицію прибрано з вашої історії. У бібліотекаря вона збережена.");
+      if (!response.ok) throw new Error(body.error || "Не вдалося змінити видимість пропозиції.");
+      setNotice(hidden ? "Пропозицію приховано лише у вашій історії. У бібліотекаря вона збережена." : "Пропозицію повернуто до вашої історії.");
+      await load();
+    } catch (visibilityError) { setError(message(visibilityError)); } finally { setBusy(false); }
+  }
+
+  async function hideCompleted() {
+    if (!window.confirm("Приховати всі отримані, відхилені та скасовані пропозиції? Їх можна буде повернути через «Показати приховані».")) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/teacher/acquisition-requests", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "hide_completed", mutationId: crypto.randomUUID() }),
+      });
+      const body = await response.json() as { result?: { hiddenCount?: number }; error?: string };
+      if (!response.ok) throw new Error(body.error || "Не вдалося приховати завершені пропозиції.");
+      setNotice(body.result?.hiddenCount ? `Приховано завершених пропозицій: ${body.result.hiddenCount}.` : "Нових завершених пропозицій для приховування немає.");
+      await load();
     } catch (hideError) { setError(message(hideError)); } finally { setBusy(false); }
   }
 
@@ -204,21 +222,25 @@ export default function TeacherAcquisitionPanel() {
           <button className={styles.primary} type="submit" disabled={busy || (sourceKind === "catalog" && !selected)}>{busy ? "Надсилаємо…" : "Надіслати пропозицію"}</button>
         </form>
         <section className={styles.card} aria-labelledby="my-acquisition-title">
-          <div className={styles.heading}><div><span>Лише для вас</span><h3 id="my-acquisition-title">Мої пропозиції</h3></div><button type="button" onClick={() => void load()} disabled={loading} aria-busy={loading}><SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}</button></div>
+          <div className={styles.heading}><div><span>Лише для вас</span><h3 id="my-acquisition-title">Мої пропозиції</h3></div><div className={styles.headingActions}><button type="button" onClick={() => setHistoryCollapsed((value) => !value)}><SiteIcon name="expand" size={17} /> {historyCollapsed ? "Розгорнути" : "Згорнути"}</button><button type="button" onClick={() => void load()} disabled={loading} aria-busy={loading}><SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}</button></div></div>
+          {!historyCollapsed ? <>
           <div className={styles.historyToolbar}>
             <label className={styles.historySearch}>Пошук<input type="search" value={historyQuery} onChange={(event) => setHistoryQuery(event.currentTarget.value)} placeholder="Назва, автор або номер" /></label>
             <label>Статус<select value={historyStatus} onChange={(event) => setHistoryStatus(event.currentTarget.value)}><option value="all">Усі</option>{Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
             <label>Сортування<select value={historySort} onChange={(event) => setHistorySort(event.currentTarget.value)}><option value="date_desc">Спочатку нові</option><option value="date_asc">Спочатку давні</option><option value="title_asc">Назва А–Я</option><option value="title_desc">Назва Я–А</option><option value="quantity_desc">Найбільша кількість</option></select></label>
+            <label className={styles.hiddenToggle}><input type="checkbox" checked={showHidden} onChange={(event) => setShowHidden(event.currentTarget.checked)} /> Показати приховані</label>
+            <button className={styles.bulkHide} type="button" disabled={busy} onClick={() => void hideCompleted()}><SiteIcon name="hidden" size={16} /> Приховати всі завершені</button>
           </div>
           {loading ? <p className={styles.empty}>Оновлюємо історію…</p> : requests.length ? <div className={styles.history}>{requests.map((record) => <article key={record.id}>
-            <header><span className={styles.status}>{STATUS_LABELS[record.status] ?? record.status}</span><small>{record.publicNumber} · {new Intl.DateTimeFormat("uk-UA", { day: "2-digit", month: "2-digit", year: "2-digit" }).format(new Date(record.updatedAt))}</small></header>
+            <header><span className={styles.status}>{STATUS_LABELS[record.status] ?? record.status}{record.teacherHiddenAt ? " · приховано" : ""}</span><small>{record.publicNumber} · {new Intl.DateTimeFormat("uk-UA", { day: "2-digit", month: "2-digit", year: "2-digit" }).format(new Date(record.updatedAt))}</small></header>
             <h4>{record.title}</h4><p>{record.author} · {record.publicationYear} · {record.requestedQuantity} прим.</p>
             {record.clarificationMessage ? <p className={styles.attention}><strong>Уточнення:</strong> {record.clarificationMessage}</p> : null}
             {record.librarianNote && !record.clarificationMessage ? <p>{record.librarianNote}</p> : null}
             {record.rejectionReason ? <p className={styles.attention}>{record.rejectionReason}</p> : null}
             <div className={styles.progress}><span>погоджено {record.approvedQuantity ?? 0}</span><span>замовлено {record.orderedQuantity}</span><span>отримано {record.receivedQuantity}</span></div>
-            <div className={styles.historyActions}>{["submitted","in_review","clarification","approved","planned"].includes(record.status) ? <button type="button" className={styles.danger} disabled={busy} onClick={() => void cancel(record)}>Скасувати</button> : null}<button type="button" className={styles.hideAction} disabled={busy} onClick={() => void hide(record)}><SiteIcon name="delete" size={16} /> Прибрати</button></div>
+            <div className={styles.historyActions}>{["submitted","in_review","clarification","approved","planned"].includes(record.status) && !record.teacherHiddenAt ? <button type="button" className={styles.danger} disabled={busy} onClick={() => void cancel(record)}>Скасувати</button> : null}<button type="button" className={styles.hideAction} disabled={busy} onClick={() => void changeVisibility(record, !record.teacherHiddenAt)}><SiteIcon name={record.teacherHiddenAt ? "visible" : "hidden"} size={16} /> {record.teacherHiddenAt ? "Повернути" : "Приховати"}</button></div>
           </article>)}</div> : <p className={styles.empty}>Ви ще не надсилали пропозицій до комплектування.</p>}
+          </> : <p className={styles.collapsedNote}>Історію згорнуто. Усі записи збережені.</p>}
         </section>
       </div>
     </section>

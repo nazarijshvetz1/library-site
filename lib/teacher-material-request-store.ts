@@ -49,6 +49,16 @@ export type TeacherMaterialRequestSort =
   | "title_desc"
   | "quantity_desc";
 
+export type LibrarianMaterialRequestSort =
+  | "date_desc"
+  | "date_asc"
+  | "teacher_asc"
+  | "teacher_desc"
+  | "status_asc"
+  | "status_desc";
+
+export type MaterialRequestVisibility = "visible" | "hidden" | "all";
+
 export type MaterialRequestItemProjection = {
   id: string;
   materialId: string;
@@ -104,6 +114,7 @@ export type MaterialRequestProjection = {
   cancelledAt: string | null;
   createdAt: string;
   updatedAt: string;
+  librarianHiddenAt?: string | null;
   items: MaterialRequestItemProjection[];
 };
 
@@ -162,6 +173,7 @@ type RequestRow = {
   cancelled_at: string | null;
   created_at: string;
   updated_at: string;
+  librarian_hidden_at: string | null;
   item_id: string;
   material_id: string;
   title_snapshot: string;
@@ -620,7 +632,7 @@ export async function cancelTeacherMaterialRequest(
     throw new TeacherMaterialRequestError("request_not_cancellable", 409, "Цю заявку вже не можна скасувати.");
   }
   const cancelledAt = new Date().toISOString();
-  const current = await getMaterialRequest(db, materialRequestId);
+  const current = await getMaterialRequest(db, materialRequestId, true);
   if (!current) throw new TeacherMaterialRequestError("request_not_found", 404, "Заявку не знайдено.");
   const result: MaterialRequestProjection = {
     ...current,
@@ -769,52 +781,59 @@ export async function listLibrarianMaterialRequests(
     status?: MaterialRequestStatus | "active" | "all";
     limit?: number;
     cursor?: string | null;
+    query?: string;
+    sort?: LibrarianMaterialRequestSort;
+    visibility?: MaterialRequestVisibility;
   } = {},
 ): Promise<{ requests: MaterialRequestProjection[]; newCount: number; page: MaterialRequestPage }> {
   const status = options.status ?? "all";
+  const sort = options.sort ?? "date_desc";
+  const visibility = options.visibility ?? "visible";
+  const query = options.query?.trim().slice(0, 100) ?? "";
   const limit = boundedLimit(options.limit, 100, 100);
-  const cursor = decodeListCursor(options.cursor, "ranked");
+  const offset = decodeOffsetCursor(options.cursor);
   const statusClause = status === "all"
     ? ""
     : status === "active"
       ? "AND mr.status IN ('submitted','in_review','ready','partially_ready')"
       : "AND mr.status = ?";
-  const rankSql = `CASE mr.status WHEN 'submitted' THEN 0 WHEN 'in_review' THEN 1
-    WHEN 'partially_ready' THEN 2 WHEN 'ready' THEN 3 ELSE 4 END`;
-  const cursorClause = cursor && typeof cursor.rank === "number"
-    ? `AND (${rankSql} > ? OR (${rankSql} = ? AND
-        (mr.created_at > ? OR (mr.created_at = ? AND mr.id > ?))))`
-    : "";
+  const visibilityClause = visibility === "hidden"
+    ? "AND mr.librarian_hidden_at IS NOT NULL"
+    : visibility === "all" ? "" : "AND mr.librarian_hidden_at IS NULL";
+  const queryClause = query ? `AND (teacher_sort.full_name LIKE ? ESCAPE '\\'
+    OR mr.id LIKE ? ESCAPE '\\'
+    OR EXISTS (SELECT 1 FROM material_request_items search_item WHERE search_item.request_id=mr.id
+      AND (search_item.title_snapshot LIKE ? ESCAPE '\\' OR search_item.author_snapshot LIKE ? ESCAPE '\\')))` : "";
   const bindings: D1Value[] = [];
   if (status !== "all" && status !== "active") bindings.push(status);
-  if (cursor && typeof cursor.rank === "number") {
-    bindings.push(cursor.rank, cursor.rank, cursor.createdAt, cursor.createdAt, cursor.id);
+  if (query) {
+    const pattern = `%${escapeSqlLike(query)}%`;
+    bindings.push(pattern, pattern, pattern, pattern);
   }
-  bindings.push(limit + 1);
+  bindings.push(limit + 1, offset);
+  const selectedOrder = librarianMaterialRequestOrderClause(sort, "teacher_sort");
+  const projectedOrder = librarianMaterialRequestOrderClause(sort, "teacher");
   const [response, count] = await Promise.all([
     db.prepare(`
       WITH selected AS (
         SELECT mr.id
         FROM material_requests mr
-        WHERE 1 = 1 ${statusClause} ${cursorClause}
-        ORDER BY
-          ${rankSql},
-          mr.created_at ASC, mr.id ASC
-        LIMIT ?
+        JOIN users teacher_sort ON teacher_sort.id=mr.teacher_user_id
+        WHERE 1 = 1 ${statusClause} ${visibilityClause} ${queryClause}
+        ORDER BY ${selectedOrder}
+        LIMIT ? OFFSET ?
       )
       ${requestProjectionSql()}
       WHERE mr.id IN (SELECT id FROM selected)
-      ORDER BY
-        ${rankSql},
-        mr.created_at ASC, mr.id ASC, mri.sort_order, mri.id
+      ORDER BY ${projectedOrder}, mri.sort_order, mri.id
     `).bind(...bindings).all<RequestRow>(),
     db.prepare(`
       SELECT COUNT(*) AS new_count
       FROM material_requests
-      WHERE status = 'submitted'
+      WHERE status = 'submitted' AND librarian_hidden_at IS NULL
     `).first<{ new_count: number }>(),
   ]);
-  const allRequests = mapRequestRows(response.results ?? []);
+  const allRequests = mapRequestRows(response.results ?? [], true);
   const hasMore = allRequests.length > limit;
   const requests = allRequests.slice(0, limit);
   const last = requests.at(-1);
@@ -825,10 +844,73 @@ export async function listLibrarianMaterialRequests(
       limit,
       hasMore,
       nextCursor: hasMore && last
-        ? encodeListCursor({ createdAt: last.createdAt, id: last.id, rank: materialRequestStatusRank(last.status) })
+        ? encodeOffsetCursor(offset + limit)
         : null,
     },
   };
+}
+
+function librarianMaterialRequestOrderClause(sort: LibrarianMaterialRequestSort, teacherAlias: string): string {
+  const rank = `CASE mr.status WHEN 'submitted' THEN 0 WHEN 'in_review' THEN 1 WHEN 'partially_ready' THEN 2
+    WHEN 'ready' THEN 3 WHEN 'completed' THEN 4 WHEN 'rejected' THEN 5 ELSE 6 END`;
+  switch (sort) {
+    case "date_asc": return "mr.created_at ASC, mr.id ASC";
+    case "teacher_asc": return `${teacherAlias}.full_name COLLATE NOCASE ASC, mr.created_at DESC, mr.id DESC`;
+    case "teacher_desc": return `${teacherAlias}.full_name COLLATE NOCASE DESC, mr.created_at DESC, mr.id DESC`;
+    case "status_asc": return `${rank} ASC, mr.created_at DESC, mr.id DESC`;
+    case "status_desc": return `${rank} DESC, mr.created_at DESC, mr.id DESC`;
+    default: return "mr.created_at DESC, mr.id DESC";
+  }
+}
+
+export async function setLibrarianMaterialRequestVisibility(
+  db: TeacherMaterialRequestDatabase,
+  user: ChatGPTUser,
+  materialRequestId: string,
+  hidden: boolean,
+  mutationId: string,
+): Promise<{ requestId: string; hidden: boolean; hiddenAt: string | null }> {
+  const actor = await resolveLibrarianActor(db, user);
+  const current = await getMaterialRequest(db, materialRequestId, true);
+  if (!current) throw new TeacherMaterialRequestError("request_not_found", 404, "Замовлення не знайдено.");
+  if (hidden && !["completed", "rejected", "cancelled"].includes(current.status)) {
+    throw new TeacherMaterialRequestError("request_not_terminal", 409, "Приховати можна лише виконане, відхилене або скасоване замовлення.");
+  }
+  if (hidden === Boolean(current.librarianHiddenAt)) {
+    throw new TeacherMaterialRequestError(hidden ? "request_already_hidden" : "request_already_visible", 409, hidden ? "Замовлення вже приховано." : "Замовлення вже відображається.");
+  }
+  const now = new Date().toISOString();
+  const update = hidden
+    ? db.prepare(`UPDATE material_requests SET librarian_hidden_at=?,librarian_hidden_by_user_id=? WHERE id=? AND librarian_hidden_at IS NULL`).bind(now, actor.id, materialRequestId)
+    : db.prepare(`UPDATE material_requests SET librarian_hidden_at=NULL,librarian_hidden_by_user_id=NULL WHERE id=? AND librarian_hidden_at IS NOT NULL`).bind(materialRequestId);
+  const audit = db.prepare(`INSERT INTO audit_events (id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,before_json,after_json,metadata_json,created_at)
+    VALUES (?,?,?,?, 'material_request',?,?,?,?,NULL,?)`)
+    .bind(`AUD-${crypto.randomUUID()}`, actor.id, actor.email, hidden ? "material_request.hide_for_librarian" : "material_request.restore_for_librarian",
+      materialRequestId, mutationId, JSON.stringify({ hidden: !hidden }), JSON.stringify({ hidden, hiddenAt: hidden ? now : null }), now);
+  await db.batch([update, audit]);
+  const confirmed = await getMaterialRequest(db, materialRequestId, true);
+  if (!confirmed || Boolean(confirmed.librarianHiddenAt) !== hidden) {
+    throw new TeacherMaterialRequestError("visibility_conflict", 409, "Список уже змінився. Оновіть сторінку.");
+  }
+  return { requestId: materialRequestId, hidden, hiddenAt: hidden ? now : null };
+}
+
+export async function hideCompletedLibrarianMaterialRequests(
+  db: TeacherMaterialRequestDatabase,
+  user: ChatGPTUser,
+  mutationId: string,
+): Promise<{ hiddenCount: number }> {
+  const actor = await resolveLibrarianActor(db, user);
+  const now = new Date().toISOString();
+  const results = await db.batch([
+    db.prepare(`INSERT INTO audit_events (id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,before_json,after_json,metadata_json,created_at)
+      SELECT 'AUD-' || lower(hex(randomblob(16))),?,?, 'material_request.hide_completed_for_librarian','material_request',id,?,NULL,?,NULL,?
+      FROM material_requests WHERE librarian_hidden_at IS NULL AND status IN ('completed','rejected','cancelled')`)
+      .bind(actor.id, actor.email, mutationId, JSON.stringify({ hidden: true, hiddenAt: now }), now),
+    db.prepare(`UPDATE material_requests SET librarian_hidden_at=?,librarian_hidden_by_user_id=?
+      WHERE librarian_hidden_at IS NULL AND status IN ('completed','rejected','cancelled')`).bind(now, actor.id),
+  ]);
+  return { hiddenCount: Math.max(0, Number(results[1]?.meta?.changes) || 0) };
 }
 
 export async function listMaterialRequestPickupLocations(
@@ -2643,13 +2725,14 @@ function transitionNotification(
 export async function getMaterialRequest(
   db: TeacherMaterialRequestDatabase,
   materialRequestId: string,
+  includeLibrarianVisibility = false,
 ): Promise<MaterialRequestProjection | null> {
   const response = await db.prepare(`
     ${requestProjectionSql()}
     WHERE mr.id=?
     ORDER BY mri.sort_order, mri.id
   `).bind(materialRequestId).all<RequestRow>();
-  return mapRequestRows(response.results ?? [])[0] ?? null;
+  return mapRequestRows(response.results ?? [], includeLibrarianVisibility)[0] ?? null;
 }
 
 function requestProjectionSql(): string {
@@ -2660,7 +2743,7 @@ function requestProjectionSql(): string {
       mr.pickup_location_id, pickup.name AS pickup_location_name,
       mr.resulting_loan_id, mr.due_at, mr.version, mr.submitted_at, mr.ready_at,
       mr.completed_at, mr.rejected_at, mr.cancelled_at,
-      mr.created_at, mr.updated_at,
+      mr.created_at, mr.updated_at, mr.librarian_hidden_at,
       mri.id AS item_id, mri.material_id, mri.title_snapshot,
       mri.author_snapshot, mri.requested_quantity, mri.approved_quantity,
       mri.fulfilled_quantity, mri.sort_order, material.publication_year,
@@ -2694,7 +2777,7 @@ function requestProjectionSql(): string {
   `;
 }
 
-function mapRequestRows(rows: RequestRow[]): MaterialRequestProjection[] {
+function mapRequestRows(rows: RequestRow[], includeLibrarianVisibility = false): MaterialRequestProjection[] {
   const requests = new Map<string, MaterialRequestProjection>();
   for (const row of rows) {
     let request = requests.get(row.id);
@@ -2725,6 +2808,7 @@ function mapRequestRows(rows: RequestRow[]): MaterialRequestProjection[] {
         updatedAt: row.updated_at,
         items: [],
       };
+      if (includeLibrarianVisibility) request.librarianHiddenAt = row.librarian_hidden_at;
       requests.set(row.id, request);
     }
     const reservations = parseReservationRows(row.reservations_json);
@@ -3197,16 +3281,6 @@ function decodeListCursor(
       400,
       "Некоректний курсор сторінки. Оновіть список і спробуйте ще раз.",
     );
-  }
-}
-
-function materialRequestStatusRank(status: MaterialRequestStatus): number {
-  switch (status) {
-    case "submitted": return 0;
-    case "in_review": return 1;
-    case "partially_ready": return 2;
-    case "ready": return 3;
-    default: return 4;
   }
 }
 

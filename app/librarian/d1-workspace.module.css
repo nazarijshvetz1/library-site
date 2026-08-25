@@ -2811,9 +2811,15 @@
 }
 
 /* Unified compact workspace. The global librarian shell owns the primary rail. */
-.shell { min-height: calc(100dvh - 60px); background: var(--system-canvas); }
-.body { max-width: none; min-height: auto; }
-.workspace { padding: 16px 18px 44px; }
+.shell { min-height: calc(100dvh - 60px); max-width: 100%; overflow-x: clip; background: var(--system-canvas); }
+.body { width: 100%; min-width: 0; max-width: 100%; min-height: auto; }
+.workspace { width: 100%; min-width: 0; max-width: 100%; padding: 16px 18px 44px; overflow-x: clip; }
+.dashboard,
+.dashboardHero,
+.dashboardHero > *,
+.dashboardSearch,
+.dashboardMetrics,
+.dashboardSection { min-width: 0; max-width: 100%; }
 .titleRow { margin-bottom: 12px; align-items: center; gap: 14px; }
 .titleRow h1 { margin: 3px 0; font-size: clamp(24px,2.5vw,30px); line-height: 1.08; letter-spacing: -.02em; }
 .titleRow > div > p:last-child { font-size: 10px; }
@@ -2857,6 +2863,8 @@
     top: 60px;
     padding: 6px 12px;
     overflow-x: auto;
+    max-width: 100%;
+    overscroll-behavior-inline: contain;
     border-right: 0;
     border-bottom: 1px solid var(--system-line);
     background: rgba(246,247,244,.96);
@@ -2865,7 +2873,7 @@
   .sidebarLabel,
   .toolGroup h2,
   .tool small { display: none; }
-  .toolNav { width: max-content; min-width: 100%; display: flex; gap: 3px; }
+  .toolNav { width: max-content; min-width: 0; display: flex; gap: 3px; }
   .toolGroup { padding: 0 0 0 4px; display: flex; gap: 3px; border-top: 0; border-left: 1px solid var(--system-line); }
   .tool,
   .toolActive { width: auto; min-height: 36px; padding: 3px 7px; grid-template-columns: 26px auto; gap: 6px; border-radius: var(--system-radius-sm); white-space: nowrap; }

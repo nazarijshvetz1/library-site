@@ -31,6 +31,47 @@
   color-scheme: light;
 }
 
+/* Green catalog filters restored after the compact-system cascade. */
+.catalog-section .filters {
+  color: #173e2e;
+  border-color: #bfd1bd;
+  background: linear-gradient(180deg,#eef6e9 0%,#e4efdf 100%);
+}
+.catalog-section .filter-header { border-color: #c7d8c4; }
+.catalog-section .filter-header strong,
+.catalog-section .filters label,
+.catalog-section .availability-check strong { color: #173e2e; }
+.catalog-section .filter-header small,
+.catalog-section .availability-check small { color: #587064; }
+.catalog-section .filters select {
+  border-color: #b7cbb5;
+  color: #173e2e;
+  background-color: #fffef9;
+}
+.catalog-section .filters select:focus-visible {
+  outline: 3px solid rgba(54,116,70,.26);
+  outline-offset: 2px;
+  border-color: #5c8a67;
+}
+.catalog-section .availability-check {
+  padding: 9px;
+  border: 1px solid #c4d6c1;
+  border-radius: var(--system-radius-sm);
+  background: rgba(255,255,255,.58);
+}
+.catalog-section .filter-note {
+  border-color: #bfd1bd;
+  color: #456154;
+  background: #f8fbf5;
+}
+.catalog-section .filter-chip { color: #f6fbf3; background: #23583b; }
+
+@media (max-width: 820px) {
+  .catalog-section .filters,
+  .catalog-section .filters .filter-header { background: #eef6e9; }
+  .catalog-section .filter-close { color: #173e2e; border-color: #b7cbb5; background: #fffef9; }
+}
+
 html {
   scrollbar-gutter: stable;
 }

@@ -1019,6 +1019,19 @@ test("teacher requests, librarian queue, and notifications paginate without gaps
   assert.equal(new Set(librarianIds).size, 5);
   assert.equal(librarianThird.page.hasMore, false);
 
+  requestContext.sqlite.prepare("UPDATE material_requests SET status='rejected',rejected_at=? WHERE id='MRQ-PAGE-00'").run(now);
+  const hidden = await store.setLibrarianMaterialRequestVisibility(
+    requestContext.db, librarian, "MRQ-PAGE-00", true, commandId(),
+  );
+  assert.equal(hidden.hidden, true);
+  assert.equal((await store.listLibrarianMaterialRequests(requestContext.db, { visibility: "visible" })).requests.some((request) => request.id === "MRQ-PAGE-00"), false);
+  assert.equal((await store.listLibrarianMaterialRequests(requestContext.db, { visibility: "all" })).requests.some((request) => request.id === "MRQ-PAGE-00"), true);
+  await store.setLibrarianMaterialRequestVisibility(requestContext.db, librarian, "MRQ-PAGE-00", false, commandId());
+  await assert.rejects(
+    () => store.setLibrarianMaterialRequestVisibility(requestContext.db, librarian, "MRQ-PAGE-01", true, commandId()),
+    (error) => error instanceof store.TeacherMaterialRequestError && error.code === "request_not_terminal",
+  );
+
   for (let index = 0; index < 5; index += 1) {
     requestContext.sqlite.prepare(`INSERT INTO portal_notifications (
       id,teacher_user_id,dedupe_key,type,title,message,entity_type,entity_id,

@@ -1705,12 +1705,18 @@ export const materialRequests = sqliteTable(
     completedAt: text("completed_at"),
     rejectedAt: text("rejected_at"),
     cancelledAt: text("cancelled_at"),
+    librarianHiddenAt: text("librarian_hidden_at"),
+    librarianHiddenByUserId: text("librarian_hidden_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },
   (table) => [
     index("idx_material_requests_teacher_created").on(table.teacherUserId, table.createdAt),
     index("idx_material_requests_status_created").on(table.status, table.createdAt),
+    index("idx_material_requests_librarian_hidden").on(table.librarianHiddenAt, table.status, table.createdAt),
     uniqueIndex("idx_material_requests_resulting_loan").on(table.resultingLoanId),
     check("material_requests_status_valid", sql`${table.status} in ('submitted','in_review','ready','partially_ready','completed','rejected','cancelled')`),
     check("material_requests_version_positive", sql`${table.version} > 0`),
@@ -1924,6 +1930,11 @@ export const acquisitionRequests = sqliteTable(
     rejectedAt: text("rejected_at"),
     cancelledAt: text("cancelled_at"),
     teacherHiddenAt: text("teacher_hidden_at"),
+    librarianHiddenAt: text("librarian_hidden_at"),
+    librarianHiddenByUserId: text("librarian_hidden_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },
@@ -1935,6 +1946,7 @@ export const acquisitionRequests = sqliteTable(
     index("idx_acquisition_requests_status_created").on(table.status, table.createdAt),
     index("idx_acquisition_requests_duplicate_status").on(table.academicYearId, table.duplicateKey, table.status),
     index("idx_acquisition_requests_year_status").on(table.academicYearId, table.status),
+    index("idx_acquisition_requests_librarian_hidden").on(table.librarianHiddenAt, table.status, table.createdAt),
     check("acquisition_requests_requester_valid", sql`
       (${table.requesterKind} = 'teacher' and ${table.teacherUserId} is not null and ${table.requesterClassYearId} is null)
       or (${table.requesterKind} = 'student' and ${table.teacherUserId} is null and ${table.requesterClassYearId} is not null and length(trim(${table.requesterClassName})) > 0)`),

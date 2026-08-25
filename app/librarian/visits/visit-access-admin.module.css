@@ -612,3 +612,19 @@
   .bulkButton,
   .secondaryButton { min-height: 44px; }
 }
+
+.embeddedAccess {
+  margin: 0;
+  padding: 12px;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.embeddedAccess .heading { align-items: flex-start; }
+.embeddedAccess .heading p { max-width: 54rem; }
+.embeddedAccess .tableRegion { margin-top: 8px; background: #fff; }
+.embeddedAccess .accessTable {
+  min-width: 0;
+  width: 100%;
+}
