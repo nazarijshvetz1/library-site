@@ -7,7 +7,7 @@
     radial-gradient(circle at 85% 6%, rgba(220,174,61,.2), transparent 20rem),
     var(--tg-theme-secondary-bg-color, #eef2ea);
   color: var(--tg-theme-text-color, #173f31);
-  font-family: Arial, sans-serif;
+  font-family: var(--system-font);
 }
 
 .panel {
@@ -47,7 +47,9 @@
   border-radius: 10px;
   background: transparent;
   color: var(--tg-theme-text-color, #173f31);
-  font: 800 13px/1.25 Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.25;
   cursor: pointer;
 }
 
@@ -82,7 +84,9 @@
   border-radius: 13px;
   background: var(--tg-theme-secondary-bg-color, #f7f8f3);
   color: var(--tg-theme-text-color, #173f31);
-  font: 700 16px/1.2 Arial, sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
 .fieldGroup input:focus-visible {
@@ -187,7 +191,7 @@
 .panel h1 {
   margin: -6px 0 0;
   color: var(--tg-theme-text-color, #163e2a);
-  font: 700 clamp(34px, 9vw, 48px)/.98 Georgia, serif;
+  font: 700 clamp(34px, 9vw, 48px)/.98 Georgia, "Times New Roman", serif;
   letter-spacing: -.035em;
 }
 
@@ -217,7 +221,9 @@
   align-items: center;
   justify-content: center;
   border-radius: 14px;
-  font: 800 16px/1 Arial, sans-serif;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
   text-decoration: none;
 }
 

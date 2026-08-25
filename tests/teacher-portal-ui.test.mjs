@@ -39,6 +39,24 @@ test("teacher cabinet is the primary route and legacy visits keeps bounded deep 
   assert.match(workspace, /initialOrderMaterialId=\{initialOrderMaterialId\}/u);
 });
 
+test("teacher cabinet keeps a sans interface and Georgia display headings", async () => {
+  const [globals, system, workspaceCss, telegramCss, acquisitionCss] = await Promise.all([
+    read("app/globals.css"),
+    read("source/system.css"),
+    read("app/visits/visits.module.css"),
+    read("app/teacher/telegram/telegram.module.css"),
+    read("app/teacher/acquisition/teacher-acquisition.module.css"),
+  ]);
+  assert.match(system, /--system-font:\s*Inter,[^;]*"Segoe UI"[^;]*sans-serif;/u);
+  assert.match(globals, /body\s*\{[\s\S]*?font-family:\s*var\(--system-font\);/u);
+  assert.doesNotMatch(telegramCss, /Arial,\s*sans-serif/u);
+  assert.match(telegramCss, /\.page\s*\{[\s\S]*?font-family:\s*var\(--system-font\);/u);
+  assert.match(workspaceCss, /\.teacherPageHeader h1\s*\{[^}]*Georgia/u);
+  assert.match(workspaceCss, /\.cardHeading h2\s*\{[^}]*Georgia/u);
+  assert.match(acquisitionCss, /\.intro h2,[\s\S]*?\.heading h3\s*\{[^}]*Georgia/u);
+  assert.match(telegramCss, /\.panel h1\s*\{[^}]*Georgia/u);
+});
+
 test("public teacher entry renders a privacy-limited schedule through the full 90 day horizon", async () => {
   const [workspace, client] = await Promise.all([
     read("app/visits/visit-booking-workspace.tsx"),
