@@ -97,7 +97,8 @@ test("profile fields keep personnel and imported personal email out of the card"
     serviceContact: "",
     librarianNote: "",
   });
-  assert.match(workspace, /Службовий контакт/u);
+  assert.match(workspace, /Мобільний номер/u);
+  assert.match(workspace, /type="tel"/u);
   assert.match(workspace, /Особиста пошта автоматично не підтягується/u);
   assert.doesNotMatch(client, /personnel|employeeNumber|email:/iu);
   assert.doesNotMatch(workspace, /табельн/iu);

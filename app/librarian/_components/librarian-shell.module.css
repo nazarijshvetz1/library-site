@@ -556,11 +556,39 @@
 @media (max-width: 840px) {
   .shell { padding-bottom: 68px; }
   .header { min-height: 60px; padding: 6px 10px; }
+  .brand { width: 100%; max-width: 100%; overflow: hidden; }
+  .brand > span { overflow: hidden; }
   .brand img { width: 38px; height: 38px; }
+  .brand strong,
+  .brand small { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .brand strong { font-size: 16px; }
-  .brand small { display: block; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .account { min-width: max-content; }
+  .account > a { flex: 0 0 auto; white-space: nowrap; }
   .layout { min-height: calc(100dvh - 60px); }
   .mobileNav { min-height: 62px; }
   .mobileNav a,
   .mobileNav button { min-height: 46px; }
+  .content :is(label,fieldset) { min-width: 0; max-width: 100%; }
+  .content :is(input,select,textarea) { min-width: 0; max-width: 100%; font-size: 16px!important; }
+  .content select {
+    width: 100%;
+    min-height: 44px;
+    height: auto;
+    padding: 10px 36px 10px 12px;
+    border: 1px solid var(--lib-line);
+    border-radius: 10px;
+    color: var(--lib-ink);
+    background-color: #fff;
+    line-height: 1.25;
+  }
+  .content select:focus-visible {
+    outline: none;
+    border-color: var(--lib-green);
+    box-shadow: 0 0 0 3px rgba(35, 88, 59, .2);
+  }
+  .drawer > header button:focus-visible {
+    outline: none;
+    border-color: var(--lib-green);
+    box-shadow: 0 0 0 3px rgba(35, 88, 59, .2);
+  }
 }

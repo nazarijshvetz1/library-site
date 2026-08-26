@@ -274,6 +274,7 @@ test("teacher orders and notifications page with the frozen opaque cursor", asyn
   assert.match(orders, /loadId !== historyLoadRef\.current/u);
   assert.match(orders, /params\.set\("q", committedHistoryQuery\)/u);
   assert.match(orders, /params\.set\("sort", historySort\)/u);
+  assert.match(orders, /params\.set\("visibility", showHiddenHistory \? "all" : "visible"\)/u);
   assert.match(orders, /mergePortalPageById\(current, response\.requests\)/u);
   assert.match(orders, /requestPage\.nextCursor/u);
   assert.match(orders, /useState\(initialMaterialId\)/u);
@@ -289,6 +290,10 @@ test("teacher orders and notifications page with the frozen opaque cursor", asyn
   assert.match(orders, /onBlur=\{\(\) => finishQuantityEdit\(item\.id\)\}/u);
   assert.match(orders, /onClick=\{\(\) => removeFromCart\(item\.id\)\}/u);
   assert.match(orders, /Завантажити ще/u);
+  assert.match(orders, /Показати приховані/u);
+  assert.match(orders, /method: "PATCH"/u);
+  assert.match(orders, /request\.teacherHiddenAt \? "Повернути" : "Приховати"/u);
+  assert.match(orders, /Бібліотекар і надалі бачить замовлення/u);
   assert.match(notifications, /params\.set\("cursor", cursor\)/u);
   assert.match(notifications, /mergePortalPageById\(current\.notifications, response\.notifications\)/u);
   assert.match(notifications, /data\.page\.nextCursor/u);
@@ -529,9 +534,12 @@ test("teacher profile shows assigned information and keeps photo access private 
   assert.match(profileRoute, /requireVisitTeacherSession\(db, request\)/u);
   assert.match(profileRoute, /export async function PATCH\(request: Request\)/u);
   assert.match(profileRoute, /expectedKeys = \["requestId", "expectedVersion", "subjectPosition", "primaryLocationId"\]/u);
-  assert.match(profileRoute, /acceptedKeys = new Set\(\[\.\.\.expectedKeys, "fullName"\]\)/u);
+  assert.match(profileRoute, /acceptedKeys = new Set\(\[\.\.\.expectedKeys, "fullName", "serviceContact"\]\)/u);
   assert.match(profileRoute, /updateTeacherOwnProfile\(db, teacher/u);
   assert.match(workspace, /Прізвище та ім’я/u);
+  assert.match(workspace, /Мобільний номер/u);
+  assert.match(workspace, /type="tel" autoComplete="tel" inputMode="tel"/u);
+  assert.match(workspace, /serviceContact: normalizedServiceContact/u);
   assert.match(workspace, /expectedVersion: profile\.profileVersion,[\s\S]*fullName: normalizedName,[\s\S]*subjectPosition: normalizedSubject,[\s\S]*primaryLocationId: nextLocation/u);
   assert.match(photoRoute, /requireVisitTeacherSession\(db, request\)/u);
   assert.equal((photoRoute.match(/isSameOriginRequest\(request\)/gu) ?? []).length, 2);

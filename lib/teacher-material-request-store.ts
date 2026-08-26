@@ -114,6 +114,7 @@ export type MaterialRequestProjection = {
   cancelledAt: string | null;
   createdAt: string;
   updatedAt: string;
+  teacherHiddenAt: string | null;
   librarianHiddenAt?: string | null;
   items: MaterialRequestItemProjection[];
 };
@@ -173,6 +174,7 @@ type RequestRow = {
   cancelled_at: string | null;
   created_at: string;
   updated_at: string;
+  teacher_hidden_at: string | null;
   librarian_hidden_at: string | null;
   item_id: string;
   material_id: string;
@@ -223,6 +225,7 @@ export async function listTeacherMaterialRequests(
     cursor?: string | null;
     query?: string;
     sort?: TeacherMaterialRequestSort;
+    visibility?: MaterialRequestVisibility;
   } = {},
 ): Promise<MaterialRequestProjection[]> {
   return (await listTeacherMaterialRequestPage(db, teacherUserId, options)).requests;
@@ -237,14 +240,19 @@ export async function listTeacherMaterialRequestPage(
     cursor?: string | null;
     query?: string;
     sort?: TeacherMaterialRequestSort;
+    visibility?: MaterialRequestVisibility;
   } = {},
 ): Promise<{ requests: MaterialRequestProjection[]; page: MaterialRequestPage }> {
   const status = options.status ?? "all";
   const sort = options.sort ?? "date_desc";
+  const visibility = options.visibility ?? "visible";
   const query = options.query?.trim().slice(0, 80) ?? "";
   const limit = boundedLimit(options.limit, 50, 100);
   const offset = decodeOffsetCursor(options.cursor);
   const statusClause = status === "all" ? "" : "AND mr.status = ?";
+  const visibilityClause = visibility === "hidden"
+    ? "AND mr.teacher_hidden_at IS NOT NULL"
+    : visibility === "all" ? "" : "AND mr.teacher_hidden_at IS NULL";
   const queryClause = query
     ? `AND (
         mr.id LIKE ? ESCAPE '\\'
@@ -268,7 +276,7 @@ export async function listTeacherMaterialRequestPage(
     WITH selected AS (
       SELECT mr.id
       FROM material_requests mr
-      WHERE mr.teacher_user_id = ? ${statusClause} ${queryClause}
+      WHERE mr.teacher_user_id = ? ${statusClause} ${visibilityClause} ${queryClause}
       ORDER BY ${orderClause}
       LIMIT ? OFFSET ?
     )
@@ -416,6 +424,7 @@ export async function createTeacherMaterialRequest(
     cancelledAt: null,
     createdAt,
     updatedAt: createdAt,
+    teacherHiddenAt: null,
     items: snapshots.map((item) => ({
       id: item.itemId,
       materialId: item.materialId,
@@ -890,6 +899,72 @@ export async function setLibrarianMaterialRequestVisibility(
   await db.batch([update, audit]);
   const confirmed = await getMaterialRequest(db, materialRequestId, true);
   if (!confirmed || Boolean(confirmed.librarianHiddenAt) !== hidden) {
+    throw new TeacherMaterialRequestError("visibility_conflict", 409, "Список уже змінився. Оновіть сторінку.");
+  }
+  return { requestId: materialRequestId, hidden, hiddenAt: hidden ? now : null };
+}
+
+export async function setTeacherMaterialRequestVisibility(
+  db: TeacherMaterialRequestDatabase,
+  teacher: VisitTeacherIdentity,
+  materialRequestId: string,
+  hidden: boolean,
+  expectedVersion: number,
+  mutationId: string,
+): Promise<{ requestId: string; hidden: boolean; hiddenAt: string | null }> {
+  const now = new Date().toISOString();
+  await requireActiveTeacherPrincipal(db, teacher, now);
+  const current = await getMaterialRequest(db, materialRequestId);
+  if (!current || current.teacherUserId !== teacher.teacherUserId) {
+    throw new TeacherMaterialRequestError("request_not_found", 404, "Замовлення не знайдено.");
+  }
+  if (current.version !== expectedVersion) {
+    throw new TeacherMaterialRequestError("request_version_conflict", 409, "Замовлення вже змінилося. Оновіть сторінку.", {
+      currentVersion: current.version,
+    });
+  }
+  if (hidden === Boolean(current.teacherHiddenAt)) {
+    throw new TeacherMaterialRequestError(
+      hidden ? "request_already_hidden" : "request_already_visible",
+      409,
+      hidden ? "Замовлення вже приховано." : "Замовлення вже відображається.",
+    );
+  }
+  const update = hidden
+    ? db.prepare(`UPDATE material_requests SET teacher_hidden_at=?
+        WHERE id=? AND teacher_user_id=? AND version=? AND teacher_hidden_at IS NULL`)
+      .bind(now, materialRequestId, teacher.teacherUserId, expectedVersion)
+    : db.prepare(`UPDATE material_requests SET teacher_hidden_at=NULL
+        WHERE id=? AND teacher_user_id=? AND version=? AND teacher_hidden_at IS NOT NULL`)
+      .bind(materialRequestId, teacher.teacherUserId, expectedVersion);
+  const audit = hidden
+    ? db.prepare(`INSERT INTO audit_events (id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,before_json,after_json,metadata_json,created_at)
+        SELECT ?,?,?,'material_request.hide_from_teacher','material_request',id,?,?,?,NULL,?
+        FROM material_requests WHERE id=? AND teacher_user_id=? AND version=? AND teacher_hidden_at IS NULL`)
+      .bind(`AUD-${crypto.randomUUID()}`, teacher.teacherUserId, `teacher:${teacher.teacherUserId}`, mutationId,
+        JSON.stringify({ hidden: false }), JSON.stringify({ hidden: true, hiddenAt: now }), now,
+        materialRequestId, teacher.teacherUserId, expectedVersion)
+    : db.prepare(`INSERT INTO audit_events (id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,before_json,after_json,metadata_json,created_at)
+        SELECT ?,?,?,'material_request.restore_for_teacher','material_request',id,?,?,?,NULL,?
+        FROM material_requests WHERE id=? AND teacher_user_id=? AND version=? AND teacher_hidden_at IS NOT NULL`)
+      .bind(`AUD-${crypto.randomUUID()}`, teacher.teacherUserId, `teacher:${teacher.teacherUserId}`, mutationId,
+        JSON.stringify({ hidden: true }), JSON.stringify({ hidden: false }), now, materialRequestId, teacher.teacherUserId, expectedVersion);
+  await db.batch([audit, update]);
+  const confirmed = await getMaterialRequest(db, materialRequestId);
+  if (!confirmed || confirmed.teacherUserId !== teacher.teacherUserId
+    || (hidden ? confirmed.teacherHiddenAt !== now : confirmed.teacherHiddenAt !== null)) {
+    throw new TeacherMaterialRequestError("visibility_conflict", 409, "Список уже змінився. Оновіть сторінку.");
+  }
+  const auditRecorded = await db.prepare(`SELECT id FROM audit_events
+    WHERE request_id=? AND actor_user_id=? AND entity_type='material_request' AND entity_id=?
+      AND action=? LIMIT 1`)
+    .bind(
+      mutationId,
+      teacher.teacherUserId,
+      materialRequestId,
+      hidden ? "material_request.hide_from_teacher" : "material_request.restore_for_teacher",
+    ).first<{ id: string }>();
+  if (!auditRecorded) {
     throw new TeacherMaterialRequestError("visibility_conflict", 409, "Список уже змінився. Оновіть сторінку.");
   }
   return { requestId: materialRequestId, hidden, hiddenAt: hidden ? now : null };
@@ -2743,7 +2818,7 @@ function requestProjectionSql(): string {
       mr.pickup_location_id, pickup.name AS pickup_location_name,
       mr.resulting_loan_id, mr.due_at, mr.version, mr.submitted_at, mr.ready_at,
       mr.completed_at, mr.rejected_at, mr.cancelled_at,
-      mr.created_at, mr.updated_at, mr.librarian_hidden_at,
+      mr.created_at, mr.updated_at, mr.teacher_hidden_at, mr.librarian_hidden_at,
       mri.id AS item_id, mri.material_id, mri.title_snapshot,
       mri.author_snapshot, mri.requested_quantity, mri.approved_quantity,
       mri.fulfilled_quantity, mri.sort_order, material.publication_year,
@@ -2806,6 +2881,7 @@ function mapRequestRows(rows: RequestRow[], includeLibrarianVisibility = false):
         cancelledAt: row.cancelled_at,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
+        teacherHiddenAt: row.teacher_hidden_at,
         items: [],
       };
       if (includeLibrarianVisibility) request.librarianHiddenAt = row.librarian_hidden_at;

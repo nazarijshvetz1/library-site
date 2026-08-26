@@ -1,0 +1,2 @@
+ALTER TABLE `material_requests` ADD `teacher_hidden_at` text;--> statement-breakpoint
+CREATE INDEX `idx_material_requests_teacher_hidden` ON `material_requests` (`teacher_user_id`,`teacher_hidden_at`,`created_at`);

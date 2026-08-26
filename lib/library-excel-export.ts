@@ -162,7 +162,7 @@ function buildSheets(snapshot: LibraryExportSnapshot): Sheet[] {
         { header: "USR-ID", width: 15 }, { header: "Прізвище та ім’я", width: 34 },
         { header: "Статус", width: 16 }, { header: "Статус (код)", width: 15, hidden: true },
         { header: "Предмет / посада", width: 26 }, { header: "Основний кабінет", width: 28 },
-        { header: "Службовий контакт", width: 28 }, { header: "Примітка бібліотекаря", width: 42 },
+        { header: "Мобільний номер", width: 28 }, { header: "Примітка бібліотекаря", width: 42 },
         { header: "Оновлено", width: 21, kind: "datetime" },
       ],
       rows: snapshot.teachers.map((row) => [

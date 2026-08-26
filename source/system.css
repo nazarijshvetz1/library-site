@@ -238,7 +238,8 @@ main > .contacts-section { order: 8; }
   box-shadow: var(--system-shadow-sm);
 }
 .filter-backdrop,
-.filter-close { display: none; }
+.filter-close,
+.filter-apply { display: none; }
 .filter-header { padding-bottom: 8px; border-color: var(--system-line); }
 .filter-header > span:first-child { min-width: 0; flex: 1 1 auto; }
 .filter-header strong { color: var(--system-text); font-size: 16px; }
@@ -370,9 +371,9 @@ main > .contacts-section { order: 8; }
     display: none;
     position: fixed;
     z-index: 95;
-    inset: auto 8px calc(74px + env(safe-area-inset-bottom));
-    top: 76px;
-    max-height: calc(100dvh - 158px - env(safe-area-inset-bottom));
+    inset: 76px 8px auto;
+    height: max-content;
+    max-height: calc(var(--tg-viewport-stable-height, 100dvh) - 158px - env(safe-area-inset-bottom));
     overflow-y: auto;
     border: 1px solid var(--system-line-strong);
     background: #fff;
@@ -409,6 +410,22 @@ main > .contacts-section { order: 8; }
   }
   .filter-close:hover { background: var(--system-surface-muted); }
   .filter-close .ui-icon { width: 18px; height: 18px; }
+  .filter-apply {
+    position: sticky;
+    bottom: 0;
+    width: 100%;
+    min-height: 44px;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #dce99f;
+    border-radius: var(--system-radius-sm);
+    color: #123b2f;
+    background: #dce99f;
+    box-shadow: 0 -8px 18px rgba(18,59,47,.16);
+    font-weight: 850;
+  }
   .material-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }
   .cover-wrap { height: 160px; }
   .cover-wrap img,
@@ -435,6 +452,10 @@ main > .contacts-section { order: 8; }
   .cover-wrap { height: 124px; padding: 10px; }
   .cover-wrap img,
   .cover-fallback { width: 64px; height: 94px; }
+  .cover-fallback { padding: 6px 5px; }
+  .cover-fallback span { font-size: 10px; line-height: 1.06; overflow-wrap: anywhere; hyphens: auto; }
+  .cover-fallback-medium span { font-size: 8px; }
+  .cover-fallback-long span { font-size: 6.5px; line-height: 1.03; }
   .class-badge { left: 5px; top: 5px; max-width: 78px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .card-body { min-width: 0; padding: 10px; }
   .material-card h3 { min-height: 0; font-size: 13px; }

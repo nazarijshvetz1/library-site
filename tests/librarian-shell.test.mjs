@@ -48,9 +48,10 @@ test("shared librarian route helper freezes web and Telegram Mini App destinatio
 });
 
 test("LibrarianShell keeps the official emblem, full-page navigation, and accessible mobile drawer", async () => {
-  const [source, css] = await Promise.all([
+  const [source, css, workspaceCss] = await Promise.all([
     readFile(new URL("../app/librarian/_components/librarian-shell.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/librarian/_components/librarian-shell.module.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/librarian/d1-workspace.module.css", import.meta.url), "utf8"),
   ]);
 
   assert.equal(LIBRARY_EMBLEM_URL, "https://nazarijshvetz1.github.io/library-site/library-logo.png");
@@ -78,4 +79,9 @@ test("LibrarianShell keeps the official emblem, full-page navigation, and access
   assert.match(css, /min-height:\s*48px/u);
   assert.match(css, /@media \(max-width:\s*840px\)/u);
   assert.match(css, /env\(safe-area-inset-bottom\)/u);
+  assert.match(css, /\.brand \{ width: 100%; max-width: 100%; overflow: hidden; \}/u);
+  assert.match(css, /\.account > a \{ flex: 0 0 auto; white-space: nowrap; \}/u);
+  assert.match(css, /\.content :is\(input,select,textarea\) \{ min-width: 0; max-width: 100%; font-size: 16px!important; \}/u);
+  assert.match(css, /\.drawer > header button:focus-visible \{[\s\S]*?box-shadow: 0 0 0 3px rgba\(35, 88, 59, \.2\);/u);
+  assert.match(workspaceCss, /\.resultCopy strong,[\s\S]*?\.selectedSummary strong \{[\s\S]*?white-space: normal;[\s\S]*?overflow-wrap: anywhere;/u);
 });

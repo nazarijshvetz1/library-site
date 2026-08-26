@@ -11,6 +11,7 @@ import {
   createTeacherMaterialRequest,
   listTeacherMaterialRequestPage,
   type MaterialRequestStatus,
+  type MaterialRequestVisibility,
   type TeacherMaterialRequestSort,
   type TeacherMaterialRequestDatabase,
 } from "@/lib/teacher-material-request-store";
@@ -40,6 +41,7 @@ const SORTS = new Set<TeacherMaterialRequestSort>([
   "title_desc",
   "quantity_desc",
 ]);
+const VISIBILITIES = new Set<MaterialRequestVisibility>(["visible", "hidden", "all"]);
 
 export async function GET(request: Request): Promise<Response> {
   const gate = teacherPortalGate(); if (gate) return gate;
@@ -49,10 +51,11 @@ export async function GET(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const status = (url.searchParams.get("status") ?? "all") as MaterialRequestStatus | "all";
     const sort = (url.searchParams.get("sort") ?? "date_desc") as TeacherMaterialRequestSort;
+    const visibility = (url.searchParams.get("visibility") ?? "visible") as MaterialRequestVisibility;
     const query = (url.searchParams.get("q") ?? "").trim();
     const limit = parseBoundedLimit(url.searchParams.get("limit"), 50, 100);
     const cursor = url.searchParams.get("cursor");
-    if (!STATUSES.has(status) || !SORTS.has(sort) || query.length > 80 || limit === null) {
+    if (!STATUSES.has(status) || !SORTS.has(sort) || !VISIBILITIES.has(visibility) || query.length > 80 || limit === null) {
       return materialRequestError(400, "validation_failed", "Некоректні параметри пошуку, сортування або сторінки.");
     }
     const result = await listTeacherMaterialRequestPage(db, teacher.teacherUserId, {
@@ -61,6 +64,7 @@ export async function GET(request: Request): Promise<Response> {
       cursor,
       query,
       sort,
+      visibility,
     });
     return materialRequestJson({
       schemaVersion: 1,

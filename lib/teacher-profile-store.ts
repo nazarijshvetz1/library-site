@@ -88,6 +88,7 @@ export type TeacherProfileUpdateInput = {
   fullName?: string;
   subjectPosition: string;
   primaryLocationId: string | null;
+  serviceContact?: string;
 };
 
 export type TeacherProfileUpdateResult = {
@@ -177,6 +178,7 @@ export async function updateTeacherOwnProfile(
     }
   }
   const fullName = input.fullName === undefined ? current.full_name : normalizeTeacherName(input.fullName);
+  const serviceContact = input.serviceContact === undefined ? current.service_contact : input.serviceContact;
   if (fullName.length < 3 || fullName.length > 120 || fullName.split(/\s+/u).length < 2) {
     throw new VisitScheduleError("teacher_profile_name_invalid", 400, "Укажіть прізвище та ім’я (до 120 символів).");
   }
@@ -189,7 +191,8 @@ export async function updateTeacherOwnProfile(
   }
   if (current.full_name === fullName
     && current.subject_position === input.subjectPosition
-    && current.primary_location_id === input.primaryLocationId) {
+    && current.primary_location_id === input.primaryLocationId
+    && current.service_contact === serviceContact) {
     throw new VisitScheduleError("teacher_profile_no_changes", 400, "Нові дані не відрізняються від поточних.");
   }
   const now = new Date().toISOString();
@@ -202,12 +205,14 @@ export async function updateTeacherOwnProfile(
     fullName: current.full_name,
     subjectPosition: current.subject_position,
     primaryLocationId: current.primary_location_id,
+    serviceContact: current.service_contact,
     version: current.version,
   };
   const after = {
     fullName,
     subjectPosition: input.subjectPosition,
     primaryLocationId: input.primaryLocationId,
+    serviceContact,
     version: result.profileVersion,
   };
   await db.batch([
@@ -255,7 +260,7 @@ export async function updateTeacherOwnProfile(
         requestHash,
       ),
     db.prepare(`UPDATE teacher_profiles
-      SET subject_position=?,primary_location_id=?,version=version+1,
+      SET subject_position=?,primary_location_id=?,service_contact=?,version=version+1,
         last_mutation_request_id=?,updated_by_user_id=?,updated_at=?
       WHERE teacher_user_id=? AND version=? AND closed_at IS NULL
         AND (? IS NULL OR EXISTS(
@@ -268,6 +273,7 @@ export async function updateTeacherOwnProfile(
       .bind(
         input.subjectPosition,
         input.primaryLocationId,
+        serviceContact,
         input.requestId,
         teacher.teacherUserId,
         now,

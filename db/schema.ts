@@ -1705,6 +1705,7 @@ export const materialRequests = sqliteTable(
     completedAt: text("completed_at"),
     rejectedAt: text("rejected_at"),
     cancelledAt: text("cancelled_at"),
+    teacherHiddenAt: text("teacher_hidden_at"),
     librarianHiddenAt: text("librarian_hidden_at"),
     librarianHiddenByUserId: text("librarian_hidden_by_user_id").references(() => users.id, {
       onDelete: "set null",
@@ -1715,6 +1716,7 @@ export const materialRequests = sqliteTable(
   },
   (table) => [
     index("idx_material_requests_teacher_created").on(table.teacherUserId, table.createdAt),
+    index("idx_material_requests_teacher_hidden").on(table.teacherUserId, table.teacherHiddenAt, table.createdAt),
     index("idx_material_requests_status_created").on(table.status, table.createdAt),
     index("idx_material_requests_librarian_hidden").on(table.librarianHiddenAt, table.status, table.createdAt),
     uniqueIndex("idx_material_requests_resulting_loan").on(table.resultingLoanId),

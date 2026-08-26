@@ -34,7 +34,7 @@ export async function PATCH(request: Request): Promise<Response> {
   if (!body.ok) return body.response;
   const keys = Object.keys(body.value);
   const expectedKeys = ["requestId", "expectedVersion", "subjectPosition", "primaryLocationId"];
-  const acceptedKeys = new Set([...expectedKeys, "fullName"]);
+  const acceptedKeys = new Set([...expectedKeys, "fullName", "serviceContact"]);
   if (expectedKeys.some((key) => !keys.includes(key)) || keys.some((key) => !acceptedKeys.has(key))) {
     return visitError(400, "validation_failed", "Форма профілю містить непідтримувані або пропущені поля.");
   }
@@ -55,12 +55,21 @@ export async function PATCH(request: Request): Promise<Response> {
     : typeof body.value.primaryLocationId === "string"
       ? body.value.primaryLocationId.trim()
       : "";
+  const serviceContact = body.value.serviceContact === undefined
+    ? undefined
+    : typeof body.value.serviceContact === "string"
+      ? body.value.serviceContact.normalize("NFKC").trim().replace(/\s+/gu, " ")
+      : "\0";
+  const serviceContactDigits = serviceContact?.replace(/\D/gu, "") ?? "";
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(requestId)
     || !Number.isSafeInteger(expectedVersion) || expectedVersion < 1
     || (fullName !== undefined && (fullName.length < 3 || fullName.length > 120 || fullName.split(/\s+/u).length < 2))
     || subjectPosition.length > 160
+    || (serviceContact !== undefined && (serviceContact.length > 40
+      || (serviceContact.length > 0 && (!/^\+?[0-9() .-]+$/u.test(serviceContact)
+        || serviceContactDigits.length < 7 || serviceContactDigits.length > 15))))
     || (primaryLocationId !== null && !safeResourceId(primaryLocationId))) {
-    return visitError(400, "validation_failed", "Перевірте предмет, посаду та обраний кабінет.");
+    return visitError(400, "validation_failed", "Перевірте ПІБ, предмет, мобільний номер та обраний кабінет.");
   }
   const db = env.DB as unknown as VisitD1Database;
   try {
@@ -69,6 +78,7 @@ export async function PATCH(request: Request): Promise<Response> {
       requestId,
       expectedVersion,
       ...(fullName === undefined ? {} : { fullName }),
+      ...(serviceContact === undefined ? {} : { serviceContact }),
       subjectPosition,
       primaryLocationId,
     });

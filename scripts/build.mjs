@@ -36,7 +36,7 @@ function decodeBase64(value) {
 }
 
 const securityHeaders = {
-  "content-security-policy": "default-src 'self'; img-src 'self' https: data:; style-src 'self'; script-src 'self'; connect-src 'self' https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+  "content-security-policy": "default-src 'self'; img-src 'self' https: data:; style-src 'self'; script-src 'self' https://telegram.org; connect-src 'self' https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
   "referrer-policy": "strict-origin-when-cross-origin",
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",

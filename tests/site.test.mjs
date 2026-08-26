@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import worker from "../dist-catalog/server/index.js";
 import {
   catalogDetailApiUrl,
+  initializeTelegramMiniApp,
   materialIdFromUrl,
   materialOrderDestination,
   materialOrderUrl,
@@ -59,6 +60,26 @@ test("keeps catalog ordering inside the Telegram Mini App and preserves the sele
   const browser = materialOrderDestination("https://library.example/teacher", "CAT-0112", "#catalog");
   assert.equal(browser.withinTelegram, false);
   assert.equal(browser.url, "https://library.example/teacher?tab=orders&material=CAT-0112");
+});
+
+test("expands the public catalog Mini App and safely requests supported fullscreen", () => {
+  const calls = [];
+  const connected = initializeTelegramMiniApp({
+    ready: () => calls.push("ready"),
+    expand: () => calls.push("expand"),
+    isVersionAtLeast: (version) => version === "8.0",
+    isFullscreen: false,
+    requestFullscreen: () => calls.push("fullscreen"),
+  });
+  assert.deepEqual(connected, { connected: true, fullscreenRequested: true });
+  assert.deepEqual(calls, ["ready", "expand", "fullscreen"]);
+  assert.deepEqual(initializeTelegramMiniApp(null), { connected: false, fullscreenRequested: false });
+  assert.equal(initializeTelegramMiniApp({
+    expand: () => calls.push("older-expand"),
+    isVersionAtLeast: () => false,
+    requestFullscreen: () => calls.push("older-fullscreen"),
+  }).fullscreenRequested, false);
+  assert.equal(calls.includes("older-fullscreen"), false);
 });
 
 test("offers bounded title suggestions with stable relevance", () => {
@@ -280,12 +301,16 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(html, /<option value="">Усі<\/option>/);
   assert.match(html, /href="\/styles\.css\?v=20260826-1"/);
   assert.match(html, /href="\/brand\.css\?v=20260824-2"/);
-  assert.match(html, /href="\/system\.css\?v=20260826-1"/);
+  assert.match(html, /href="\/system\.css\?v=20260826-2"/);
   assert.match(brand, /\.stats\s*\{[^}]*margin-top:\s*24px;/s);
-  assert.match(html, /type="module" src="\/app\.js\?v=20260825-3"/);
+  assert.match(html, /src="https:\/\/telegram\.org\/js\/telegram-web-app\.js\?59"/u);
+  assert.match(html, /type="module" src="\/app\.js\?v=20260826-1"/);
   assert.match(html, /id="filterBackdrop" hidden/u);
   assert.match(html, /id="filterClose"[^>]+aria-label="Закрити фільтри"/u);
+  assert.match(html, /id="filterApply"[^>]*>Показати результати<\/button>/u);
   assert.match(app, /function setFilterDrawerOpen\(open/u);
+  assert.match(app, /const fallbackTitle = cleanText\(item\.title \|\| item\.subject/u);
+  assert.match(app, /cover-fallback-long/u);
   assert.match(app, /event\.key !== "Escape"/u);
   assert.match(app, /elements\.filterBackdrop\.addEventListener\("click"/u);
   assert.match(app, /elements\.filterToggle\.setAttribute\("aria-expanded", String\(shouldOpen\)\)/u);
@@ -294,6 +319,8 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.doesNotMatch(css, /\.showcase-footer button,\.filter-toggle,[^{]+\{display:inline-flex/u);
   assert.match(system, /\.filter-backdrop:not\(\[hidden\]\)/u);
   assert.match(system, /\.filter-close\s*\{/u);
+  assert.match(system, /\.filter-apply\s*\{/u);
+  assert.match(system, /height:\s*max-content/u);
   assert.match(html, /class="icon-sprite"/u);
   assert.match(app, /const uiIcon =/u);
   assert.doesNotMatch(html, /[⌕☷✓←→↗○✦×＋]/u);
@@ -435,6 +462,7 @@ test("ships paginated public D1 sync with a GitHub Pages fallback", async () => 
     /catalogApiUrl:\s*"https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/api\/catalog-v2"/,
   );
   assert.match(home.headers.get("content-security-policy"), /connect-src 'self' https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site/);
+  assert.match(home.headers.get("content-security-policy"), /script-src 'self' https:\/\/telegram\.org/);
   assert.doesNotMatch(home.headers.get("content-security-policy"), /script\.google\.com/);
 
   const app = await (await worker.fetch(new Request("https://example.test/app.js"))).text();

@@ -182,7 +182,9 @@
 .requestHistory { margin-top: 20px; }
 .requestList { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .requestList > article { padding: 15px; display: grid; gap: 12px; border: 1px solid var(--line); border-radius: 13px; }
+.requestList > article[data-hidden="true"] { background: #f7f8f5; }
 .requestList header { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.requestHeaderBadges { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .requestList time { color: var(--muted); font-size: 9px; }
 .requestStatus { padding: 6px 8px; border-radius: 999px; color: #6f581c; background: #fff0c4; font-size: 9px; font-weight: 850; letter-spacing: .05em; text-transform: uppercase; }
 .requestStatus[data-status="ready"], .requestStatus[data-status="completed"] { color: var(--green-900); background: var(--green-100); }
@@ -195,6 +197,8 @@
 .requestList li small, .requestList li > span:last-child { color: var(--muted); }
 .requestList p { margin: 0; color: var(--muted); font-size: 11px; }
 .requestList .requestReason { color: var(--danger); }
+.requestHistoryActions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.requestHistoryActions :is(.danger,.quiet) { width: auto; margin: 0; }
 .notificationList { display: grid; gap: 9px; }
 .notificationStack { display: grid; gap: 20px; }
 .telegramSettingsStack { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
@@ -693,7 +697,7 @@
 .historyToolbar {
   margin-bottom: 12px;
   display: grid;
-  grid-template-columns: minmax(220px,1fr) minmax(150px,.38fr) minmax(190px,.48fr);
+  grid-template-columns: minmax(220px,1fr) minmax(150px,.38fr) minmax(190px,.48fr) auto;
   gap: 8px;
   align-items: end;
 }
@@ -708,6 +712,20 @@
   background: #fff;
   font-size: 12px;
 }
+.historyToolbar .historyVisibilityToggle {
+  min-height: 36px;
+  padding: 6px 10px;
+  display: flex;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--system-line-strong);
+  border-radius: var(--system-radius-sm);
+  color: var(--system-ink);
+  background: #f1f7ed;
+  white-space: nowrap;
+}
+.historyToolbar .historyVisibilityToggle input { width: 16px; min-height: 0; height: 16px; padding: 0; accent-color: #23583b; }
 .teacherPortalContent .requestList { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
 .teacherPortalContent .requestList > article { padding: 11px; gap: 8px; border-radius: var(--system-radius-md); }
 .teacherPortalContent .requestList li { font-size: 10px; }

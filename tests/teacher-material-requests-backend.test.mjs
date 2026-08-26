@@ -224,6 +224,7 @@ test("teacher profile self-update is optimistic, audited and idempotent", async 
     fullName: "Шевченко Олена Вікторівна",
     subjectPosition: "Учитель математики",
     primaryLocationId: "LOC-205",
+    serviceContact: "+380 67 123 45 67",
   };
 
   const updated = await profileStore.updateTeacherOwnProfile(context.db, teacher, input);
@@ -236,11 +237,12 @@ test("teacher profile self-update is optimistic, audited and idempotent", async 
     { full_name: "Шевченко Олена Вікторівна", sort_name: "шевченко олена вікторівна" },
   );
   assert.deepEqual(
-    { ...context.sqlite.prepare(`SELECT subject_position,primary_location_id,version,
+    { ...context.sqlite.prepare(`SELECT subject_position,primary_location_id,service_contact,version,
       last_mutation_request_id,updated_by_user_id FROM teacher_profiles WHERE teacher_user_id='USR-T1'`).get() },
     {
       subject_position: "Учитель математики",
       primary_location_id: "LOC-205",
+      service_contact: "+380 67 123 45 67",
       version: 2,
       last_mutation_request_id: requestId,
       updated_by_user_id: "USR-T1",
@@ -249,6 +251,10 @@ test("teacher profile self-update is optimistic, audited and idempotent", async 
   assert.equal(
     context.sqlite.prepare("SELECT action FROM audit_events WHERE request_id=?").get(requestId).action,
     "teacher.profile.self_updated",
+  );
+  assert.match(
+    context.sqlite.prepare("SELECT after_json FROM audit_events WHERE request_id=?").get(requestId).after_json,
+    /\+380 67 123 45 67/u,
   );
   assert.equal(
     context.sqlite.prepare("SELECT status FROM mutation_commands WHERE id=?").get(requestId).status,
@@ -272,6 +278,18 @@ test("teacher profile self-update is optimistic, audited and idempotent", async 
       primaryLocationId: "LOC-MISSING",
     }),
     (error) => error.code === "teacher_profile_location_invalid" && error.status === 400,
+  );
+  await profileStore.updateTeacherOwnProfile(context.db, { ...teacher, fullName: input.fullName }, {
+    requestId: commandId(),
+    expectedVersion: 2,
+    fullName: input.fullName,
+    subjectPosition: "Учитель алгебри",
+    primaryLocationId: input.primaryLocationId,
+  });
+  assert.equal(
+    context.sqlite.prepare("SELECT service_contact FROM teacher_profiles WHERE teacher_user_id='USR-T1'").get().service_contact,
+    "+380 67 123 45 67",
+    "cached clients that omit serviceContact must preserve the current number",
   );
 });
 
@@ -1056,6 +1074,43 @@ test("teacher requests, librarian queue, and notifications paginate without gaps
   await assert.rejects(
     () => store.listTeacherMaterialRequestPage(requestContext.db, "USR-T1", { cursor: "bad" }),
     (error) => error.code === "invalid_cursor" && error.status === 400,
+  );
+});
+
+test("teacher can hide and restore an order history record without deleting library data", async () => {
+  const context = openDatabase();
+  const request = await createRequest(context, 2);
+
+  const hidden = await store.setTeacherMaterialRequestVisibility(
+    context.db, teacher, request.id, true, request.version, commandId(),
+  );
+  assert.equal(hidden.hidden, true);
+  assert.equal((await store.listTeacherMaterialRequestPage(context.db, teacher.teacherUserId)).requests.length, 0);
+  assert.deepEqual(
+    (await store.listTeacherMaterialRequestPage(context.db, teacher.teacherUserId, { visibility: "hidden" })).requests.map((item) => item.id),
+    [request.id],
+  );
+  assert.equal(
+    (await store.listLibrarianMaterialRequests(context.db)).requests.some((item) => item.id === request.id),
+    true,
+  );
+  assert.deepEqual(
+    { ...context.sqlite.prepare("SELECT teacher_hidden_at,librarian_hidden_at FROM material_requests WHERE id=?").get(request.id) },
+    { teacher_hidden_at: hidden.hiddenAt, librarian_hidden_at: null },
+  );
+  assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM material_request_items WHERE request_id=?").get(request.id).n, 1);
+
+  const restored = await store.setTeacherMaterialRequestVisibility(
+    context.db, teacher, request.id, false, request.version, commandId(),
+  );
+  assert.deepEqual(restored, { requestId: request.id, hidden: false, hiddenAt: null });
+  assert.deepEqual(
+    (await store.listTeacherMaterialRequestPage(context.db, teacher.teacherUserId)).requests.map((item) => item.id),
+    [request.id],
+  );
+  assert.equal(
+    context.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE entity_id=? AND action IN ('material_request.hide_from_teacher','material_request.restore_for_teacher')").get(request.id).n,
+    2,
   );
 });
 

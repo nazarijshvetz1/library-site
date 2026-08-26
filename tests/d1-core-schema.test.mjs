@@ -28,6 +28,9 @@ const migrationFiles = [
   "drizzle/0021_optional_student_acquisition_metadata.sql",
   "drizzle/0022_teacher_curator_change_requests.sql",
   "drizzle/0023_guest_public_teacher_name_consent.sql",
+  "drizzle/0024_watery_miss_america.sql",
+  "drizzle/0025_lying_lucky_pierre.sql",
+  "drizzle/0026_typical_scalphunter.sql",
 ];
 
 async function migratedDatabase() {
@@ -38,6 +41,37 @@ async function migratedDatabase() {
   }
   return database;
 }
+
+test("0026 adds reversible teacher history visibility without changing existing requests", async () => {
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON;");
+  for (const file of migrationFiles.slice(0, migrationFiles.indexOf("drizzle/0026_typical_scalphunter.sql"))) {
+    database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
+  }
+  const now = "2026-08-26T08:00:00.000Z";
+  database.exec(`
+    INSERT INTO users (id,full_name,sort_name,email,auth_user_id,role,status,created_at,updated_at)
+      VALUES ('USR-T','Учитель Тестовий','учитель тестовий',NULL,NULL,'teacher','active','${now}','${now}');
+    INSERT INTO materials (id,catalog_number,title,sort_title,search_text,rubric,publication_type,subject,class_from,class_to,author,publication_year,isbn,isbn_normalized,publisher,notes,status,version,created_at,updated_at)
+      VALUES ('CAT-0001',1,'Матеріал','матеріал','матеріал','Підручники','Підручник','',NULL,NULL,'',NULL,'','','','','active',1,'${now}','${now}');
+    INSERT INTO material_requests (id,teacher_user_id,status,teacher_notes,librarian_note,rejection_reason,version,submitted_at,created_at,updated_at)
+      VALUES ('MR-1','USR-T','submitted','','','',1,'${now}','${now}','${now}');
+    INSERT INTO material_request_items (id,request_id,material_id,title_snapshot,author_snapshot,requested_quantity,approved_quantity,fulfilled_quantity,sort_order,created_at,updated_at)
+      VALUES ('MRI-1','MR-1','CAT-0001','Матеріал','',1,1,1,0,'${now}','${now}');
+    INSERT INTO material_request_events (id,request_id,actor_user_id,actor_kind,kind,from_status,to_status,metadata_json,created_at)
+      VALUES ('MRE-1','MR-1','USR-T','teacher','submitted',NULL,'submitted',NULL,'${now}');
+  `);
+  database.exec(await readFile(new URL("../drizzle/0026_typical_scalphunter.sql", import.meta.url), "utf8"));
+  assert.deepEqual(
+    { ...database.prepare("SELECT id,teacher_hidden_at FROM material_requests WHERE id='MR-1'").get() },
+    { id: "MR-1", teacher_hidden_at: null },
+  );
+  assert.equal(database.prepare("SELECT COUNT(*) AS n FROM material_request_items WHERE request_id='MR-1'").get().n, 1);
+  assert.equal(database.prepare("SELECT COUNT(*) AS n FROM material_request_events WHERE request_id='MR-1'").get().n, 1);
+  assert.equal(database.prepare("SELECT COUNT(*) AS n FROM pragma_index_list('material_requests') WHERE name='idx_material_requests_teacher_hidden'").get().n, 1);
+  assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+  database.close();
+});
 
 test("0021 keeps existing acquisition requests and child events while loosening only student metadata", async () => {
   const database = new DatabaseSync(":memory:");

@@ -1468,6 +1468,7 @@ type MaterialRequest = {
   readyAt: string | null;
   completedAt: string | null;
   cancelledAt: string | null;
+  teacherHiddenAt: string | null;
   items: Array<{
     id: string;
     material: { id: string; title: string; author: string; year: number | null; thumbnailUrl: string };
@@ -1656,6 +1657,7 @@ function TeacherOverview({
   const [fullName, setFullName] = useState("");
   const [subjectPosition, setSubjectPosition] = useState("");
   const [primaryLocationId, setPrimaryLocationId] = useState("");
+  const [serviceContact, setServiceContact] = useState("");
   const [curatorClassYearId, setCuratorClassYearId] = useState("");
   const [curatorNote, setCuratorNote] = useState("");
   const [curatorBusy, setCuratorBusy] = useState(false);
@@ -1671,6 +1673,7 @@ function TeacherOverview({
     setFullName(profile.fullName);
     setSubjectPosition(profile.subjectPosition);
     setPrimaryLocationId(profile.primaryLocation?.id ?? "");
+    setServiceContact(profile.serviceContact);
     setCuratorClassYearId(profile.pendingCuratorRequest?.requestedClassYearId ?? profile.curatedClasses[0]?.id ?? "");
     setCuratorNote("");
     setEditingProfile(true);
@@ -1736,8 +1739,12 @@ function TeacherOverview({
     if (!profile || profileBusy) return;
     const normalizedName = fullName.normalize("NFKC").trim().replace(/\s+/gu, " ");
     const normalizedSubject = subjectPosition.normalize("NFKC").trim().replace(/\s+/gu, " ");
+    const normalizedServiceContact = serviceContact.normalize("NFKC").trim().replace(/\s+/gu, " ");
     const nextLocation = primaryLocationId || null;
-    if (normalizedName === profile.fullName && normalizedSubject === profile.subjectPosition && nextLocation === profile.primaryLocation?.id) {
+    if (normalizedName === profile.fullName
+      && normalizedSubject === profile.subjectPosition
+      && normalizedServiceContact === profile.serviceContact
+      && nextLocation === profile.primaryLocation?.id) {
       setEditingProfile(false);
       return;
     }
@@ -1752,6 +1759,7 @@ function TeacherOverview({
           fullName: normalizedName,
           subjectPosition: normalizedSubject,
           primaryLocationId: nextLocation,
+          ...(normalizedServiceContact === profile.serviceContact ? {} : { serviceContact: normalizedServiceContact }),
         }),
       });
       onProfileChange(response.profile);
@@ -1826,7 +1834,7 @@ function TeacherOverview({
                 <div><dt>Куратор класу</dt><dd>{profile.curatedClasses.length
                   ? profile.curatedClasses.map((item) => `${item.className}${item.location?.name ? ` · ${item.location.name}` : ""}`).join(", ")
                   : "Не призначено"}</dd></div>
-                {profile.serviceContact ? <div><dt>Службовий контакт</dt><dd>{profile.serviceContact}</dd></div> : null}
+                {profile.serviceContact ? <div><dt>Мобільний номер</dt><dd>{profile.serviceContact}</dd></div> : null}
               </dl>
             ) : <p>Відомості профілю зараз недоступні.</p>}
           </div>
@@ -1857,6 +1865,9 @@ function TeacherOverview({
                   <option value="">Не вказано</option>
                   {profile.options.locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
                 </select>
+              </label>
+              <label>Мобільний номер
+                <input type="tel" autoComplete="tel" inputMode="tel" maxLength={40} value={serviceContact} onChange={(event) => setServiceContact(event.currentTarget.value)} placeholder="Наприклад, +380 67 123 45 67" />
               </label>
               <div className={styles.teacherProfileFormActions}>
                 <button className={styles.quiet} type="button" disabled={profileBusy} onClick={() => setEditingProfile(false)}>Скасувати</button>
@@ -2074,8 +2085,10 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
   const [committedHistoryQuery, setCommittedHistoryQuery] = useState("");
   const [historyStatus, setHistoryStatus] = useState<MaterialRequestStatus | "all">("all");
   const [historySort, setHistorySort] = useState<"date_desc" | "date_asc" | "title_asc" | "title_desc" | "quantity_desc">("date_desc");
+  const [showHiddenHistory, setShowHiddenHistory] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
+  const [historyActionId, setHistoryActionId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [pending, setPending] = useState<OrderPendingIntent | null>(null);
   const initialMaterialApplied = useRef(false);
@@ -2097,6 +2110,7 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
       if (committedHistoryQuery) params.set("q", committedHistoryQuery);
       if (historyStatus !== "all") params.set("status", historyStatus);
       params.set("sort", historySort);
+      params.set("visibility", showHiddenHistory ? "all" : "visible");
       const response = await visitApi<MaterialRequestsEnvelope>(`/api/teacher/material-requests?${params.toString()}`);
       if (loadId !== historyLoadRef.current) return;
       setRequests((current) => append ? mergePortalPageById(current, response.requests) : response.requests);
@@ -2115,7 +2129,7 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
         else setHistoryLoading(false);
       }
     }
-  }, [committedHistoryQuery, historySort, historyStatus]);
+  }, [committedHistoryQuery, historySort, historyStatus, showHiddenHistory]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setCommittedHistoryQuery(historyQuery.trim()), 280);
@@ -2237,6 +2251,32 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
     const requestId = crypto.randomUUID();
     const payload = { requestId, expectedVersion: request.version, reason: null };
     void sendOrderIntent({ kind: "order-cancel", requestId, resourceId: request.id, payload });
+  }
+
+  async function changeHistoryVisibility(request: MaterialRequest, hidden: boolean) {
+    if (historyActionId) return;
+    setHistoryActionId(request.id);
+    setNotice("");
+    try {
+      await visitApi(`/api/teacher/material-requests/${encodeURIComponent(request.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          action: hidden ? "hide" : "restore",
+          expectedVersion: request.version,
+          mutationId: crypto.randomUUID(),
+        }),
+      });
+      setNotice(hidden
+        ? "Запис приховано лише у вашій історії. Бібліотекар і надалі бачить замовлення."
+        : "Запис повернуто до історії замовлень.");
+      setNoticeTone("success");
+      await loadRequests(true);
+    } catch (error) {
+      setNotice(errorMessage(error));
+      setNoticeTone("error");
+    } finally {
+      setHistoryActionId("");
+    }
   }
 
   function add(item: TeacherCatalogItem) {
@@ -2368,14 +2408,18 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
               <option value="quantity_desc">Найбільша кількість</option>
             </select>
           </label>
+          <label className={styles.historyVisibilityToggle}><input type="checkbox" checked={showHiddenHistory} onChange={(event) => setShowHiddenHistory(event.currentTarget.checked)} /> Показати приховані</label>
         </div>
         {historyLoading ? <p className={styles.empty}>Оновлюємо замовлення…</p> : requests.length ? <div className={styles.requestList}>{requests.map((request) => (
-          <article key={request.id}>
-            <header><span className={styles.requestStatus} data-status={request.status}>{materialRequestStatusLabel(request.status)}</span><time dateTime={request.createdAt}>{formatPortalDate(request.createdAt)}</time></header>
+          <article key={request.id} data-hidden={request.teacherHiddenAt ? "true" : "false"}>
+            <header><div className={styles.requestHeaderBadges}><span className={styles.requestStatus} data-status={request.status}>{materialRequestStatusLabel(request.status)}</span>{request.teacherHiddenAt ? <span className={styles.hiddenRecordBadge}>Приховано</span> : null}</div><time dateTime={request.createdAt}>{formatPortalDate(request.createdAt)}</time></header>
             <ul>{request.items.map((item) => <li key={item.id}><span><strong>{item.material.title}</strong><small>{[item.material.author, item.material.year].filter(Boolean).join(" · ")}</small></span><span>{item.approvedQuantity ? `${item.approvedQuantity} із ${item.requestedQuantity}` : `${item.requestedQuantity} запитано`}</span></li>)}</ul>
             {request.pickupLocation ? <p>Отримання: <strong>{request.pickupLocation.name}</strong></p> : null}
             {request.rejectionReason ? <p className={styles.requestReason}>{request.rejectionReason}</p> : null}
-            {request.status === "submitted" ? <button className={styles.danger} type="button" onClick={() => cancelOrder(request)} disabled={submitting || Boolean(pending)}>Скасувати замовлення</button> : null}
+            <div className={styles.requestHistoryActions}>
+              {request.status === "submitted" ? <button className={styles.danger} type="button" onClick={() => cancelOrder(request)} disabled={submitting || Boolean(pending) || Boolean(historyActionId)}>Скасувати замовлення</button> : null}
+              <button className={styles.quiet} type="button" onClick={() => void changeHistoryVisibility(request, !request.teacherHiddenAt)} disabled={Boolean(historyActionId) || submitting}><SiteIcon name={request.teacherHiddenAt ? "visible" : "hidden"} size={16} /> {request.teacherHiddenAt ? "Повернути" : "Приховати"}</button>
+            </div>
           </article>
         ))}</div> : <p className={styles.empty}>Замовлень ще немає.</p>}
         {requestPage?.hasMore && requestPage.nextCursor ? <button className={styles.loadMore} type="button" onClick={() => void loadRequests(false, requestPage.nextCursor)} disabled={historyLoading || historyLoadingMore || submitting}>{historyLoadingMore ? "Завантажуємо…" : "Завантажити ще"}</button> : null}

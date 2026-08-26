@@ -58,7 +58,7 @@ function seed(sqlite) {
   sqlite.prepare(`INSERT INTO locations (id,name,type,status,is_public,sort_order,created_at,updated_at)
     VALUES ('LOC-001','Бібліотека','library','active',1,1,?,?),('LOC-002','Кабінет № 5','classroom','active',1,2,?,?)`).run(now, now, now, now);
   sqlite.prepare(`INSERT INTO teacher_profiles (teacher_user_id,subject_position,primary_location_id,service_contact,librarian_note,version,created_by_user_id,updated_by_user_id,created_at,updated_at)
-    VALUES ('USR-TEACH','Математика','LOC-002','службовий контакт','примітка',1,'USR-LIB','USR-LIB',?,?)`).run(now, now);
+    VALUES ('USR-TEACH','Математика','LOC-002','+380 67 123 45 67','примітка',1,'USR-LIB','USR-LIB',?,?)`).run(now, now);
   sqlite.prepare(`INSERT INTO materials (id,catalog_number,title,sort_title,search_text,rubric,publication_type,subject,class_from,class_to,author,publication_year,isbn,isbn_normalized,publisher,notes,status,version,created_at,updated_at)
     VALUES ('CAT-0001',1,'=HYPERLINK(""https://example.test"")','математика','математика','Підручники','Підручник','Математика',5,5,'Автор',2026,'9780000000001','9780000000001','Видавництво','Тест','active',1,?,?)`).run(now, now);
   sqlite.prepare(`INSERT INTO material_links (id,material_id,kind,label,url,is_public,sort_order,status,created_at,updated_at)
@@ -122,6 +122,7 @@ test("generated XLSX has the full workbook structure, subject sheets and safe in
   assert.match(styles, /<name val="Times New Roman"\/>/u);
   assert.match(styles, /sz val="14"/u);
   assert.match(catalog, /t="inlineStr"/u);
+  assert.match([...entries.values()].map((bytes) => new TextDecoder().decode(bytes)).join("\n"), />Мобільний номер</u);
   assert.match(catalog, /=HYPERLINK/u);
   assert.doesNotMatch(catalog, /<f>HYPERLINK/u);
   assert.doesNotMatch(decode("xl/worksheets/sheet2.xml"), /Вигляд/u);

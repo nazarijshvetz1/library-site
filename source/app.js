@@ -76,6 +76,24 @@ export function materialOrderDestination(value, materialId, launchHash = "", bas
   return { url: url.toString(), withinTelegram: true };
 }
 
+export function initializeTelegramMiniApp(webApp) {
+  if (!webApp || typeof webApp !== "object") return { connected: false, fullscreenRequested: false };
+  try { webApp.ready?.(); } catch { /* Telegram client owns this lifecycle. */ }
+  try { webApp.expand?.(); } catch { /* Older clients may ignore expansion. */ }
+  let fullscreenRequested = false;
+  let versionSupported = typeof webApp.isVersionAtLeast !== "function";
+  try {
+    if (typeof webApp.isVersionAtLeast === "function") versionSupported = webApp.isVersionAtLeast("8.0");
+  } catch { /* A partially implemented client still keeps the expanded viewport. */ }
+  if (versionSupported && !webApp.isFullscreen && typeof webApp.requestFullscreen === "function") {
+    try {
+      webApp.requestFullscreen();
+      fullscreenRequested = true;
+    } catch { /* Unsupported devices keep the maximally expanded height. */ }
+  }
+  return { connected: true, fullscreenRequested };
+}
+
 function normalizedSearchText(value) {
   return String(value || "")
     .toLocaleLowerCase("uk")
@@ -481,6 +499,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
 const config = window.LIBRARY_CONFIG && typeof window.LIBRARY_CONFIG === "object" ? window.LIBRARY_CONFIG : {};
 const telegramLaunchHash = telegramMiniAppLaunchHash(window.location.hash);
+if (telegramLaunchHash || window.Telegram?.WebApp?.initData) initializeTelegramMiniApp(window.Telegram?.WebApp);
 const balanceData = window.BALANCE_DATA && typeof window.BALANCE_DATA === "object" ? window.BALANCE_DATA : {};
 const collator = new Intl.Collator("uk", { sensitivity: "base", numeric: true });
 const state = { search: "", grade: "", rubric: "", subject: "", type: "", available: false, collection: "", sort: "recommended", limit: 18 };
@@ -512,6 +531,7 @@ const elements = {
   dialog: document.querySelector("#materialDialog"), dialogContent: document.querySelector("#dialogContent"), toast: document.querySelector("#toast"),
   filters: document.querySelector("#filters"), filterToggle: document.querySelector("#filterToggle"),
   filterClose: document.querySelector("#filterClose"), filterBackdrop: document.querySelector("#filterBackdrop"),
+  filterApply: document.querySelector("#filterApply"),
   materialStat: document.querySelector("#materialStat"), copiesStat: document.querySelector("#copiesStat"),
   locationsStat: document.querySelector("#locationsStat"), rubricsStat: document.querySelector("#rubricsStat"),
   dataSync: document.querySelector("#dataSync"), dataSyncText: document.querySelector("#dataSyncText"), syncRetry: document.querySelector("#syncRetry"),
@@ -838,9 +858,11 @@ function filteredMaterials() {
 }
 
 function coverMarkup(item, large = false) {
-  const fallback = `<span class="cover-fallback"><span>${escapeHtml(item.subject)}</span></span>`;
+  const fallbackTitle = cleanText(item.title || item.subject || "Матеріал", 160);
+  const lengthClass = [...fallbackTitle].length > 64 ? " cover-fallback-long" : [...fallbackTitle].length > 34 ? " cover-fallback-medium" : "";
+  const fallback = `<span class="cover-fallback${lengthClass}"><span>${escapeHtml(fallbackTitle)}</span></span>`;
   if (!item.cover) return fallback;
-  return `<img data-cover src="${escapeHtml(item.cover)}" alt="Обкладинка: ${escapeHtml(item.title)}" loading="${large ? "eager" : "lazy"}"><span class="cover-fallback" hidden><span>${escapeHtml(item.subject)}</span></span>`;
+  return `<img data-cover src="${escapeHtml(item.cover)}" alt="Обкладинка: ${escapeHtml(item.title)}" loading="${large ? "eager" : "lazy"}">${fallback.replace("class=\"cover-fallback", "hidden class=\"cover-fallback")}`;
 }
 
 function bindCoverErrors(root) {
@@ -1462,6 +1484,10 @@ function setFilterDrawerOpen(open, { restoreFocus = false } = {}) {
 elements.filterToggle.addEventListener("click", () => setFilterDrawerOpen(!elements.filters.classList.contains("open")));
 elements.filterClose.addEventListener("click", () => setFilterDrawerOpen(false, { restoreFocus: true }));
 elements.filterBackdrop.addEventListener("click", () => setFilterDrawerOpen(false, { restoreFocus: true }));
+elements.filterApply?.addEventListener("click", () => {
+  setFilterDrawerOpen(false);
+  document.querySelector(".results-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+});
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape" || !elements.filters.classList.contains("open")) return;
   event.preventDefault();

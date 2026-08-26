@@ -183,6 +183,13 @@
       "when": 1787692080504,
       "tag": "0025_lying_lucky_pierre",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1787722729092,
+      "tag": "0026_typical_scalphunter",
+      "breakpoints": true
     }
   ]
 }
