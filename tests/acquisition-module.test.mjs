@@ -173,7 +173,7 @@ test("acquisition interfaces expose catalog metadata, optional student fields an
   assert.match(teacherUi,/setSourceUrl\(detail\.links\.find/u);assert.match(teacherUi,/required=\{!existingCatalogMaterial\}/u);
   assert.match(teacherUi,/historyRequest = useRef\(0\)/u);assert.match(teacherUi,/requestId !== historyRequest\.current/u);
   assert.match(teacherUi,/action: hidden \? "hide" : "restore"/u);assert.match(teacherUi,/Бібліотекар і далі бачитиме цю пропозицію/u);
-  assert.match(teacherUi,/Показати приховані/u);assert.match(teacherUi,/Приховати всі завершені/u);assert.match(teacherUi,/Згорнути/u);
+  assert.match(teacherUi,/Показати приховані/u);assert.match(teacherUi,/Приховати всі завершені/u);assert.match(teacherUi,/CollapsibleListSection/u);
   assert.match(studentUi,/publicationYear:year\.trim\(\)\?Number\(year\):null/u);assert.match(studentUi,/requestedQuantity:quantity\.trim\(\)\?Number\(quantity\):null/u);
   assert.match(studentUi,/Автор <em>\*<\/em>[\s\S]*?name="author"[\s\S]*?required minLength=\{2\}/u);assert.doesNotMatch(studentUi,/Покликання на книгу \*<input/u);
   assert.match(studentUi,/Потрібні лише 4 поля/u);

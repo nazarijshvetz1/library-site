@@ -32,6 +32,7 @@
 .loanCounters strong { color: var(--green-950); font: 650 30px/1 Georgia, serif; }
 .loanSections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
 .teacherLoanList { display: grid; gap: 12px; }
+.teacherLoansBody { display: grid; gap: 20px; }
 .teacherLoanList > article { padding: 14px; display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 13px; background: #fbfcf9; }
 .teacherLoanList header { display: flex; justify-content: space-between; gap: 12px; color: var(--green-950); font-size: 11px; font-weight: 800; }
 .teacherLoanList header small, .loanMeta, .teacherLoanList > article > p { color: var(--muted); font-size: 9px; line-height: 1.45; }
@@ -647,7 +648,8 @@
   min-height: 60px;
   padding: 6px max(18px, calc((100vw - 1500px) / 2));
   border-color: var(--system-line);
-  background: rgba(255,255,255,.96);
+  isolation: isolate;
+  background: #fffef9;
 }
 .brand img { width: 40px; height: 40px; box-shadow: var(--system-shadow-sm); }
 .brand strong { font-size: 16px; letter-spacing: -.015em; }
@@ -732,7 +734,12 @@
 
 @media (max-width: 840px) {
   .header { min-height: 60px; padding: 6px 12px; }
-  .teacherPortalPage { min-height: calc(100dvh - 60px); padding: 14px 12px 88px; }
+  .header[data-telegram-mini-app="true"] { position: static; }
+  .teacherPortalPage {
+    min-height: calc(100dvh - 60px);
+    padding: 14px 12px calc(112px + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(112px + env(safe-area-inset-bottom));
+  }
   .teacherPageHeader h1 { font-size: 24px; }
   .teacherPageHeader > div:first-child > p:last-child { font-size: 12px; }
   .teacherMobileNav {
@@ -798,6 +805,8 @@
   .historyToolbar { grid-template-columns: 1fr 1fr; }
   .historySearch { grid-column: 1 / -1; }
   .teacherPortalContent .requestList { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .bookingActions { width: 100%; display: grid!important; grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .bookingActions > button { width: 100%; min-width: 0; }
 }
 
 @media (max-width: 620px) {
@@ -852,6 +861,10 @@
     opacity: 0;
     pointer-events: none;
     transform: translateY(calc(100% + 24px));
+  }
+  .teacherPortalPage:has(.mobileCartBar:not(:disabled)) {
+    padding-bottom: calc(174px + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(174px + env(safe-area-inset-bottom));
   }
   .orderCart { overscroll-behavior: contain; }
 }

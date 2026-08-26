@@ -9,6 +9,7 @@ import { visitApi } from "@/app/visits/visit-client";
 import MaterialRequestInbox from "@/app/librarian/visits/material-request-inbox";
 import TeacherAccessAdmin from "@/app/librarian/visits/teacher-access-admin";
 import SiteIcon from "@/app/_components/site-icon";
+import CollapsibleListSection from "@/app/_components/collapsible-list-section";
 import TeacherCodeImport from "./teacher-code-import";
 import {
   changeTeacherStatus,
@@ -523,13 +524,9 @@ function TeacherDirectoryPanel({
   return (
     <div className={styles.directoryStack}>
       <TeacherCuratorRequestQueue writesEnabled={writesEnabled} onNotice={onNotice} />
-      <section className={styles.card} aria-labelledby="directory-title">
-        <div className={styles.cardHeading}>
-          <div><span>{data?.counters.active ?? 0} активних</span><h2 id="directory-title">Картки вчителів</h2></div>
-          <button className={styles.primaryButton} type="button" onClick={() => setCreating((value) => !value)} disabled={!writesEnabled}>
+      <CollapsibleListSection className={styles.card} flatOnMobile titleId="directory-title" eyebrow={`${data?.counters.active ?? 0} активних`} title="Картки вчителів" actions={<button className={styles.primaryButton} type="button" onClick={() => setCreating((value) => !value)} disabled={!writesEnabled}>
             <SiteIcon name={creating ? "close" : "add"} size={18} /> {creating ? "Закрити форму" : "Додати вчителя"}
-          </button>
-        </div>
+          </button>}>
 
         {creating ? (
           <TeacherProfileForm
@@ -577,7 +574,7 @@ function TeacherDirectoryPanel({
             </aside>
           </div>
         ) : <p className={styles.empty}>За цими фільтрами карток не знайдено.</p>}
-      </section>
+      </CollapsibleListSection>
 
       <section className={styles.bulkOperations} aria-labelledby="teacher-bulk-operations-title">
         <div><span>Масові операції</span><h2 id="teacher-bulk-operations-title">Імпорт тимчасових кодів</h2><p>Службовий інструмент розміщено внизу, щоб він не заважав щоденній роботі з картками.</p></div>
@@ -642,11 +639,7 @@ function TeacherCuratorRequestQueue({
   }
 
   return (
-    <section className={`${styles.card} ${styles.curatorQueue}`} aria-labelledby="curator-request-title">
-      <div className={styles.cardHeading}>
-        <div><span>{requests.length} очікує</span><h2 id="curator-request-title">Зміни кураторства</h2></div>
-        <button type="button" onClick={() => void load()} disabled={loading}><SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}</button>
-      </div>
+    <CollapsibleListSection className={`${styles.card} ${styles.curatorQueue}`} flatOnMobile titleId="curator-request-title" eyebrow={`${requests.length} очікує`} title="Зміни кураторства" actions={<button type="button" onClick={() => void load()} disabled={loading}><SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}</button>}>
       <p className={styles.curatorQueueHint}>Учитель може змінити предмет і кабінет самостійно. Клас куратора змінюється тут, щоб зберегти правильний облік виданих матеріалів.</p>
       {loading ? <p className={styles.empty}>Перевіряємо заявки…</p> : requests.length ? (
         <div className={styles.curatorRequestList}>
@@ -665,7 +658,7 @@ function TeacherCuratorRequestQueue({
           ))}
         </div>
       ) : <p className={styles.empty}>Нових заявок на зміну кураторства немає.</p>}
-    </section>
+    </CollapsibleListSection>
   );
 }
 
@@ -878,11 +871,10 @@ function VisitManagementPanel({ telegramMiniApp }: { telegramMiniApp: boolean })
   }, [load]);
 
   return (
-    <section className={styles.card} aria-labelledby="visits-title">
-      <div className={styles.cardHeading}><div><span>{data?.bookings.length ?? 0} записів</span><h2 id="visits-title">Відвідування бібліотеки</h2></div><a className={styles.secondaryLink} href={telegramMiniApp ? "/librarian/telegram/cabinet?target=visits" : "/librarian/visits"}>Повне керування розкладом <SiteIcon name="next" size={17} /></a></div>
+    <CollapsibleListSection className={styles.card} flatOnMobile titleId="visits-title" eyebrow={`${data?.bookings.length ?? 0} записів`} title="Відвідування бібліотеки" actions={<a className={styles.secondaryLink} href={telegramMiniApp ? "/librarian/telegram/cabinet?target=visits" : "/librarian/visits"}>Повне керування розкладом <SiteIcon name="next" size={17} /></a>}>
       <div className={styles.filters}><label>Дата<input type="date" value={date} onChange={(event) => setDate(event.currentTarget.value)} /></label><label>Стан<select value={status} onChange={(event) => setStatus(event.currentTarget.value)}><option value="active">Активні</option><option value="cancelled">Скасовані</option><option value="">Усі</option></select></label></div>
       {error ? <div className={styles.error} role="alert">{error}</div> : loading ? <p className={styles.empty}>Оновлюємо розклад…</p> : data?.bookings.length ? <div className={styles.visitList}>{data.bookings.map((booking) => <article key={booking.id}><time>{booking.startTime}–{booking.endTime}</time><span><strong>{booking.surname}</strong><small>{[booking.classLabel, booking.purpose].filter(Boolean).join(" · ") || "Без додаткових відомостей"}</small></span><StatusPill value={booking.status} /></article>)}</div> : <p className={styles.empty}>На цю дату записів немає.</p>}
-    </section>
+    </CollapsibleListSection>
   );
 }
 

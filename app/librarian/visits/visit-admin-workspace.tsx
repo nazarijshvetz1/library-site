@@ -18,6 +18,7 @@ import {
 } from "@/app/visits/visit-client";
 import LibrarianShell from "../_components/librarian-shell";
 import SiteIcon from "@/app/_components/site-icon";
+import CollapsibleListSection from "@/app/_components/collapsible-list-section";
 import styles from "@/app/visits/visits.module.css";
 
 type Props = {
@@ -141,11 +142,7 @@ export default function LibrarianVisitWorkspace({
         {data && data.bookingEnabled !== true ? <div className={styles.info} role="status">Скасування записів тимчасово вимкнено адміністратором.</div> : null}
         {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
 
-        <section className={styles.card}>
-          <div className={styles.cardHeading}>
-            <div><span>{bookings.length} записів</span><h2>Розклад</h2></div>
-            <button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading} aria-busy={loading}><SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}</button>
-          </div>
+        <CollapsibleListSection className={styles.card} flatOnMobile titleId="librarian-visit-schedule-title" eyebrow={`${bookings.length} записів`} title="Розклад" actions={<button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading} aria-busy={loading}><SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}</button>}>
           <div className={styles.adminFilters}>
             <label>Дата<input type="date" value={date} onInput={(event) => setDate(event.currentTarget.value)} /></label>
             <label>Стан<select value={status} onChange={(event) => setStatus(event.currentTarget.value)}><option value="active">Активні</option><option value="cancelled">Скасовані</option><option value="">Усі</option></select></label>
@@ -167,7 +164,7 @@ export default function LibrarianVisitWorkspace({
               </table>
             </div>
           ) : <p className={styles.empty}>За цими фільтрами записів немає.</p>}
-        </section>
+        </CollapsibleListSection>
         </section>
       </main>
     </LibrarianShell>

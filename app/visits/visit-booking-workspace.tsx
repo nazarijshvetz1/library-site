@@ -13,6 +13,7 @@ import {
   useState,
 } from "react";
 import SiteIcon, { type SiteIconName } from "../_components/site-icon";
+import CollapsibleListSection from "../_components/collapsible-list-section";
 
 import {
   busyPeriodParts,
@@ -276,7 +277,7 @@ export default function VisitBookingWorkspace({
 function VisitShell({ children, telegramMiniApp = false }: { children: React.ReactNode; telegramMiniApp?: boolean }) {
   return (
     <main className={styles.shell}>
-      <header className={styles.header}>
+      <header className={styles.header} data-telegram-mini-app={telegramMiniApp ? "true" : undefined}>
         <a className={styles.brand} href={telegramMiniApp ? "/teacher/telegram/cabinet?tab=overview" : "/teacher?tab=overview"} aria-label="Перейти на головну Кабінету учителя">
           <img src={LOGO_URL} alt="" width="48" height="48" />
           <span><strong>Єдина бібліотека</strong><small>Простір учителя</small></span>
@@ -1386,15 +1387,14 @@ function VisitBookingPanel({
           </aside>
             </div>
 
-            <section className={`${styles.card} ${styles.bookings}`} aria-labelledby="my-bookings-title">
-          <div className={styles.cardHeading}><div><span>Лише для вас</span><h2 id="my-bookings-title">Мої майбутні записи</h2></div><button type="button" className={styles.quiet} onClick={() => void load()} disabled={loading}><SiteIcon name="refresh" size={18} /> Оновити</button></div>
+            <CollapsibleListSection className={`${styles.card} ${styles.bookings}`} flatOnMobile titleId="my-bookings-title" eyebrow="Лише для вас" title="Мої майбутні записи" actions={<button type="button" className={styles.quiet} onClick={() => void load()} disabled={loading}><SiteIcon name="refresh" size={18} /> Оновити</button>}>
           {activeBookings.length ? <div className={styles.bookingList}>{activeBookings.map((booking) => (
             <article key={booking.id}>
               <div><strong>{formatVisitDateTime(`${booking.date}T${booking.startTime}`)}–{booking.endTime}</strong><span>{booking.classLabel || "Без класу"}{booking.purpose ? ` · ${booking.purpose}` : ""}</span></div>
               <div className={styles.bookingActions}><button type="button" className={styles.quiet} onClick={() => editBooking(booking)} disabled={!bookingEnabled || submitting || Boolean(pending)}>Редагувати</button><button type="button" className={styles.danger} onClick={() => cancelBooking(booking)} disabled={!bookingEnabled || submitting || Boolean(pending)}>Скасувати</button></div>
             </article>
           ))}</div> : <p className={styles.empty}>Майбутніх записів немає.</p>}
-            </section>
+            </CollapsibleListSection>
             </> : null}
 
             {activeTab === "orders" ? <TeacherOrdersPanel pendingScope={pendingScope} initialMaterialId={initialOrderMaterialId} /> : null}
@@ -2001,11 +2001,7 @@ function TeacherLoansPanel() {
   }, [load]);
 
   return (
-    <section className={styles.teacherLoans} aria-labelledby="teacher-loans-title">
-      <div className={styles.cardHeading}>
-        <div><span>Лише для вас</span><h2 id="teacher-loans-title">Що записано на вас</h2></div>
-        <button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading}><SiteIcon name="refresh" size={18} /> Оновити</button>
-      </div>
+    <CollapsibleListSection className={styles.teacherLoans} contentClassName={styles.teacherLoansBody} flatOnMobile titleId="teacher-loans-title" eyebrow="Лише для вас" title="Що записано на вас" actions={<button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading}><SiteIcon name="refresh" size={18} /> Оновити</button>}>
       {error ? <div className={styles.error} role="alert">{error}</div> : null}
       <div className={styles.loanCounters} aria-label="Підсумок виданих посібників">
         <article><span>Усього</span><strong>{data?.summary.totalCopies ?? 0}</strong><small>примірників</small></article>
@@ -2045,7 +2041,7 @@ function TeacherLoansPanel() {
           </section>
         </div>
       ) : null}
-    </section>
+    </CollapsibleListSection>
   );
 }
 
@@ -2381,8 +2377,7 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
       <button className={styles.mobileCartBar} type="button" onClick={() => setCartOpen(true)} disabled={!cartRows.length} aria-expanded={cartOpen}>
         <span><SiteIcon name="orders" size={18} /><strong>Кошик</strong><small>{cartRows.length} поз. · {cartQuantity} прим.</small></span><b>Відкрити</b>
       </button>
-      <section className={`${styles.card} ${styles.requestHistory}`} aria-labelledby="request-history-title">
-        <div className={styles.cardHeading}><div><span>Лише для вас</span><h2 id="request-history-title">Історія замовлень</h2></div><button className={styles.quiet} type="button" onClick={() => void loadRequests()} disabled={historyLoading || historyLoadingMore || submitting}><SiteIcon name="refresh" size={18} /> Оновити</button></div>
+      <CollapsibleListSection className={`${styles.card} ${styles.requestHistory}`} flatOnMobile titleId="request-history-title" eyebrow="Лише для вас" title="Історія замовлень" actions={<button className={styles.quiet} type="button" onClick={() => void loadRequests()} disabled={historyLoading || historyLoadingMore || submitting}><SiteIcon name="refresh" size={18} /> Оновити</button>}>
         <div className={styles.historyToolbar}>
           <label className={styles.historySearch}>Пошук
             <input type="search" value={historyQuery} onChange={(event) => setHistoryQuery(event.currentTarget.value)} placeholder="Назва, автор або номер" autoComplete="off" />
@@ -2423,7 +2418,7 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
           </article>
         ))}</div> : <p className={styles.empty}>Замовлень ще немає.</p>}
         {requestPage?.hasMore && requestPage.nextCursor ? <button className={styles.loadMore} type="button" onClick={() => void loadRequests(false, requestPage.nextCursor)} disabled={historyLoading || historyLoadingMore || submitting}>{historyLoadingMore ? "Завантажуємо…" : "Завантажити ще"}</button> : null}
-      </section>
+      </CollapsibleListSection>
     </section>
   );
 }
@@ -2539,8 +2534,7 @@ function TeacherNotificationsPanel({ pendingScope }: { pendingScope: string }) {
 
   return (
     <div className={styles.notificationStack}>
-      <section className={styles.card} aria-labelledby="notifications-title">
-      <div className={styles.cardHeading}><div><span>{data?.unreadCount ?? 0} непрочитаних</span><h2 id="notifications-title">Повідомлення</h2></div><button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading || loadingMore || submitting}><SiteIcon name="refresh" size={18} /> Оновити</button></div>
+      <CollapsibleListSection className={styles.card} flatOnMobile titleId="notifications-title" eyebrow={`${data?.unreadCount ?? 0} непрочитаних`} title="Повідомлення" actions={<button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading || loadingMore || submitting}><SiteIcon name="refresh" size={18} /> Оновити</button>}>
       {pending ? <div className={styles.pending} role="status"><span>Не вдалося підтвердити попередню дію з повідомленням.</span><button type="button" onClick={() => void sendNotificationMutation(pending)} disabled={submitting}>Перевірити результат</button></div> : null}
       {notice ? <div className={styles.error} role="alert">{notice}</div> : null}
       {loading ? <p className={styles.empty}>Оновлюємо повідомлення…</p> : data?.notifications.length ? <div className={styles.notificationList}>{data.notifications.map((notification) => (
@@ -2554,7 +2548,7 @@ function TeacherNotificationsPanel({ pendingScope }: { pendingScope: string }) {
         </article>
       ))}</div> : <p className={styles.empty}>Повідомлень ще немає.</p>}
       {data?.page.hasMore && data.page.nextCursor ? <button className={styles.loadMore} type="button" onClick={() => void load(false, data.page.nextCursor)} disabled={loading || loadingMore || submitting}>{loadingMore ? "Завантажуємо…" : "Завантажити ще"}</button> : null}
-      </section>
+      </CollapsibleListSection>
     </div>
   );
 }

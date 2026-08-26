@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-img-element -- first-party catalog thumbnails are already resized by the catalog service. */
 
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import CollapsibleListSection from "@/app/_components/collapsible-list-section";
 import SiteIcon from "@/app/_components/site-icon";
 import styles from "./teacher-acquisition.module.css";
 
@@ -43,7 +44,6 @@ export default function TeacherAcquisitionPanel() {
   const [historyStatus, setHistoryStatus] = useState("all");
   const [historySort, setHistorySort] = useState("date_desc");
   const [showHidden, setShowHidden] = useState(false);
-  const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [notice, setNotice] = useState(""); const [error, setError] = useState("");
@@ -221,9 +221,15 @@ export default function TeacherAcquisitionPanel() {
           </div>
           <button className={styles.primary} type="submit" disabled={busy || (sourceKind === "catalog" && !selected)}>{busy ? "Надсилаємо…" : "Надіслати пропозицію"}</button>
         </form>
-        <section className={styles.card} aria-labelledby="my-acquisition-title">
-          <div className={styles.heading}><div><span>Лише для вас</span><h3 id="my-acquisition-title">Мої пропозиції</h3></div><div className={styles.headingActions}><button type="button" onClick={() => setHistoryCollapsed((value) => !value)}><SiteIcon name="expand" size={17} /> {historyCollapsed ? "Розгорнути" : "Згорнути"}</button><button type="button" onClick={() => void load()} disabled={loading} aria-busy={loading}><SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}</button></div></div>
-          {!historyCollapsed ? <>
+        <CollapsibleListSection
+          className={styles.card}
+          flatOnMobile
+          titleId="my-acquisition-title"
+          eyebrow="Лише для вас"
+          title="Мої пропозиції"
+          headingLevel="h3"
+          actions={<button type="button" onClick={() => void load()} disabled={loading} aria-busy={loading}><SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}</button>}
+        >
           <div className={styles.historyToolbar}>
             <label className={styles.historySearch}>Пошук<input type="search" value={historyQuery} onChange={(event) => setHistoryQuery(event.currentTarget.value)} placeholder="Назва, автор або номер" /></label>
             <label>Статус<select value={historyStatus} onChange={(event) => setHistoryStatus(event.currentTarget.value)}><option value="all">Усі</option>{Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
@@ -240,8 +246,7 @@ export default function TeacherAcquisitionPanel() {
             <div className={styles.progress}><span>погоджено {record.approvedQuantity ?? 0}</span><span>замовлено {record.orderedQuantity}</span><span>отримано {record.receivedQuantity}</span></div>
             <div className={styles.historyActions}>{["submitted","in_review","clarification","approved","planned"].includes(record.status) && !record.teacherHiddenAt ? <button type="button" className={styles.danger} disabled={busy} onClick={() => void cancel(record)}>Скасувати</button> : null}<button type="button" className={styles.hideAction} disabled={busy} onClick={() => void changeVisibility(record, !record.teacherHiddenAt)}><SiteIcon name={record.teacherHiddenAt ? "visible" : "hidden"} size={16} /> {record.teacherHiddenAt ? "Повернути" : "Приховати"}</button></div>
           </article>)}</div> : <p className={styles.empty}>Ви ще не надсилали пропозицій до комплектування.</p>}
-          </> : <p className={styles.collapsedNote}>Історію згорнуто. Усі записи збережені.</p>}
-        </section>
+        </CollapsibleListSection>
       </div>
     </section>
   );

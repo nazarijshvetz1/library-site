@@ -1,0 +1,90 @@
+.section { min-width: 0; }
+
+.heading {
+  margin-bottom: 12px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.titleBlock { min-width: 0; }
+.titleBlock > span {
+  display: block;
+  color: #33704d;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+.titleBlock > :is(h2, h3) {
+  margin: 3px 0 0;
+  color: #123f2f;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(20px, 2vw, 27px);
+  font-weight: 700;
+  letter-spacing: -.02em;
+  line-height: 1.08;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.actions > * { min-width: 0; }
+
+.toggle {
+  min-height: 38px;
+  padding: 8px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #cfdbcf;
+  border-radius: 10px;
+  color: #1b5139;
+  background: #fffef9;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.toggle:hover { border-color: #9fbaa4; background: #f4f8f1; }
+.toggle:focus-visible { outline: 2px solid #2b6e49; outline-offset: 2px; }
+.chevron { display: inline-flex; transition: transform .16s ease; }
+.chevron[data-expanded="false"] { transform: rotate(-90deg); }
+
+.content { min-width: 0; }
+.content[hidden] { display: none; }
+.collapsedNote {
+  margin: 0;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  color: #5d6b63;
+  background: #f3f7f0;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+@media (max-width: 620px) {
+  .flatOnMobile {
+    padding-inline: 0 !important;
+    border-color: transparent !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+  .heading { display: grid; gap: 10px; }
+  .titleBlock > :is(h2, h3) { font-size: 22px; }
+  .actions { width: 100%; display: grid; grid-template-columns: repeat(auto-fit,minmax(132px,1fr)); }
+  .actions > *, .toggle { width: 100%; min-height: 44px; }
+  .collapsedNote { padding: 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron { transition: none; }
+}

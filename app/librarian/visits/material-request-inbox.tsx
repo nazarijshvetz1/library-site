@@ -12,6 +12,7 @@ import {
   writePortalPendingIntent,
 } from "@/app/visits/visit-client";
 import SiteIcon from "@/app/_components/site-icon";
+import CollapsibleListSection from "@/app/_components/collapsible-list-section";
 import styles from "@/app/visits/visits.module.css";
 
 type RequestStatus = "submitted" | "in_review" | "ready" | "partially_ready" | "completed" | "rejected" | "cancelled";
@@ -291,8 +292,7 @@ export default function MaterialRequestInbox({
   const requests = useMemo(() => data?.requests ?? [], [data]);
 
   return (
-    <section className={`${styles.card} ${styles.requestInbox}`} aria-labelledby="request-inbox-title">
-      <div className={styles.cardHeading}><div><span>{data?.newCount ?? 0} нових</span><h2 id="request-inbox-title">Замовлення вчителів</h2></div><button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading || loadingMore || submitting} aria-busy={loading}><SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}</button></div>
+    <CollapsibleListSection className={`${styles.card} ${styles.requestInbox}`} flatOnMobile titleId="request-inbox-title" eyebrow={`${data?.newCount ?? 0} нових`} title="Замовлення вчителів" actions={<button className={styles.quiet} type="button" onClick={() => void load()} disabled={loading || loadingMore || submitting} aria-busy={loading}><SiteIcon name={loading ? "loading" : "refresh"} size={18} /> {loading ? "Оновлюємо…" : "Оновити"}</button>}>
       <div className={styles.adminFilters}>
         <label>Пошук<input type="search" value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="Учитель, назва або автор" /></label>
         <label>Стан<select value={status} onChange={(event) => changeStatus(event.currentTarget.value)} disabled={loading || loadingMore || submitting}><option value="">Усі</option><option value="submitted">Нові</option><option value="in_review">Опрацьовуються</option><option value="ready">Готові</option><option value="partially_ready">Частково готові</option><option value="completed">Виконані</option><option value="rejected">Відхилені</option><option value="cancelled">Скасовані</option></select></label>
@@ -319,7 +319,7 @@ export default function MaterialRequestInbox({
         </article>
       ))}</div> : <p className={styles.empty}>За цим фільтром замовлень немає.</p>}
       {data?.page.hasMore && data.page.nextCursor ? <button className={styles.loadMore} type="button" onClick={() => void load(false, data.page.nextCursor)} disabled={loading || loadingMore || submitting}>{loadingMore ? "Завантажуємо…" : "Завантажити ще"}</button> : null}
-    </section>
+    </CollapsibleListSection>
   );
 }
 
