@@ -1169,7 +1169,13 @@ function DashboardPanel({
             <span>Назва, автор, ISBN або CAT-ID</span>
             <input
               value={filters.q}
-              onChange={(event) => onFilters((current) => ({ ...current, q: event.currentTarget.value }))}
+              onChange={(event) => {
+                // React clears currentTarget after the handler returns. Snapshot
+                // the value before passing a functional update to avoid a
+                // deferred WebView render reading currentTarget as null.
+                const nextQuery = event.currentTarget.value;
+                onFilters((current) => ({ ...current, q: nextQuery }));
+              }}
               placeholder="Наприклад, CAT-0195"
             />
           </label>

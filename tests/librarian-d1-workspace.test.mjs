@@ -619,6 +619,14 @@ test("D1 workspace opens on a grouped accessible dashboard and keeps every tool 
   }
   assert.match(workspace, /function DashboardPanel/u);
   assert.match(workspace, /Знайдіть матеріал або відскануйте ISBN/u);
+  const dashboardPanel = workspace.match(
+    /function DashboardPanel[\s\S]*?(?=function CatalogSearch)/u,
+  )?.[0] ?? "";
+  assert.match(
+    dashboardPanel,
+    /const nextQuery = event\.currentTarget\.value;[\s\S]*?onFilters\(\(current\) => \(\{ \.\.\.current, q: nextQuery \}\)\)/u,
+  );
+  assert.doesNotMatch(dashboardPanel, /q: event\.currentTarget\.value/u);
   assert.match(workspace, /"return",[\s\S]*?"issue",[\s\S]*?"class-issue",[\s\S]*?"receipt",[\s\S]*?"create",[\s\S]*?"count"/u);
   assert.match(workspace, /<IsbnCameraScanner disabled=\{false\} onDetected=\{searchScannedIsbn\}/u);
   assert.match(workspace, /aria-pressed=\{tool === item\.id\}/u);
