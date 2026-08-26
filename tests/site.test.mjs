@@ -301,10 +301,10 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(html, /<option value="">Усі<\/option>/);
   assert.match(html, /href="\/styles\.css\?v=20260826-2"/);
   assert.match(html, /href="\/brand\.css\?v=20260824-2"/);
-  assert.match(html, /href="\/system\.css\?v=20260826-3"/);
+  assert.match(html, /href="\/system\.css\?v=20260827-1"/);
   assert.match(brand, /\.stats\s*\{[^}]*margin-top:\s*24px;/s);
-  assert.match(html, /src="https:\/\/telegram\.org\/js\/telegram-web-app\.js\?59"/u);
-  assert.match(html, /type="module" src="\/app\.js\?v=20260826-2"/);
+  assert.match(html, /<head>[\s\S]*?src="https:\/\/telegram\.org\/js\/telegram-web-app\.js\?63"[\s\S]*?<\/head>/u);
+  assert.match(html, /type="module" src="\/app\.js\?v=20260827-1"/);
   assert.match(html, /id="filterBackdrop" hidden/u);
   assert.match(html, /id="filterClose"[^>]+aria-label="Закрити фільтри"/u);
   assert.match(html, /id="filterApply"[^>]*>Показати результати<\/button>/u);
@@ -361,8 +361,25 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(app, /raw\.publicationType/);
   assert.match(css, /max-height:calc\(100dvh - 12px\)/);
   assert.match(css, /env\(safe-area-inset-bottom\)/);
-  assert.match(system, /padding-top:\s*max\(env\(safe-area-inset-top\), var\(--tg-content-safe-area-inset-top, 0px\)\)/u);
-  assert.match(system, /top:\s*max\(env\(safe-area-inset-top\), var\(--tg-content-safe-area-inset-top, 0px\)\)/u);
+  assert.match(system, /--catalog-top-inset:\s*calc\(\s*max\(env\(safe-area-inset-top\), var\(--tg-safe-area-inset-top, 0px\)\)\s*\+\s*var\(--tg-content-safe-area-inset-top, 0px\)\s*\);/u);
+  assert.doesNotMatch(system, /max\(env\(safe-area-inset-top\), var\(--tg-content-safe-area-inset-top/u);
+  assert.match(system, /padding-top:\s*var\(--catalog-top-inset\)/u);
+  assert.match(system, /top:\s*var\(--catalog-top-inset\)/u);
+  assert.match(system, /\.skip-link:focus\s*\{\s*top:\s*calc\(var\(--catalog-top-inset\) \+ 8px\)/u);
+  assert.match(system, /caret-color:\s*#1f5a3c/u);
+  assert.match(system, /-webkit-text-fill-color:\s*#15372f/u);
+  assert.match(system, /@supports \(caret-animation: manual\)/u);
+  assert.match(app, /function scheduleSearchRender\(\)/u);
+  assert.match(app, /window\.setTimeout\([\s\S]*?, 140\);/u);
+  assert.match(app, /addEventListener\("compositionstart"/u);
+  assert.match(app, /addEventListener\("compositionend"/u);
+  assert.match(app, /event\.isComposing \|\| searchCompositionActive/u);
+  const searchInputHandler = app.slice(
+    app.indexOf('elements.search.addEventListener("input"'),
+    app.indexOf('elements.search.addEventListener("focus"'),
+  );
+  assert.match(searchInputHandler, /scheduleSearchRender\(\)/u);
+  assert.doesNotMatch(searchInputHandler, /resetLimitAndRender/u);
   assert.match(css, /min-height:44px/);
   assert.match(brand, /\.hero \{[\s\S]*?z-index: 4;[\s\S]*?overflow: visible;/u);
   assert.match(brand, /\.hero-decoration \{[\s\S]*?overflow: hidden;[\s\S]*?pointer-events: none;/u);

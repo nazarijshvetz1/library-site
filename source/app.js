@@ -887,15 +887,19 @@ function renderChips() {
   elements.chips.innerHTML = chips.map(([key, label]) => `<span class="filter-chip">${escapeHtml(label)}<button type="button" data-remove="${key}" aria-label="Прибрати фільтр ${escapeHtml(label)}">${uiIcon("x")}</button></span>`).join("");
 }
 
-function render() {
+function render({ refreshCollections = true } = {}) {
   const result = filteredMaterials(); const shown = result.slice(0, state.limit);
   elements.grid.innerHTML = shown.map(cardMarkup).join("");
   bindCoverErrors(elements.grid);
   elements.count.innerHTML = `Знайдено <strong>${result.length.toLocaleString("uk-UA")}</strong> матеріалів`;
-  elements.empty.hidden = result.length !== 0; elements.grid.hidden = result.length === 0; elements.loadMore.hidden = result.length <= state.limit; renderChips(); renderCollections();
+  elements.empty.hidden = result.length !== 0;
+  elements.grid.hidden = result.length === 0;
+  elements.loadMore.hidden = result.length <= state.limit;
+  renderChips();
+  if (refreshCollections) renderCollections();
 }
 
-function resetLimitAndRender() { state.limit = 18; render(); }
+function resetLimitAndRender(options) { state.limit = 18; render(options); }
 function clearFilters() {
   Object.assign(state, { search: "", grade: "", rubric: "", subject: "", type: "", available: false, collection: "", limit: 18 });
   elements.search.value = ""; elements.grade.value = ""; elements.rubric.value = ""; elements.subject.value = ""; elements.type.value = ""; elements.available.checked = false; render();
@@ -1403,10 +1407,56 @@ for (let grade = 1; grade <= 11; grade += 1) {
   const option = document.createElement("option"); option.value = String(grade); option.textContent = `${grade} клас`; elements.grade.append(option);
 }
 
-document.querySelector("#heroSearchForm").addEventListener("submit", (event) => { event.preventDefault(); state.search = elements.search.value; closeTitleSuggestions(); resetLimitAndRender(); document.querySelector("#catalog").scrollIntoView({ behavior: "smooth" }); });
-elements.search.addEventListener("input", () => { state.search = elements.search.value; resetLimitAndRender(); renderTitleSuggestions(); });
+let searchRenderTimer = 0;
+let searchCompositionActive = false;
+
+function cancelSearchRender() {
+  if (!searchRenderTimer) return;
+  window.clearTimeout(searchRenderTimer);
+  searchRenderTimer = 0;
+}
+
+function scheduleSearchRender() {
+  cancelSearchRender();
+  searchRenderTimer = window.setTimeout(() => {
+    searchRenderTimer = 0;
+    if (searchCompositionActive || document.activeElement !== elements.search) return;
+    window.requestAnimationFrame(() => {
+      if (searchCompositionActive || document.activeElement !== elements.search) return;
+      resetLimitAndRender({ refreshCollections: false });
+      renderTitleSuggestions();
+    });
+  }, 140);
+}
+
+document.querySelector("#heroSearchForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  cancelSearchRender();
+  state.search = elements.search.value;
+  closeTitleSuggestions();
+  resetLimitAndRender({ refreshCollections: false });
+  document.querySelector("#catalog").scrollIntoView({ behavior: "smooth" });
+});
+elements.search.addEventListener("compositionstart", () => {
+  searchCompositionActive = true;
+  cancelSearchRender();
+});
+elements.search.addEventListener("compositionend", () => {
+  searchCompositionActive = false;
+  state.search = elements.search.value;
+  scheduleSearchRender();
+});
+elements.search.addEventListener("input", (event) => {
+  state.search = elements.search.value;
+  if (event.isComposing || searchCompositionActive) return;
+  scheduleSearchRender();
+});
 elements.search.addEventListener("focus", renderTitleSuggestions);
-elements.search.addEventListener("blur", () => window.setTimeout(closeTitleSuggestions, 120));
+elements.search.addEventListener("blur", () => {
+  cancelSearchRender();
+  resetLimitAndRender({ refreshCollections: false });
+  window.setTimeout(closeTitleSuggestions, 120);
+});
 elements.search.addEventListener("keydown", (event) => {
   if (event.key === "ArrowDown" && visibleSuggestions.length) { event.preventDefault(); setActiveSuggestion(activeSuggestionIndex + 1); }
   else if (event.key === "ArrowUp" && visibleSuggestions.length) { event.preventDefault(); setActiveSuggestion(activeSuggestionIndex - 1); }
