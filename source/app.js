@@ -874,11 +874,11 @@ function bindCoverErrors(root) {
 
 function cardMarkup(item) {
   const available = Number(item.availableQuantity) > 0;
-  return `<article class="material-card"><button class="cover-wrap cover-button" type="button" data-details="${escapeHtml(item.id)}" aria-label="Відкрити інформацію про ${escapeHtml(item.title)}"><span class="class-badge">${escapeHtml(classLabel(item))}</span>${coverMarkup(item)}</button><div class="card-body">
+  return `<article class="material-card"><div class="cover-wrap"><span class="class-badge">${escapeHtml(classLabel(item))}</span>${coverMarkup(item)}</div><div class="card-body">
     <div class="card-kicker"><span>${escapeHtml(item.subject)}</span><span class="availability ${available ? "" : "none"}">${available ? "У наявності" : "Немає"}</span></div>
     <h3>${escapeHtml(item.title)}</h3><p class="author-line">${escapeHtml(item.author)}${item.year ? ` · ${escapeHtml(item.year)}` : ""}</p>
-    <div class="card-footer"><div class="card-stock"><span class="quantity"><strong>${escapeHtml(item.quantity)}</strong><span>примірників</span></span><span class="quantity available-quantity${available ? "" : " none"}"><strong>${escapeHtml(item.availableQuantity)}</strong><span>Доступно</span></span></div><button class="details-button" type="button" data-details="${escapeHtml(item.id)}">Детальніше ${uiIcon("arrow-right")}</button></div>
-  </div></article>`;
+    <div class="card-footer"><div class="card-stock"><span class="quantity"><strong>${escapeHtml(item.quantity)}</strong><span>примірників</span></span><span class="quantity available-quantity${available ? "" : " none"}"><strong>${escapeHtml(item.availableQuantity)}</strong><span>Доступно</span></span></div><span class="details-button" aria-hidden="true">Детальніше ${uiIcon("arrow-right")}</span></div>
+  </div><button class="material-card-action" type="button" data-details="${escapeHtml(item.id)}" aria-label="Відкрити інформацію про ${escapeHtml(item.title)}"></button></article>`;
 }
 
 function renderChips() {

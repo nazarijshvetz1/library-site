@@ -627,9 +627,12 @@ test("D1 workspace opens on a grouped accessible dashboard and keeps every tool 
   assert.match(workspace, /function parseTool\(value: string \| null\): Tool \| null/u);
   assert.match(workspace, /new URL\(window\.location\.href\)/u);
   assert.match(workspace, /url\.searchParams\.set\("tool", requestedTool\)/u);
+  assert.match(workspace, /if \(!parseTool\(url\.searchParams\.get\("tool"\)\) && !telegramMiniApp\)/u);
   assert.match(workspace, /window\.history\.replaceState/u);
   assert.match(workspace, /window\.history\[method\]/u);
   assert.match(workspace, /currentTool === nextTool \? "replaceState" : "pushState"/u);
+  assert.match(workspace, /if \(!telegramMiniApp\) \{[\s\S]*?window\.history\[method\]/u);
+  assert.match(workspace, /function openCatalog\(event: FormEvent<HTMLFormElement>\) \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?onChooseTool\("catalog"\);/u);
   assert.match(workspace, /window\.addEventListener\("popstate", applyToolFromLocation\)/u);
   assert.match(workspace, /librarianSectionHref\("visits", telegramMiniApp\)/u);
   assert.match(workspace, /librarianSectionHref\("orders", telegramMiniApp\)/u);

@@ -629,7 +629,7 @@ export default function D1LibrarianWorkspace({
   const applyToolFromLocation = useCallback(() => {
     const url = new URL(window.location.href);
     const requestedTool = parseTool(url.searchParams.get("tool")) ?? "dashboard";
-    if (!parseTool(url.searchParams.get("tool"))) {
+    if (!parseTool(url.searchParams.get("tool")) && !telegramMiniApp) {
       url.searchParams.set("tool", requestedTool);
       const currentState = typeof window.history.state === "object" && window.history.state
         ? window.history.state as Record<string, unknown>
@@ -663,7 +663,7 @@ export default function D1LibrarianWorkspace({
     }
 
     window.queueMicrotask(() => workspaceTitleRef.current?.focus());
-  }, [selectMaterial]);
+  }, [selectMaterial, telegramMiniApp]);
 
   useEffect(() => {
     const timer = window.setTimeout(applyToolFromLocation, 0);
@@ -714,18 +714,24 @@ export default function D1LibrarianWorkspace({
     setEditing(false);
     setWorkspaceNotice("");
     setWorkspaceNoticeTone("error");
-    const url = new URL(window.location.href);
-    const currentTool = parseTool(url.searchParams.get("tool"));
-    url.searchParams.set("tool", nextTool);
-    const currentState = typeof window.history.state === "object" && window.history.state
-      ? window.history.state as Record<string, unknown>
-      : {};
-    const method = currentTool === nextTool ? "replaceState" : "pushState";
-    window.history[method](
-      { ...currentState, librarianTool: nextTool },
-      "",
-      `${url.pathname}${url.search}${url.hash}`,
-    );
+    // Vinext patches the History API. Telegram's iOS WebView can treat those
+    // patched same-document writes as a navigation and replace the Mini App
+    // with its generic "page couldn't load" screen. The cabinet is already a
+    // stateful client view, so Telegram only needs the React state transition.
+    if (!telegramMiniApp) {
+      const url = new URL(window.location.href);
+      const currentTool = parseTool(url.searchParams.get("tool"));
+      url.searchParams.set("tool", nextTool);
+      const currentState = typeof window.history.state === "object" && window.history.state
+        ? window.history.state as Record<string, unknown>
+        : {};
+      const method = currentTool === nextTool ? "replaceState" : "pushState";
+      window.history[method](
+        { ...currentState, librarianTool: nextTool },
+        "",
+        `${url.pathname}${url.search}${url.hash}`,
+      );
+    }
     window.queueMicrotask(() => workspaceTitleRef.current?.focus());
   }
 

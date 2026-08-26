@@ -299,12 +299,12 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.doesNotMatch(app, /contactsGrid\.innerHTML/u);
   assert.match(html, /id="titleSuggestions" role="listbox"/);
   assert.match(html, /<option value="">Усі<\/option>/);
-  assert.match(html, /href="\/styles\.css\?v=20260826-1"/);
+  assert.match(html, /href="\/styles\.css\?v=20260826-2"/);
   assert.match(html, /href="\/brand\.css\?v=20260824-2"/);
-  assert.match(html, /href="\/system\.css\?v=20260826-2"/);
+  assert.match(html, /href="\/system\.css\?v=20260826-3"/);
   assert.match(brand, /\.stats\s*\{[^}]*margin-top:\s*24px;/s);
   assert.match(html, /src="https:\/\/telegram\.org\/js\/telegram-web-app\.js\?59"/u);
-  assert.match(html, /type="module" src="\/app\.js\?v=20260826-1"/);
+  assert.match(html, /type="module" src="\/app\.js\?v=20260826-2"/);
   assert.match(html, /id="filterBackdrop" hidden/u);
   assert.match(html, /id="filterClose"[^>]+aria-label="Закрити фільтри"/u);
   assert.match(html, /id="filterApply"[^>]*>Показати результати<\/button>/u);
@@ -341,7 +341,10 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(app, /item\.year \|\| "Рік не вказаний"/);
   assert.match(app, /data-report-error/);
   assert.match(app, /class="material-links"/);
-  assert.match(app, /class="cover-wrap cover-button"[^>]*data-details=/u);
+  assert.match(app, /<button class="material-card-action" type="button" data-details="\$\{escapeHtml\(item\.id\)\}" aria-label="Відкрити інформацію про/u);
+  assert.match(app, /<div class="cover-wrap">/u);
+  assert.match(app, /<span class="details-button" aria-hidden="true">Детальніше/u);
+  assert.doesNotMatch(app, /class="cover-wrap cover-button"/u);
   assert.match(app, /class="card-stock"/u);
   assert.match(app, /class="quantity available-quantity\$\{available \? "" : " none"\}"/u);
   assert.match(app, /<strong>\$\{escapeHtml\(item\.availableQuantity\)\}<\/strong><span>Доступно<\/span>/u);
@@ -358,6 +361,8 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(app, /raw\.publicationType/);
   assert.match(css, /max-height:calc\(100dvh - 12px\)/);
   assert.match(css, /env\(safe-area-inset-bottom\)/);
+  assert.match(system, /padding-top:\s*max\(env\(safe-area-inset-top\), var\(--tg-content-safe-area-inset-top, 0px\)\)/u);
+  assert.match(system, /top:\s*max\(env\(safe-area-inset-top\), var\(--tg-content-safe-area-inset-top, 0px\)\)/u);
   assert.match(css, /min-height:44px/);
   assert.match(brand, /\.hero \{[\s\S]*?z-index: 4;[\s\S]*?overflow: visible;/u);
   assert.match(brand, /\.hero-decoration \{[\s\S]*?overflow: hidden;[\s\S]*?pointer-events: none;/u);
@@ -366,7 +371,8 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(brand, /@media \(max-width: 820px\)[\s\S]*?\.site-header \{[\s\S]*?-webkit-backdrop-filter: none;[\s\S]*?backdrop-filter: none;/u);
   assert.match(brand, /@media \(max-width: 820px\)[\s\S]*?\.site-header \.site-nav \{[\s\S]*?position: fixed;/u);
   assert.match(css, /\.title-suggestions/);
-  assert.match(css, /\.cover-button/);
+  assert.match(css, /\.material-card-action\{position:absolute;z-index:6;inset:0;/u);
+  assert.match(css, /\.material-card-action:focus-visible\{outline:3px solid var\(--lime\)/u);
   assert.match(css, /\.card-stock\{display:flex;align-items:flex-end;gap:18px\}/u);
   assert.match(css, /\.available-quantity\.none strong\{color:#a05744\}/u);
   assert.match(css, /\.dialog-order/);
