@@ -5,6 +5,7 @@ import D1LibrarianWorkspace from "@/app/librarian/d1-workspace";
 import TeacherManagementWorkspace from "@/app/librarian/teachers/teacher-management-workspace";
 import LibrarianVisitWorkspace from "@/app/librarian/visits/visit-admin-workspace";
 import AcquisitionWorkspace from "@/app/librarian/acquisitions/acquisition-workspace";
+import ReportsWorkspace from "@/app/librarian/reports/reports-workspace";
 import { getLibrarianAccess } from "@/lib/librarian-access";
 import { readLibrarianTelegramUser } from "@/lib/librarian-telegram-auth";
 import type { VisitD1Database } from "@/lib/visit-schedule-store";
@@ -73,6 +74,16 @@ export default async function TelegramLibrarianCabinetPage({ searchParams }: Pag
       />
     );
   }
+  if (target === "reports") {
+    return (
+      <ReportsWorkspace
+        displayName={session.user.displayName}
+        role={session.role}
+        signOutHref={botHref}
+        telegramMiniApp
+      />
+    );
+  }
   return (
     <D1LibrarianWorkspace
       displayName={session.user.displayName}
@@ -84,8 +95,8 @@ export default async function TelegramLibrarianCabinetPage({ searchParams }: Pag
   );
 }
 
-function boundedTarget(value: string | string[] | undefined): "home" | "visits" | "teachers" | "acquisitions" {
-  return value === "visits" || value === "teachers" || value === "acquisitions" ? value : "home";
+function boundedTarget(value: string | string[] | undefined): "home" | "visits" | "teachers" | "acquisitions" | "reports" {
+  return value === "visits" || value === "teachers" || value === "acquisitions" || value === "reports" ? value : "home";
 }
 
 function boundedTeacherTab(value: string | string[] | undefined): "overview" | "teachers" | "orders" | "visits" | "telegram" {

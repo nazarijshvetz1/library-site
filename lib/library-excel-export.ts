@@ -107,7 +107,7 @@ function buildSheets(snapshot: LibraryExportSnapshot): Sheet[] {
   }));
 
   const holdingsColumns: Column[] = [
-    { header: "CAT-ID", width: 15 }, { header: "Назва", width: 46 },
+    { header: "Назва", width: 46 },
     { header: "Предмет", width: 26 }, { header: "LOC-ID", width: 14 },
     { header: "Місце зберігання", width: 30 }, { header: "Стан", width: 18 },
     { header: "Фізична кількість", width: 19, kind: "number" },
@@ -116,9 +116,9 @@ function buildSheets(snapshot: LibraryExportSnapshot): Sheet[] {
     { header: "Оновлено", width: 21, kind: "datetime" },
   ];
   const holdingsRows = snapshot.holdings.map((row, index) => [
-    row.materialId, row.title, row.subject, row.locationId, row.locationName,
+    row.title, row.subject, row.locationId, row.locationName,
     conditionLabel(row.condition), row.quantity, row.reservedQuantity,
-    formula(`G${index + 2}-H${index + 2}`, row.availableQuantity), datetime(row.updatedAt),
+    formula(`F${index + 2}-G${index + 2}`, row.availableQuantity), datetime(row.updatedAt),
   ]);
 
   const teacherLoanColumns = teacherLoanSheetColumns();
@@ -129,20 +129,20 @@ function buildSheets(snapshot: LibraryExportSnapshot): Sheet[] {
     row.requestId, row.itemId, row.teacherUserId, row.teacherName, requestStatusLabel(row.status), row.status,
     datetime(row.submittedAt), datetime(row.readyAt), datetime(row.completedAt), datetime(row.dueAt),
     row.pickupLocation, row.teacherNotes, row.librarianNote, row.rejectionReason, row.resultingLoanId,
-    row.materialId, row.title, row.author, row.requestedQuantity,
+    row.title, row.author, row.requestedQuantity,
     row.approvedQuantity ?? "", row.fulfilledQuantity, row.activeReservedQuantity,
   ]);
 
   const totalsByMaterial = exportControl(snapshot);
   const summaryRows: Cell[][] = [
     ["Сформовано", datetime(snapshot.generatedAt)],
-    ["Матеріалів", formula(`COUNTA('Каталог'!$A$2:$A$${Math.max(2, materialRows.length + 1)})`, materials.length)],
+    ["Матеріалів", formula(`COUNTA('Каталог'!$F$2:$F$${Math.max(2, materialRows.length + 1)})`, materials.length)],
     ["Предметів", formula(`COUNTA('Предмети'!$A$2:$A$${Math.max(2, subjectSheets.length + 1)})`, subjects.length)],
-    ["Фізично на місцях", formula(`SUM('Залишки'!$G$2:$G$${Math.max(2, holdingsRows.length + 1)})`, physicalTotal)],
-    ["Активно зарезервовано", formula(`SUM('Залишки'!$H$2:$H$${Math.max(2, holdingsRows.length + 1)})`, reservedTotal)],
-    ["Доступно зараз", formula(`SUM('Залишки'!$I$2:$I$${Math.max(2, holdingsRows.length + 1)})`, availableTotal)],
-    ["На руках у вчителів", formula(`SUM('Видачі вчителям'!$P$2:$P$${Math.max(2, teacherLoanRows.length + 1)})`, teacherOutstanding)],
-    ["На руках у класів", formula(`SUM('Видачі класам'!$R$2:$R$${Math.max(2, classLoanRows.length + 1)})`, classOutstanding)],
+    ["Фізично на місцях", formula(`SUM('Залишки'!$F$2:$F$${Math.max(2, holdingsRows.length + 1)})`, physicalTotal)],
+    ["Активно зарезервовано", formula(`SUM('Залишки'!$G$2:$G$${Math.max(2, holdingsRows.length + 1)})`, reservedTotal)],
+    ["Доступно зараз", formula(`SUM('Залишки'!$H$2:$H$${Math.max(2, holdingsRows.length + 1)})`, availableTotal)],
+    ["На руках у вчителів", formula(`SUM('Видачі вчителям'!$O$2:$O$${Math.max(2, teacherLoanRows.length + 1)})`, teacherOutstanding)],
+    ["На руках у класів", formula(`SUM('Видачі класам'!$Q$2:$Q$${Math.max(2, classLoanRows.length + 1)})`, classOutstanding)],
     ["Загальний фонд", formula("B5+B8+B9", physicalTotal + teacherOutstanding + classOutstanding)],
     ["Заявок учителів (позицій)", formula(`COUNTA('Заявки вчителів'!$A$2:$A$${Math.max(2, requestRows.length + 1)})`, requestRows.length)],
   ];
@@ -197,7 +197,7 @@ function buildSheets(snapshot: LibraryExportSnapshot): Sheet[] {
         { header: "Завершено", width: 21, kind: "datetime" }, { header: "Повернути до", width: 21, kind: "datetime" },
         { header: "Місце отримання", width: 28 }, { header: "Примітка вчителя", width: 36 },
         { header: "Примітка бібліотекаря", width: 36 }, { header: "Причина відмови", width: 34 },
-        { header: "LOAN-ID", width: 39, hidden: true }, { header: "CAT-ID", width: 15 },
+        { header: "LOAN-ID", width: 39, hidden: true },
         { header: "Назва", width: 46 }, { header: "Автор", width: 34 },
         { header: "Запитано", width: 14, kind: "number" }, { header: "Погоджено", width: 15, kind: "number" },
         { header: "Видано", width: 13, kind: "number" }, { header: "У резерві", width: 15, kind: "number" },
@@ -239,7 +239,7 @@ function buildSheets(snapshot: LibraryExportSnapshot): Sheet[] {
 
 function catalogSheetColumns(): Column[] {
   return [
-    { header: "CAT-ID", width: 15 }, { header: "Рубрика", width: 32 },
+    { header: "Рубрика", width: 32 },
     { header: "Тип видання", width: 28 }, { header: "Предмет", width: 28 },
     { header: "Клас від", width: 12, kind: "number" }, { header: "Клас до", width: 12, kind: "number" },
     { header: "Назва", width: 48 }, { header: "Автор", width: 36 },
@@ -254,17 +254,17 @@ function catalogSheetColumns(): Column[] {
 
 function catalogRow(row: ExportMaterial, excelRow: number): Cell[] {
   return [
-    row.id, row.rubric, row.publicationType, row.subject, row.classFrom ?? "", row.classTo ?? "",
+    row.rubric, row.publicationType, row.subject, row.classFrom ?? "", row.classTo ?? "",
     row.title, row.author, row.publicationYear ?? "", row.isbn, row.publisher, row.electronicUrl,
     row.notes, materialStatusLabel(row.status), row.totalQuantity, row.libraryQuantity,
     row.otherLocationQuantity, row.loanedQuantity, row.reservedQuantity,
-    formula(`O${excelRow}-R${excelRow}-S${excelRow}`, row.totalQuantity - row.loanedQuantity - row.reservedQuantity),
+    formula(`N${excelRow}-Q${excelRow}-R${excelRow}`, row.totalQuantity - row.loanedQuantity - row.reservedQuantity),
   ];
 }
 
 function classViewColumns(): Column[] {
   return [
-    { header: "Клас", width: 15 }, { header: "CAT-ID", width: 15 },
+    { header: "Клас", width: 15 },
     { header: "Предмет", width: 28 }, { header: "Тип видання", width: 28 },
     { header: "Назва", width: 48 }, { header: "Автор", width: 36 },
     { header: "Рік", width: 11, kind: "number" }, { header: "Загальний фонд", width: 18, kind: "number" },
@@ -280,14 +280,14 @@ function classViewRows(materials: ExportMaterial[]): Cell[][] {
       : [null];
     for (const grade of grades) {
       rows.push([
-        grade ? `${grade} клас` : "Без класу", material.id, material.subject, material.publicationType,
+        grade ? `${grade} клас` : "Без класу", material.subject, material.publicationType,
         material.title, material.author, material.publicationYear ?? "", material.totalQuantity,
         material.totalQuantity - material.loanedQuantity - material.reservedQuantity,
       ]);
     }
   }
   return rows.sort((a, b) => String(a[0]).localeCompare(String(b[0]), "uk-UA", { numeric: true })
-    || String(a[2]).localeCompare(String(b[2]), "uk-UA") || String(a[4]).localeCompare(String(b[4]), "uk-UA"));
+    || String(a[1]).localeCompare(String(b[1]), "uk-UA") || String(a[3]).localeCompare(String(b[3]), "uk-UA"));
 }
 
 function teacherLoanSheetColumns(): Column[] {
@@ -296,7 +296,7 @@ function teacherLoanSheetColumns(): Column[] {
     { header: "USR-ID", width: 15 }, { header: "Учитель", width: 34 },
     { header: "Статус", width: 16 }, { header: "Видано", width: 21, kind: "datetime" },
     { header: "Повернути до", width: 21, kind: "datetime" }, { header: "Закрито", width: 21, kind: "datetime" },
-    { header: "CAT-ID", width: 15 }, { header: "Назва", width: 46 }, { header: "Предмет", width: 28 },
+    { header: "Назва", width: 46 }, { header: "Предмет", width: 28 },
     { header: "Місце видачі", width: 28 }, { header: "Стан", width: 18 },
     { header: "Видано", width: 13, kind: "number" }, { header: "Повернено", width: 15, kind: "number" },
     { header: "Залишилося на руках", width: 22, kind: "number" },
@@ -307,9 +307,9 @@ function teacherLoanSheetColumns(): Column[] {
 function teacherLoanRow(row: ExportTeacherLoan, excelRow: number): Cell[] {
   return [
     row.loanId, row.itemId, row.teacherUserId, row.teacherName, loanStatusLabel(row.status),
-    datetime(row.issuedAt), datetime(row.dueAt), datetime(row.closedAt), row.materialId,
+    datetime(row.issuedAt), datetime(row.dueAt), datetime(row.closedAt),
     row.title, row.subject, row.sourceLocation, conditionLabel(row.condition), row.quantityIssued,
-    row.quantityReturned, formula(`N${excelRow}-O${excelRow}`, row.remainingQuantity), row.loanNotes, row.itemNotes,
+    row.quantityReturned, formula(`M${excelRow}-N${excelRow}`, row.remainingQuantity), row.loanNotes, row.itemNotes,
   ];
 }
 
@@ -320,7 +320,7 @@ function classLoanSheetColumns(): Column[] {
     { header: "Клас", width: 18 }, { header: "Відповідальний учитель", width: 34 },
     { header: "Статус", width: 16 }, { header: "Видано", width: 21, kind: "datetime" },
     { header: "Повернути до", width: 21, kind: "datetime" }, { header: "Закрито", width: 21, kind: "datetime" },
-    { header: "CAT-ID", width: 15 }, { header: "Назва", width: 46 }, { header: "Предмет", width: 28 },
+    { header: "Назва", width: 46 }, { header: "Предмет", width: 28 },
     { header: "Місце видачі", width: 28 }, { header: "Стан", width: 18 },
     { header: "Видано", width: 13, kind: "number" }, { header: "Повернено", width: 15, kind: "number" },
     { header: "Залишилося у класу", width: 22, kind: "number" },
@@ -332,9 +332,9 @@ function classLoanRow(row: ExportClassLoan, excelRow: number): Cell[] {
   return [
     row.classLoanId, row.itemId, row.classYearId, row.academicYear, row.className,
     row.responsibleTeacher, loanStatusLabel(row.status), datetime(row.issuedAt), datetime(row.dueAt),
-    datetime(row.closedAt), row.materialId, row.title, row.subject, row.sourceLocation,
+    datetime(row.closedAt), row.title, row.subject, row.sourceLocation,
     conditionLabel(row.condition), row.quantityIssued, row.quantityReturned,
-    formula(`P${excelRow}-Q${excelRow}`, row.remainingQuantity), row.loanNotes, row.itemNotes,
+    formula(`O${excelRow}-P${excelRow}`, row.remainingQuantity), row.loanNotes, row.itemNotes,
   ];
 }
 

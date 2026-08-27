@@ -154,11 +154,20 @@ test("teacher-code Excel template is styled, bounded and contains no secret code
   assert.match(workbook.fileName, /^Шаблон кодів учителів — 2026-08-22\.xlsx$/u);
 });
 
-test("acquisition template and export keep the exact four-sheet contract without ISBN", () => {
-  for (const workbook of [
-    acquisitionExcel.createAcquisitionImportTemplate("2026-08-23T09:15:00.000Z"),
-    acquisitionExcel.createAcquisitionExport([], "2026-08-23T09:15:00.000Z"),
-  ]) {
+test("acquisition template and human export keep the four-sheet contract without ISBN", () => {
+  const template = acquisitionExcel.createAcquisitionImportTemplate("2026-08-23T09:15:00.000Z");
+  const humanExport = acquisitionExcel.createAcquisitionExport([{
+    id: "ACQ-INTERNAL-1", publicNumber: "КФ-2026-0001", requesterKind: "teacher",
+    teacherUserId: "USR-INTERNAL-1", requesterName: "Ірина Вчитель", requesterClassName: "",
+    category: "educational", sourceKind: "catalog", literatureKind: "none",
+    materialId: "CAT-9999", title: "Алгебра", author: "Автор", publicationYear: 2024,
+    requestedQuantity: 5, approvedQuantity: 5, orderedQuantity: 0, receivedQuantity: 0,
+    sourceUrl: "https://example.test/book", subject: "Математика", targetClass: "7-А",
+    requesterNote: "", librarianNote: "", rejectionReason: "", status: "approved",
+    version: 1, submittedAt: "2026-08-23T09:00:00.000Z", updatedAt: "2026-08-23T09:00:00.000Z",
+    hidden: false, hiddenAt: null, canHide: false,
+  }], "2026-08-23T09:15:00.000Z");
+  for (const workbook of [template, humanExport]) {
     const entries = unzipStored(workbook.bytes);
     const workbookXml = new TextDecoder().decode(entries.get("xl/workbook.xml"));
     const allXml = [...entries.values()].map((bytes) => new TextDecoder().decode(bytes)).join("\n");
@@ -169,12 +178,16 @@ test("acquisition template and export keep the exact four-sheet contract without
     assert.doesNotMatch(workbookXml, /name="Стани"/u);
     assert.doesNotMatch(allXml, /ISBN/iu);
   }
+  const templateXml = [...unzipStored(template.bytes).values()].map((bytes) => new TextDecoder().decode(bytes)).join("\n");
+  const humanXml = [...unzipStored(humanExport.bytes).values()].map((bytes) => new TextDecoder().decode(bytes)).join("\n");
+  assert.match(templateXml, /CAT-ID/u);
+  assert.doesNotMatch(humanXml, /CAT-ID|CAT-9999/u);
 });
 
-test("protected export page and navigation expose one-click full Excel download", async () => {
+test("protected reports center and navigation expose compact downloads", async () => {
   const [page, ui, route, workspace, teachers, visits, shell, routes] = await Promise.all([
-    fs.promises.readFile(path.join(root, "app/librarian/export/page.tsx"), "utf8"),
-    fs.promises.readFile(path.join(root, "app/librarian/export/excel-export-workspace.tsx"), "utf8"),
+    fs.promises.readFile(path.join(root, "app/librarian/reports/page.tsx"), "utf8"),
+    fs.promises.readFile(path.join(root, "app/librarian/reports/reports-workspace.tsx"), "utf8"),
     fs.promises.readFile(path.join(root, "app/api/librarian/excel-export/route.ts"), "utf8"),
     fs.promises.readFile(path.join(root, "app/librarian/d1-workspace.tsx"), "utf8"),
     fs.promises.readFile(path.join(root, "app/librarian/teachers/teacher-management-workspace.tsx"), "utf8"),
@@ -182,16 +195,16 @@ test("protected export page and navigation expose one-click full Excel download"
     fs.promises.readFile(path.join(root, "app/librarian/_components/librarian-shell.tsx"), "utf8"),
     fs.promises.readFile(path.join(root, "app/librarian/_components/librarian-routes.ts"), "utf8"),
   ]);
-  assert.match(page, /requireChatGPTUser\("\/librarian\/export"\)/u);
+  assert.match(page, /requireChatGPTUser\("\/librarian\/reports"\)/u);
   assert.match(route, /authorizeLibrarianApi/u);
   assert.match(route, /private, no-store/u);
   assert.match(route, /application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet/u);
-  assert.match(ui, /Сформувати й завантажити Excel/u);
-  assert.match(ui, /Коди доступу не експортуються/u);
+  assert.match(ui, /Звіти й документи/u);
+  assert.match(ui, /PIN-коди й ключі доступу не експортуються/u);
   for (const source of [workspace, teachers, visits, ui]) assert.match(source, /<LibrarianShell/u);
   assert.match(shell, /librarianUtilityHref\("excelExport", telegramMiniApp\)/u);
-  assert.match(shell, /excelExportHref \? <a href=\{excelExportHref\}>Експорт/u);
-  assert.match(routes, /if \(utility === "excelExport"\) return telegramMiniApp \? null : "\/librarian\/export"/u);
+  assert.match(shell, /excelExportHref \? <a href=\{excelExportHref\}>Звіти/u);
+  assert.match(routes, /if \(utility === "excelExport"\) return telegramMiniApp \? null : "\/librarian\/reports"/u);
 });
 
 function unzipStored(bytes) {

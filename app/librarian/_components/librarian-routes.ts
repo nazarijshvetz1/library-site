@@ -6,6 +6,7 @@ export const LIBRARIAN_SECTIONS = [
   "visits",
   "teachers",
   "acquisitions",
+  "reports",
   "management",
 ] as const;
 
@@ -24,6 +25,7 @@ const WEB_SECTION_ROUTES: Record<LibrarianSection, string> = {
   visits: "/librarian/visits",
   teachers: "/librarian/teachers",
   acquisitions: "/librarian/acquisitions",
+  reports: "/librarian/reports",
   management: "/librarian?tool=locations",
 };
 
@@ -35,6 +37,7 @@ const TELEGRAM_SECTION_ROUTES: Record<LibrarianSection, string> = {
   visits: "/librarian/telegram/cabinet?target=visits",
   teachers: "/librarian/telegram/cabinet?target=teachers",
   acquisitions: "/librarian/telegram/cabinet?target=acquisitions",
+  reports: "/librarian/telegram/cabinet?target=reports",
   management: "/librarian/telegram/cabinet?target=home&tool=locations",
 };
 
@@ -64,7 +67,7 @@ export function librarianUtilityHref(
   telegramMiniApp = false,
 ): string | null {
   if (utility === "publicCatalog") return PUBLIC_CATALOG_URL;
-  if (utility === "excelExport") return telegramMiniApp ? null : "/librarian/export";
+  if (utility === "excelExport") return telegramMiniApp ? null : "/librarian/reports";
   if (utility === "excelImport") return telegramMiniApp ? null : "/librarian/import";
   return telegramMiniApp
     ? "/librarian/telegram/cabinet?target=teachers&tab=telegram"

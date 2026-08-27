@@ -13,6 +13,7 @@ import {
   CalendarClock,
   CalendarPlus,
   CalendarSync,
+  ChartColumn,
   Camera,
   CheckCheck,
   ChevronDown,
@@ -136,6 +137,7 @@ const SITE_ICONS = {
   loading: LoaderCircle,
   "read-only": CircleOff,
   profile: UserRound,
+  reports: ChartColumn,
 } satisfies Record<string, LucideIcon>;
 
 export type SiteIconName = keyof typeof SITE_ICONS;

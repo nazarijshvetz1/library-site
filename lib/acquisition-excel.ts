@@ -1,8 +1,14 @@
 import { createExcelWorkbookBytes, type ExcelCell, type ExcelColumn, type ExcelSheet } from "./library-excel-export.ts";
 import type { AcquisitionProjection } from "./acquisition-store.ts";
 
-const RESTOCK_COLUMNS: ExcelColumn[] = [
+const RESTOCK_IMPORT_COLUMNS: ExcelColumn[] = [
   { header: "REQUEST-ID", width: 22 }, { header: "CAT-ID", width: 15 }, { header: "Назва", width: 42 },
+  { header: "Автор", width: 30 }, { header: "Рік", width: 12, kind: "number" }, { header: "Кількість", width: 14, kind: "number" },
+  { header: "Покликання", width: 45 }, { header: "Предмет", width: 24 }, { header: "Клас", width: 16 },
+  { header: "USR-ID", width: 18 }, { header: "Учитель", width: 34 }, { header: "Примітка", width: 42 },
+];
+const RESTOCK_EXPORT_COLUMNS: ExcelColumn[] = [
+  { header: "REQUEST-ID", width: 22 }, { header: "Назва", width: 42 },
   { header: "Автор", width: 30 }, { header: "Рік", width: 12, kind: "number" }, { header: "Кількість", width: 14, kind: "number" },
   { header: "Покликання", width: 45 }, { header: "Предмет", width: 24 }, { header: "Клас", width: 16 },
   { header: "USR-ID", width: 18 }, { header: "Учитель", width: 34 }, { header: "Примітка", width: 42 },
@@ -32,10 +38,11 @@ const REFERENCE_ROWS: ExcelCell[][] = [
   ["Правило", "CAT-ID", "Залиште порожнім, якщо матеріалу ще немає в каталозі"],
   ["Правило", "REQUEST-ID", "Залиште порожнім для нової заявки; наявний номер не імпортується повторно"],
 ];
+const EXPORT_REFERENCE_ROWS = REFERENCE_ROWS.filter((row) => row[1] !== "CAT-ID");
 
 export function createAcquisitionImportTemplate(generatedAt = new Date().toISOString()): { bytes: Uint8Array; fileName: string } {
   const sheets: ExcelSheet[] = [
-    requestSheet("Дозамовлення", "Дозамовлення навчальних матеріалів", RESTOCK_COLUMNS, [["", "", "", "", "", "", "", "", "", "", "", ""]]),
+    requestSheet("Дозамовлення", "Дозамовлення навчальних матеріалів", RESTOCK_IMPORT_COLUMNS, [["", "", "", "", "", "", "", "", "", "", "", ""]]),
     requestSheet("Художня та наукова література", "Замовлення художньої та наукової літератури", LITERATURE_COLUMNS, [["", "", "", "", "", "", "", "", "", ""]]),
     requestSheet("Пропозиції учнів", "Пропозиції книг від учнів", STUDENT_COLUMNS, [["", "", "", "", "", "", "", "", ""]]),
     {
@@ -52,10 +59,10 @@ export function createAcquisitionExport(requests: AcquisitionProjection[], gener
   const teacherLiterature = requests.filter((row) => row.requesterKind === "teacher" && row.category === "literature");
   const students = requests.filter((row) => row.requesterKind === "student");
   const sheets: ExcelSheet[] = [
-    requestSheet("Дозамовлення", "Дозамовлення навчальних матеріалів", RESTOCK_COLUMNS, teacherEducational.map((row) => [row.publicNumber, row.materialId ?? "", row.title, row.author, row.publicationYear ?? "", row.requestedQuantity, row.sourceUrl, row.subject, row.targetClass, row.teacherUserId ?? "", row.requesterName, row.requesterNote])),
+    requestSheet("Дозамовлення", "Дозамовлення навчальних матеріалів", RESTOCK_EXPORT_COLUMNS, teacherEducational.map((row) => [row.publicNumber, row.title, row.author, row.publicationYear ?? "", row.requestedQuantity, row.sourceUrl, row.subject, row.targetClass, row.teacherUserId ?? "", row.requesterName, row.requesterNote])),
     requestSheet("Художня та наукова література", "Замовлення художньої та наукової літератури", LITERATURE_COLUMNS, teacherLiterature.map((row) => [row.publicNumber, literatureLabel(row.literatureKind), row.title, row.author, row.publicationYear ?? "", row.requestedQuantity, row.sourceUrl, row.teacherUserId ?? "", row.requesterName, row.requesterNote])),
     requestSheet("Пропозиції учнів", "Пропозиції книг від учнів", STUDENT_COLUMNS, students.map((row) => [row.publicNumber, row.requesterClassName, row.requesterName, row.title, row.author, row.publicationYear ?? "", row.requestedQuantity, row.sourceUrl, row.requesterNote])),
-    { name: "Довідники", reportTitle: "Довідники для заповнення", compactRows: true, columns: REFERENCE_COLUMNS, rows: REFERENCE_ROWS },
+    { name: "Довідники", reportTitle: "Довідники", compactRows: true, columns: REFERENCE_COLUMNS, rows: EXPORT_REFERENCE_ROWS },
   ];
   return { bytes: createExcelWorkbookBytes(sheets, generatedAt, "Єдина бібліотека — комплектування фонду"), fileName: `Комплектування фонду — ${kyivStamp(generatedAt)}.xlsx`, rowCount: requests.length };
 }

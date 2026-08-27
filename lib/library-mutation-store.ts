@@ -2697,10 +2697,14 @@ export async function issueLoanToClass(
       cy.id, cy.class_name, cy.cohort_id, cy.version, cy.status,
       cy.start_date, cy.end_date,
       ay.id AS academic_year_id, ay.label AS academic_year_label,
-      ay.status AS academic_year_status, c.status AS cohort_status
+      ay.status AS academic_year_status, c.status AS cohort_status,
+      COALESCE(curator.full_name, '') AS curator_name,
+      COALESCE(classroom.name, '') AS classroom_name
     FROM class_years cy
     JOIN academic_years ay ON ay.id = cy.academic_year_id
     JOIN cohorts c ON c.id = cy.cohort_id
+    LEFT JOIN users curator ON curator.id = cy.teacher_user_id
+    LEFT JOIN locations classroom ON classroom.id = cy.location_id
     WHERE cy.id = ?
     LIMIT 1
   `).bind(input.classYearId).first<{
@@ -2713,6 +2717,8 @@ export async function issueLoanToClass(
     academic_year_label: string;
     academic_year_status: string;
     cohort_status: string;
+    curator_name: string;
+    classroom_name: string;
     start_date: string;
     end_date: string;
   }>();
@@ -2793,6 +2799,11 @@ export async function issueLoanToClass(
     SELECT
       requested.item_index,
       requested.material_id,
+      m.title,
+      m.author,
+      m.publication_year,
+      m.subject,
+      m.rubric,
       CASE WHEN m.status = 'active' AND m.archived_at IS NULL THEN m.id END
         AS active_material_id,
       CASE WHEN l.status = 'active' AND l.type != 'service' THEN l.id END
@@ -2820,6 +2831,11 @@ export async function issueLoanToClass(
     quantity: number | null;
     version: number | null;
     reserved_quantity: number;
+    title: string | null;
+    author: string | null;
+    publication_year: number | null;
+    subject: string | null;
+    rubric: string | null;
   }>();
   const itemStates = (itemStateResult.results ?? []).map((state) => ({
     quantity: state.active_material_id && state.active_location_id
@@ -2829,6 +2845,11 @@ export async function issueLoanToClass(
       ? Number(state.version ?? 0)
       : 0,
     reservedQuantity: Number(state.reserved_quantity ?? 0),
+    title: state.title?.trim() ?? "",
+    author: state.author?.trim() ?? "",
+    publicationYear: state.publication_year == null ? null : Number(state.publication_year),
+    subject: state.subject?.trim() ?? "",
+    rubric: state.rubric?.trim() ?? "",
   }));
   if (itemStates.length !== input.items.length) {
     throw new LibraryMutationError(
@@ -2872,6 +2893,24 @@ export async function issueLoanToClass(
     quantityAfter: itemStates[index].quantity - item.quantity,
   }));
   const issueRowsJson = JSON.stringify(issueRows);
+  const issueStatementJson = JSON.stringify({
+    schemaVersion: 1,
+    className: classYear.class_name,
+    academicYearLabel: classYear.academic_year_label,
+    classroomName: classYear.classroom_name,
+    curatorName: classYear.curator_name,
+    issuedAt: input.issuedAt,
+    dueAt: input.dueAt,
+    lines: input.items.map((item, index) => ({
+      position: index + 1,
+      subject: itemStates[index].subject,
+      title: itemStates[index].title,
+      author: itemStates[index].author,
+      publicationYear: itemStates[index].publicationYear,
+      rubric: itemStates[index].rubric,
+      quantityIssued: item.quantity,
+    })),
+  });
   const nonzeroHoldingCount = issueRows.filter((row) => row.quantityAfter > 0).length;
   const deletedHoldingCount = issueRows.length - nonzeroHoldingCount;
   const result: ClassLoanMutationResult = {
@@ -2906,7 +2945,9 @@ export async function issueLoanToClass(
     db.prepare(`
       INSERT INTO class_loans (
         id, class_year_id, responsible_teacher_user_id, status,
-        issued_at, due_at, closed_at, notes, issued_by_user_id,
+        issued_at, due_at, closed_at, notes,
+        issue_statement_schema_version, issue_statement_json, issue_statement_origin,
+        issued_by_user_id,
         closed_by_user_id, version, created_at, updated_at
       ) VALUES (
         ?, (
@@ -2921,7 +2962,7 @@ export async function issueLoanToClass(
           SELECT u.id FROM users u
           JOIN teacher_profiles tp ON tp.teacher_user_id = u.id AND tp.closed_at IS NULL
           WHERE u.id = ? AND u.status = 'active'
-        ), 'open', ?, ?, NULL, ?, ?, NULL, 1, ?, ?
+        ), 'open', ?, ?, NULL, ?, 1, ?, 'issued', ?, NULL, 1, ?, ?
       )
     `).bind(
       classLoanId,
@@ -2934,6 +2975,7 @@ export async function issueLoanToClass(
       input.issuedAt,
       input.dueAt,
       input.notes ?? "",
+      issueStatementJson,
       actor.id,
       createdAt,
       createdAt,

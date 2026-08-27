@@ -32,6 +32,7 @@ const migrationFiles = [
   "drizzle/0025_lying_lucky_pierre.sql",
   "drizzle/0026_typical_scalphunter.sql",
   "drizzle/0027_naive_microbe.sql",
+  "drizzle/0028_dusty_marten_broadcloak.sql",
 ];
 
 async function migratedDatabase() {
@@ -105,6 +106,52 @@ test("0027 preserves Telegram connections and marks existing teacher menus as st
       menu_claimed_at: null,
     },
   );
+  assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+  database.close();
+});
+
+test("0028 stores immutable issue-time class statements without changing operational loan updates", async () => {
+  const database = await migratedDatabase();
+  const now = "2026-08-28T08:00:00.000Z";
+  database.exec(`
+    INSERT INTO users (id,full_name,sort_name,email,auth_user_id,role,status,created_at,updated_at) VALUES
+      ('USR-STATEMENT-LIB','Бібліотекар Тестовий','бібліотекар тестовий',NULL,NULL,'librarian','active','${now}','${now}'),
+      ('USR-STATEMENT-TEACHER','Учитель Тестовий','учитель тестовий',NULL,NULL,'teacher','active','${now}','${now}');
+    INSERT INTO academic_years (id,label,start_date,end_date,status,notes,version,created_at,updated_at)
+      VALUES ('YR-STATEMENT','2026/2027','2026-08-01','2027-06-30','active','',1,'${now}','${now}');
+    INSERT INTO cohorts (id,status,notes,created_at,updated_at)
+      VALUES ('COH-STATEMENT','active','','${now}','${now}');
+    INSERT INTO class_years (id,academic_year_id,cohort_id,class_name,grade,code,teacher_user_id,
+      location_id,start_date,end_date,status,actual_closed_date,notes,version,created_at,updated_at)
+      VALUES ('CY-STATEMENT','YR-STATEMENT','COH-STATEMENT','7-А',7,'А','USR-STATEMENT-TEACHER',
+        NULL,'2026-08-01','2027-06-30','active',NULL,'',1,'${now}','${now}');
+  `);
+  const snapshot = JSON.stringify({
+    schemaVersion: 1,
+    className: "7-А",
+    academicYearLabel: "2026/2027",
+    classroomName: "Кабінет №108",
+    curatorName: "Класний керівник",
+    issuedAt: "2026-08-28",
+    dueAt: "2027-05-31",
+    lines: [{ position: 1, subject: "Математика", title: "Алгебра", author: "Автор", publicationYear: 2024, rubric: "Підручники", quantityIssued: 25 }],
+  });
+  database.prepare(`INSERT INTO class_loans (
+    id,class_year_id,responsible_teacher_user_id,status,issued_at,due_at,closed_at,notes,
+    issue_statement_schema_version,issue_statement_json,issue_statement_origin,
+    issued_by_user_id,closed_by_user_id,version,created_at,updated_at
+  ) VALUES ('CLOAN-STATEMENT-TEST',?,?,'open','2026-08-28','2027-05-31',NULL,'',1,?,'issued',?,NULL,1,?,?)`)
+    .run("CY-STATEMENT", "USR-STATEMENT-TEACHER", snapshot, "USR-STATEMENT-LIB", now, now);
+  const columns = database.prepare("PRAGMA table_info('class_loans')").all().map((row) => row.name);
+  assert.ok(columns.includes("issue_statement_schema_version"));
+  assert.ok(columns.includes("issue_statement_json"));
+  assert.ok(columns.includes("issue_statement_origin"));
+  assert.throws(
+    () => database.prepare("UPDATE class_loans SET issue_statement_json='{}' WHERE id='CLOAN-STATEMENT-TEST'").run(),
+    /class issue statement is immutable/u,
+  );
+  database.prepare("UPDATE class_loans SET version=2,updated_at=? WHERE id='CLOAN-STATEMENT-TEST'").run(now);
+  assert.equal(database.prepare("SELECT version FROM class_loans WHERE id='CLOAN-STATEMENT-TEST'").get().version, 2);
   assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
   database.close();
 });

@@ -1,0 +1,65 @@
+.page { width: min(1480px, calc(100% - 24px)); margin: 0 auto; padding: 14px 0 46px; color: #173d2b; }
+.intro { display: flex; align-items: end; justify-content: space-between; gap: 16px; }
+.intro p, .sectionHeading p { margin: 0 0 3px; color: #34734a; font-size: 9px; font-weight: 850; letter-spacing: .11em; text-transform: uppercase; }
+.intro h1, .sectionHeading h2 { margin: 0; font: 700 30px/1.05 Georgia, serif; }
+.intro span { display: block; margin-top: 5px; color: #66766d; font-size: 11px; }
+.intro > a, .backup > a { min-height: 38px; padding: 0 13px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid #cbd8ca; border-radius: 9px; background: #fff; color: #1c5835; font-size: 11px; font-weight: 800; text-decoration: none; white-space: nowrap; }
+.period { margin-top: 10px; padding: 9px; display: grid; grid-template-columns: 180px 180px minmax(0, 1fr); gap: 8px; align-items: end; border: 1px solid #d7e0d5; border-radius: 11px; background: #f8faf5; }
+.period label, .classToolbar label { display: grid; gap: 4px; }
+.period label span, .classToolbar label span { font-size: 9px; font-weight: 800; }
+.period input, .classToolbar select { width: 100%; min-height: 38px; padding: 0 10px; border: 1px solid #cdd9cc; border-radius: 8px; background: #fff; color: #173d2b; font: 600 12px/1 Inter, "Segoe UI", sans-serif; }
+.period small { align-self: center; color: #6a7970; font-size: 10px; }
+.reportGrid { margin-top: 10px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.reportCard { min-width: 0; min-height: 118px; padding: 12px; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: start; border: 1px solid #d8e1d6; border-radius: 12px; background: #fff; box-shadow: 0 5px 15px rgba(24, 67, 40, .045); }
+.reportCard > span[aria-hidden="true"] { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 9px; background: #e8f1e5; color: #26653d; }
+.reportCard h3 { margin: 1px 0 4px; font-size: 12px; }
+.reportCard p { margin: 0; color: #687970; font-size: 10px; line-height: 1.42; }
+.reportCard small { display: block; margin-top: 5px; color: #886a1f; font-size: 9px; line-height: 1.35; }
+.reportCard > a, .reportCard > span[aria-disabled="true"] { align-self: end; min-height: 32px; padding: 0 9px; display: inline-flex; align-items: center; gap: 5px; border-radius: 8px; background: #1e5b37; color: #fff; font-size: 10px; font-weight: 850; text-decoration: none; }
+.reportCard > span[aria-disabled="true"] { pointer-events: none; opacity: .45; }
+.section { margin-top: 12px; padding: 13px; scroll-margin-top: 86px; border: 1px solid #d8e0d6; border-radius: 13px; background: #fffdfa; }
+.sectionHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sectionHeading h2 { font-size: 22px; }
+.sectionHeading > span { color: #6d7c72; font-size: 10px; }
+.classToolbar { margin-top: 10px; display: grid; grid-template-columns: minmax(240px, 1fr) auto auto; gap: 8px; align-items: end; }
+.primaryAction, .secondaryAction { min-height: 38px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; font-size: 10px; font-weight: 850; text-decoration: none; }
+.primaryAction { background: #1e5b37; color: #fff; }
+.secondaryAction { border: 1px solid #cbd8ca; background: #f5f8f2; color: #245d39; }
+.primaryAction[aria-disabled="true"] { pointer-events: none; opacity: .45; }
+.statementList { margin-top: 10px; border: 1px solid #dbe4d9; border-radius: 10px; overflow: hidden; }
+.listHeader, .statementList article { padding: 9px 11px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid #e5ebe3; }
+.listHeader { background: #f0f5ed; }
+.listHeader strong, .statementList article strong { font-size: 11px; }
+.listHeader span, .statementList article span, .statementList article small { display: block; margin-top: 2px; color: #6b7a71; font-size: 9px; }
+.statementList article:last-child { border-bottom: 0; }
+.statementList article > div:last-child { display: flex; gap: 6px; }
+.statementList article a { min-height: 32px; padding: 0 9px; display: inline-flex; align-items: center; border: 1px solid #ccd8cb; border-radius: 7px; color: #1e5b37; font-size: 9px; font-weight: 800; text-decoration: none; white-space: nowrap; }
+.info, .error { margin: 9px 0 0; padding: 9px 11px; border-radius: 8px; font-size: 10px; }
+.info { background: #eff4ec; color: #567063; }
+.error { background: #fff0ed; color: #8b342b; }
+.backup { margin-top: 12px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 14px; border: 1px dashed #bdcdbd; border-radius: 12px; background: #f5f7f2; }
+.backup div { display: grid; gap: 3px; }
+.backup strong { font-size: 11px; }
+.backup span { color: #68786f; font-size: 9px; }
+
+@media (max-width: 980px) { .reportGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .page { width: min(100% - 16px, 1480px); padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+  .intro { align-items: start; }
+  .intro h1 { font-size: 27px; }
+  .intro > a { display: none; }
+  .period { grid-template-columns: 1fr 1fr; }
+  .period small { grid-column: 1 / -1; }
+  .period input, .classToolbar select { min-height: 44px; font-size: 16px; }
+  .reportGrid { grid-template-columns: 1fr; }
+  .reportCard { min-height: 108px; grid-template-columns: 34px minmax(0, 1fr); }
+  .reportCard > a, .reportCard > span[aria-disabled="true"] { grid-column: 1 / -1; min-height: 44px; justify-content: center; }
+  .section { padding: 10px; }
+  .classToolbar { grid-template-columns: 1fr; }
+  .primaryAction, .secondaryAction { min-height: 44px; }
+  .listHeader, .statementList article { align-items: stretch; flex-direction: column; }
+  .statementList article > div:last-child { display: grid; grid-template-columns: 1fr 1fr; }
+  .statementList article a { min-height: 44px; justify-content: center; white-space: normal; text-align: center; }
+  .backup { align-items: stretch; flex-direction: column; }
+  .backup > a { min-height: 44px; justify-content: center; }
+}

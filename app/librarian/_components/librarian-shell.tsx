@@ -59,6 +59,7 @@ const SECONDARY_ITEMS: NavigationItem[] = [
   { id: "visits", label: "Відвідування", hint: "Графік бібліотеки", icon: "visits" },
   { id: "teachers", label: "Вчителі", hint: "Картки та доступ", icon: "teachers" },
   { id: "acquisitions", label: "Комплектування", hint: "Дозамовлення фонду", icon: "acquisitions" },
+  { id: "reports", label: "Звіти", hint: "Аналітика й документи", icon: "reports" },
   { id: "management", label: "Керування", hint: "Кабінети й навчальний рік", icon: "management" },
 ];
 
@@ -144,7 +145,7 @@ export default function LibrarianShell({
           <a href={publicCatalogHref ?? undefined} target="_blank" rel="noopener noreferrer">
             Публічний каталог <SiteIcon name="external" size={16} />
           </a>
-          {excelExportHref ? <a href={excelExportHref}>Експорт <SiteIcon name="export" size={16} /></a> : null}
+          {excelExportHref ? <a href={excelExportHref}>Звіти <SiteIcon name="reports" size={16} /></a> : null}
           {excelImportHref ? <a href={excelImportHref}>Імпорт <SiteIcon name="import" size={16} /></a> : null}
           <a href={telegramHref ?? undefined} className={styles.telegramLink}>
             Telegram <SiteIcon name="telegram" size={16} />
@@ -212,7 +213,7 @@ export default function LibrarianShell({
           </nav>
           <nav className={styles.sidebarUtilities} aria-label="Службові посилання кабінету">
             <a href={publicCatalogHref ?? undefined} target="_blank" rel="noopener noreferrer">Публічний каталог <SiteIcon name="external" size={15} /></a>
-            {excelExportHref ? <a href={excelExportHref}><SiteIcon name="export" size={15} /> Експорт в Excel</a> : null}
+            {excelExportHref ? <a href={excelExportHref}><SiteIcon name="reports" size={15} /> Звіти й документи</a> : null}
             {excelImportHref ? <a href={excelImportHref}><SiteIcon name="import" size={15} /> Імпорт з Excel</a> : null}
             <a href={telegramHref ?? undefined}><SiteIcon name="telegram" size={15} /> Telegram</a>
           </nav>
@@ -310,7 +311,7 @@ export default function LibrarianShell({
             </nav>
             <div className={styles.drawerUtilities}>
               <a href={publicCatalogHref ?? undefined} target="_blank" rel="noopener noreferrer">Публічний каталог <SiteIcon name="external" size={16} /></a>
-              {excelExportHref ? <a href={excelExportHref}><SiteIcon name="export" size={16} /> Експорт в Excel</a> : null}
+              {excelExportHref ? <a href={excelExportHref}><SiteIcon name="reports" size={16} /> Звіти й документи</a> : null}
               {excelImportHref ? <a href={excelImportHref}><SiteIcon name="import" size={16} /> Імпорт з Excel</a> : null}
               <a href={telegramHref ?? undefined}><SiteIcon name="telegram" size={16} /> Telegram</a>
               <a href={signOutHref}><SiteIcon name={telegramMiniApp ? "external" : "logout"} size={16} /> {telegramMiniApp ? "Повернутися до бота" : "Вийти з кабінету"}</a>

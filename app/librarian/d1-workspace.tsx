@@ -4092,6 +4092,7 @@ function ClassIssueWorkspace({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"error" | "success" | "info">("info");
+  const [lastIssuedClassLoanId, setLastIssuedClassLoanId] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -4215,13 +4216,14 @@ function ClassIssueWorkspace({
       quantity: parsedQuantity,
       expectedAvailableQuantity: source.quantity,
     };
+    setLastIssuedClassLoanId("");
     setCart((current) => (
       current.some((item) => item.key === key)
         ? current.map((item) => item.key === key ? row : item)
         : [...current, row]
     ));
     setMessageTone("success");
-    setMessage(current => current === "Видачу на клас оформлено." ? current : `${detail.title} додано до видачі.`);
+    setMessage(`${detail.title} додано до видачі.`);
   }
 
   function updateCartQuantity(key: string, nextQuantity: number) {
@@ -4255,6 +4257,7 @@ function ClassIssueWorkspace({
       clearPendingClassCirculationIntent("class-issue");
       setPendingIntent(null);
       setCart([]);
+      setLastIssuedClassLoanId(response.result.classLoanId);
       setMessageTone("success");
       setMessage(response.result.status === "open" ? "Видачу на клас оформлено." : "Операцію збережено.");
       await onSaved();
@@ -4543,24 +4546,42 @@ function ClassIssueWorkspace({
       {message ? <InlineMessage tone={messageTone}>{message}</InlineMessage> : null}
 
       <div className={styles.formActions}>
-        {messageTone === "success" && message === "Видачу на клас оформлено." ? (
-          <button className={styles.secondaryButton} type="button" onClick={onChooseReturn}>
-            Перейти до повернень класу
-          </button>
+        {messageTone === "success" && lastIssuedClassLoanId ? (
+          <div className={styles.statementActions}>
+            <a
+              className={styles.primaryButton}
+              href={`/librarian/class-loans/${encodeURIComponent(lastIssuedClassLoanId)}/statement`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Відкрити й друкувати відомість
+            </a>
+            <a
+              className={styles.secondaryButton}
+              href={`/api/librarian/class-issue-statements/${encodeURIComponent(lastIssuedClassLoanId)}/excel`}
+            >
+              Excel
+            </a>
+            <button className={styles.secondaryButton} type="button" onClick={onChooseReturn}>
+              До повернень
+            </button>
+          </div>
         ) : <span>Одна видача може містити до 100 позицій.</span>}
-        <button
-          className={styles.primaryButton}
-          type="submit"
-          disabled={
-            !writesEnabled
-            || locked
-            || !selectedClassYear
-            || !effectiveResponsibleTeacherUserId
-            || !cart.length
-          }
-        >
-          {saving ? "Оформлюємо…" : `Підтвердити видачу (${cartCopies} прим.)`}
-        </button>
+        {messageTone === "success" && lastIssuedClassLoanId ? null : (
+          <button
+            className={styles.primaryButton}
+            type="submit"
+            disabled={
+              !writesEnabled
+              || locked
+              || !selectedClassYear
+              || !effectiveResponsibleTeacherUserId
+              || !cart.length
+            }
+          >
+            {saving ? "Оформлюємо…" : `Підтвердити видачу (${cartCopies} прим.)`}
+          </button>
+        )}
       </div>
     </form>
   );

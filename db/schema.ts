@@ -907,6 +907,14 @@ export const classLoans = sqliteTable(
     dueAt: text("due_at"),
     closedAt: text("closed_at"),
     notes: text("notes").notNull().default(""),
+    /** Immutable, print-safe snapshot captured atomically with the issue. */
+    issueStatementSchemaVersion: integer("issue_statement_schema_version")
+      .notNull()
+      .default(0),
+    issueStatementJson: text("issue_statement_json").notNull().default(""),
+    issueStatementOrigin: text("issue_statement_origin")
+      .notNull()
+      .default("legacy"),
     issuedByUserId: text("issued_by_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
@@ -944,6 +952,15 @@ export const classLoans = sqliteTable(
         or (${table.status} != 'closed' and ${table.closedAt} is null and ${table.closedByUserId} is null)`,
     ),
     check("class_loans_version_positive", sql`${table.version} > 0`),
+    check(
+      "class_loans_issue_statement_valid",
+      sql`(${table.issueStatementSchemaVersion} = 0
+          and ${table.issueStatementJson} = ''
+          and ${table.issueStatementOrigin} = 'legacy')
+        or (${table.issueStatementSchemaVersion} = 1
+          and json_valid(${table.issueStatementJson})
+          and ${table.issueStatementOrigin} in ('issued', 'legacy_backfill'))`,
+    ),
   ],
 );
 

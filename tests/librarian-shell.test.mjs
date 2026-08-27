@@ -18,6 +18,7 @@ const expectedWebRoutes = {
   visits: "/librarian/visits",
   teachers: "/librarian/teachers",
   acquisitions: "/librarian/acquisitions",
+  reports: "/librarian/reports",
   management: "/librarian?tool=locations",
 };
 
@@ -29,6 +30,7 @@ const expectedTelegramRoutes = {
   visits: "/librarian/telegram/cabinet?target=visits",
   teachers: "/librarian/telegram/cabinet?target=teachers",
   acquisitions: "/librarian/telegram/cabinet?target=acquisitions",
+  reports: "/librarian/telegram/cabinet?target=reports",
   management: "/librarian/telegram/cabinet?target=home&tool=locations",
 };
 
@@ -40,7 +42,7 @@ test("shared librarian route helper freezes web and Telegram Mini App destinatio
   }
   assert.equal(librarianUtilityHref("publicCatalog", false), "https://nazarijshvetz1.github.io/library-site/");
   assert.equal(librarianUtilityHref("publicCatalog", true), "https://nazarijshvetz1.github.io/library-site/");
-  assert.equal(librarianUtilityHref("excelExport", false), "/librarian/export");
+  assert.equal(librarianUtilityHref("excelExport", false), "/librarian/reports");
   assert.equal(librarianUtilityHref("excelExport", true), null);
   assert.equal(librarianUtilityHref("excelImport", false), "/librarian/import");
   assert.equal(librarianUtilityHref("excelImport", true), null);
@@ -69,7 +71,7 @@ test("LibrarianShell keeps the official emblem, full-page navigation, and access
   assert.match(source, /aria-modal="true"/u);
   assert.match(source, /event\.key === "Escape"/u);
   assert.match(source, /event\.key !== "Tab"/u);
-  assert.match(source, /excelExportHref \? <a href=\{excelExportHref\}>Експорт/u);
+  assert.match(source, /excelExportHref \? <a href=\{excelExportHref\}>Звіти/u);
   assert.match(source, /excelImportHref \? <a href=\{excelImportHref\}>Імпорт/u);
   assert.match(source, /className=\{styles\.sidebarUtilities\}/u);
   assert.match(source, /subsections\?: LibrarianSubsection\[\]/u);
@@ -83,7 +85,7 @@ test("LibrarianShell keeps the official emblem, full-page navigation, and access
   assert.match(source, /<div className=\{`\$\{styles\.shell\}/u);
   assert.doesNotMatch(source, /<main\b/u);
 
-  for (const label of ["Головна", "Фонд", "Видача", "Заявки", "Ще", "Відвідування", "Вчителі", "Комплектування", "Керування"]) {
+  for (const label of ["Головна", "Фонд", "Видача", "Заявки", "Ще", "Відвідування", "Вчителі", "Комплектування", "Звіти", "Керування"]) {
     assert.match(source, new RegExp(label, "u"));
   }
   assert.match(css, /min-height:\s*44px/u);
