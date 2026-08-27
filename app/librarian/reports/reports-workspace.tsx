@@ -150,7 +150,7 @@ export default function ReportsWorkspace({
 
         <section className={styles.section} id="activity" aria-labelledby="activity-title">
           <div className={styles.sectionHeading}><div><p>Робота бібліотеки</p><h2 id="activity-title">Комплектування та відвідування</h2></div></div>
-          <div className={styles.reportGrid}>{REPORTS.filter((item) => item.group === "activity").map((item) => <ReportCard key={item.kind} item={item} query={query} disabled={!validPeriod} />)}</div>
+          <div className={styles.reportGrid}>{REPORTS.filter((item) => item.group === "activity").map((item) => <ReportCard key={item.kind} item={item} query={query} disabled={!validPeriod} />)}<article className={styles.reportCard}><span aria-hidden="true"><SiteIcon name="reports" size={19} /></span><div><h3>Потреба на новий навчальний рік</h3><p>Майбутні класи, кількість учнів, придатний фонд і готовий список для замовлення.</p><small>Кількість учнів можна внести пізніше.</small></div><a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=acquisitions&view=planning" : "/librarian/acquisitions/planning"}>Відкрити <SiteIcon name="next" size={15} /></a></article></div>
         </section>
 
         <section className={styles.backup} aria-label="Повний резервний експорт">

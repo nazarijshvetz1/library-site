@@ -8,6 +8,7 @@ import SiteIcon from "@/app/_components/site-icon";
 import CollapsibleListSection from "@/app/_components/collapsible-list-section";
 import LibrarianShell from "../_components/librarian-shell";
 import { parseAcquisitionWorkbook, type ParsedAcquisitionWorkbook } from "./acquisition-excel-parser";
+import { acquisitionSubsections } from "./acquisition-navigation";
 import styles from "./acquisition-workspace.module.css";
 
 type RequestRecord = {
@@ -174,6 +175,8 @@ export default function AcquisitionWorkspace({ displayName, role = "librarian", 
     signOutHref={signOutHref}
     telegramMiniApp={telegramMiniApp}
     writesEnabled={writesEnabled}
+    subsections={acquisitionSubsections(telegramMiniApp)}
+    activeSubsection="requests"
   >
     <main className={`${styles.shell} ${telegramMiniApp ? styles.telegram : ""}`}>
       <section className={styles.page}>

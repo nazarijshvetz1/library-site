@@ -33,6 +33,7 @@ const migrationFiles = [
   "drizzle/0026_typical_scalphunter.sql",
   "drizzle/0027_naive_microbe.sql",
   "drizzle/0028_dusty_marten_broadcloak.sql",
+  "drizzle/0029_swift_surge.sql",
 ];
 
 async function migratedDatabase() {

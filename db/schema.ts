@@ -187,6 +187,17 @@ const acquisitionRequestStatuses = [
 ] as const;
 const acquisitionActorKinds = ["teacher", "student", "librarian", "import", "system"] as const;
 const acquisitionImportStatuses = ["completed"] as const;
+const procurementPlanStatuses = ["draft", "finalized", "archived"] as const;
+const procurementCategories = [
+  "textbook",
+  "workbook",
+  "assessment",
+  "exercises",
+  "atlas",
+  "other",
+] as const;
+const procurementStockModes = ["reusable", "consumable"] as const;
+const procurementDemandModes = ["per_student", "per_class", "fixed"] as const;
 
 /**
  * Canonical bibliographic record. `id` is the durable CAT-ID while
@@ -2070,6 +2081,153 @@ export const acquisitionPublicRateLimits = sqliteTable(
     index("idx_acquisition_public_limits_updated").on(table.updatedAt),
     check("acquisition_public_limits_hash_valid", sql`length(${table.scopeHash}) = 64`),
     check("acquisition_public_limits_attempts_valid", sql`${table.attempts} >= 0`),
+  ],
+);
+
+/** Annual planning scenario used after revision to calculate next-year procurement. */
+export const procurementPlans = sqliteTable(
+  "procurement_plans",
+  {
+    id: text("id").primaryKey(),
+    academicYearId: text("academic_year_id").references(() => academicYears.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    academicYearLabel: text("academic_year_label").notNull(),
+    title: text("title").notNull(),
+    status: text("status", { enum: procurementPlanStatuses }).notNull().default("draft"),
+    defaultReserve: integer("default_reserve").notNull().default(0),
+    notes: text("notes").notNull().default(""),
+    revisionConfirmedAt: text("revision_confirmed_at"),
+    revisionConfirmedByUserId: text("revision_confirmed_by_user_id").references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    finalizedAt: text("finalized_at"),
+    finalizedByUserId: text("finalized_by_user_id").references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    createdByUserId: text("created_by_user_id").notNull().references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    version: integer("version").notNull().default(1),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_procurement_plans_year_label").on(table.academicYearLabel),
+    index("idx_procurement_plans_status_updated").on(table.status, table.updatedAt),
+    check("procurement_plans_year_not_blank", sql`length(trim(${table.academicYearLabel})) > 0`),
+    check("procurement_plans_title_not_blank", sql`length(trim(${table.title})) > 0`),
+    check("procurement_plans_status_valid", sql`${table.status} in ('draft','finalized','archived')`),
+    check("procurement_plans_reserve_valid", sql`${table.defaultReserve} between 0 and 1000`),
+    check("procurement_plans_version_positive", sql`${table.version} > 0`),
+    check("procurement_plans_finalized_consistent", sql`(${table.status} = 'finalized' and ${table.finalizedAt} is not null and ${table.finalizedByUserId} is not null) or (${table.status} != 'finalized')`),
+  ],
+);
+
+/** Future classes may exist before their final pupil counts are known. */
+export const procurementPlanClasses = sqliteTable(
+  "procurement_plan_classes",
+  {
+    id: text("id").primaryKey(),
+    planId: text("plan_id").notNull().references(() => procurementPlans.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    sourceClassYearId: text("source_class_year_id").references(() => classYears.id, { onDelete: "set null", onUpdate: "cascade" }),
+    className: text("class_name").notNull(),
+    grade: integer("grade").notNull(),
+    studentCount: integer("student_count"),
+    notes: text("notes").notNull().default(""),
+    sortOrder: integer("sort_order").notNull().default(0),
+    version: integer("version").notNull().default(1),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_procurement_plan_classes_name").on(table.planId, table.className),
+    index("idx_procurement_plan_classes_order").on(table.planId, table.grade, table.sortOrder, table.className),
+    check("procurement_plan_classes_name_not_blank", sql`length(trim(${table.className})) > 0`),
+    check("procurement_plan_classes_grade_valid", sql`${table.grade} between 1 and 11`),
+    check("procurement_plan_classes_students_valid", sql`${table.studentCount} is null or ${table.studentCount} between 0 and 500`),
+    check("procurement_plan_classes_order_valid", sql`${table.sortOrder} >= 0`),
+    check("procurement_plan_classes_version_positive", sql`${table.version} > 0`),
+  ],
+);
+
+/** One exact edition is shared across all planned classes, so stock is deducted only once. */
+export const procurementPlanResources = sqliteTable(
+  "procurement_plan_resources",
+  {
+    id: text("id").primaryKey(),
+    planId: text("plan_id").notNull().references(() => procurementPlans.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    materialId: text("material_id").references(() => materials.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    category: text("category", { enum: procurementCategories }).notNull(),
+    stockMode: text("stock_mode", { enum: procurementStockModes }).notNull().default("reusable"),
+    subject: text("subject").notNull().default(""),
+    title: text("title").notNull(),
+    author: text("author").notNull().default(""),
+    publisher: text("publisher").notNull().default(""),
+    publicationYear: integer("publication_year"),
+    sourceUrl: text("source_url").notNull().default(""),
+    notes: text("notes").notNull().default(""),
+    usableQuantityOverride: integer("usable_quantity_override"),
+    additionalIncomingQuantity: integer("additional_incoming_quantity").notNull().default(0),
+    sortOrder: integer("sort_order").notNull().default(0),
+    version: integer("version").notNull().default(1),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_procurement_plan_resources_material").on(table.planId, table.materialId),
+    index("idx_procurement_plan_resources_category_order").on(table.planId, table.category, table.sortOrder, table.title),
+    check("procurement_plan_resources_category_valid", sql`${table.category} in ('textbook','workbook','assessment','exercises','atlas','other')`),
+    check("procurement_plan_resources_stock_mode_valid", sql`${table.stockMode} in ('reusable','consumable')`),
+    check("procurement_plan_resources_title_not_blank", sql`length(trim(${table.title})) > 0`),
+    check("procurement_plan_resources_year_valid", sql`${table.publicationYear} is null or ${table.publicationYear} between 1000 and 2100`),
+    check("procurement_plan_resources_usable_valid", sql`${table.usableQuantityOverride} is null or ${table.usableQuantityOverride} between 0 and 100000`),
+    check("procurement_plan_resources_incoming_valid", sql`${table.additionalIncomingQuantity} between 0 and 100000`),
+    check("procurement_plan_resources_order_valid", sql`${table.sortOrder} >= 0`),
+    check("procurement_plan_resources_version_positive", sql`${table.version} > 0`),
+  ],
+);
+
+/** Per-class demand for a shared exact edition. */
+export const procurementPlanAllocations = sqliteTable(
+  "procurement_plan_allocations",
+  {
+    id: text("id").primaryKey(),
+    resourceId: text("resource_id").notNull().references(() => procurementPlanResources.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    classId: text("class_id").notNull().references(() => procurementPlanClasses.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    demandMode: text("demand_mode", { enum: procurementDemandModes }).notNull().default("per_student"),
+    copiesPerUnit: integer("copies_per_unit").notNull().default(1),
+    fixedQuantity: integer("fixed_quantity").notNull().default(0),
+    reserveQuantity: integer("reserve_quantity").notNull().default(0),
+    notes: text("notes").notNull().default(""),
+    version: integer("version").notNull().default(1),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_procurement_plan_allocations_resource_class").on(table.resourceId, table.classId),
+    index("idx_procurement_plan_allocations_class").on(table.classId, table.resourceId),
+    check("procurement_plan_allocations_mode_valid", sql`${table.demandMode} in ('per_student','per_class','fixed')`),
+    check("procurement_plan_allocations_copies_valid", sql`${table.copiesPerUnit} between 1 and 100`),
+    check("procurement_plan_allocations_fixed_valid", sql`${table.fixedQuantity} between 0 and 100000`),
+    check("procurement_plan_allocations_reserve_valid", sql`${table.reserveQuantity} between 0 and 1000`),
+    check("procurement_plan_allocations_version_positive", sql`${table.version} > 0`),
+  ],
+);
+
+/** Immutable calculation snapshots created every time a plan is finalized. */
+export const procurementPlanSnapshots = sqliteTable(
+  "procurement_plan_snapshots",
+  {
+    id: text("id").primaryKey(),
+    planId: text("plan_id").notNull().references(() => procurementPlans.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    sequence: integer("sequence").notNull(),
+    schemaVersion: integer("schema_version").notNull().default(1),
+    payloadJson: text("payload_json").notNull(),
+    payloadSha256: text("payload_sha256").notNull(),
+    inventoryCutoffAt: text("inventory_cutoff_at").notNull(),
+    createdByUserId: text("created_by_user_id").notNull().references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_procurement_plan_snapshots_sequence").on(table.planId, table.sequence),
+    index("idx_procurement_plan_snapshots_created").on(table.planId, table.createdAt),
+    check("procurement_plan_snapshots_sequence_positive", sql`${table.sequence} > 0`),
+    check("procurement_plan_snapshots_schema_positive", sql`${table.schemaVersion} > 0`),
+    check("procurement_plan_snapshots_payload_valid", sql`json_valid(${table.payloadJson})`),
+    check("procurement_plan_snapshots_hash_valid", sql`length(${table.payloadSha256}) = 64 and lower(${table.payloadSha256}) not glob '*[^0-9a-f]*'`),
   ],
 );
 
