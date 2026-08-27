@@ -23,7 +23,8 @@ export type TeacherUpdateInput = {
 export type TeacherDeleteInput = {
   requestId: string;
   expectedVersion: number;
-  confirmation: "DELETE_EMPTY_TEACHER";
+  confirmation: "DELETE_TEACHER_CARD";
+  confirmedFullName: string;
 };
 
 export type TeacherValidationResult<T> =
@@ -84,14 +85,15 @@ export function validateTeacherUpdateInput(input: unknown): TeacherValidationRes
 export function validateTeacherDeleteInput(input: unknown): TeacherValidationResult<TeacherDeleteInput> {
   if (!record(input)) return invalid("body", "Очікуються дані видалення картки.");
   const errors: Record<string, string> = {};
-  exactKeys(input, ["requestId", "expectedVersion", "confirmation"], errors);
-  const confirmation = input.confirmation === "DELETE_EMPTY_TEACHER"
-    ? "DELETE_EMPTY_TEACHER"
-    : (errors.confirmation = "Підтвердьте видалення порожньої картки.", "DELETE_EMPTY_TEACHER");
+  exactKeys(input, ["requestId", "expectedVersion", "confirmation", "confirmedFullName"], errors);
+  const confirmation = input.confirmation === "DELETE_TEACHER_CARD"
+    ? "DELETE_TEACHER_CARD"
+    : (errors.confirmation = "Підтвердьте видалення картки вчителя.", "DELETE_TEACHER_CARD");
   return finish(errors, {
     requestId: requestId(input.requestId, errors),
     expectedVersion: positiveVersion(input.expectedVersion, errors),
     confirmation,
+    confirmedFullName: requiredText(input.confirmedFullName, "confirmedFullName", 120, errors),
   });
 }
 

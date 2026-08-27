@@ -7,7 +7,7 @@ import {
   teacherRegistryStoreError,
 } from "@/lib/teacher-registry-api";
 import {
-  deleteEmptyTeacherRegistryCard,
+  deleteTeacherRegistryCard,
   getTeacherRegistryDetail,
   updateTeacherRegistryCard,
 } from "@/lib/teacher-registry-store";
@@ -74,9 +74,9 @@ export async function DELETE(request: Request, context: RouteContext): Promise<R
   const body = await readTeacherRegistryBody(request);
   if (!body.ok) return body.response;
   const validated = validateTeacherDeleteInput(body.value);
-  if (!validated.ok) return validationError("Підтвердьте видалення порожньої картки.", validated.fieldErrors);
+  if (!validated.ok) return validationError("Підтвердьте видалення картки вчителя.", validated.fieldErrors);
   try {
-    const result = await deleteEmptyTeacherRegistryCard(
+    const result = await deleteTeacherRegistryCard(
       authorization.value.db,
       authorization.value.user,
       id,

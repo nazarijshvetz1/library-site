@@ -629,8 +629,16 @@ test("D1 workspace opens on a grouped accessible dashboard and keeps every tool 
   assert.doesNotMatch(dashboardPanel, /q: event\.currentTarget\.value/u);
   assert.match(workspace, /"return",[\s\S]*?"issue",[\s\S]*?"class-issue",[\s\S]*?"receipt",[\s\S]*?"create",[\s\S]*?"count"/u);
   assert.match(workspace, /<IsbnCameraScanner disabled=\{false\} onDetected=\{searchScannedIsbn\}/u);
-  assert.match(workspace, /aria-pressed=\{tool === item\.id\}/u);
-  assert.match(workspace, /<optgroup label=\{group\.label\}/u);
+  assert.match(workspace, /const MATERIAL_ACTION_ITEMS: ToolItem\[\]/u);
+  assert.match(workspace, /subsections=\{shellSubsections\}/u);
+  assert.match(workspace, /activeSubsection=\{librarianSubsectionForTool\(tool\)\}/u);
+  assert.match(workspace, /onSubsectionNavigate=\{\(id\) => chooseTool\(id as Tool\)\}/u);
+  assert.doesNotMatch(workspace, /<aside className=\{styles\.sidebar\}/u);
+  assert.doesNotMatch(workspace, /<optgroup label=\{group\.label\}/u);
+  for (const action of ["issue", "receipt", "transfer", "count", "writeoff"]) {
+    assert.match(workspace, new RegExp(`onClick=\\{\\(\\) => onChooseTool\\("${action}"\\)\\}`, "u"));
+  }
+  assert.match(workspace, /onClick=\{\(\) => onEditing\(true\)\}/u);
 
   assert.match(workspace, /function parseTool\(value: string \| null\): Tool \| null/u);
   assert.match(workspace, /new URL\(window\.location\.href\)/u);
@@ -638,6 +646,7 @@ test("D1 workspace opens on a grouped accessible dashboard and keeps every tool 
   assert.match(workspace, /if \(!parseTool\(url\.searchParams\.get\("tool"\)\) && !telegramMiniApp\)/u);
   assert.match(workspace, /window\.history\.replaceState/u);
   assert.match(workspace, /window\.history\[method\]/u);
+  assert.match(workspace, /window\.dispatchEvent\(new Event\("librarian:navigation-change"\)\)/u);
   assert.match(workspace, /currentTool === nextTool \? "replaceState" : "pushState"/u);
   assert.match(workspace, /if \(!telegramMiniApp\) \{[\s\S]*?window\.history\[method\]/u);
   assert.match(workspace, /function openCatalog\(event: FormEvent<HTMLFormElement>\) \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?onChooseTool\("catalog"\);/u);
@@ -652,8 +661,9 @@ test("D1 workspace opens on a grouped accessible dashboard and keeps every tool 
   assert.match(styles, /\.dashboardQuickGrid/u);
   assert.match(styles, /\.toolGroup h2 \{[\s\S]*?font-size: 12px/u);
   assert.match(styles, /\.tool small,[\s\S]*?font-size: 12px/u);
-  assert.match(styles, /\.mobileTools select \{[\s\S]*?font-size: 14px/u);
-  assert.doesNotMatch(styles, /\.mobileTools button \{[\s\S]*?font-size: 8px/u);
+  assert.match(styles, /\.sidebar,[\s\S]*?\.mobileTools \{ display: none!important; \}/u);
+  assert.match(styles, /\.workGridSelected \.searchPane \{ display: none; \}/u);
+  assert.match(styles, /\.workGridSelected \.backToResults \{[\s\S]*?display: inline-flex;/u);
 });
 
 test("protected navigation uses full-page anchors so Vinext cannot swallow clicks", async () => {

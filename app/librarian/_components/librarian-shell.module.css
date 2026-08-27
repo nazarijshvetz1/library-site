@@ -505,6 +505,138 @@
   }
 }
 
+/* Hierarchical navigation and device-safe visited-page controls. */
+.historyNav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.historyNav button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--lib-line);
+  border-radius: 9px;
+  color: var(--lib-green-deep);
+  background: #fff;
+  cursor: pointer;
+}
+
+.historyNav button:hover:not(:disabled),
+.historyNav button:focus-visible:not(:disabled) {
+  border-color: rgba(35, 88, 59, .35);
+  background: var(--lib-green-soft);
+}
+
+.historyNav button:disabled {
+  color: #9ca9a0;
+  background: #f5f6f2;
+  cursor: not-allowed;
+  opacity: .6;
+}
+
+.navigationGroup {
+  min-width: 0;
+}
+
+.subsectionNav {
+  margin: 3px 0 7px 15px;
+  padding-left: 9px;
+  display: grid;
+  gap: 2px;
+  border-left: 1px solid rgba(35, 88, 59, .18);
+}
+
+.subsectionLink {
+  min-height: 38px;
+  padding: 5px 7px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: var(--lib-ink);
+}
+
+.subsectionLink > span:first-child {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--lib-green);
+  background: rgba(230, 240, 226, .8);
+}
+
+.subsectionLink > span:last-child {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.subsectionLink strong { font-size: 10px; }
+.subsectionLink small {
+  overflow: hidden;
+  color: var(--lib-muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subsectionLink:hover,
+.subsectionLink:focus-visible,
+.subsectionCurrent {
+  border-color: rgba(35, 88, 59, .15);
+  background: rgba(255, 255, 255, .82);
+}
+
+.subsectionCurrent {
+  color: var(--lib-green-deep);
+  box-shadow: 0 4px 13px rgba(22, 62, 42, .06);
+}
+
+.subsectionCurrent > span:first-child {
+  color: #fff;
+  background: var(--lib-green);
+}
+
+@media (max-width: 840px) {
+  .account { gap: 5px; }
+  .historyNav { gap: 2px; }
+  .historyNav button { width: 30px; height: 34px; }
+  .account > a { padding-inline: 8px; }
+
+  .drawerNavigationGroup {
+    min-width: 0;
+    display: grid;
+    gap: 5px;
+  }
+
+  .subsectionCompact {
+    min-height: 46px;
+    margin-left: 8px;
+    border-color: var(--lib-line);
+    background: #fff;
+  }
+}
+
+@media (max-width: 440px) {
+  .header { gap: 6px; }
+  .brand img { width: 36px; height: 36px; }
+  .brand strong { font-size: 14px; }
+  .brand small { font-size: 8px; }
+  .account > a { min-height: 36px; font-size: 9px; }
+}
+
+@media (max-width: 360px) {
+  .brand > span { display: none; }
+  .brand img { width: 36px; height: 36px; }
+}
+
 @media (max-width: 440px) {
   .brand small {
     display: block;

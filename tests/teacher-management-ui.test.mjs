@@ -72,13 +72,19 @@ test("teacher directory uses frozen server paging, search and status contract", 
   ]);
   assert.equal(
     teacherDirectoryUrl({ query: "Коваль", status: "inactive", limit: 30, cursor: "opaque" }),
-    "/api/librarian/teachers?q=%D0%9A%D0%BE%D0%B2%D0%B0%D0%BB%D1%8C&status=inactive&cursor=opaque&limit=30",
+    "/api/librarian/teachers?q=%D0%9A%D0%BE%D0%B2%D0%B0%D0%BB%D1%8C&status=inactive&telegram=all&cursor=opaque&limit=30",
   );
   assert.match(client, /counters: TeacherDirectoryCounters/u);
   assert.match(client, /accountRole: "teacher" \| "admin" \| "librarian"/u);
   assert.match(client, /nextCursor: string \| null/u);
   assert.match(workspace, /load\(data\.page\.nextCursor\)/u);
   assert.match(workspace, /Прізвище або ім’я/u);
+  assert.match(workspace, />Підключені<\/option>/u);
+  assert.match(workspace, />Не підключені<\/option>/u);
+  assert.match(workspace, />Сповіщення вимкнено<\/option>/u);
+  assert.match(workspace, />Бот заблоковано<\/option>/u);
+  assert.match(workspace, /function TelegramStatusBadge/u);
+  assert.match(workspace, /telegramAvatarIndicator/u);
   assert.match(workspace, /const handleDirectoryNotice = useCallback/u);
   assert.match(workspace, /onNotice=\{handleDirectoryNotice\}/u);
   assert.doesNotMatch(workspace, /onNotice=\{\(message, tone/u);
@@ -123,17 +129,16 @@ test("teacher mutations match the exact backend contract and protect history", a
   assert.match(client, /action: "update"/u);
   assert.match(client, /changes: \{/u);
   assert.match(client, /reason: ""/u);
-  assert.match(client, /confirmation: "DELETE_EMPTY_TEACHER"/u);
+  assert.match(client, /confirmation: "DELETE_TEACHER_CARD"/u);
+  assert.match(client, /confirmedFullName: confirmedFullName\.trim\(\)/u);
   assert.match(workspace, /TeacherDuplicateWarning/u);
   assert.match(workspace, /Усе одно створити або зберегти окрему картку/u);
   assert.match(workspace, /teacherCloseBlockers/u);
-  assert.match(workspace, /dependencySummary\.totalDependencies === 0/u);
-  assert.match(workspace, /teacher\.accountRole === "teacher"/u);
   assert.match(workspace, /Обліковий рівень/u);
   assert.match(workspace, />Видалити картку<\/button>/u);
-  assert.match(workspace, /disabled=\{!writesEnabled \|\| busy \|\| !deletionAllowed\}/u);
+  assert.match(workspace, /disabled=\{!writesEnabled \|\| busy\}/u);
   assert.match(workspace, /confirmation !== teacher\.fullName/u);
-  assert.match(workspace, /Картку закрито без втрати історії/u);
+  assert.match(workspace, /Видалення прибере картку й доступ, але не видалить видачі, замовлення, відвідування та журнал операцій/u);
 });
 
 test("selected teacher exposes profile, material history, visits and an embedded access tab", async () => {

@@ -14,7 +14,7 @@ import TeacherCodeImport from "./teacher-code-import";
 import {
   changeTeacherStatus,
   createTeacherProfile,
-  deleteEmptyTeacherProfile,
+  deleteTeacherProfile,
   emptyTeacherCounters,
   loadTeacherDetail,
   loadTeacherDirectory,
@@ -32,6 +32,7 @@ import styles from "./teacher-management.module.css";
 type MainTab = "overview" | "teachers" | "orders" | "visits" | "telegram";
 type DetailTab = "profile" | "access" | "orders" | "issued" | "visits";
 type DirectoryStatus = "active" | "inactive" | "all";
+type DirectoryTelegram = "all" | "connected" | "disconnected" | "muted" | "blocked";
 
 const TAB_COPY: Record<MainTab, { eyebrow: string; title: string; description: string }> = {
   overview: {
@@ -266,6 +267,9 @@ function OverviewPanel({
   const attention = [
     { label: "Учителі без коду", value: summary.withoutCode, tab: "teachers" as const },
     { label: "Заблокований доступ", value: summary.locked, tab: "teachers" as const },
+    { label: "Telegram не підключено", value: summary.telegramNotConnected, tab: "teachers" as const },
+    { label: "Сповіщення Telegram вимкнено", value: summary.telegramNotificationsOff, tab: "teachers" as const },
+    { label: "Бот Telegram заблоковано", value: summary.telegramBlocked, tab: "teachers" as const },
     { label: "Прострочені видачі", value: summary.withOverdueLoans, tab: "orders" as const },
     { label: "Активні замовлення", value: summary.withOpenRequests, tab: "orders" as const },
   ];
@@ -531,6 +535,7 @@ function TeacherDirectoryPanel({
   const [queryInput, setQueryInput] = useState("");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<DirectoryStatus>("active");
+  const [telegram, setTelegram] = useState<DirectoryTelegram>("all");
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -540,7 +545,7 @@ function TeacherDirectoryPanel({
   const listRequestRef = useRef(0);
   const detailRequestRef = useRef(0);
   const selectedIdRef = useRef<string | null>(null);
-  const directoryScope = `${query}\u001e${status}`;
+  const directoryScope = `${query}\u001e${status}\u001e${telegram}`;
   const directoryScopeRef = useRef(directoryScope);
   useEffect(() => {
     directoryScopeRef.current = directoryScope;
@@ -548,11 +553,11 @@ function TeacherDirectoryPanel({
 
   const load = useCallback(async (cursor: string | null = null) => {
     const requestSequence = ++listRequestRef.current;
-    const requestScope = `${query}\u001e${status}`;
+    const requestScope = `${query}\u001e${status}\u001e${telegram}`;
     if (cursor) setLoadingMore(true);
     else setLoading(true);
     try {
-      const next = await loadTeacherDirectory({ query, status, cursor, limit: 30 });
+      const next = await loadTeacherDirectory({ query, status, telegram, cursor, limit: 30 });
       if (requestSequence !== listRequestRef.current || requestScope !== directoryScopeRef.current) return;
       if (cursor) {
         setData((current) => current ? {
@@ -572,7 +577,7 @@ function TeacherDirectoryPanel({
         setLoadingMore(false);
       }
     }
-  }, [onDirectoryChange, onNotice, query, status]);
+  }, [onDirectoryChange, onNotice, query, status, telegram]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
@@ -643,6 +648,15 @@ function TeacherDirectoryPanel({
               <option value="active">Активні</option><option value="inactive">Закриті</option><option value="all">Усі</option>
             </select>
           </label>
+          <label>Telegram
+            <select value={telegram} onChange={(event) => setTelegram(event.currentTarget.value as DirectoryTelegram)}>
+              <option value="all">Усі</option>
+              <option value="connected">Підключені</option>
+              <option value="disconnected">Не підключені</option>
+              <option value="muted">Сповіщення вимкнено</option>
+              <option value="blocked">Бот заблоковано</option>
+            </select>
+          </label>
         </form>
 
         {loading ? <p className={styles.empty}>Оновлюємо картки…</p> : data?.teachers.length ? (
@@ -652,14 +666,14 @@ function TeacherDirectoryPanel({
                 <button type="button" key={teacher.id} data-selected={selectedId === teacher.id} onClick={() => void selectTeacher(teacher.id)}>
                   <TeacherAvatar teacher={teacher} size="small" />
                   <span className={styles.teacherIdentity}><strong>{teacher.fullName}</strong><small>{[teacher.subjectPosition, teacher.primaryLocation?.name, accountRoleLabel(teacher.accountRole)].filter(Boolean).join(" · ") || "Дані ще не заповнено"}</small></span>
-                  <span className={styles.badges}><StatusBadge teacher={teacher} />{teacher.attention.overdueLoans ? <em>{teacher.attention.overdueLoans} простроч.</em> : null}{teacher.attention.openRequests ? <em>{teacher.attention.openRequests} заяв.</em> : null}</span>
+                  <span className={styles.badges}><StatusBadge teacher={teacher} /><TelegramStatusBadge teacher={teacher} />{teacher.attention.overdueLoans ? <em>{teacher.attention.overdueLoans} простроч.</em> : null}{teacher.attention.openRequests ? <em>{teacher.attention.openRequests} заяв.</em> : null}</span>
                 </button>
               ))}
               {data.page.hasMore && data.page.nextCursor ? <button className={styles.loadMore} type="button" onClick={() => void load(data.page.nextCursor)} disabled={loadingMore}>{loadingMore ? "Завантажуємо…" : "Показати ще"}</button> : null}
             </div>
             <aside className={styles.detailRegion} aria-label="Картка вибраного вчителя">
               {detailLoading ? <p className={styles.empty}>Відкриваємо картку…</p> : detail ? (
-                <TeacherDetailCard detail={detail} locations={data.locations} writesEnabled={writesEnabled} onClose={() => { detailRequestRef.current += 1; selectedIdRef.current = null; setDetail(null); setSelectedId(null); }} onSaved={mutationSaved} onDeleted={async () => { selectedIdRef.current = null; setDetail(null); setSelectedId(null); onNotice("Порожню помилкову картку видалено."); await load(); }} />
+                <TeacherDetailCard detail={detail} locations={data.locations} writesEnabled={writesEnabled} onClose={() => { detailRequestRef.current += 1; selectedIdRef.current = null; setDetail(null); setSelectedId(null); }} onSaved={mutationSaved} onDeleted={async () => { selectedIdRef.current = null; setDetail(null); setSelectedId(null); onNotice("Картку й доступ учителя видалено. Історію обліку збережено."); await load(); }} />
               ) : <div className={styles.detailPlaceholder}><span aria-hidden="true"><SiteIcon name="profile" size={28} /></span><h3>Виберіть учителя</h3><p>Тут з’являться профіль, замовлення, фактичні видачі та відвідування.</p></div>}
             </aside>
           </div>
@@ -773,8 +787,6 @@ function TeacherDetailCard({
   const [actionError, setActionError] = useState("");
   const teacher = detail.teacher;
   const closeBlockers = teacher.status === "active" ? teacherCloseBlockers(detail) : [];
-  const deletionAllowed = detail.dependencySummary.totalDependencies === 0 && teacher.accountRole === "teacher";
-  const deletionBlockers = teacherDeletionBlockers(detail);
 
   async function changeStatus() {
     const action = teacher.status === "active" ? "close" : "restore";
@@ -799,13 +811,12 @@ function TeacherDetailCard({
   }
 
   async function remove() {
-    if (!deletionAllowed) return;
-    const confirmation = window.prompt(`Безповоротно видаляється лише порожня помилкова картка. Для підтвердження введіть повне ПІБ:\n${teacher.fullName}`)?.trim();
+    const confirmation = window.prompt(`Картку буде прибрано зі списку, доступ, PIN і сеанси буде вимкнено. Видачі, замовлення та журнал дій залишаться в обліку.\n\nДля підтвердження введіть повне ПІБ:\n${teacher.fullName}`)?.trim();
     if (confirmation !== teacher.fullName) return;
     setBusy(true);
     setActionError("");
     try {
-      await deleteEmptyTeacherProfile(teacher.id, teacher.version);
+      await deleteTeacherProfile(teacher.id, teacher.version, confirmation);
       await onDeleted();
     } catch (error) {
       setActionError(errorMessage(error));
@@ -818,7 +829,7 @@ function TeacherDetailCard({
     <article className={styles.detailCard}>
       <header>
         <TeacherAvatar teacher={teacher} size="large" />
-        <div><p>{teacher.status === "active" ? "Активна картка" : "Картка закрита"}</p><h3>{teacher.fullName}</h3><small>{[teacher.subjectPosition || "Посаду або предмет не вказано", accountRoleLabel(teacher.accountRole)].join(" · ")}</small></div>
+        <div><p>{teacher.status === "active" ? "Активна картка" : "Картка закрита"}</p><h3>{teacher.fullName}</h3><small>{[teacher.subjectPosition || "Посаду або предмет не вказано", accountRoleLabel(teacher.accountRole)].join(" · ")}</small><div className={styles.teacherHeaderBadges}><TelegramStatusBadge teacher={teacher} /></div></div>
         <button className={styles.detailClose} type="button" onClick={onClose} aria-label="Закрити картку"><SiteIcon name="close" size={18} /></button>
       </header>
       <nav className={styles.detailTabs} aria-label="Дані вчителя">
@@ -830,9 +841,9 @@ function TeacherDetailCard({
       ) : (
         <div className={styles.profilePane}>
           <dl><div><dt>Предмет / посада</dt><dd>{teacher.subjectPosition || "—"}</dd></div><div><dt>Обліковий рівень</dt><dd>{accountRoleLabel(teacher.accountRole)}</dd></div><div><dt>Основний кабінет</dt><dd>{teacher.primaryLocation?.name || "—"}</dd></div><div><dt>Мобільний номер</dt><dd>{teacher.serviceContact || "—"}</dd></div><div><dt>Внутрішня примітка</dt><dd>{teacher.librarianNote || "—"}</dd></div></dl>
-          <div className={styles.profileActions}><button type="button" onClick={() => setEditing(true)} disabled={!writesEnabled || busy}>Редагувати</button><button type="button" onClick={() => setTab("access")}>Код і доступ</button><button type="button" onClick={() => void changeStatus()} disabled={!writesEnabled || busy || (teacher.status === "active" && closeBlockers.length > 0)}>{teacher.status === "active" ? "Закрити картку" : "Поновити картку"}</button><button className={styles.dangerButton} type="button" onClick={() => void remove()} disabled={!writesEnabled || busy || !deletionAllowed} title={teacher.accountRole !== "teacher" ? "Обліковий запис адміністратора або бібліотекаря не видаляється; картку учителя можна лише закрити" : deletionAllowed ? "Безповоротно видалити порожню помилкову картку" : "Картка має пов’язані дані, тому її можна лише закрити"}>Видалити картку</button></div>
+          <div className={styles.profileActions}><button type="button" onClick={() => setEditing(true)} disabled={!writesEnabled || busy}>Редагувати</button><button type="button" onClick={() => setTab("access")}>Код і доступ</button><button type="button" onClick={() => void changeStatus()} disabled={!writesEnabled || busy || (teacher.status === "active" && closeBlockers.length > 0)}>{teacher.status === "active" ? "Закрити картку" : "Поновити картку"}</button><button className={styles.dangerButton} type="button" onClick={() => void remove()} disabled={!writesEnabled || busy} title="Видалити картку й доступ, зберігши історію обліку">Видалити картку</button></div>
           {closeBlockers.length ? <p className={styles.closeGuard}>Щоб закрити картку, спочатку: {closeBlockers.join("; ")}.</p> : null}
-          {!deletionAllowed && deletionBlockers.length ? <p className={styles.deleteGuard}>Картку не можна видалити: {deletionBlockers.join(", ")}. Її можна лише закрити.</p> : null}
+          <p className={styles.deleteGuard}>Видалення прибере картку й доступ, але не видалить видачі, замовлення, відвідування та журнал операцій.</p>
         </div>
       ) : tab === "access" ? <TeacherAccessAdmin key={teacher.id} writesEnabled={writesEnabled} teacherId={teacher.id} embedded /> : tab === "orders" ? <CompactRecords kind="orders" detail={detail} /> : tab === "issued" ? <CompactRecords kind="issued" detail={detail} /> : <CompactRecords kind="visits" detail={detail} />}
     </article>
@@ -983,9 +994,25 @@ function StatusBadge({ teacher }: { teacher: TeacherDirectoryRow }) {
 
 function TeacherAvatar({ teacher, size }: { teacher: TeacherDirectoryRow; size: "small" | "large" }) {
   const className = size === "large" ? styles.largeAvatar : styles.avatar;
-  return teacher.photoUrl
-    ? <img className={`${className} ${styles.teacherPhoto}`} src={teacher.photoUrl} alt={`Фото ${teacher.fullName}`} />
-    : <span className={className} aria-hidden="true">{teacherInitials(teacher.fullName)}</span>;
+  return (
+    <span className={`${className} ${styles.avatarFrame}`}>
+      {teacher.photoUrl
+        ? <img className={styles.teacherPhoto} src={teacher.photoUrl} alt={`Фото ${teacher.fullName}`} />
+        : <span aria-hidden="true">{teacherInitials(teacher.fullName)}</span>}
+      {teacher.telegram.connected ? (
+        <span className={styles.telegramAvatarIndicator} role="img" aria-label={teacher.telegram.notificationsMuted ? "Telegram підключено, сповіщення вимкнено" : "Telegram підключено"} title={teacher.telegram.notificationsMuted ? "Telegram: сповіщення вимкнено" : "Telegram підключено"}>
+          <SiteIcon name={teacher.telegram.notificationsMuted ? "bell-off" : "telegram"} size={11} />
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function TelegramStatusBadge({ teacher }: { teacher: TeacherDirectoryRow }) {
+  if (teacher.telegram.status === "blocked") return <span className={styles.telegramBlockedBadge}><SiteIcon name="telegram" size={12} /> Бот заблоковано</span>;
+  if (teacher.telegram.connected && teacher.telegram.notificationsMuted) return <span className={styles.telegramMutedBadge}><SiteIcon name="bell-off" size={12} /> Сповіщення вимкнено</span>;
+  if (teacher.telegram.connected) return <span className={styles.telegramConnectedBadge}><SiteIcon name="telegram" size={12} /> Telegram</span>;
+  return <span className={styles.telegramDisconnectedBadge}><SiteIcon name="unlink" size={12} /> Не підключено</span>;
 }
 
 function StatusPill({ value }: { value: string }) {
@@ -1022,22 +1049,6 @@ function teacherCloseBlockers(detail: TeacherDetail): string[] {
   ].filter(Boolean);
 }
 
-function teacherDeletionBlockers(detail: TeacherDetail): string[] {
-  const labels: Record<string, string> = {
-    credentials: "виданий код",
-    sessions: "сеанси входу",
-    visits: "відвідування",
-    requests: "замовлення",
-    loans: "видачі",
-    classAssignments: "призначення класів",
-    classResponsibilities: "класні видачі",
-    notifications: "сповіщення",
-  };
-  return Object.entries(detail.dependencySummary)
-    .filter(([key, value]) => key !== "totalDependencies" && !key.startsWith("active") && !key.startsWith("future") && !key.startsWith("open") && Number(value) > 0)
-    .map(([key, value]) => `${labels[key] ?? key}: ${value}`);
-}
-
 function statusLabel(value: string) {
   return ({ submitted: "Нове", in_review: "Опрацьовується", reserved: "Підготовлено", ready: "Готове", partially_ready: "Частково", completed: "Виконано", rejected: "Відхилено", cancelled: "Скасовано", active: "Активне", open: "Відкрита", closed: "Закрита" } as Record<string, string>)[value] ?? value;
 }
@@ -1049,6 +1060,9 @@ function accountRoleLabel(role: TeacherDirectoryRow["accountRole"]) {
 function attentionHint(label: string) {
   if (label === "Учителі без коду") return "Доступ до кабінету ще не видано";
   if (label === "Заблокований доступ") return "Перевірити невдалі спроби входу";
+  if (label === "Telegram не підключено") return "Учитель ще не активував бота";
+  if (label === "Сповіщення Telegram вимкнено") return "Telegram підключено, але повідомлення вимкнені";
+  if (label === "Бот Telegram заблоковано") return "Telegram відхиляє повідомлення бота";
   if (label === "Прострочені видачі") return "Потрібно нагадати про повернення";
   return "Потрібно опрацювати або підготувати";
 }

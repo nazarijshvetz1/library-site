@@ -20,6 +20,14 @@ export type TeacherAttention = {
   readyUncollected: number;
 };
 
+export type TeacherTelegram = {
+  connected: boolean;
+  status: "active" | "disabled" | "blocked" | null;
+  notificationsEnabled: boolean;
+  notificationsMuted: boolean;
+  linkedAt: string | null;
+};
+
 export type TeacherDirectoryRow = {
   id: string;
   fullName: string;
@@ -33,6 +41,7 @@ export type TeacherDirectoryRow = {
   closedAt?: string | null;
   version: number;
   access: TeacherAccess;
+  telegram: TeacherTelegram;
   attention: TeacherAttention;
   createdAt: string;
   updatedAt: string;
@@ -48,6 +57,10 @@ export type TeacherDirectoryCounters = {
   withOpenLoans: number;
   withOverdueLoans: number;
   withOpenRequests: number;
+  telegramConnected: number;
+  telegramNotConnected: number;
+  telegramNotificationsOff: number;
+  telegramBlocked: number;
 };
 
 export type TeacherDirectoryEnvelope = {
@@ -137,6 +150,7 @@ export type TeacherMutationEnvelope = {
 export type TeacherDirectoryFilters = {
   query?: string;
   status?: "active" | "inactive" | "all";
+  telegram?: "all" | "connected" | "disconnected" | "muted" | "blocked";
   cursor?: string | null;
   limit?: number;
 };
@@ -167,6 +181,7 @@ export function teacherDirectoryUrl(filters: TeacherDirectoryFilters): string {
   const params = new URLSearchParams();
   if (filters.query?.trim()) params.set("q", filters.query.trim());
   params.set("status", filters.status ?? "active");
+  params.set("telegram", filters.telegram ?? "all");
   if (filters.cursor) params.set("cursor", filters.cursor);
   params.set("limit", String(filters.limit ?? 30));
   return `${TEACHER_DIRECTORY_URL}?${params.toString()}`;
@@ -243,19 +258,20 @@ export async function changeTeacherStatus(
   });
 }
 
-export async function deleteEmptyTeacherProfile(teacherId: string, expectedVersion: number) {
+export async function deleteTeacherProfile(teacherId: string, expectedVersion: number, confirmedFullName: string) {
   return teacherMutation<{ success: true; deleted: true; teacherId: string }>(teacherDetailUrl(teacherId), {
     method: "DELETE",
     body: JSON.stringify({
       requestId: crypto.randomUUID(),
       expectedVersion,
-      confirmation: "DELETE_EMPTY_TEACHER",
+      confirmation: "DELETE_TEACHER_CARD",
+      confirmedFullName: confirmedFullName.trim(),
     }),
   });
 }
 
 export function emptyTeacherCounters(): TeacherDirectoryCounters {
-  return { total: 0, active: 0, inactive: 0, withCode: 0, withoutCode: 0, locked: 0, withOpenLoans: 0, withOverdueLoans: 0, withOpenRequests: 0 };
+  return { total: 0, active: 0, inactive: 0, withCode: 0, withoutCode: 0, locked: 0, withOpenLoans: 0, withOverdueLoans: 0, withOpenRequests: 0, telegramConnected: 0, telegramNotConnected: 0, telegramNotificationsOff: 0, telegramBlocked: 0 };
 }
 
 export function teacherProfileDraft(teacher?: TeacherDirectoryRow | null): TeacherProfileDraft {

@@ -6,13 +6,14 @@ import {
   LIBRARIAN_SECTIONS,
   LIBRARY_EMBLEM_URL,
   librarianSectionHref,
+  librarianToolHref,
   librarianUtilityHref,
 } from "../app/librarian/_components/librarian-routes.ts";
 
 const expectedWebRoutes = {
   home: "/librarian",
   fund: "/librarian?tool=catalog",
-  circulation: "/librarian?tool=issue",
+  circulation: "/librarian?tool=return",
   orders: "/librarian/orders",
   visits: "/librarian/visits",
   teachers: "/librarian/teachers",
@@ -23,7 +24,7 @@ const expectedWebRoutes = {
 const expectedTelegramRoutes = {
   home: "/librarian/telegram/cabinet?target=home",
   fund: "/librarian/telegram/cabinet?target=home&tool=catalog",
-  circulation: "/librarian/telegram/cabinet?target=home&tool=issue",
+  circulation: "/librarian/telegram/cabinet?target=home&tool=return",
   orders: "/librarian/telegram/cabinet?target=teachers&tab=orders",
   visits: "/librarian/telegram/cabinet?target=visits",
   teachers: "/librarian/telegram/cabinet?target=teachers",
@@ -45,6 +46,8 @@ test("shared librarian route helper freezes web and Telegram Mini App destinatio
   assert.equal(librarianUtilityHref("excelImport", true), null);
   assert.equal(librarianUtilityHref("telegram", false), "/librarian/teachers?tab=telegram");
   assert.equal(librarianUtilityHref("telegram", true), "/librarian/telegram/cabinet?target=teachers&tab=telegram");
+  assert.equal(librarianToolHref("catalog", false), "/librarian?tool=catalog");
+  assert.equal(librarianToolHref("catalog", true), "/librarian/telegram/cabinet?target=home&tool=catalog");
 });
 
 test("LibrarianShell keeps the official emblem, full-page navigation, and accessible mobile drawer", async () => {
@@ -69,6 +72,14 @@ test("LibrarianShell keeps the official emblem, full-page navigation, and access
   assert.match(source, /excelExportHref \? <a href=\{excelExportHref\}>Експорт/u);
   assert.match(source, /excelImportHref \? <a href=\{excelImportHref\}>Імпорт/u);
   assert.match(source, /className=\{styles\.sidebarUtilities\}/u);
+  assert.match(source, /subsections\?: LibrarianSubsection\[\]/u);
+  assert.match(source, /activeSubsection\?: string/u);
+  assert.match(source, /onSubsectionNavigate\?: \(id: string\) => void/u);
+  assert.match(source, /aria-label="Назад до попередньої сторінки"/u);
+  assert.match(source, /aria-label="Вперед до наступної сторінки"/u);
+  assert.match(source, /window\.sessionStorage\.getItem\(key\)/u);
+  assert.match(source, /window\.location\.assign\(destination\)/u);
+  assert.match(source, /"librarian:navigation-change"/u);
   assert.match(source, /<div className=\{`\$\{styles\.shell\}/u);
   assert.doesNotMatch(source, /<main\b/u);
 

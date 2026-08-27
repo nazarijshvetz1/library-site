@@ -2911,3 +2911,164 @@
   .actionPane { border-radius: var(--system-radius-md); }
   .actionPane { padding: 11px; }
 }
+
+/* The global cabinet shell is now the only navigation frame. */
+.shell { min-height: 0; }
+.body { display: block!important; }
+.sidebar,
+.mobileTools { display: none!important; }
+
+.backToResults {
+  display: none;
+}
+
+.materialActionContext {
+  margin: 0 0 12px;
+  padding: 9px;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--system-line);
+  border-radius: var(--system-radius-md);
+  background: #f5f8f2;
+}
+
+.materialActionThumbnail {
+  width: 42px;
+  height: 58px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: #fff;
+  background: var(--green-800);
+  font: 700 20px/1 Georgia, serif;
+}
+
+.materialActionThumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.materialActionContext > div:nth-child(2) {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.materialActionContext span,
+.materialActionContext small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.materialActionContext strong {
+  overflow: hidden;
+  color: var(--green-950);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.materialActionContext > button,
+.backToResults {
+  min-height: 36px;
+  padding: 0 10px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--system-line);
+  border-radius: var(--system-radius-sm);
+  color: var(--green-900);
+  background: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.materialActionContext > button {
+  display: inline-flex;
+}
+
+.detailActionGrid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.detailActionGrid button {
+  width: 100%;
+  min-height: 38px;
+  padding-inline: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 9px;
+}
+
+.materialTabs {
+  margin: 12px 0 2px;
+  padding: 3px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+  border: 1px solid var(--system-line);
+  border-radius: var(--system-radius-sm);
+  background: #f5f8f2;
+}
+
+.materialTabs button {
+  min-height: 34px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.materialTabs button[aria-pressed="true"] {
+  color: #fff;
+  background: var(--green-800);
+}
+
+.materialTabs span {
+  min-width: 18px;
+  height: 18px;
+  padding-inline: 4px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .16);
+  font-size: 8px;
+}
+
+@media (max-width: 1080px) {
+  .workGridSelected .searchPane { display: none; }
+  .workGridSelected .actionPane { margin-top: 0; }
+  .workGridSelected .backToResults {
+    width: 100%;
+    margin-bottom: 9px;
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 540px) {
+  .detailActionGrid { grid-template-columns: 1fr 1fr; }
+  .materialActionContext {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+  .materialActionThumbnail { width: 38px; height: 52px; }
+  .materialActionContext > button { grid-column: 1 / -1; width: 100%; }
+  .materialTabs button { padding-inline: 4px; font-size: 9px; }
+}

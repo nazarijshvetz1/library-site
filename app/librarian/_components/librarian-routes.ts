@@ -19,7 +19,7 @@ export const LIBRARY_EMBLEM_URL = `${PUBLIC_CATALOG_URL}library-logo.png`;
 const WEB_SECTION_ROUTES: Record<LibrarianSection, string> = {
   home: "/librarian",
   fund: "/librarian?tool=catalog",
-  circulation: "/librarian?tool=issue",
+  circulation: "/librarian?tool=return",
   orders: "/librarian/orders",
   visits: "/librarian/visits",
   teachers: "/librarian/teachers",
@@ -30,13 +30,23 @@ const WEB_SECTION_ROUTES: Record<LibrarianSection, string> = {
 const TELEGRAM_SECTION_ROUTES: Record<LibrarianSection, string> = {
   home: "/librarian/telegram/cabinet?target=home",
   fund: "/librarian/telegram/cabinet?target=home&tool=catalog",
-  circulation: "/librarian/telegram/cabinet?target=home&tool=issue",
+  circulation: "/librarian/telegram/cabinet?target=home&tool=return",
   orders: "/librarian/telegram/cabinet?target=teachers&tab=orders",
   visits: "/librarian/telegram/cabinet?target=visits",
   teachers: "/librarian/telegram/cabinet?target=teachers",
   acquisitions: "/librarian/telegram/cabinet?target=acquisitions",
   management: "/librarian/telegram/cabinet?target=home&tool=locations",
 };
+
+/** Stable deep links for the nested D1 workspace navigation. */
+export function librarianToolHref(tool: string, telegramMiniApp = false): string {
+  const params = new URLSearchParams();
+  if (telegramMiniApp) params.set("target", "home");
+  params.set("tool", tool);
+  return telegramMiniApp
+    ? `/librarian/telegram/cabinet?${params.toString()}`
+    : `/librarian?${params.toString()}`;
+}
 
 /** Full-page destinations used by both the website and Telegram Mini App shells. */
 export function librarianSectionHref(

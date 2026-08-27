@@ -274,14 +274,43 @@ test("staff accounts can hold a closable teacher card without losing their prima
   assert.equal(ctx.sqlite.prepare("SELECT closed_at FROM teacher_profiles WHERE teacher_user_id='USR-ADMIN'").get().closed_at, null);
 
   const restored = await store.getTeacherRegistryDetail(ctx.db, "USR-ADMIN");
-  await assert.rejects(
-    () => store.deleteEmptyTeacherRegistryCard(ctx.db, ctx.user, "USR-ADMIN", {
-      requestId: crypto.randomUUID(),
-      expectedVersion: restored.teacher.version,
-      confirmation: "DELETE_EMPTY_TEACHER",
-    }),
-    (error) => error.code === "teacher_delete_staff_role" && error.details.accountRole === "admin",
-  );
+  const removed = await store.deleteTeacherRegistryCard(ctx.db, ctx.user, "USR-ADMIN", {
+    requestId: crypto.randomUUID(),
+    expectedVersion: restored.teacher.version,
+    confirmation: "DELETE_TEACHER_CARD",
+    confirmedFullName: restored.teacher.fullName,
+  });
+  assert.equal(removed.deleted, true);
+  assert.equal(removed.historyPreserved, true);
+  assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM teacher_profiles WHERE teacher_user_id='USR-ADMIN'").get().n, 0);
+  assert.deepEqual({ ...ctx.sqlite.prepare("SELECT role,status FROM users WHERE id='USR-ADMIN'").get() }, { role: "admin", status: "active" });
+});
+
+test("delete removes a teacher card without dependency blockers while preserving accounting history", async () => {
+  const ctx = await context();
+  const created = await store.createTeacherRegistryCard(ctx.db, ctx.user, createInput());
+  const now = "2026-08-13T09:00:00.000Z";
+  ctx.sqlite.prepare(`INSERT INTO material_requests(id,teacher_user_id,status,teacher_notes,librarian_note,rejection_reason,
+    pickup_location_id,resulting_loan_id,due_at,reviewed_by_user_id,cancelled_by_user_id,version,submitted_at,ready_at,
+    completed_at,rejected_at,cancelled_at,created_at,updated_at) VALUES('MR-HISTORY',?,'cancelled','','','',NULL,NULL,NULL,
+    NULL,NULL,1,?,NULL,NULL,NULL,?,?,?)`).run(created.teacherId, now, now, now, now);
+  ctx.sqlite.prepare(`INSERT INTO telegram_connections(user_id,telegram_user_id,chat_id,username,status,notify_orders,
+    notify_visits,version,linked_at,disabled_at,last_success_at,last_failure_at,last_error_code,created_at,updated_at)
+    VALUES(?,?,?,NULL,'active',1,0,1,?,NULL,NULL,NULL,NULL,?,?)`)
+    .run(created.teacherId, `tg-${created.teacherId}`, `chat-${created.teacherId}`, now, now, now);
+  const detail = await store.getTeacherRegistryDetail(ctx.db, created.teacherId);
+  const removed = await store.deleteTeacherRegistryCard(ctx.db, ctx.user, created.teacherId, {
+    requestId: crypto.randomUUID(),
+    expectedVersion: detail.teacher.version,
+    confirmation: "DELETE_TEACHER_CARD",
+    confirmedFullName: detail.teacher.fullName,
+  });
+  assert.equal(removed.deleted, true);
+  assert.equal(ctx.sqlite.prepare("SELECT status FROM users WHERE id=?").get(created.teacherId).status, "inactive");
+  assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM teacher_profiles WHERE teacher_user_id=?").get(created.teacherId).n, 0);
+  assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM telegram_connections WHERE user_id=?").get(created.teacherId).n, 0);
+  assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM material_requests WHERE teacher_user_id=?").get(created.teacherId).n, 1);
+  assert.deepEqual(ctx.sqlite.prepare("PRAGMA foreign_key_check").all(), []);
 });
 
 test("mutation zero-row race rolls back command, audit and partial profile changes", async () => {
@@ -320,12 +349,45 @@ test("list exposes exact counters, private note only in detail, and nested mater
   assert.equal(list.counters.total, 1);
   assert.equal(list.counters.active, 1);
   assert.equal(list.counters.withoutCode, 1);
+  assert.equal(list.counters.telegramConnected, 0);
+  assert.equal(list.counters.telegramNotConnected, 1);
   assert.equal(list.teachers.length, 1);
   assert.equal(Object.hasOwn(list.teachers[0], "librarianNote"), false);
   const detail = await store.getTeacherRegistryDetail(ctx.db, created.teacherId);
   assert.equal(detail.teacher.librarianNote, "Лише бібліотекарю");
   assert.deepEqual(detail.requests, []);
   assert.deepEqual(detail.loans, []);
+});
+
+test("registry exposes and filters connected, disconnected, muted and blocked Telegram states", async () => {
+  const ctx = await context();
+  const now = "2026-08-13T09:00:00.000Z";
+  const connected = await store.createTeacherRegistryCard(ctx.db, ctx.user, createInput("Андрусенко Олена"));
+  const muted = await store.createTeacherRegistryCard(ctx.db, ctx.user, createInput("Бондар Ірина"));
+  const blocked = await store.createTeacherRegistryCard(ctx.db, ctx.user, createInput("Василенко Марія"));
+  await store.createTeacherRegistryCard(ctx.db, ctx.user, createInput("Гнатюк Софія"));
+  const insertTelegram = ctx.sqlite.prepare(`INSERT INTO telegram_connections(user_id,telegram_user_id,chat_id,username,
+    status,notify_orders,notify_visits,version,linked_at,disabled_at,last_success_at,last_failure_at,last_error_code,
+    created_at,updated_at) VALUES(?,?,?,NULL,?,?,?,?,?,?,NULL,NULL,NULL,?,?)`);
+  insertTelegram.run(connected.teacherId, "tg-connected", "chat-connected", "active", 1, 1, 1, now, null, now, now);
+  insertTelegram.run(muted.teacherId, "tg-muted", "chat-muted", "active", 0, 0, 1, now, null, now, now);
+  insertTelegram.run(blocked.teacherId, "tg-blocked", "chat-blocked", "blocked", 1, 1, 1, now, now, now, now);
+  const list = (telegram) => store.listTeacherRegistry(ctx.db, {
+    status: "all", attention: "all", telegram, query: "", limit: 30, cursor: null,
+  });
+  const all = await list("all");
+  assert.equal(all.counters.telegramConnected, 2);
+  assert.equal(all.counters.telegramNotConnected, 1);
+  assert.equal(all.counters.telegramNotificationsOff, 1);
+  assert.equal(all.counters.telegramBlocked, 1);
+  assert.equal((await list("connected")).teachers.length, 2);
+  assert.equal((await list("muted")).teachers[0].telegram.notificationsMuted, true);
+  assert.equal((await list("blocked")).teachers[0].telegram.status, "blocked");
+  const disconnected = (await list("disconnected")).teachers;
+  assert.equal(disconnected.length, 1);
+  assert.equal(disconnected[0].telegram.connected, false);
+  assert.equal(Object.hasOwn(all.teachers[0].telegram, "telegramUserId"), false);
+  assert.equal(Object.hasOwn(all.teachers[0].telegram, "chatId"), false);
 });
 
 test("Kyiv date remains deterministic across UTC midnight", () => {

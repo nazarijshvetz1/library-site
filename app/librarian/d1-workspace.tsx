@@ -41,9 +41,10 @@ import AcademicWorkspace, {
   type AcademicTool,
   isAcademicTool,
 } from "./academic-workspace";
-import LibrarianShell from "./_components/librarian-shell";
+import LibrarianShell, { type LibrarianSubsection } from "./_components/librarian-shell";
 import {
   librarianSectionHref,
+  librarianToolHref,
   type LibrarianSection,
 } from "./_components/librarian-routes";
 import SiteIcon, { type SiteIconName } from "../_components/site-icon";
@@ -419,6 +420,7 @@ function buildMaterialTitleSuggestionUrl(title: string): string {
 
 type ToolItem = { id: Tool; icon: SiteIconName; label: string; hint: string };
 type ToolGroup = { id: string; label: string; items: ToolItem[] };
+type MaterialActionTool = "receipt" | "transfer" | "writeoff" | "count" | "issue";
 
 const DASHBOARD_TOOL: ToolItem = {
   id: "dashboard",
@@ -434,17 +436,12 @@ const TOOL_GROUPS: ToolGroup[] = [
     items: [
       { id: "catalog", icon: "catalog", label: "Каталог", hint: "Пошук і картка" },
       { id: "create", icon: "new-material", label: "Новий матеріал", hint: "Додати без чернетки" },
-      { id: "receipt", icon: "receipt", label: "Надходження", hint: "Додати примірники" },
-      { id: "transfer", icon: "transfer", label: "Переміщення", hint: "Змінити розміщення" },
-      { id: "count", icon: "count", label: "Фактична кількість", hint: "Звірити залишок" },
-      { id: "writeoff", icon: "writeoff", label: "Списання", hint: "Зменшити залишок" },
     ],
   },
   {
     id: "circulation",
     label: "Видача й повернення",
     items: [
-      { id: "issue", icon: "issue-teacher", label: "Видача вчителю", hint: "Оформити видачу" },
       { id: "return", icon: "return", label: "Повернення", hint: "Прийняти книги" },
       { id: "class-issue", icon: "issue-class", label: "Видача класу", hint: "Кілька матеріалів" },
       { id: "class-return", icon: "return-class", label: "Повернення класу", hint: "Частково або повністю" },
@@ -472,7 +469,15 @@ const TOOL_GROUPS: ToolGroup[] = [
   },
 ];
 
-const TOOLS: ToolItem[] = [DASHBOARD_TOOL, ...TOOL_GROUPS.flatMap((group) => group.items)];
+const MATERIAL_ACTION_ITEMS: ToolItem[] = [
+  { id: "issue", icon: "issue-teacher", label: "Видати вчителю", hint: "Оформити видачу" },
+  { id: "receipt", icon: "receipt", label: "Додати примірники", hint: "Оформити надходження" },
+  { id: "transfer", icon: "transfer", label: "Перемістити", hint: "Змінити розміщення" },
+  { id: "count", icon: "count", label: "Звірити кількість", hint: "Зафіксувати залишок" },
+  { id: "writeoff", icon: "writeoff", label: "Списати", hint: "Зменшити залишок" },
+];
+const MATERIAL_ACTION_IDS = new Set<MaterialActionTool>(MATERIAL_ACTION_ITEMS.map((item) => item.id as MaterialActionTool));
+const TOOLS: ToolItem[] = [DASHBOARD_TOOL, ...TOOL_GROUPS.flatMap((group) => group.items), ...MATERIAL_ACTION_ITEMS];
 const TOOL_IDS = new Set<Tool>(TOOLS.map((item) => item.id));
 
 function parseTool(value: string | null): Tool | null {
@@ -481,9 +486,25 @@ function parseTool(value: string | null): Tool | null {
 
 function librarianSectionForTool(tool: Tool): LibrarianSection {
   if (tool === "dashboard") return "home";
-  if (["issue", "return", "class-issue", "class-return"].includes(tool)) return "circulation";
+  if (["return", "class-issue", "class-return"].includes(tool)) return "circulation";
   if (tool === "locations" || tool === "contacts" || isAcademicTool(tool)) return "management";
   return "fund";
+}
+
+function librarianSubsectionForTool(tool: Tool): string | undefined {
+  if (MATERIAL_ACTION_IDS.has(tool as MaterialActionTool)) return "catalog";
+  return tool === "dashboard" ? undefined : tool;
+}
+
+function librarianSubsections(telegramMiniApp: boolean): LibrarianSubsection[] {
+  return TOOL_GROUPS.flatMap((group) => group.items.map((item) => ({
+    id: item.id,
+    section: librarianSectionForTool(item.id),
+    label: item.label,
+    hint: item.hint,
+    icon: item.icon,
+    href: librarianToolHref(item.id, telegramMiniApp),
+  })));
 }
 
 export default function D1LibrarianWorkspace({
@@ -529,6 +550,7 @@ export default function D1LibrarianWorkspace({
   const [acquisitionPrefill, setAcquisitionPrefill] = useState<AcquisitionMaterialPrefill | null>(null);
   const [acquisitionReturnId, setAcquisitionReturnId] = useState("");
   const workspaceTitleRef = useRef<HTMLHeadingElement>(null);
+  const shellSubsections = useMemo(() => librarianSubsections(telegramMiniApp), [telegramMiniApp]);
 
   const loadDetail = useCallback(async (materialId: string) => {
     const request = detailRequestRef.current + 1;
@@ -731,6 +753,7 @@ export default function D1LibrarianWorkspace({
         "",
         `${url.pathname}${url.search}${url.hash}`,
       );
+      window.dispatchEvent(new Event("librarian:navigation-change"));
     }
     window.queueMicrotask(() => workspaceTitleRef.current?.focus());
   }
@@ -750,6 +773,17 @@ export default function D1LibrarianWorkspace({
     window.queueMicrotask(() => workspaceTitleRef.current?.focus());
   }
 
+  function clearMaterialSelection() {
+    selectedIdRef.current = null;
+    detailRequestRef.current += 1;
+    setSelectedId(null);
+    setDetail(null);
+    setDetailState("idle");
+    setDetailError("");
+    setEditing(false);
+    if (MATERIAL_ACTION_IDS.has(tool as MaterialActionTool)) chooseTool("catalog");
+  }
+
   const showCatalogSearch = tool !== "dashboard"
     && !isAcademicTool(tool)
     && tool !== "return"
@@ -765,64 +799,13 @@ export default function D1LibrarianWorkspace({
       signOutHref={signOutHref}
       telegramMiniApp={telegramMiniApp}
       writesEnabled={writesEnabled}
+      subsections={shellSubsections}
+      activeSubsection={librarianSubsectionForTool(tool)}
+      onSubsectionNavigate={(id) => chooseTool(id as Tool)}
     >
       <main className={styles.shell}>
         <div className={styles.body}>
-        <aside className={styles.sidebar} aria-label="Робочі дії">
-          <p className={styles.sidebarLabel}>Робоче місце</p>
-          <nav className={styles.toolNav}>
-            <button
-              className={tool === DASHBOARD_TOOL.id ? styles.toolActive : styles.tool}
-              type="button"
-              aria-pressed={tool === DASHBOARD_TOOL.id}
-              onClick={() => chooseTool(DASHBOARD_TOOL.id)}
-            >
-              <span aria-hidden="true"><SiteIcon name={DASHBOARD_TOOL.icon} /></span>
-              <span>
-                <strong>{DASHBOARD_TOOL.label}</strong>
-                <small>{DASHBOARD_TOOL.hint}</small>
-              </span>
-            </button>
-            {TOOL_GROUPS.map((group) => (
-              <section className={styles.toolGroup} aria-labelledby={`tool-group-${group.id}`} key={group.id}>
-                <h2 id={`tool-group-${group.id}`}>{group.label}</h2>
-                {group.items.map((item) => (
-                  <button
-                    key={item.id}
-                    className={tool === item.id ? styles.toolActive : styles.tool}
-                    type="button"
-                    aria-pressed={tool === item.id}
-                    onClick={() => chooseTool(item.id)}
-                  >
-                    <span aria-hidden="true"><SiteIcon name={item.icon} /></span>
-                    <span>
-                      <strong>{item.label}</strong>
-                      <small>{item.hint}</small>
-                    </span>
-                  </button>
-                ))}
-              </section>
-            ))}
-          </nav>
-        </aside>
-
         <section className={styles.workspace}>
-          <label className={styles.mobileTools}>
-            <span>Робочий розділ</span>
-            <select
-              aria-label="Оберіть робочий розділ"
-              value={tool}
-              onChange={(event) => chooseTool(event.currentTarget.value as Tool)}
-            >
-              <option value={DASHBOARD_TOOL.id}>{DASHBOARD_TOOL.label}</option>
-              {TOOL_GROUPS.map((group) => (
-                <optgroup label={group.label} key={group.id}>
-                  {group.items.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}
-                </optgroup>
-              ))}
-            </select>
-          </label>
-
           <div className={styles.titleRow}>
             <div>
               <p className={styles.eyebrow}>D1 · швидкий режим</p>
@@ -866,7 +849,7 @@ export default function D1LibrarianWorkspace({
               onChooseTool={chooseTool}
             />
           ) : (
-          <div className={tool === "create" ? styles.workGridCreate : showCatalogSearch ? styles.workGrid : styles.workGridWide}>
+          <div className={`${tool === "create" ? styles.workGridCreate : showCatalogSearch ? styles.workGrid : styles.workGridWide} ${selectedId && (tool === "catalog" || MATERIAL_ACTION_IDS.has(tool as MaterialActionTool)) ? styles.workGridSelected : ""}`}>
             {showCatalogSearch && tool !== "create" ? (
               <CatalogSearch
                 filters={filters}
@@ -888,8 +871,17 @@ export default function D1LibrarianWorkspace({
             ) : null}
 
             <section className={styles.actionPane}>
+              {selectedId && (tool === "catalog" || MATERIAL_ACTION_IDS.has(tool as MaterialActionTool)) ? (
+                <button className={styles.backToResults} type="button" onClick={clearMaterialSelection}>
+                  <SiteIcon name="previous" size={17} /> Назад до результатів
+                </button>
+              ) : null}
+              {MATERIAL_ACTION_IDS.has(tool as MaterialActionTool) && detail ? (
+                <MaterialActionContext detail={detail} tool={tool as MaterialActionTool} onBack={() => chooseTool("catalog")} />
+              ) : null}
               {tool === "catalog" ? (
                 <MaterialCard
+                  key={detail?.id ?? "material-card"}
                   detail={detail}
                   state={detailState}
                   error={detailError}
@@ -1607,6 +1599,35 @@ function CatalogSearch({
   );
 }
 
+function MaterialActionContext({
+  detail,
+  tool,
+  onBack,
+}: {
+  detail: MaterialDetail;
+  tool: MaterialActionTool;
+  onBack: () => void;
+}) {
+  const action = MATERIAL_ACTION_ITEMS.find((item) => item.id === tool);
+  return (
+    <header className={styles.materialActionContext}>
+      <div className={styles.materialActionThumbnail}>
+        {detail.cover?.url || detail.thumbnailUrl
+          ? <img src={detail.cover?.url || detail.thumbnailUrl} alt="" />
+          : <span aria-hidden="true">Б</span>}
+      </div>
+      <div>
+        <span>{action?.label ?? "Дія з матеріалом"} · {detail.id}</span>
+        <strong>{detail.title}</strong>
+        <small>{detail.availableQuantity} доступно з {detail.totalQuantity}</small>
+      </div>
+      <button type="button" onClick={onBack}><SiteIcon name="previous" size={17} /> До картки</button>
+    </header>
+  );
+}
+
+type MaterialCardTab = "overview" | "holdings" | "links";
+
 function MaterialCard({
   detail,
   state,
@@ -1630,6 +1651,8 @@ function MaterialCard({
   onArchived: (materialId: string) => void;
   onChooseTool: (tool: Tool) => void;
 }) {
+  const [activeTab, setActiveTab] = useState<MaterialCardTab>("overview");
+
   if (state === "idle") return <ChooseMaterial />;
   if (state === "loading") return <PanelLoading />;
   if (state === "error" || !detail) {
@@ -1670,20 +1693,34 @@ function MaterialCard({
           <p className={styles.materialId}>{detail.id}</p>
           <h2>{detail.title}</h2>
           <p>{[detail.author, detail.year].filter(Boolean).join(" · ") || "Автор і рік не вказані"}</p>
-          <div className={styles.detailActions}>
+          <div className={styles.detailActionGrid} aria-label="Дії з матеріалом">
             <button
               className={styles.primaryButton}
+              type="button"
+              disabled={!writesEnabled}
+              onClick={() => onChooseTool("issue")}
+            >
+              <SiteIcon name="issue-teacher" size={18} /> Видати
+            </button>
+            <button className={styles.primaryButton} type="button" disabled={!writesEnabled} onClick={() => onChooseTool("receipt")}>
+              <SiteIcon name="receipt" size={18} /> Додати примірники
+            </button>
+            <button className={styles.secondaryButton} type="button" disabled={!writesEnabled} onClick={() => onChooseTool("transfer")}>
+              <SiteIcon name="transfer" size={18} /> Перемістити
+            </button>
+            <button className={styles.secondaryButton} type="button" disabled={!writesEnabled} onClick={() => onChooseTool("count")}>
+              <SiteIcon name="count" size={18} /> Звірити
+            </button>
+            <button className={styles.secondaryButton} type="button" disabled={!writesEnabled} onClick={() => onChooseTool("writeoff")}>
+              <SiteIcon name="writeoff" size={18} /> Списати
+            </button>
+            <button
+              className={styles.secondaryButton}
               type="button"
               disabled={!writesEnabled || typeof detail.version !== "number"}
               onClick={() => onEditing(true)}
             >
-              Редагувати матеріал
-            </button>
-            <button className={styles.secondaryButton} type="button" onClick={() => onChooseTool("count")}>
-              Встановити кількість
-            </button>
-            <button className={styles.secondaryButton} type="button" onClick={() => onChooseTool("issue")}>
-              Видати вчителю
+              <SiteIcon name="edit" size={18} /> Редагувати
             </button>
           </div>
           {writesEnabled && typeof detail.version !== "number" ? (
@@ -1701,7 +1738,13 @@ function MaterialCard({
         {detail.reservedQuantity ? <StockStat label="Зарезервовано" value={detail.reservedQuantity} /> : null}
       </div>
 
-      <section className={styles.detailSection}>
+      <nav className={styles.materialTabs} aria-label="Картка матеріалу">
+        <button type="button" aria-pressed={activeTab === "overview"} onClick={() => setActiveTab("overview")}>Огляд</button>
+        <button type="button" aria-pressed={activeTab === "holdings"} onClick={() => setActiveTab("holdings")}>Примірники <span>{detail.holdings.length}</span></button>
+        <button type="button" aria-pressed={activeTab === "links"} onClick={() => setActiveTab("links")}>Посилання <span>{detail.links.length}</span></button>
+      </nav>
+
+      {activeTab === "overview" ? <section className={styles.detailSection}>
         <h3>Відомості про видання</h3>
         <dl className={styles.factGrid}>
           <Fact label="Рубрика" value={detail.rubric} />
@@ -1712,9 +1755,9 @@ function MaterialCard({
           <Fact label="Видавництво" value={detail.publisher} />
         </dl>
         {detail.notes ? <p className={styles.notes}>{detail.notes}</p> : null}
-      </section>
+      </section> : null}
 
-      <section className={styles.detailSection}>
+      {activeTab === "holdings" ? <section className={styles.detailSection}>
         <div className={styles.sectionTitle}>
           <h3>Примірники й розміщення</h3>
           <span>{detail.holdings.length}</span>
@@ -1738,9 +1781,9 @@ function MaterialCard({
         ) : (
           <p className={styles.mutedText}>Місця з ненульовим залишком відсутні.</p>
         )}
-      </section>
+      </section> : null}
 
-      <section className={styles.detailSection}>
+      {activeTab === "links" ? <section className={styles.detailSection}>
         <div className={styles.sectionTitle}>
           <h3>Посилання та електронні версії</h3>
           <span>{detail.links.length}</span>
@@ -1765,7 +1808,7 @@ function MaterialCard({
         ) : (
           <p className={styles.mutedText}>Для цього матеріалу посилань ще немає.</p>
         )}
-      </section>
+      </section> : null}
     </div>
   );
 }

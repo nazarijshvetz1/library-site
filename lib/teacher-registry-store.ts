@@ -20,9 +20,11 @@ export type TeacherRegistryDatabase = {
 };
 
 export type TeacherStatus = "active" | "inactive";
+export type TeacherTelegramFilter = "all" | "connected" | "disconnected" | "muted" | "blocked";
 export type TeacherListOptions = {
   status: TeacherStatus | "all";
   attention: "all" | "orders" | "overdue" | "visits" | "access";
+  telegram: TeacherTelegramFilter;
   query: string;
   limit: number;
   cursor: string | null;
@@ -74,6 +76,10 @@ type TeacherBaseRow = {
   overdue_loans: number;
   ready_uncollected: number;
   upcoming_visits: number;
+  telegram_status: "active" | "disabled" | "blocked" | null;
+  telegram_notify_orders: number | null;
+  telegram_notify_visits: number | null;
+  telegram_linked_at: string | null;
 };
 
 export async function listTeacherRegistry(
@@ -112,6 +118,10 @@ export async function listTeacherRegistry(
       OR (c.status='active' AND c.locked_until>?))`);
     values.push(now);
   }
+  if (options.telegram === "connected") where.push("tc.status='active'");
+  if (options.telegram === "disconnected") where.push("(tc.user_id IS NULL OR tc.status='disabled')");
+  if (options.telegram === "muted") where.push("tc.status='active' AND tc.notify_orders=0 AND tc.notify_visits=0");
+  if (options.telegram === "blocked") where.push("tc.status='blocked'");
   if (cursor) {
     where.push("(u.sort_name > ? OR (u.sort_name=? AND u.id>?))");
     values.push(cursor.sortName, cursor.sortName, cursor.id);
@@ -283,58 +293,81 @@ export async function updateTeacherRegistryCard(
   return restoreTeacher(db, actor, current, input, requestHash);
 }
 
-export async function deleteEmptyTeacherRegistryCard(
+export async function deleteTeacherRegistryCard(
   db: TeacherRegistryDatabase,
   actorUser: ChatGPTUser,
   teacherId: string,
   input: TeacherDeleteInput,
 ) {
   const actor = await resolveActor(db, actorUser);
-  const requestHash = await sha256Json({ kind: "teacher.delete_empty", actor: actor.id, teacherId, input });
+  const requestHash = await sha256Json({ kind: "teacher.delete_card", actor: actor.id, teacherId, input });
   const replay = await mutationReplay(db, input.requestId, requestHash);
   if (replay) return replay;
   const current = await getMutableTeacher(db, teacherId);
   if (current.version !== input.expectedVersion) throw versionConflict(current.version);
-  if (current.accountRole !== "teacher") {
-    throw new TeacherRegistryError(
-      "teacher_delete_staff_role",
-      409,
-      "Картку працівника з правами адміністратора або бібліотекаря не можна видалити. Її можна лише закрити.",
-      { accountRole: current.accountRole },
-    );
-  }
-  const dependencies = await dependencySummary(db, teacherId, new Date().toISOString());
-  if (dependencies.totalDependencies > 0) {
-    throw new TeacherRegistryError("teacher_delete_blocked", 409, "Картка має пов’язані дані й не може бути видалена.", { dependencies });
+  if (typeof input.confirmedFullName !== "string"
+    || normalizeTeacherName(input.confirmedFullName) !== normalizeTeacherName(current.fullName)) {
+    throw new TeacherRegistryError("teacher_delete_name_mismatch", 400, "ПІБ для підтвердження не збігається з карткою.");
   }
   const now = new Date().toISOString();
-  // The audit deliberately does not reference users.id, so the deletion remains documented.
-  const result = { deleted: true, teacherId };
+  const result = {
+    deleted: true,
+    teacherId,
+    accountPreserved: true,
+    historyPreserved: true,
+  };
   try {
     await db.batch([
-      commandStart(db, input.requestId, "teacher.delete_empty", actor.id, requestHash, teacherId, now),
+      commandStart(db, input.requestId, "teacher.delete_card", actor.id, requestHash, teacherId, now),
+      db.prepare(`UPDATE visit_teacher_credentials SET status='disabled',version=version+1,
+        failed_attempts=0,failure_window_started_at=NULL,locked_until=NULL,updated_by_user_id=?,updated_at=?
+        WHERE teacher_user_id=? AND EXISTS(SELECT 1 FROM mutation_commands
+          WHERE id=? AND request_hash=? AND status='processing')`)
+        .bind(actor.id, now, teacherId, input.requestId, requestHash),
+      db.prepare(`UPDATE visit_teacher_sessions SET revoked_at=COALESCE(revoked_at,?) WHERE teacher_user_id=?
+        AND EXISTS(SELECT 1 FROM mutation_commands WHERE id=? AND request_hash=? AND status='processing')`)
+        .bind(now, teacherId, input.requestId, requestHash),
+      db.prepare(`UPDATE telegram_teacher_activation_invites SET revoked_at=COALESCE(revoked_at,?),updated_at=?
+        WHERE teacher_user_id=? AND consumed_at IS NULL
+        AND EXISTS(SELECT 1 FROM mutation_commands WHERE id=? AND request_hash=? AND status='processing')`)
+        .bind(now, now, teacherId, input.requestId, requestHash),
+      db.prepare(`UPDATE telegram_delivery_outbox SET status='dead',lease_token=NULL,lease_expires_at=NULL,
+        last_error_code='teacher_card_deleted',last_error_message='Teacher card removed',updated_at=?
+        WHERE recipient_user_id=? AND status IN ('pending','processing','retry')
+        AND EXISTS(SELECT 1 FROM mutation_commands WHERE id=? AND request_hash=? AND status='processing')`)
+        .bind(now, teacherId, input.requestId, requestHash),
+      db.prepare(`DELETE FROM telegram_connections WHERE user_id=?
+        AND EXISTS(SELECT 1 FROM users WHERE id=? AND role='teacher')
+        AND EXISTS(SELECT 1 FROM mutation_commands WHERE id=? AND request_hash=? AND status='processing')`)
+        .bind(teacherId, teacherId, input.requestId, requestHash),
+      db.prepare(`DELETE FROM telegram_link_tokens WHERE user_id=?
+        AND EXISTS(SELECT 1 FROM users WHERE id=? AND role='teacher')
+        AND EXISTS(SELECT 1 FROM mutation_commands WHERE id=? AND request_hash=? AND status='processing')`)
+        .bind(teacherId, teacherId, input.requestId, requestHash),
+      db.prepare(`DELETE FROM telegram_mini_app_auth_receipts WHERE teacher_user_id=?
+        AND EXISTS(SELECT 1 FROM users WHERE id=? AND role='teacher')
+        AND EXISTS(SELECT 1 FROM mutation_commands WHERE id=? AND request_hash=? AND status='processing')`)
+        .bind(teacherId, teacherId, input.requestId, requestHash),
       db.prepare(`DELETE FROM teacher_profiles WHERE teacher_user_id=? AND version=?
-        AND EXISTS(SELECT 1 FROM mutation_commands WHERE id=? AND request_hash=? AND status='processing')
-        AND ${noTeacherDependenciesSql("teacher_profiles.teacher_user_id")}`)
+        AND EXISTS(SELECT 1 FROM mutation_commands WHERE id=? AND request_hash=? AND status='processing')`)
         .bind(teacherId, input.expectedVersion, input.requestId, requestHash),
-      db.prepare(`DELETE FROM users WHERE id=? AND role='teacher'
+      db.prepare(`UPDATE users SET status='inactive',updated_at=? WHERE id=? AND role='teacher'
         AND NOT EXISTS(SELECT 1 FROM teacher_profiles WHERE teacher_user_id=users.id)
-        AND ${noTeacherDependenciesSql("users.id")}`)
-        .bind(teacherId),
-      guardedAuditInsert(db, actor, "teacher.deleted_empty", teacherId, input.requestId, {
+        AND EXISTS(SELECT 1 FROM mutation_commands WHERE id=? AND request_hash=? AND status='processing')`)
+        .bind(now, teacherId, input.requestId, requestHash),
+      guardedAuditInsert(db, actor, "teacher.card_deleted", teacherId, input.requestId, {
         fullName: current.fullName,
         status: current.status,
         version: current.version,
-      }, null, now, "NOT EXISTS(SELECT 1 FROM users WHERE id=?)", [teacherId]),
+        accountRole: current.accountRole,
+      }, result, now, `EXISTS(SELECT 1 FROM users u WHERE u.id=?
+        AND NOT EXISTS(SELECT 1 FROM teacher_profiles p WHERE p.teacher_user_id=u.id)
+        AND ((u.role='teacher' AND u.status='inactive') OR u.role IN ('admin','librarian')))`, [teacherId]),
       commandComplete(db, input.requestId, requestHash, result, now),
     ]);
   } catch (error) {
     const recovered = await completedMutationReplay(db, input.requestId, requestHash);
     if (recovered) return recovered;
-    const freshDependencies = await dependencySummary(db, teacherId, now);
-    if (freshDependencies.totalDependencies > 0) {
-      throw new TeacherRegistryError("teacher_delete_blocked", 409, "Картка має пов’язані дані й не може бути видалена.", { dependencies: freshDependencies });
-    }
     const fresh = await db.prepare(`SELECT p.version FROM users u JOIN teacher_profiles p ON p.teacher_user_id=u.id
       WHERE u.id=? LIMIT 1`).bind(teacherId).first<{ version: number }>();
     if (fresh && Number(fresh.version) !== input.expectedVersion) throw versionConflict(Number(fresh.version));
@@ -342,6 +375,9 @@ export async function deleteEmptyTeacherRegistryCard(
   }
   return result;
 }
+
+/** @deprecated Use deleteTeacherRegistryCard. Kept for older internal callers during rollout. */
+export const deleteEmptyTeacherRegistryCard = deleteTeacherRegistryCard;
 
 function teacherSelectSql() {
   return `SELECT u.id,u.full_name,u.role AS account_role,
@@ -351,6 +387,8 @@ function teacherSelectSql() {
     p.photo_storage_key,p.photo_version,p.photo_updated_at,p.version,p.closed_at,
     u.created_at,COALESCE(p.updated_at,u.updated_at) AS updated_at,
     c.status AS credential_status,c.version AS credential_version,c.last_login_at,c.locked_until,
+    tc.status AS telegram_status,tc.notify_orders AS telegram_notify_orders,
+    tc.notify_visits AS telegram_notify_visits,tc.linked_at AS telegram_linked_at,
     (SELECT COUNT(*) FROM visit_teacher_sessions s WHERE s.teacher_user_id=u.id AND s.revoked_at IS NULL AND s.expires_at>?) AS active_sessions,
     (SELECT COUNT(*) FROM material_requests mr WHERE mr.teacher_user_id=u.id AND mr.status IN ('submitted','in_review','ready','partially_ready')) AS open_requests,
     (SELECT COUNT(*) FROM loans ln WHERE ln.teacher_user_id=u.id AND ln.status='open') AS open_loans,
@@ -360,7 +398,8 @@ function teacherSelectSql() {
       AND vb.status='active' AND vb.visit_date>=?) AS upcoming_visits
     FROM users u JOIN teacher_profiles p ON p.teacher_user_id=u.id
     LEFT JOIN locations loc ON loc.id=p.primary_location_id
-    LEFT JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id`;
+    LEFT JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id
+    LEFT JOIN telegram_connections tc ON tc.user_id=u.id`;
 }
 
 function projectTeacher(row: TeacherBaseRow, now: string, includePrivate: boolean) {
@@ -368,6 +407,10 @@ function projectTeacher(row: TeacherBaseRow, now: string, includePrivate: boolea
   const credentialStatus = row.credential_status === "active" && row.locked_until && row.locked_until > now
     ? "locked" as const
     : row.credential_status;
+  const currentTelegramStatus = row.user_status === "active" ? row.telegram_status : null;
+  const telegramConnected = currentTelegramStatus === "active";
+  const telegramNotificationsEnabled = telegramConnected
+    && (Boolean(row.telegram_notify_orders) || Boolean(row.telegram_notify_visits));
   return {
     id: row.id,
     fullName: row.full_name,
@@ -391,6 +434,13 @@ function projectTeacher(row: TeacherBaseRow, now: string, includePrivate: boolea
       lockedUntil: row.locked_until,
       activeSessions: Number(row.active_sessions),
     },
+    telegram: {
+      connected: telegramConnected,
+      status: currentTelegramStatus,
+      notificationsEnabled: telegramNotificationsEnabled,
+      notificationsMuted: telegramConnected && !telegramNotificationsEnabled,
+      linkedAt: telegramConnected ? row.telegram_linked_at : null,
+    },
     attention: {
       openRequests: Number(row.open_requests),
       openLoans: Number(row.open_loans),
@@ -411,6 +461,10 @@ async function registryCounters(db: TeacherRegistryDatabase, now: string) {
     SUM(CASE WHEN u.status='active' AND p.closed_at IS NULL AND c.teacher_user_id IS NOT NULL THEN 1 ELSE 0 END) AS with_code,
     SUM(CASE WHEN u.status='active' AND p.closed_at IS NULL AND c.teacher_user_id IS NULL THEN 1 ELSE 0 END) AS without_code,
     SUM(CASE WHEN u.status='active' AND p.closed_at IS NULL AND c.status='active' AND c.locked_until>? THEN 1 ELSE 0 END) AS locked,
+    SUM(CASE WHEN u.status='active' AND p.closed_at IS NULL AND tc.status='active' THEN 1 ELSE 0 END) AS telegram_connected,
+    SUM(CASE WHEN u.status='active' AND p.closed_at IS NULL AND (tc.user_id IS NULL OR tc.status='disabled') THEN 1 ELSE 0 END) AS telegram_not_connected,
+    SUM(CASE WHEN u.status='active' AND p.closed_at IS NULL AND tc.status='active' AND tc.notify_orders=0 AND tc.notify_visits=0 THEN 1 ELSE 0 END) AS telegram_notifications_off,
+    SUM(CASE WHEN u.status='active' AND p.closed_at IS NULL AND tc.status='blocked' THEN 1 ELSE 0 END) AS telegram_blocked,
     SUM(CASE WHEN EXISTS(SELECT 1 FROM loans l WHERE l.teacher_user_id=u.id AND l.status='open') THEN 1 ELSE 0 END) AS with_open_loans,
     SUM(CASE WHEN EXISTS(SELECT 1 FROM loans l WHERE l.teacher_user_id=u.id AND l.status='open' AND l.due_at IS NOT NULL AND l.due_at<?) THEN 1 ELSE 0 END) AS with_overdue_loans,
     SUM(CASE WHEN EXISTS(SELECT 1 FROM material_requests mr WHERE mr.teacher_user_id=u.id AND mr.status IN ('submitted','in_review','ready','partially_ready')) THEN 1 ELSE 0 END) AS with_open_requests
@@ -419,7 +473,8 @@ async function registryCounters(db: TeacherRegistryDatabase, now: string) {
     ,(SELECT COUNT(*) FROM loans WHERE status='open' AND due_at IS NOT NULL AND due_at<?) AS overdue_loans
     ,(SELECT COUNT(*) FROM visit_bookings WHERE status='active' AND visit_date>=?) AS upcoming_visits
     FROM users u JOIN teacher_profiles p ON p.teacher_user_id=u.id
-    LEFT JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id`)
+    LEFT JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id
+    LEFT JOIN telegram_connections tc ON tc.user_id=u.id`)
     .bind(now, now, now, kyivDate(now)).first<Record<string, number | null>>();
   const value = row ?? {};
   return {
@@ -427,6 +482,10 @@ async function registryCounters(db: TeacherRegistryDatabase, now: string) {
     withCode: Number(value.with_code ?? 0), withoutCode: Number(value.without_code ?? 0), locked: Number(value.locked ?? 0),
     withOpenLoans: Number(value.with_open_loans ?? 0), withOverdueLoans: Number(value.with_overdue_loans ?? 0),
     withOpenRequests: Number(value.with_open_requests ?? 0),
+    telegramConnected: Number(value.telegram_connected ?? 0),
+    telegramNotConnected: Number(value.telegram_not_connected ?? 0),
+    telegramNotificationsOff: Number(value.telegram_notifications_off ?? 0),
+    telegramBlocked: Number(value.telegram_blocked ?? 0),
     newOrders: Number(value.new_orders ?? 0),
     readyForPickup: Number(value.ready_for_pickup ?? 0),
     overdueLoans: Number(value.overdue_loans ?? 0),
@@ -770,36 +829,6 @@ function noCloseBlockersSql(teacherExpression: string): string {
       OR vb.selected_teacher_user_id=${teacherExpression}) AND vb.status='active' AND vb.visit_date>=?)
     AND NOT EXISTS(SELECT 1 FROM class_years cy WHERE cy.teacher_user_id=${teacherExpression}
       AND cy.status IN ('active','planned'))`;
-}
-
-function noTeacherDependenciesSql(teacherExpression: string): string {
-  return `NOT EXISTS(SELECT 1 FROM visit_teacher_credentials c WHERE c.teacher_user_id=${teacherExpression})
-    AND NOT EXISTS(SELECT 1 FROM visit_teacher_sessions s WHERE s.teacher_user_id=${teacherExpression})
-    AND NOT EXISTS(SELECT 1 FROM visit_teacher_access_commands ac WHERE ac.teacher_user_id=${teacherExpression}
-      OR ac.actor_user_id=${teacherExpression})
-    AND NOT EXISTS(SELECT 1 FROM teacher_profiles other WHERE other.teacher_user_id<>${teacherExpression}
-      AND (other.closed_by_user_id=${teacherExpression} OR other.created_by_user_id=${teacherExpression}
-        OR other.updated_by_user_id=${teacherExpression}))
-    AND NOT EXISTS(SELECT 1 FROM visit_teacher_credentials c2 WHERE c2.created_by_user_id=${teacherExpression}
-      OR c2.updated_by_user_id=${teacherExpression})
-    AND NOT EXISTS(SELECT 1 FROM visit_bookings vb WHERE vb.owner_user_id=${teacherExpression}
-      OR vb.selected_teacher_user_id=${teacherExpression} OR vb.cancelled_by_user_id=${teacherExpression})
-    AND NOT EXISTS(SELECT 1 FROM material_requests mr WHERE mr.teacher_user_id=${teacherExpression}
-      OR mr.reviewed_by_user_id=${teacherExpression} OR mr.cancelled_by_user_id=${teacherExpression})
-    AND NOT EXISTS(SELECT 1 FROM loans l WHERE l.teacher_user_id=${teacherExpression}
-      OR l.issued_by_user_id=${teacherExpression} OR l.closed_by_user_id=${teacherExpression})
-    AND NOT EXISTS(SELECT 1 FROM class_years cy WHERE cy.teacher_user_id=${teacherExpression})
-    AND NOT EXISTS(SELECT 1 FROM class_loans cl WHERE cl.responsible_teacher_user_id=${teacherExpression}
-      OR cl.issued_by_user_id=${teacherExpression} OR cl.closed_by_user_id=${teacherExpression})
-    AND NOT EXISTS(SELECT 1 FROM class_loan_transactions ct WHERE ct.actor_user_id=${teacherExpression})
-    AND NOT EXISTS(SELECT 1 FROM inventory_transactions it WHERE it.actor_user_id=${teacherExpression})
-    AND NOT EXISTS(SELECT 1 FROM visit_schedule_hours vh WHERE vh.updated_by_user_id=${teacherExpression})
-    AND NOT EXISTS(SELECT 1 FROM visit_schedule_closures vc WHERE vc.created_by_user_id=${teacherExpression}
-      OR vc.cancelled_by_user_id=${teacherExpression})
-    AND NOT EXISTS(SELECT 1 FROM portal_notifications pn WHERE pn.teacher_user_id=${teacherExpression})
-    AND NOT EXISTS(SELECT 1 FROM material_request_events me WHERE me.actor_user_id=${teacherExpression})
-    AND NOT EXISTS(SELECT 1 FROM audit_events ae WHERE ae.actor_user_id=${teacherExpression})
-    AND NOT EXISTS(SELECT 1 FROM mutation_commands mc WHERE mc.actor_user_id=${teacherExpression})`;
 }
 
 function camel(value: string) {

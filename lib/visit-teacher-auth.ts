@@ -61,6 +61,8 @@ export type VisitTeacherAccessRow = {
   telegram: {
     connected: boolean;
     status: "active" | "disabled" | "blocked" | null;
+    notificationsEnabled: boolean;
+    notificationsMuted: boolean;
     version: number | null;
     linkedAt: string | null;
     activeInviteId: string | null;
@@ -1563,7 +1565,8 @@ export async function listVisitTeacherAccess(db: VisitD1Database): Promise<Visit
   const rows = await db.prepare(`
     SELECT u.id, u.full_name, u.status AS user_status,
            c.status, c.version, c.last_login_at, c.locked_until, c.must_change_pin,
-           tc.status AS telegram_status,tc.version AS telegram_version,tc.linked_at,
+           tc.status AS telegram_status,tc.notify_orders AS telegram_notify_orders,
+           tc.notify_visits AS telegram_notify_visits,tc.version AS telegram_version,tc.linked_at,
            (SELECT i.id FROM telegram_teacher_activation_invites i
              WHERE i.teacher_user_id=u.id AND i.kind='personal'
                AND i.consumed_at IS NULL AND i.revoked_at IS NULL AND i.expires_at>?
@@ -1588,6 +1591,8 @@ export async function listVisitTeacherAccess(db: VisitD1Database): Promise<Visit
     last_login_at: string | null; locked_until: string | null; active_sessions: number;
     must_change_pin: number | null;
     telegram_status: "active" | "disabled" | "blocked" | null;
+    telegram_notify_orders: number | null;
+    telegram_notify_visits: number | null;
     telegram_version: number | null;
     linked_at: string | null;
     active_invite_id: string | null;
@@ -1609,6 +1614,10 @@ export async function listVisitTeacherAccess(db: VisitD1Database): Promise<Visit
     telegram: {
       connected: row.telegram_status === "active",
       status: row.telegram_status,
+      notificationsEnabled: row.telegram_status === "active"
+        && (Boolean(row.telegram_notify_orders) || Boolean(row.telegram_notify_visits)),
+      notificationsMuted: row.telegram_status === "active"
+        && !row.telegram_notify_orders && !row.telegram_notify_visits,
       version: row.telegram_version === null ? null : Number(row.telegram_version),
       linkedAt: row.linked_at,
       activeInviteId: row.active_invite_id,

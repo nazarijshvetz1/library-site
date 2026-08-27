@@ -11,6 +11,7 @@ import {
   TeacherRegistryError,
   type TeacherRegistryDatabase,
   type TeacherStatus,
+  type TeacherTelegramFilter,
 } from "@/lib/teacher-registry-store";
 
 export async function authorizeTeacherRegistryRead() {
@@ -44,16 +45,17 @@ export async function authorizeTeacherRegistryWrite(request: Request) {
 }
 
 export function parseTeacherListQuery(request: Request):
-  | { ok: true; value: { status: TeacherStatus | "all"; attention: "all" | "orders" | "overdue" | "visits" | "access"; query: string; limit: number; cursor: string | null } }
+  | { ok: true; value: { status: TeacherStatus | "all"; attention: "all" | "orders" | "overdue" | "visits" | "access"; telegram: TeacherTelegramFilter; query: string; limit: number; cursor: string | null } }
   | { ok: false; response: Response } {
   const url = new URL(request.url);
   const status = url.searchParams.get("status") ?? "active";
   const attention = url.searchParams.get("attention") ?? "all";
+  const telegram = url.searchParams.get("telegram") ?? "all";
   const query = (url.searchParams.get("q") ?? "").normalize("NFKC").trim().replace(/\s+/gu, " ");
   const cursor = url.searchParams.get("cursor");
   const rawLimit = url.searchParams.get("limit") ?? "30";
   const limit = Number(rawLimit);
-  const allowedKeys = new Set(["status", "attention", "q", "cursor", "limit"]);
+  const allowedKeys = new Set(["status", "attention", "telegram", "q", "cursor", "limit"]);
   for (const key of url.searchParams.keys()) {
     if (!allowedKeys.has(key)) return invalidList("Невідомий параметр списку.");
   }
@@ -63,6 +65,9 @@ export function parseTeacherListQuery(request: Request):
   if (!(["all", "orders", "overdue", "visits", "access"] as const).includes(
     attention as "all" | "orders" | "overdue" | "visits" | "access",
   )) return invalidList("Некоректний фільтр уваги.");
+  if (!(["all", "connected", "disconnected", "muted", "blocked"] as const).includes(
+    telegram as TeacherTelegramFilter,
+  )) return invalidList("Некоректний стан Telegram.");
   if (query.length > 120 || (cursor !== null && (cursor.length < 1 || cursor.length > 512))
     || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
     return invalidList("Перевірте пошук, сторінку та кількість рядків.");
@@ -72,6 +77,7 @@ export function parseTeacherListQuery(request: Request):
     value: {
       status: status as TeacherStatus | "all",
       attention: attention as "all" | "orders" | "overdue" | "visits" | "access",
+      telegram: telegram as TeacherTelegramFilter,
       query,
       limit,
       cursor,

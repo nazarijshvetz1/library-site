@@ -28,6 +28,8 @@ type TeacherAccessRow = {
   telegram: {
     connected: boolean;
     status: "active" | "disabled" | "blocked" | null;
+    notificationsEnabled: boolean;
+    notificationsMuted: boolean;
     version: number | null;
     linkedAt: string | null;
     activeInviteId: string | null;
@@ -560,10 +562,13 @@ function CredentialBadge({ credential }: { credential: TeacherCredential | null 
 }
 
 function TelegramBadge({ teacher }: { teacher: TeacherAccessRow }) {
+  if (teacher.telegram.status === "blocked") {
+    return <span className={`${styles.badge} ${styles.disabledBadge}`}>Бот заблоковано</span>;
+  }
   if (teacher.telegram.connected) {
     return (
-      <span className={`${styles.badge} ${styles.activeBadge}`}>
-        Підключено
+      <span className={`${styles.badge} ${teacher.telegram.notificationsMuted ? styles.inviteBadge : styles.activeBadge}`}>
+        {teacher.telegram.notificationsMuted ? "Сповіщення вимкнено" : "Підключено"}
         {teacher.telegram.linkedAt ? <small>{formatDateTime(teacher.telegram.linkedAt)}</small> : null}
       </span>
     );
@@ -575,9 +580,6 @@ function TelegramBadge({ teacher }: { teacher: TeacherAccessRow }) {
         {teacher.telegram.activeInviteExpiresAt ? <small>до {formatDateTime(teacher.telegram.activeInviteExpiresAt)}</small> : null}
       </span>
     );
-  }
-  if (teacher.telegram.status === "blocked") {
-    return <span className={`${styles.badge} ${styles.disabledBadge}`}>Бот заблоковано</span>;
   }
   return <span className={`${styles.badge} ${styles.missingBadge}`}>Не підключено</span>;
 }

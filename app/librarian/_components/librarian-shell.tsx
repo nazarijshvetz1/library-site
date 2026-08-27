@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-img-element -- the official shared emblem is intentionally loaded from the public catalog. */
 
 import {
+  useCallback,
   type ReactNode,
   useEffect,
   useRef,
@@ -25,7 +26,19 @@ export type LibrarianShellProps = {
   signOutHref: string;
   telegramMiniApp?: boolean;
   writesEnabled?: boolean;
+  subsections?: LibrarianSubsection[];
+  activeSubsection?: string;
+  onSubsectionNavigate?: (id: string) => void;
   children: ReactNode;
+};
+
+export type LibrarianSubsection = {
+  id: string;
+  section: LibrarianSection;
+  label: string;
+  hint: string;
+  icon: SiteIconName;
+  href: string;
 };
 
 type NavigationItem = {
@@ -58,6 +71,9 @@ export default function LibrarianShell({
   signOutHref,
   telegramMiniApp = false,
   writesEnabled,
+  subsections = [],
+  activeSubsection,
+  onSubsectionNavigate,
   children,
 }: LibrarianShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -70,6 +86,7 @@ export default function LibrarianShell({
   const telegramHref = librarianUtilityHref("telegram", telegramMiniApp);
   const publicCatalogHref = librarianUtilityHref("publicCatalog", telegramMiniApp);
   const secondaryActive = SECONDARY_ITEMS.some((item) => item.id === activeSection);
+  const navigationHistory = useLibrarianNavigationHistory(telegramMiniApp);
 
   useEffect(() => {
     if (!drawerOpen) return;
@@ -135,6 +152,26 @@ export default function LibrarianShell({
         </nav>
 
         <div className={styles.account}>
+          <nav className={styles.historyNav} aria-label="Історія переходів">
+            <button
+              type="button"
+              aria-label="Назад до попередньої сторінки"
+              title="Назад"
+              disabled={!navigationHistory.canGoBack}
+              onClick={navigationHistory.goBack}
+            >
+              <SiteIcon name="previous" size={18} />
+            </button>
+            <button
+              type="button"
+              aria-label="Вперед до наступної сторінки"
+              title="Вперед"
+              disabled={!navigationHistory.canGoForward}
+              onClick={navigationHistory.goForward}
+            >
+              <SiteIcon name="forward" size={18} />
+            </button>
+          </nav>
           <span>
             <strong title={displayName}>{displayName}</strong>
             <small>{roleLabel}</small>
@@ -147,14 +184,31 @@ export default function LibrarianShell({
         <aside className={styles.sidebar} aria-label="Головне меню кабінету бібліотекаря">
           <p className={styles.menuLabel}>Робоче місце</p>
           <nav className={styles.desktopNav} aria-label="Розділи кабінету бібліотекаря">
-            {ALL_ITEMS.map((item) => (
-              <SectionLink
-                key={item.id}
-                item={item}
-                active={item.id === activeSection}
-                telegramMiniApp={telegramMiniApp}
-              />
-            ))}
+            {ALL_ITEMS.map((item) => {
+              const nested = subsections.filter((subsection) => subsection.section === item.id);
+              const active = item.id === activeSection;
+              return (
+                <div className={styles.navigationGroup} key={item.id}>
+                  <SectionLink
+                    item={item}
+                    active={active}
+                    telegramMiniApp={telegramMiniApp}
+                  />
+                  {active && nested.length ? (
+                    <nav className={styles.subsectionNav} aria-label={`Підрозділи: ${item.label}`}>
+                      {nested.map((subsection) => (
+                        <SubsectionLink
+                          key={subsection.id}
+                          subsection={subsection}
+                          active={subsection.id === activeSubsection}
+                          onNavigate={onSubsectionNavigate}
+                        />
+                      ))}
+                    </nav>
+                  ) : null}
+                </div>
+              );
+            })}
           </nav>
           <nav className={styles.sidebarUtilities} aria-label="Службові посилання кабінету">
             <a href={publicCatalogHref ?? undefined} target="_blank" rel="noopener noreferrer">Публічний каталог <SiteIcon name="external" size={15} /></a>
@@ -230,15 +284,28 @@ export default function LibrarianShell({
                 <SiteIcon name="close" size={20} />
               </button>
             </header>
-            <nav className={styles.drawerNav} aria-label="Додаткові розділи кабінету бібліотекаря">
-              {SECONDARY_ITEMS.map((item) => (
-                <SectionLink
-                  key={item.id}
-                  item={item}
-                  active={item.id === activeSection}
-                  telegramMiniApp={telegramMiniApp}
-                  compact
-                />
+            <nav className={styles.drawerNav} aria-label="Усі розділи кабінету бібліотекаря">
+              {ALL_ITEMS.map((item) => (
+                <div className={styles.drawerNavigationGroup} key={item.id}>
+                  <SectionLink
+                    item={item}
+                    active={item.id === activeSection}
+                    telegramMiniApp={telegramMiniApp}
+                    compact
+                  />
+                  {item.id === activeSection ? subsections.filter((subsection) => subsection.section === item.id).map((subsection) => (
+                    <SubsectionLink
+                      key={subsection.id}
+                      subsection={subsection}
+                      active={subsection.id === activeSubsection}
+                      onNavigate={(id) => {
+                        closeDrawer();
+                        onSubsectionNavigate?.(id);
+                      }}
+                      compact
+                    />
+                  )) : null}
+                </div>
               ))}
             </nav>
             <div className={styles.drawerUtilities}>
@@ -253,6 +320,106 @@ export default function LibrarianShell({
       ) : null}
     </div>
   );
+}
+
+function SubsectionLink({
+  subsection,
+  active,
+  onNavigate,
+  compact = false,
+}: {
+  subsection: LibrarianSubsection;
+  active: boolean;
+  onNavigate?: (id: string) => void;
+  compact?: boolean;
+}) {
+  return (
+    <a
+      className={`${styles.subsectionLink} ${active ? styles.subsectionCurrent : ""} ${compact ? styles.subsectionCompact : ""}`}
+      href={subsection.href}
+      aria-current={active ? "page" : undefined}
+      onClick={(event) => {
+        if (!onNavigate || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        onNavigate(subsection.id);
+      }}
+    >
+      <span aria-hidden="true"><SiteIcon name={subsection.icon} size={17} /></span>
+      <span><strong>{subsection.label}</strong><small>{subsection.hint}</small></span>
+    </a>
+  );
+}
+
+type StoredNavigationHistory = { entries: string[]; index: number };
+
+function useLibrarianNavigationHistory(telegramMiniApp: boolean) {
+  const [state, setState] = useState<StoredNavigationHistory>({ entries: [], index: -1 });
+  const storageKey = `library:librarian-history:${telegramMiniApp ? "telegram" : "web"}`;
+
+  const recordCurrent = useCallback(() => {
+    const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    let stored = readNavigationHistory(storageKey);
+    if (stored.entries[stored.index] !== current) {
+      const previousIndex = stored.entries.lastIndexOf(current, Math.max(0, stored.index - 1));
+      const nextIndex = stored.entries.indexOf(current, stored.index + 1);
+      if (previousIndex >= 0 && previousIndex === stored.index - 1) {
+        stored = { ...stored, index: previousIndex };
+      } else if (nextIndex >= 0 && nextIndex === stored.index + 1) {
+        stored = { ...stored, index: nextIndex };
+      } else {
+        const entries = [...stored.entries.slice(0, stored.index + 1), current].slice(-40);
+        stored = { entries, index: entries.length - 1 };
+      }
+      writeNavigationHistory(storageKey, stored);
+    }
+    setState(stored);
+  }, [storageKey]);
+
+  useEffect(() => {
+    const initialRecord = window.setTimeout(recordCurrent, 0);
+    window.addEventListener("popstate", recordCurrent);
+    window.addEventListener("pageshow", recordCurrent);
+    window.addEventListener("librarian:navigation-change", recordCurrent);
+    return () => {
+      window.clearTimeout(initialRecord);
+      window.removeEventListener("popstate", recordCurrent);
+      window.removeEventListener("pageshow", recordCurrent);
+      window.removeEventListener("librarian:navigation-change", recordCurrent);
+    };
+  }, [recordCurrent]);
+
+  const go = useCallback((offset: -1 | 1) => {
+    const stored = readNavigationHistory(storageKey);
+    const index = stored.index + offset;
+    const destination = stored.entries[index];
+    if (!destination) return;
+    const next = { ...stored, index };
+    writeNavigationHistory(storageKey, next);
+    setState(next);
+    window.location.assign(destination);
+  }, [storageKey]);
+
+  return {
+    canGoBack: state.index > 0,
+    canGoForward: state.index >= 0 && state.index < state.entries.length - 1,
+    goBack: () => go(-1),
+    goForward: () => go(1),
+  };
+}
+
+function readNavigationHistory(key: string): StoredNavigationHistory {
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(key) || "null") as StoredNavigationHistory | null;
+    if (parsed && Array.isArray(parsed.entries) && Number.isInteger(parsed.index)) {
+      const entries = parsed.entries.filter((entry): entry is string => typeof entry === "string" && entry.startsWith("/")).slice(-40);
+      return { entries, index: Math.min(Math.max(-1, parsed.index), entries.length - 1) };
+    }
+  } catch { /* Session storage may be unavailable in privacy-focused WebViews. */ }
+  return { entries: [], index: -1 };
+}
+
+function writeNavigationHistory(key: string, value: StoredNavigationHistory) {
+  try { window.sessionStorage.setItem(key, JSON.stringify(value)); } catch { /* Navigation still works through direct links. */ }
 }
 
 function SectionLink({
