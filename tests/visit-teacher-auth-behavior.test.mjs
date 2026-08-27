@@ -86,6 +86,7 @@ async function database() {
     "0017_fresh_robbie_robertson.sql",
     "0018_yielding_skaar.sql",
     "0019_kindly_wolfsbane.sql",
+    "0027_naive_microbe.sql",
     "0023_guest_public_teacher_name_consent.sql",
   ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
   const now = new Date().toISOString();

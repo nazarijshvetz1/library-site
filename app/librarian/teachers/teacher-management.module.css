@@ -119,6 +119,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .telegramSettingsStack { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
 .telegramGlobalNotice { grid-column: 1 / -1; margin-bottom: 0; }
 .telegramPanel { overflow: hidden; }
+.telegramTeacherMenuCard { grid-column: 1 / -1; }
 .telegramConnectionCard { border-color: #b9dced; box-shadow: 0 16px 44px rgba(34, 158, 217, .1); }
 .telegramHeading { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: start; gap: 15px; }
 .telegramMark { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 14px; color: white; background: #2aabee; font-size: 23px; }
@@ -139,6 +140,14 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .telegramActions { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 9px; }
 .telegramActions button { min-height: 42px; padding: 0 15px; border: 1px solid var(--line); border-radius: 10px; background: white; color: var(--green-900); cursor: pointer; font-weight: 800; }
 .telegramActions .telegramDanger { border-color: #e5b8b0; color: var(--danger); background: #fff3f0; }
+.telegramMenuStats { margin-top: 18px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.telegramMenuStats > div { min-width: 0; padding: 13px 14px; display: grid; gap: 3px; border: 1px solid var(--line); border-radius: 12px; background: #f7faf5; }
+.telegramMenuStats strong { color: var(--green-950); font: 650 25px/1 Georgia, serif; }
+.telegramMenuStats span { color: var(--muted); font-size: 10px; line-height: 1.35; }
+.telegramMenuConfirmation { margin-top: 16px; padding: 14px; border: 1px solid #bfd3b7; border-radius: 12px; background: #f4f8f1; }
+.telegramMenuConfirmation p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.telegramMenuConfirmation > label { margin-top: 12px; display: flex; align-items: flex-start; gap: 9px; color: var(--green-950); font-size: 11px; font-weight: 800; cursor: pointer; }
+.telegramMenuConfirmation input { width: 18px; height: 18px; flex: 0 0 auto; margin: 0; accent-color: var(--green-900); }
 
 .directoryStack, .ordersStack { display: grid; gap: 20px; }
 .curatorQueue { background: linear-gradient(145deg,#fffef9,#f4f8f1); }
@@ -283,6 +292,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .cardHeading > button, .cardHeading .secondaryLink { width: 100%; justify-content: center; }
   .visitList article { align-items: flex-start; }
   .telegramSettingsStack, .telegramHeading, .telegramPreferenceGrid { grid-template-columns: 1fr; }
+  .telegramMenuStats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .telegramHeading > strong { width: max-content; }
   .telegramActions { display: grid; }
   .telegramActions button { width: 100%; }

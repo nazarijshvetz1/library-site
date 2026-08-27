@@ -24,11 +24,15 @@ const TELEGRAM_LINK_TOKEN_SECONDS = 10 * 60;
 const TELEGRAM_TEACHER_PERSONAL_ACTIVATION_SECONDS = 10 * 60;
 const TELEGRAM_TEACHER_ACTIVATION_SECONDS = 30 * 60;
 const TELEGRAM_DELIVERY_LEASE_SECONDS = 45;
+const TELEGRAM_MENU_CLAIM_SECONDS = 60;
 const TELEGRAM_MAX_ATTEMPTS = 8;
 const TELEGRAM_DRAIN_LIMIT = 10;
 const TELEGRAM_API_TIMEOUT_MS = 6_000;
 const TELEGRAM_BOT_API = "https://api.telegram.org";
 const PUBLIC_CATALOG_URL = "https://nazarijshvetz1.github.io/library-site/";
+export const TELEGRAM_TEACHER_MENU_VERSION = 1;
+const TELEGRAM_TEACHER_MENU_OUTBOX_TYPE = "teacher_menu_refresh";
+const TELEGRAM_TEACHER_MENU_ENTITY = `menu-v${TELEGRAM_TEACHER_MENU_VERSION}`;
 
 export class TelegramIntegrationError extends Error {
   readonly code: string;
@@ -93,11 +97,30 @@ type OutboxRow = {
   recipient_user_id: string;
   chat_id: string;
   connection_version: number;
+  type: string;
+  full_name: string;
+  role: ConnectedTelegramRole;
+  teacher_capability: number;
+  notify_orders: number;
+  notify_visits: number;
   title: string;
   message: string;
   target_path: string;
   attempts: number;
   created_at: string;
+};
+
+export type TelegramTeacherMenuRollout = {
+  currentVersion: number;
+  connectedTeachers: number;
+  currentTeachers: number;
+  mutedPendingTeachers: number;
+  recipients: number;
+  queued: number;
+  retrying: number;
+  sent: number;
+  failed: number;
+  lastUpdatedAt: string | null;
 };
 
 export type TelegramQueueEvent = {
@@ -180,6 +203,136 @@ export async function readTelegramConnectionStatus(
     lastSuccessAt: row.last_success_at ?? null,
     lastFailureAt: row.last_failure_at ?? null,
     lastErrorCode: row.last_error_code ?? null,
+  };
+}
+
+export async function readTelegramTeacherMenuRollout(
+  db: TelegramDatabase,
+): Promise<TelegramTeacherMenuRollout> {
+  const teachers = await db.prepare(`
+    SELECT COUNT(*) AS connected_teachers,
+      COALESCE(SUM(CASE WHEN c.menu_delivered_version>=? THEN 1 ELSE 0 END),0) AS current_teachers,
+      COALESCE(SUM(CASE WHEN c.menu_delivered_version<?
+        AND c.notify_orders=0 AND c.notify_visits=0 THEN 1 ELSE 0 END),0) AS muted_pending_teachers,
+      COALESCE(SUM(CASE WHEN c.menu_delivered_version<?
+        AND (c.notify_orders=1 OR c.notify_visits=1) THEN 1 ELSE 0 END),0) AS recipients
+    FROM telegram_connections c
+    JOIN users u ON u.id=c.user_id AND u.status='active'
+    JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+    JOIN visit_teacher_credentials v ON v.teacher_user_id=u.id AND v.status='active'
+    WHERE c.status='active'
+  `).bind(
+    TELEGRAM_TEACHER_MENU_VERSION,
+    TELEGRAM_TEACHER_MENU_VERSION,
+    TELEGRAM_TEACHER_MENU_VERSION,
+  ).first<{
+    connected_teachers: number;
+    current_teachers: number;
+    muted_pending_teachers: number;
+    recipients: number;
+  }>();
+  const delivery = await db.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN status IN ('pending','processing') THEN 1 ELSE 0 END),0) AS queued,
+      COALESCE(SUM(CASE WHEN status='retry' THEN 1 ELSE 0 END),0) AS retrying,
+      COALESCE(SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END),0) AS sent,
+      COALESCE(SUM(CASE WHEN status='dead' THEN 1 ELSE 0 END),0) AS failed,
+      MAX(updated_at) AS last_updated_at
+    FROM telegram_delivery_outbox
+    WHERE type=? AND entity_type='telegram_teacher_menu' AND entity_id=?
+  `).bind(TELEGRAM_TEACHER_MENU_OUTBOX_TYPE, TELEGRAM_TEACHER_MENU_ENTITY).first<{
+    queued: number;
+    retrying: number;
+    sent: number;
+    failed: number;
+    last_updated_at: string | null;
+  }>();
+  return {
+    currentVersion: TELEGRAM_TEACHER_MENU_VERSION,
+    connectedTeachers: Number(teachers?.connected_teachers ?? 0),
+    currentTeachers: Number(teachers?.current_teachers ?? 0),
+    mutedPendingTeachers: Number(teachers?.muted_pending_teachers ?? 0),
+    recipients: Number(teachers?.recipients ?? 0),
+    queued: Number(delivery?.queued ?? 0),
+    retrying: Number(delivery?.retrying ?? 0),
+    sent: Number(delivery?.sent ?? 0),
+    failed: Number(delivery?.failed ?? 0),
+    lastUpdatedAt: delivery?.last_updated_at ?? null,
+  };
+}
+
+export async function queueTelegramTeacherMenuRefresh(
+  db: TelegramDatabase,
+  actor: { id: string; email: string },
+  input: {
+    requestId: string;
+    expectedMenuVersion: number;
+    expectedRecipientCount: number;
+  },
+): Promise<{ rollout: TelegramTeacherMenuRollout; queuedNow: number }> {
+  const before = await readTelegramTeacherMenuRollout(db);
+  if (input.expectedMenuVersion !== before.currentVersion
+    || input.expectedRecipientCount !== before.recipients) {
+    throw new TelegramIntegrationError(
+      "teacher_menu_rollout_changed",
+      409,
+      "Список одержувачів уже змінився. Оновіть дані й підтвердьте надсилання ще раз.",
+      { permanent: true },
+    );
+  }
+  const now = new Date().toISOString();
+  const results = await db.batch([
+    db.prepare(`
+      INSERT INTO telegram_delivery_outbox (
+        id,recipient_user_id,dedupe_key,category,type,title,message,target_path,
+        entity_type,entity_id,status,attempts,next_attempt_at,lease_token,lease_expires_at,
+        telegram_message_id,last_error_code,last_error_message,sent_at,created_at,updated_at
+      )
+      SELECT 'TGO-' || lower(hex(randomblob(16))),c.user_id,
+        'teacher-menu:' || ? || ':' || c.user_id,'system',?,
+        'Оновлене меню бібліотеки',CAST(? AS TEXT),'',
+        'telegram_teacher_menu',?,'pending',0,?,NULL,NULL,NULL,NULL,NULL,NULL,?,?
+      FROM telegram_connections c
+      JOIN users u ON u.id=c.user_id AND u.status='active'
+      JOIN teacher_profiles p ON p.teacher_user_id=u.id AND p.closed_at IS NULL
+      JOIN visit_teacher_credentials v ON v.teacher_user_id=u.id AND v.status='active'
+      WHERE c.status='active' AND c.menu_delivered_version<?
+        AND (c.notify_orders=1 OR c.notify_visits=1)
+      ON CONFLICT(dedupe_key) DO UPDATE SET
+        status='pending',attempts=0,next_attempt_at=excluded.next_attempt_at,
+        lease_token=NULL,lease_expires_at=NULL,last_error_code=NULL,last_error_message=NULL,
+        updated_at=excluded.updated_at
+      WHERE telegram_delivery_outbox.status='dead'
+        AND telegram_delivery_outbox.last_error_code='notifications_disabled'
+    `).bind(
+      TELEGRAM_TEACHER_MENU_VERSION,
+      TELEGRAM_TEACHER_MENU_OUTBOX_TYPE,
+      TELEGRAM_TEACHER_MENU_VERSION,
+      TELEGRAM_TEACHER_MENU_ENTITY,
+      now,
+      now,
+      now,
+      TELEGRAM_TEACHER_MENU_VERSION,
+    ),
+    db.prepare(`INSERT INTO audit_events (
+      id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,
+      before_json,after_json,metadata_json,created_at
+    ) VALUES (?,?,?,'telegram.teacher_menu.bulk_queued','telegram_teacher_menu',?,?,
+      NULL,NULL,json_object('menuVersion',?,'expectedRecipients',?),?)`)
+      .bind(
+        `AUD-${crypto.randomUUID()}`,
+        actor.id,
+        actor.email.toLowerCase(),
+        TELEGRAM_TEACHER_MENU_ENTITY,
+        input.requestId,
+        TELEGRAM_TEACHER_MENU_VERSION,
+        input.expectedRecipientCount,
+        now,
+      ),
+  ]);
+  return {
+    rollout: await readTelegramTeacherMenuRollout(db),
+    queuedNow: Number(results[0]?.meta?.changes ?? 0),
   };
 }
 
@@ -792,7 +945,7 @@ export async function drainTelegramOutbox(
   },
 ): Promise<{ attempted: number; sent: number; failed: number }> {
   const configuration = telegramConfiguration();
-  if (!configuration.notificationsEnabled || !configuration.botToken) {
+  if (!configuration.botToken) {
     return { attempted: 0, sent: 0, failed: 0 };
   }
   const fetcher = options.fetcher ?? fetch;
@@ -809,28 +962,48 @@ export async function drainTelegramOutbox(
   ]);
   const due = await db.prepare(`
     SELECT o.id,o.recipient_user_id,c.chat_id,c.version AS connection_version,
+      o.type,u.full_name,u.role,c.notify_orders,c.notify_visits,
+      EXISTS (SELECT 1 FROM teacher_profiles teacher_profile
+        JOIN visit_teacher_credentials credential
+          ON credential.teacher_user_id=teacher_profile.teacher_user_id AND credential.status='active'
+        WHERE teacher_profile.teacher_user_id=u.id AND teacher_profile.closed_at IS NULL) AS teacher_capability,
       o.title,o.message,o.target_path,o.attempts,o.created_at
     FROM telegram_delivery_outbox o
     JOIN telegram_connections c ON c.user_id=o.recipient_user_id AND c.status='active'
     JOIN users u ON u.id=o.recipient_user_id AND u.status='active'
     WHERE o.status IN ('pending','retry') AND o.next_attempt_at<=?
-      AND (c.notify_orders=1 OR c.notify_visits=1)
+      AND ((o.type=? AND ?=1) OR (?=1 AND (c.notify_orders=1 OR c.notify_visits=1)))
       AND ((o.target_path GLOB '/librarian*' AND u.role IN ('admin','librarian'))
         OR (o.target_path NOT GLOB '/librarian*' AND EXISTS (
           SELECT 1 FROM teacher_profiles p WHERE p.teacher_user_id=u.id AND p.closed_at IS NULL
         )))
+      AND (o.type!=? OR EXISTS (
+        SELECT 1 FROM visit_teacher_credentials credential
+        WHERE credential.teacher_user_id=u.id AND credential.status='active'
+      ))
       AND NOT EXISTS (
         SELECT 1 FROM telegram_delivery_outbox earlier
         WHERE earlier.recipient_user_id=o.recipient_user_id
           AND earlier.status IN ('pending','processing','retry')
+          AND (earlier.type=? OR ?=1)
           AND (earlier.created_at<o.created_at OR (earlier.created_at=o.created_at AND earlier.id<o.id))
       )
     ORDER BY o.created_at,o.id LIMIT ?
-  `).bind(now, limit).all<OutboxRow>();
+  `).bind(
+    now,
+    TELEGRAM_TEACHER_MENU_OUTBOX_TYPE,
+    configuration.linkingEnabled ? 1 : 0,
+    configuration.notificationsEnabled ? 1 : 0,
+    TELEGRAM_TEACHER_MENU_OUTBOX_TYPE,
+    TELEGRAM_TEACHER_MENU_OUTBOX_TYPE,
+    configuration.notificationsEnabled ? 1 : 0,
+    limit,
+  ).all<OutboxRow>();
   let attempted = 0;
   let sent = 0;
   let failed = 0;
   for (const row of due.results ?? []) {
+    const menuDelivery = row.type === TELEGRAM_TEACHER_MENU_OUTBOX_TYPE;
     const leaseToken = `lease-${crypto.randomUUID()}`;
     const leaseExpiresAt = new Date(nowDate.getTime() + TELEGRAM_DELIVERY_LEASE_SECONDS * 1000).toISOString();
     const claim = await db.batch([
@@ -841,17 +1014,84 @@ export async function drainTelegramOutbox(
           AND EXISTS (SELECT 1 FROM telegram_connections c
             WHERE c.user_id=telegram_delivery_outbox.recipient_user_id AND c.status='active'
               AND c.chat_id=? AND c.version=?
-              AND (c.notify_orders=1 OR c.notify_visits=1))
-      `).bind(leaseToken, leaseExpiresAt, now, row.id, now, row.chat_id, row.connection_version),
+              AND ((telegram_delivery_outbox.type=? AND ?=1)
+                OR (?=1 AND (c.notify_orders=1 OR c.notify_visits=1))))
+      `).bind(
+        leaseToken,
+        leaseExpiresAt,
+        now,
+        row.id,
+        now,
+        row.chat_id,
+        row.connection_version,
+        TELEGRAM_TEACHER_MENU_OUTBOX_TYPE,
+        configuration.linkingEnabled ? 1 : 0,
+        configuration.notificationsEnabled ? 1 : 0,
+      ),
     ]);
     if (Number(claim[0]?.meta?.changes ?? 0) !== 1) continue;
+    if (menuDelivery) {
+      const expiredBefore = new Date(nowDate.getTime() - TELEGRAM_MENU_CLAIM_SECONDS * 1000).toISOString();
+      const menuClaim = await db.batch([db.prepare(`UPDATE telegram_connections
+        SET menu_claim_version=?,menu_claimed_at=?,updated_at=?
+        WHERE user_id=? AND chat_id=? AND version=? AND status='active'
+          AND menu_delivered_version<?
+          AND (menu_claim_version IS NULL OR menu_claimed_at<=?)`)
+        .bind(
+          TELEGRAM_TEACHER_MENU_VERSION,
+          now,
+          now,
+          row.recipient_user_id,
+          row.chat_id,
+          row.connection_version,
+          TELEGRAM_TEACHER_MENU_VERSION,
+          expiredBefore,
+        )]);
+      if (Number(menuClaim[0]?.meta?.changes ?? 0) !== 1) {
+        const connection = await db.prepare(`SELECT menu_delivered_version
+          FROM telegram_connections
+          WHERE user_id=? AND chat_id=? AND version=? AND status='active'
+          LIMIT 1`)
+          .bind(row.recipient_user_id, row.chat_id, row.connection_version)
+          .first<{ menu_delivered_version: number }>();
+        if (Number(connection?.menu_delivered_version ?? 0) >= TELEGRAM_TEACHER_MENU_VERSION) {
+          await db.batch([db.prepare(`UPDATE telegram_delivery_outbox
+            SET status='sent',telegram_message_id=NULL,sent_at=?,lease_token=NULL,lease_expires_at=NULL,
+                last_error_code=NULL,last_error_message=NULL,updated_at=?
+            WHERE id=? AND status='processing' AND lease_token=?`)
+            .bind(now, now, row.id, leaseToken)]);
+          sent += 1;
+        } else {
+          const nextAttemptAt = new Date(nowDate.getTime() + 5_000).toISOString();
+          await db.batch([db.prepare(`UPDATE telegram_delivery_outbox
+            SET status='retry',next_attempt_at=?,lease_token=NULL,lease_expires_at=NULL,
+                last_error_code='menu_refresh_busy',last_error_message='Оновлення меню вже виконується.',updated_at=?
+            WHERE id=? AND status='processing' AND lease_token=?`)
+            .bind(nextAttemptAt, now, row.id, leaseToken)]);
+        }
+        continue;
+      }
+    }
     attempted += 1;
     try {
-      const result = await telegramSendMessage(configuration.botToken, row.chat_id, {
-        title: row.title,
-        message: row.message,
-        targetUrl: row.target_path ? new URL(row.target_path, origin).toString() : null,
-      }, fetcher);
+      const result = menuDelivery
+        ? await deliverConnectedMenu(
+            configuration.botToken,
+            row.chat_id,
+            row.role,
+            Boolean(row.teacher_capability),
+            row.full_name,
+            Boolean(row.notify_orders) || Boolean(row.notify_visits),
+            origin,
+            false,
+            fetcher,
+            true,
+          )
+        : await telegramSendMessage(configuration.botToken, row.chat_id, {
+            title: row.title,
+            message: row.message,
+            targetUrl: row.target_path ? new URL(row.target_path, origin).toString() : null,
+          }, fetcher);
       await db.batch([
         db.prepare(`
           UPDATE telegram_delivery_outbox
@@ -859,6 +1099,20 @@ export async function drainTelegramOutbox(
               last_error_code=NULL,last_error_message=NULL,updated_at=?
           WHERE id=? AND status='processing' AND lease_token=?
         `).bind(result.messageId, now, now, row.id, leaseToken),
+        ...(menuDelivery ? [db.prepare(`UPDATE telegram_connections
+          SET menu_delivered_version=?,menu_claim_version=NULL,menu_claimed_at=NULL,
+              last_success_at=?,last_failure_at=NULL,last_error_code=NULL,updated_at=?
+          WHERE user_id=? AND chat_id=? AND version=? AND status='active'
+            AND menu_claim_version=?`)
+          .bind(
+            TELEGRAM_TEACHER_MENU_VERSION,
+            now,
+            now,
+            row.recipient_user_id,
+            row.chat_id,
+            row.connection_version,
+            TELEGRAM_TEACHER_MENU_VERSION,
+          )] : []),
         connectionSuccessStatement(db, row.recipient_user_id, now),
       ]);
       sent += 1;
@@ -869,6 +1123,17 @@ export async function drainTelegramOutbox(
       const retryAfter = failure.retryAfterSeconds ?? exponentialRetrySeconds(attempts);
       const nextAttemptAt = new Date(nowDate.getTime() + retryAfter * 1000).toISOString();
       const statements = [
+        ...(menuDelivery ? [db.prepare(`UPDATE telegram_connections
+          SET menu_claim_version=NULL,menu_claimed_at=NULL,updated_at=?
+          WHERE user_id=? AND chat_id=? AND version=? AND status='active'
+            AND menu_claim_version=?`)
+          .bind(
+            now,
+            row.recipient_user_id,
+            row.chat_id,
+            row.connection_version,
+            TELEGRAM_TEACHER_MENU_VERSION,
+          )] : []),
         db.prepare(`
           UPDATE telegram_delivery_outbox
           SET status=?,next_attempt_at=?,lease_token=NULL,lease_expires_at=NULL,
@@ -887,6 +1152,7 @@ export async function drainTelegramOutbox(
       ];
       await db.batch(statements);
       failed += 1;
+      if (failure.retryAfterSeconds) break;
     }
   }
   return { attempted, sent, failed };
@@ -1028,6 +1294,7 @@ export async function processTelegramWebhookUpdate(
           telegram_user_id=excluded.telegram_user_id,chat_id=excluded.chat_id,username=excluded.username,
           status='active',notify_orders=1,notify_visits=1,disabled_at=NULL,
           linked_at=excluded.linked_at,last_error_code=NULL,
+          menu_delivered_version=0,menu_claim_version=NULL,menu_claimed_at=NULL,
           version=telegram_connections.version+1,updated_at=excluded.updated_at
       `).bind(
         tokenHash,
@@ -1044,6 +1311,11 @@ export async function processTelegramWebhookUpdate(
     if (Number(results[0]?.meta?.changes ?? 0) !== 1) {
       return { outcome: "linked", duplicate: true };
     }
+    const linkedProfile = await connectedTelegramProfile(
+      db,
+      update.message.chatId,
+      update.message.telegramUserId,
+    );
     await bestEffortConnectedMenu(
       configuration.botToken,
       update.message.chatId,
@@ -1054,6 +1326,11 @@ export async function processTelegramWebhookUpdate(
       siteOrigin,
       true,
       fetcher,
+      linkedProfile ? {
+        db,
+        userId: linkedProfile.user_id,
+        connectionVersion: linkedProfile.connection_version,
+      } : undefined,
     );
     return { outcome: "linked", duplicate: false };
   }
@@ -1089,6 +1366,11 @@ export async function processTelegramWebhookUpdate(
           siteOrigin,
           false,
           fetcher,
+          {
+            db,
+            userId: toggled.profile.user_id,
+            connectionVersion: toggled.profile.connection_version,
+          },
         );
       }
     }
@@ -1139,6 +1421,11 @@ export async function processTelegramWebhookUpdate(
             siteOrigin,
             false,
             fetcher,
+            {
+              db,
+              userId: profile.user_id,
+              connectionVersion: profile.connection_version,
+            },
           );
         } else if (resumed.inserted) {
           await bestEffortBotReply(
@@ -1164,6 +1451,11 @@ export async function processTelegramWebhookUpdate(
           siteOrigin,
           false,
           fetcher,
+          {
+            db,
+            userId: profile.user_id,
+            connectionVersion: profile.connection_version,
+          },
         );
       }
       return { outcome: "menu", duplicate: !inserted };
@@ -1186,7 +1478,26 @@ export async function processTelegramWebhookUpdate(
     }
     return { outcome: grant.outcome, duplicate: !grant.inserted };
   }
+  const profile = await connectedTelegramProfile(
+    db,
+    update.message.chatId,
+    update.message.telegramUserId,
+  );
   const inserted = await insertWebhookReceipt(db, update.updateId, payloadHash, "ignored_command");
+  if (inserted && profile?.teacher_capability && siteOrigin
+    && profile.menu_delivered_version < TELEGRAM_TEACHER_MENU_VERSION) {
+    const refreshed = await refreshConnectedTeacherTelegramMenu(
+      db,
+      {
+        teacherUserId: profile.user_id,
+        telegramUserId: update.message.telegramUserId,
+        siteOrigin,
+        onlyIfStale: true,
+      },
+      fetcher,
+    );
+    if (refreshed) return { outcome: "ignored_command", duplicate: false };
+  }
   if (inserted) await bestEffortBotReply(configuration.botToken, update.message.chatId,
     "Керуйте Telegram-сповіщеннями у своєму кабінеті на сайті «Єдина бібліотека».", fetcher);
   return { outcome: "ignored_command", duplicate: !inserted };
@@ -1750,7 +2061,7 @@ async function processTelegramNotificationCallback(
     );
     if (toggled.profile && siteOrigin) {
       const origin = trustedSiteOrigin(siteOrigin);
-      await bestEffortEditMenuKeyboard(
+      const edited = await bestEffortEditMenuKeyboard(
         configuration.botToken,
         callback.chatId,
         callback.messageId,
@@ -1765,6 +2076,18 @@ async function processTelegramNotificationCallback(
         ),
         fetcher,
       );
+      if (edited && toggled.profile.teacher_capability) {
+        await db.batch([db.prepare(`UPDATE telegram_connections
+          SET menu_delivered_version=?,menu_claim_version=NULL,menu_claimed_at=NULL,updated_at=?
+          WHERE user_id=? AND chat_id=? AND version=? AND status='active'`)
+          .bind(
+            TELEGRAM_TEACHER_MENU_VERSION,
+            now,
+            toggled.profile.user_id,
+            callback.chatId,
+            toggled.profile.connection_version,
+          )]);
+      }
     }
   }
   return { outcome: enabled ? "notifications_enabled" : "notifications_disabled", duplicate: !toggled.inserted };
@@ -1906,7 +2229,7 @@ async function bestEffortEditMenuKeyboard(
   notificationsOn: boolean,
   keyboard: Array<Array<Record<string, unknown>>>,
   fetcher: TelegramFetcher,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const greeting = `Профіль: «${safePlainText(fullName, 120)}».`;
     await telegramApiRequest(botToken, "editMessageText", {
@@ -1917,8 +2240,10 @@ async function bestEffortEditMenuKeyboard(
       link_preview_options: { is_disabled: true },
       reply_markup: { inline_keyboard: keyboard },
     }, fetcher);
+    return true;
   } catch {
     // A fresh /menu always renders the authoritative state when an old message cannot be edited.
+    return false;
   }
 }
 
@@ -2034,6 +2359,8 @@ type ConnectedTelegramProfile = {
   teacher_capability: number;
   notify_orders: number;
   notify_visits: number;
+  connection_version: number;
+  menu_delivered_version: number;
 };
 
 /**
@@ -2047,7 +2374,12 @@ type ConnectedTelegramProfile = {
  */
 export async function refreshConnectedTeacherTelegramMenu(
   db: TelegramDatabase,
-  input: { teacherUserId: string; telegramUserId?: string; siteOrigin: string },
+  input: {
+    teacherUserId: string;
+    telegramUserId?: string;
+    siteOrigin: string;
+    onlyIfStale?: boolean;
+  },
   fetcher: TelegramFetcher = fetch,
 ): Promise<boolean> {
   try {
@@ -2068,6 +2400,31 @@ export async function refreshConnectedTeacherTelegramMenu(
     if (!connection) return false;
     const profile = await connectedTelegramProfile(db, connection.chat_id, connection.telegram_user_id);
     if (!profile || profile.user_id !== input.teacherUserId || !profile.teacher_capability) return false;
+    let claimVersion: number | null = null;
+    if (input.onlyIfStale) {
+      if (profile.menu_delivered_version >= TELEGRAM_TEACHER_MENU_VERSION) return false;
+      claimVersion = TELEGRAM_TEACHER_MENU_VERSION;
+      const nowDate = new Date();
+      const now = nowDate.toISOString();
+      const expiredBefore = new Date(nowDate.getTime() - TELEGRAM_MENU_CLAIM_SECONDS * 1000).toISOString();
+      const claimed = await db.batch([db.prepare(`UPDATE telegram_connections
+        SET menu_claim_version=?,menu_claimed_at=?,updated_at=?
+        WHERE user_id=? AND chat_id=? AND telegram_user_id=? AND status='active'
+          AND version=? AND menu_delivered_version<?
+          AND (menu_claim_version IS NULL OR menu_claimed_at<=?)`)
+        .bind(
+          claimVersion,
+          now,
+          now,
+          profile.user_id,
+          connection.chat_id,
+          connection.telegram_user_id,
+          profile.connection_version,
+          TELEGRAM_TEACHER_MENU_VERSION,
+          expiredBefore,
+        )]);
+      if (Number(claimed[0]?.meta?.changes ?? 0) !== 1) return false;
+    }
     return bestEffortConnectedMenu(
       configuration.botToken,
       connection.chat_id,
@@ -2078,6 +2435,12 @@ export async function refreshConnectedTeacherTelegramMenu(
       input.siteOrigin,
       true,
       fetcher,
+      {
+        db,
+        userId: profile.user_id,
+        connectionVersion: profile.connection_version,
+        claimVersion,
+      },
     );
   } catch {
     return false;
@@ -2183,6 +2546,7 @@ async function connectedTelegramProfile(
 ): Promise<ConnectedTelegramProfile | null> {
   return db.prepare(`
     SELECT u.id AS user_id,u.full_name,u.role,c.notify_orders,c.notify_visits,
+      c.version AS connection_version,c.menu_delivered_version,
       EXISTS (SELECT 1 FROM teacher_profiles p
         JOIN visit_teacher_credentials v ON v.teacher_user_id=p.teacher_user_id AND v.status='active'
         WHERE p.teacher_user_id=u.id AND p.closed_at IS NULL) AS teacher_capability
@@ -2212,47 +2576,119 @@ async function bestEffortConnectedMenu(
   siteOrigin: string | undefined,
   linked: boolean,
   fetcher: TelegramFetcher,
+  context?: {
+    db: TelegramDatabase;
+    userId: string;
+    connectionVersion: number;
+    claimVersion?: number | null;
+  },
 ): Promise<boolean> {
   try {
-    const origin = siteOrigin ? trustedSiteOrigin(siteOrigin) : null;
-    const configuration = telegramConfiguration();
-    const keyboard = origin
-      ? telegramRoleKeyboard(role, teacherCapability, origin, configuration.miniAppEnabled, notificationsOn)
-      : null;
-    const greeting = linked
-      ? `Telegram підключено до профілю «${safePlainText(fullName, 120)}».`
-      : `Профіль: «${safePlainText(fullName, 120)}».`;
-    const messageDelivery = telegramApiRequest(botToken, "sendMessage", {
-      chat_id: chatId,
-      text: `<b>${escapeHtml(greeting)}</b>\nСповіщення: ${notificationsOn ? "увімкнено 🔔" : "вимкнено 🔕"}.\nОберіть потрібний розділ:`,
-      parse_mode: "HTML",
-      link_preview_options: { is_disabled: true },
-      ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
-    }, fetcher).then(() => true, () => false);
-    let menuButtonDelivery: Promise<void> = Promise.resolve();
-    if ((role === "admin" || role === "librarian") && origin && configuration.miniAppEnabled) {
-      menuButtonDelivery = bestEffortChatMenuButton(
-        botToken,
-        chatId,
-        { text: "Кабінет бібліотекаря", url: new URL("/librarian/telegram?target=home", origin).toString() },
-        fetcher,
-      );
-    } else if (teacherCapability && origin && configuration.miniAppEnabled) {
-      menuButtonDelivery = bestEffortChatMenuButton(
-        botToken,
-        chatId,
-        { text: "Кабінет учителя", url: new URL("/teacher/telegram?tab=overview", origin).toString() },
-        fetcher,
-      );
-    } else if (origin) {
-      menuButtonDelivery = bestEffortChatMenuButton(botToken, chatId, null, fetcher);
+    await deliverConnectedMenu(
+      botToken,
+      chatId,
+      role,
+      teacherCapability,
+      fullName,
+      notificationsOn,
+      siteOrigin,
+      linked,
+      fetcher,
+    );
+    if (context) {
+      const now = new Date().toISOString();
+      await context.db.batch([context.db.prepare(`UPDATE telegram_connections
+        SET menu_delivered_version=?,menu_claim_version=NULL,menu_claimed_at=NULL,
+            last_success_at=?,last_failure_at=NULL,last_error_code=NULL,updated_at=?
+        WHERE user_id=? AND chat_id=? AND version=? AND status='active'
+          AND (? IS NULL OR menu_claim_version=?)`)
+        .bind(
+          TELEGRAM_TEACHER_MENU_VERSION,
+          now,
+          now,
+          context.userId,
+          chatId,
+          context.connectionVersion,
+          context.claimVersion ?? null,
+          context.claimVersion ?? null,
+        )]);
     }
-    const [messageDelivered] = await Promise.all([messageDelivery, menuButtonDelivery]);
-    return messageDelivered;
-  } catch {
+    return true;
+  } catch (error) {
+    if (context) {
+      const now = new Date().toISOString();
+      const failure = telegramFailure(error);
+      await context.db.batch([
+        context.db.prepare(`UPDATE telegram_connections
+          SET menu_claim_version=NULL,menu_claimed_at=NULL,updated_at=?
+          WHERE user_id=? AND chat_id=? AND version=? AND status='active'
+            AND (? IS NULL OR menu_claim_version=?)`)
+          .bind(
+            now,
+            context.userId,
+            chatId,
+            context.connectionVersion,
+            context.claimVersion ?? null,
+            context.claimVersion ?? null,
+          ),
+        connectionFailureStatement(context.db, context.userId, failure, now),
+      ]).catch(() => undefined);
+    }
     // D1 remains authoritative even if Telegram cannot render the optional menu.
     return false;
   }
+}
+
+async function deliverConnectedMenu(
+  botToken: string,
+  chatId: string,
+  role: ConnectedTelegramRole,
+  teacherCapability: boolean,
+  fullName: string,
+  notificationsOn: boolean,
+  siteOrigin: string | undefined,
+  linked: boolean,
+  fetcher: TelegramFetcher,
+  disableNotification = false,
+): Promise<{ messageId: string }> {
+  const origin = siteOrigin ? trustedSiteOrigin(siteOrigin) : null;
+  const configuration = telegramConfiguration();
+  const keyboard = origin
+    ? telegramRoleKeyboard(role, teacherCapability, origin, configuration.miniAppEnabled, notificationsOn)
+    : null;
+  const greeting = linked
+    ? `Telegram підключено до профілю «${safePlainText(fullName, 120)}».`
+    : `Профіль: «${safePlainText(fullName, 120)}».`;
+  const result = await telegramApiRequest(botToken, "sendMessage", {
+    chat_id: chatId,
+    text: `<b>${escapeHtml(greeting)}</b>\nСповіщення: ${notificationsOn ? "увімкнено 🔔" : "вимкнено 🔕"}.\nОберіть потрібний розділ:`,
+    parse_mode: "HTML",
+    disable_notification: disableNotification,
+    link_preview_options: { is_disabled: true },
+    ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
+  }, fetcher) as Record<string, unknown>;
+  const messageId = integerText(result.message_id);
+  if (!messageId) {
+    throw new TelegramIntegrationError("telegram_response_invalid", 503, "Telegram не підтвердив надсилання меню.");
+  }
+  if ((role === "admin" || role === "librarian") && origin && configuration.miniAppEnabled) {
+    await bestEffortChatMenuButton(
+      botToken,
+      chatId,
+      { text: "Кабінет бібліотекаря", url: new URL("/librarian/telegram?target=home", origin).toString() },
+      fetcher,
+    );
+  } else if (teacherCapability && origin && configuration.miniAppEnabled) {
+    await bestEffortChatMenuButton(
+      botToken,
+      chatId,
+      { text: "Кабінет учителя", url: new URL("/teacher/telegram?tab=overview", origin).toString() },
+      fetcher,
+    );
+  } else if (origin) {
+    await bestEffortChatMenuButton(botToken, chatId, null, fetcher);
+  }
+  return { messageId };
 }
 
 function telegramRoleKeyboard(

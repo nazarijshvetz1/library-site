@@ -86,6 +86,7 @@ const migrations = [
   "0017_fresh_robbie_robertson.sql",
   "0018_yielding_skaar.sql",
   "0019_kindly_wolfsbane.sql",
+  "0027_naive_microbe.sql",
 ];
 
 async function database() {
@@ -830,6 +831,237 @@ test("verified Mini App login refreshes only the exact connected teacher menu", 
   ), false);
   assert.equal(context.sqlite.prepare("SELECT status FROM telegram_connections WHERE user_id='USR-TEACHER'").get().status,
     "active");
+  context.sqlite.close();
+});
+
+test("a stale connected teacher receives one automatic menu refresh on the next interaction", async () => {
+  const context = await database();
+  addTeacherCredential(context);
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-TEACHER','7301','7301',NULL,'active',1,1,1,?,NULL,?,?)`)
+    .run(context.now, context.now, context.now);
+
+  const firstPayload = {
+    update_id: 7301,
+    message: { text: "Добрий день", chat: { id: 7301, type: "private" }, from: { id: 7301 } },
+  };
+  const firstBodies = [];
+  assert.deepEqual(await telegram.processTelegramWebhookUpdate(
+    context.db,
+    JSON.stringify(firstPayload),
+    firstPayload,
+    async (_url, init) => { firstBodies.push(JSON.parse(init.body)); return telegramOk(81); },
+    "https://library.example.test",
+  ), { outcome: "ignored_command", duplicate: false });
+  assert.equal(firstBodies.filter((body) => body.reply_markup?.inline_keyboard).length, 1);
+  assert.equal(context.sqlite.prepare(`SELECT menu_delivered_version FROM telegram_connections
+    WHERE user_id='USR-TEACHER'`).get().menu_delivered_version, telegram.TELEGRAM_TEACHER_MENU_VERSION);
+
+  const secondPayload = {
+    update_id: 7302,
+    message: { text: "Ще раз", chat: { id: 7301, type: "private" }, from: { id: 7301 } },
+  };
+  const secondBodies = [];
+  await telegram.processTelegramWebhookUpdate(
+    context.db,
+    JSON.stringify(secondPayload),
+    secondPayload,
+    async (_url, init) => { secondBodies.push(JSON.parse(init.body)); return telegramOk(82); },
+    "https://library.example.test",
+  );
+  assert.equal(secondBodies.filter((body) => body.reply_markup?.inline_keyboard).length, 0,
+    "the one-time automatic menu is not sent again after the version is current");
+  assert.equal(secondBodies.filter((body) => body.text).length, 1,
+    "ordinary guidance still answers a non-command message");
+  context.sqlite.close();
+});
+
+test("failed automatic menu delivery clears its claim so a later interaction can retry", async () => {
+  const context = await database();
+  addTeacherCredential(context);
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-TEACHER','7303','7303',NULL,'active',1,1,1,?,NULL,?,?)`)
+    .run(context.now, context.now, context.now);
+  const failedPayload = {
+    update_id: 7303,
+    message: { text: "Оновіть", chat: { id: 7303, type: "private" }, from: { id: 7303 } },
+  };
+  await telegram.processTelegramWebhookUpdate(
+    context.db,
+    JSON.stringify(failedPayload),
+    failedPayload,
+    async () => new Response(JSON.stringify({ ok: false, description: "temporary" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    }),
+    "https://library.example.test",
+  );
+  assert.deepEqual(
+    { ...context.sqlite.prepare(`SELECT menu_delivered_version,menu_claim_version,menu_claimed_at
+      FROM telegram_connections WHERE user_id='USR-TEACHER'`).get() },
+    { menu_delivered_version: 0, menu_claim_version: null, menu_claimed_at: null },
+  );
+
+  const retryPayload = {
+    update_id: 7304,
+    message: { text: "Повторіть", chat: { id: 7303, type: "private" }, from: { id: 7303 } },
+  };
+  const retryBodies = [];
+  await telegram.processTelegramWebhookUpdate(
+    context.db,
+    JSON.stringify(retryPayload),
+    retryPayload,
+    async (_url, init) => { retryBodies.push(JSON.parse(init.body)); return telegramOk(83); },
+    "https://library.example.test",
+  );
+  assert.equal(retryBodies.filter((body) => body.reply_markup?.inline_keyboard).length, 1);
+  assert.equal(context.sqlite.prepare(`SELECT menu_delivered_version FROM telegram_connections
+    WHERE user_id='USR-TEACHER'`).get().menu_delivered_version, telegram.TELEGRAM_TEACHER_MENU_VERSION);
+  context.sqlite.close();
+});
+
+test("librarian bulk rollout queues only unmuted stale teachers and records successful delivery", async () => {
+  const context = await database();
+  addTeacherCredential(context);
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-TEACHER','7305','7305',NULL,'active',1,1,1,?,NULL,?,?)`)
+    .run(context.now, context.now, context.now);
+  const preview = await telegram.readTelegramTeacherMenuRollout(context.db);
+  assert.deepEqual(
+    {
+      connectedTeachers: preview.connectedTeachers,
+      currentTeachers: preview.currentTeachers,
+      mutedPendingTeachers: preview.mutedPendingTeachers,
+      recipients: preview.recipients,
+    },
+    { connectedTeachers: 1, currentTeachers: 0, mutedPendingTeachers: 0, recipients: 1 },
+  );
+  const queued = await telegram.queueTelegramTeacherMenuRefresh(
+    context.db,
+    { id: "USR-LIB", email: "library@example.test" },
+    {
+      requestId: crypto.randomUUID(),
+      expectedMenuVersion: preview.currentVersion,
+      expectedRecipientCount: preview.recipients,
+    },
+  );
+  assert.equal(queued.queuedNow, 1);
+  assert.equal(context.sqlite.prepare(`SELECT status FROM telegram_delivery_outbox
+    WHERE type='teacher_menu_refresh'`).get().status, "pending");
+  const bodies = [];
+  assert.deepEqual(await telegram.drainTelegramOutbox(context.db, {
+    siteOrigin: "https://library.example.test",
+    now: new Date(),
+    fetcher: async (_url, init) => { bodies.push(JSON.parse(init.body)); return telegramOk(84); },
+  }), { attempted: 1, sent: 1, failed: 0 });
+  const menu = bodies.find((body) => body.reply_markup?.inline_keyboard);
+  assert.equal(menu.disable_notification, true);
+  assert.equal(menu.reply_markup.inline_keyboard[0][0].web_app.url,
+    "https://library.example.test/teacher/telegram?tab=overview");
+  assert.equal(context.sqlite.prepare(`SELECT menu_delivered_version FROM telegram_connections
+    WHERE user_id='USR-TEACHER'`).get().menu_delivered_version, telegram.TELEGRAM_TEACHER_MENU_VERSION);
+  assert.equal(context.sqlite.prepare(`SELECT status FROM telegram_delivery_outbox
+    WHERE type='teacher_menu_refresh'`).get().status, "sent");
+  context.sqlite.close();
+
+  const muted = await database();
+  addTeacherCredential(muted);
+  muted.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-TEACHER','7306','7306',NULL,'active',0,0,1,?,NULL,?,?)`)
+    .run(muted.now, muted.now, muted.now);
+  const mutedPreview = await telegram.readTelegramTeacherMenuRollout(muted.db);
+  assert.equal(mutedPreview.recipients, 0);
+  assert.equal(mutedPreview.mutedPendingTeachers, 1);
+  const mutedQueue = await telegram.queueTelegramTeacherMenuRefresh(
+    muted.db,
+    { id: "USR-LIB", email: "library@example.test" },
+    {
+      requestId: crypto.randomUUID(),
+      expectedMenuVersion: mutedPreview.currentVersion,
+      expectedRecipientCount: 0,
+    },
+  );
+  assert.equal(mutedQueue.queuedNow, 0);
+  assert.equal(muted.sqlite.prepare("SELECT count(*) AS count FROM telegram_delivery_outbox").get().count, 0);
+  muted.sqlite.close();
+});
+
+test("automatic and bulk teacher-menu refreshes share one claim and never double-send", async () => {
+  const context = await database();
+  addTeacherCredential(context);
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,created_at,updated_at
+  ) VALUES ('USR-TEACHER','7307','7307',NULL,'active',1,1,1,?,NULL,?,?)`)
+    .run(context.now, context.now, context.now);
+  const preview = await telegram.readTelegramTeacherMenuRollout(context.db);
+  await telegram.queueTelegramTeacherMenuRefresh(
+    context.db,
+    { id: "USR-LIB", email: "library@example.test" },
+    {
+      requestId: crypto.randomUUID(),
+      expectedMenuVersion: preview.currentVersion,
+      expectedRecipientCount: preview.recipients,
+    },
+  );
+
+  let releaseAutomatic;
+  let automaticStarted;
+  const automaticRelease = new Promise((resolve) => { releaseAutomatic = resolve; });
+  const automaticStart = new Promise((resolve) => { automaticStarted = resolve; });
+  const automaticRequest = telegram.refreshConnectedTeacherTelegramMenu(
+    context.db,
+    {
+      teacherUserId: "USR-TEACHER",
+      telegramUserId: "7307",
+      siteOrigin: "https://library.example.test",
+      onlyIfStale: true,
+    },
+    async (url) => {
+      if (String(url).endsWith("/sendMessage")) {
+        automaticStarted();
+        await automaticRelease;
+      }
+      return telegramOk(85);
+    },
+  );
+  await automaticStart;
+
+  let bulkRequests = 0;
+  const drainNow = new Date();
+  assert.deepEqual(await telegram.drainTelegramOutbox(context.db, {
+    siteOrigin: "https://library.example.test",
+    now: drainNow,
+    fetcher: async () => { bulkRequests += 1; return telegramOk(86); },
+  }), { attempted: 0, sent: 0, failed: 0 });
+  assert.equal(bulkRequests, 0, "the bulk worker must not race the automatic refresh");
+  assert.deepEqual(
+    { ...context.sqlite.prepare(`SELECT status,last_error_code FROM telegram_delivery_outbox
+      WHERE type='teacher_menu_refresh'`).get() },
+    { status: "retry", last_error_code: "menu_refresh_busy" },
+  );
+
+  releaseAutomatic();
+  assert.equal(await automaticRequest, true);
+  assert.equal(context.sqlite.prepare(`SELECT menu_delivered_version FROM telegram_connections
+    WHERE user_id='USR-TEACHER'`).get().menu_delivered_version, telegram.TELEGRAM_TEACHER_MENU_VERSION);
+
+  assert.deepEqual(await telegram.drainTelegramOutbox(context.db, {
+    siteOrigin: "https://library.example.test",
+    now: new Date(drainNow.getTime() + 6_000),
+    fetcher: async () => { bulkRequests += 1; return telegramOk(87); },
+  }), { attempted: 0, sent: 1, failed: 0 });
+  assert.equal(bulkRequests, 0, "a current menu completes the outbox row without another Telegram request");
+  assert.equal(context.sqlite.prepare(`SELECT status FROM telegram_delivery_outbox
+    WHERE type='teacher_menu_refresh'`).get().status, "sent");
   context.sqlite.close();
 });
 

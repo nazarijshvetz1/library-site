@@ -190,6 +190,13 @@
       "when": 1787722729092,
       "tag": "0026_typical_scalphunter",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1787858074427,
+      "tag": "0027_naive_microbe",
+      "breakpoints": true
     }
   ]
 }

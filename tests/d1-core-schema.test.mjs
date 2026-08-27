@@ -31,6 +31,7 @@ const migrationFiles = [
   "drizzle/0024_watery_miss_america.sql",
   "drizzle/0025_lying_lucky_pierre.sql",
   "drizzle/0026_typical_scalphunter.sql",
+  "drizzle/0027_naive_microbe.sql",
 ];
 
 async function migratedDatabase() {
@@ -69,6 +70,41 @@ test("0026 adds reversible teacher history visibility without changing existing 
   assert.equal(database.prepare("SELECT COUNT(*) AS n FROM material_request_items WHERE request_id='MR-1'").get().n, 1);
   assert.equal(database.prepare("SELECT COUNT(*) AS n FROM material_request_events WHERE request_id='MR-1'").get().n, 1);
   assert.equal(database.prepare("SELECT COUNT(*) AS n FROM pragma_index_list('material_requests') WHERE name='idx_material_requests_teacher_hidden'").get().n, 1);
+  assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+  database.close();
+});
+
+test("0027 preserves Telegram connections and marks existing teacher menus as stale", async () => {
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON;");
+  for (const file of migrationFiles.slice(0, migrationFiles.indexOf("drizzle/0027_naive_microbe.sql"))) {
+    database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
+  }
+  const now = "2026-08-27T08:00:00.000Z";
+  database.prepare(`INSERT INTO users
+    (id,full_name,sort_name,email,auth_user_id,role,status,created_at,updated_at)
+    VALUES ('USR-TG-MENU','Учитель Меню','учитель меню',NULL,NULL,'teacher','active',?,?)`)
+    .run(now, now);
+  database.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,username,status,notify_orders,notify_visits,version,
+    linked_at,disabled_at,last_success_at,last_failure_at,last_error_code,created_at,updated_at
+  ) VALUES ('USR-TG-MENU','7401','7401',NULL,'active',1,1,3,?,NULL,?,NULL,NULL,?,?)`)
+    .run(now, now, now, now);
+  database.exec(await readFile(new URL("../drizzle/0027_naive_microbe.sql", import.meta.url), "utf8"));
+  assert.deepEqual(
+    { ...database.prepare(`SELECT user_id,telegram_user_id,chat_id,version,
+      menu_delivered_version,menu_claim_version,menu_claimed_at
+      FROM telegram_connections WHERE user_id='USR-TG-MENU'`).get() },
+    {
+      user_id: "USR-TG-MENU",
+      telegram_user_id: "7401",
+      chat_id: "7401",
+      version: 3,
+      menu_delivered_version: 0,
+      menu_claim_version: null,
+      menu_claimed_at: null,
+    },
+  );
   assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
   database.close();
 });

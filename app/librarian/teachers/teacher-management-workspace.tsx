@@ -78,6 +78,24 @@ type TelegramStatus = {
 };
 type LibrarianTelegramEnvelope = { success: true; telegram: TelegramStatus; writesEnabled: boolean };
 type TelegramLinkEnvelope = { success: true; linkUrl: string; expiresAt: string; writesEnabled: boolean };
+type TelegramTeacherMenuRollout = {
+  currentVersion: number;
+  connectedTeachers: number;
+  currentTeachers: number;
+  mutedPendingTeachers: number;
+  recipients: number;
+  queued: number;
+  retrying: number;
+  sent: number;
+  failed: number;
+  lastUpdatedAt: string | null;
+};
+type TelegramTeacherMenuEnvelope = {
+  success: true;
+  rollout: TelegramTeacherMenuRollout;
+  queuedNow?: number;
+  writesEnabled: boolean;
+};
 type TeacherCuratorRequest = {
   id: string;
   teacher: { id: string; fullName: string };
@@ -287,19 +305,26 @@ function OverviewPanel({
 
 function LibrarianTelegramPanel({ writesEnabled }: { writesEnabled: boolean }) {
   const [telegram, setTelegram] = useState<TelegramStatus | null>(null);
+  const [teacherMenus, setTeacherMenus] = useState<TelegramTeacherMenuRollout | null>(null);
   const [apiWritesEnabled, setApiWritesEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<"link" | "toggle" | "test" | "disconnect" | null>(null);
+  const [busy, setBusy] = useState<"link" | "toggle" | "test" | "disconnect" | "menus" | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [showMenuConfirmation, setShowMenuConfirmation] = useState(false);
+  const [confirmMenus, setConfirmMenus] = useState(false);
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"success" | "error" | "info">("info");
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await visitApi<LibrarianTelegramEnvelope>("/api/librarian/telegram");
+      const [response, menus] = await Promise.all([
+        visitApi<LibrarianTelegramEnvelope>("/api/librarian/telegram"),
+        visitApi<TelegramTeacherMenuEnvelope>("/api/librarian/telegram/teacher-menus"),
+      ]);
       setTelegram(response.telegram);
-      setApiWritesEnabled(response.writesEnabled);
+      setTeacherMenus(menus.rollout);
+      setApiWritesEnabled(response.writesEnabled && menus.writesEnabled);
       setConfirmDisconnect(false);
     } catch (error) {
       setNotice(errorMessage(error)); setNoticeTone("error");
@@ -372,6 +397,36 @@ function LibrarianTelegramPanel({ writesEnabled }: { writesEnabled: boolean }) {
     } finally { setBusy(null); }
   }
 
+  async function refreshTeacherMenus() {
+    if (!teacherMenus) return;
+    setBusy("menus"); setNotice("");
+    try {
+      const response = await visitApi<TelegramTeacherMenuEnvelope>(
+        "/api/librarian/telegram/teacher-menus",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            requestId: crypto.randomUUID(),
+            confirmation: "refresh_teacher_menus",
+            expectedMenuVersion: teacherMenus.currentVersion,
+            expectedRecipientCount: teacherMenus.recipients,
+          }),
+        },
+      );
+      setTeacherMenus(response.rollout);
+      setApiWritesEnabled(response.writesEnabled);
+      setShowMenuConfirmation(false);
+      setConfirmMenus(false);
+      setNotice(response.queuedNow
+        ? `Актуальне меню передано в чергу для ${response.queuedNow} вчителів.`
+        : "Усі доступні меню вже актуальні або перебувають у черзі.");
+      setNoticeTone("success");
+      window.setTimeout(() => void load(), 1200);
+    } catch (error) {
+      setNotice(errorMessage(error)); setNoticeTone("error");
+    } finally { setBusy(null); }
+  }
+
   const canWrite = writesEnabled && apiWritesEnabled;
   const notificationsOn = Boolean(telegram?.notifyOrders || telegram?.notifyVisits);
   const statusLabel = telegram?.connected
@@ -421,6 +476,41 @@ function LibrarianTelegramPanel({ writesEnabled }: { writesEnabled: boolean }) {
             </div>
           </>
         ) : null}
+      </section>
+
+      <section className={`${styles.card} ${styles.telegramPanel} ${styles.telegramTeacherMenuCard}`} aria-labelledby="librarian-telegram-teacher-menu-title">
+        <div className={styles.telegramHeading}>
+          <div className={styles.telegramMark} aria-hidden="true"><SiteIcon name="refresh" size={24} /></div>
+          <div><span>Меню вчителів</span><h2 id="librarian-telegram-teacher-menu-title">Оновити меню в Telegram</h2><p>Нові кнопки з’являються автоматично під час наступної взаємодії вчителя з ботом. Для важливого оновлення можна заздалегідь надіслати актуальне меню всім доступним одержувачам.</p></div>
+          <strong data-connected={teacherMenus?.recipients === 0 || undefined}>{loading ? "Перевіряємо…" : teacherMenus?.recipients ? `${teacherMenus.recipients} очікує` : "Актуально"}</strong>
+        </div>
+        {teacherMenus ? (
+          <>
+            <div className={styles.telegramMenuStats} aria-live="polite">
+              <div><strong>{teacherMenus.connectedTeachers}</strong><span>підключено</span></div>
+              <div><strong>{teacherMenus.currentTeachers}</strong><span>мають актуальне меню</span></div>
+              <div><strong>{teacherMenus.recipients}</strong><span>можна оновити зараз</span></div>
+              <div><strong>{teacherMenus.queued + teacherMenus.retrying}</strong><span>у доставці</span></div>
+            </div>
+            {teacherMenus.mutedPendingTeachers ? <div className={styles.info}>{teacherMenus.mutedPendingTeachers} вчителів вимкнули сповіщення. Масове повідомлення їм не надсилається; меню оновиться автоматично, коли вони самі скористаються ботом.</div> : null}
+            {teacherMenus.failed ? <div className={styles.info}>Не доставлено: {teacherMenus.failed}. Заблоковані або недоступні чати не впливають на інших учителів.</div> : null}
+            {showMenuConfirmation && teacherMenus.recipients > 0 ? (
+              <div className={styles.telegramMenuConfirmation} role="group" aria-label="Підтвердження оновлення меню">
+                <p>Бот без звуку надішле актуальні кнопки {teacherMenus.recipients} вчителям. PIN-коди, замовлення та налаштування сповіщень не зміняться.</p>
+                <label><input type="checkbox" checked={confirmMenus} onChange={(event) => setConfirmMenus(event.target.checked)} /> Підтверджую надсилання актуального меню</label>
+                <div className={styles.telegramActions}>
+                  <button className={styles.primaryButton} type="button" onClick={() => void refreshTeacherMenus()} disabled={!canWrite || Boolean(busy) || !confirmMenus}>{busy === "menus" ? "Передаємо в чергу…" : `Надіслати меню ${teacherMenus.recipients} вчителям`}</button>
+                  <button type="button" onClick={() => { setShowMenuConfirmation(false); setConfirmMenus(false); }} disabled={Boolean(busy)}>Скасувати</button>
+                </div>
+              </div>
+            ) : (
+              <div className={styles.telegramActions}>
+                <button className={styles.primaryButton} type="button" onClick={() => { setShowMenuConfirmation(true); setConfirmMenus(false); }} disabled={!canWrite || Boolean(busy) || teacherMenus.recipients === 0}>Оновити меню всім</button>
+                <button type="button" onClick={() => void load()} disabled={Boolean(busy) || loading}><SiteIcon name={loading ? "loading" : "refresh"} size={17} /> {loading ? "Оновлюємо…" : "Оновити стан"}</button>
+              </div>
+            )}
+          </>
+        ) : !loading ? <div className={styles.info}>Не вдалося завантажити стан меню. Спробуйте оновити сторінку.</div> : null}
       </section>
     </div>
   );

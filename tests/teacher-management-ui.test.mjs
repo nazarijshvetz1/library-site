@@ -32,19 +32,25 @@ test("protected librarian teacher management has five focused work areas", async
   assert.match(css, /tabs button\[data-telegram="true"\]/u);
 });
 
-test("librarian cabinet separates Telegram connection from notification controls", async () => {
-  const [workspace, shell, routes, launchPage, launch, cabinet] = await Promise.all([
+test("librarian cabinet separates Telegram connection, notifications and teacher menu rollout", async () => {
+  const [workspace, shell, routes, launchPage, launch, cabinet, teacherMenusRoute] = await Promise.all([
     read("app/librarian/teachers/teacher-management-workspace.tsx"),
     read("app/librarian/_components/librarian-shell.tsx"),
     read("app/librarian/_components/librarian-routes.ts"),
     read("app/librarian/telegram/page.tsx"),
     read("app/librarian/telegram/telegram-librarian-launch.tsx"),
     read("app/librarian/telegram/cabinet/page.tsx"),
+    read("app/api/librarian/telegram/teacher-menus/route.ts"),
   ]);
   assert.match(workspace, /librarian-telegram-connection-title/u);
   assert.match(workspace, /librarian-telegram-notifications-title/u);
   assert.match(workspace, /Підключити Telegram/u);
   assert.match(workspace, /Сповіщення Telegram/u);
+  assert.match(workspace, /Оновити меню в Telegram/u);
+  assert.match(workspace, /\/api\/librarian\/telegram\/teacher-menus/u);
+  assert.match(workspace, /confirmation: "refresh_teacher_menus"/u);
+  assert.match(workspace, /Підтверджую надсилання актуального меню/u);
+  assert.match(workspace, /teacherMenus\.mutedPendingTeachers/u);
   assert.match(workspace, /role="status" aria-live="polite"/u);
   assert.match(workspace, /initialTab\?: MainTab/u);
   assert.match(shell, /telegramHref/u);
@@ -53,6 +59,10 @@ test("librarian cabinet separates Telegram connection from notification controls
   assert.match(launch, /target === "teachers" && teacherTab !== "overview"/u);
   assert.match(launch, /&tab=\$\{encodeURIComponent\(teacherTab\)\}/u);
   assert.match(cabinet, /initialTab=\{boundedTeacherTab\(params\?\.tab\)\}/u);
+  assert.match(teacherMenusRoute, /authorizeLibrarianApi/u);
+  assert.match(teacherMenusRoute, /isSameOriginRequest/u);
+  assert.match(teacherMenusRoute, /writesEnabled/u);
+  assert.match(teacherMenusRoute, /scheduleTelegramOutboxDrain\(db, request\.url, \{ maxBatches: 6 \}\)/u);
 });
 
 test("teacher directory uses frozen server paging, search and status contract", async () => {

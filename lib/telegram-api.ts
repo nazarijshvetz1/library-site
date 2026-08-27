@@ -103,6 +103,37 @@ export function telegramDisconnectInput(value: Record<string, unknown>):
   };
 }
 
+export function telegramTeacherMenuRefreshInput(value: Record<string, unknown>):
+  | { ok: true; value: {
+      requestId: string;
+      expectedMenuVersion: number;
+      expectedRecipientCount: number;
+    } }
+  | { ok: false; response: Response } {
+  if (!exactKeys(value, ["confirmation", "expectedMenuVersion", "expectedRecipientCount", "requestId"])
+    || value.confirmation !== "refresh_teacher_menus"
+    || typeof value.requestId !== "string"
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value.requestId)
+    || !positiveInteger(value.expectedMenuVersion)
+    || typeof value.expectedRecipientCount !== "number"
+    || !Number.isSafeInteger(value.expectedRecipientCount)
+    || value.expectedRecipientCount < 0
+    || value.expectedRecipientCount > 1000) {
+    return {
+      ok: false,
+      response: telegramError(400, "validation_failed", "Оновіть список і підтвердьте надсилання меню."),
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      requestId: value.requestId,
+      expectedMenuVersion: value.expectedMenuVersion,
+      expectedRecipientCount: value.expectedRecipientCount,
+    },
+  };
+}
+
 function exactKeys(value: Record<string, unknown>, keys: string[]): boolean {
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();

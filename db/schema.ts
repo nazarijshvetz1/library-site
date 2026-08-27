@@ -2106,6 +2106,9 @@ export const telegramConnections = sqliteTable(
     notifyOrders: integer("notify_orders", { mode: "boolean" }).notNull().default(true),
     notifyVisits: integer("notify_visits", { mode: "boolean" }).notNull().default(true),
     version: integer("version").notNull().default(1),
+    menuDeliveredVersion: integer("menu_delivered_version").notNull().default(0),
+    menuClaimVersion: integer("menu_claim_version"),
+    menuClaimedAt: text("menu_claimed_at"),
     linkedAt: text("linked_at").notNull(),
     disabledAt: text("disabled_at"),
     lastSuccessAt: text("last_success_at"),
@@ -2122,6 +2125,13 @@ export const telegramConnections = sqliteTable(
     check("telegram_connections_chat_id_not_blank", sql`length(trim(${table.chatId})) > 0`),
     check("telegram_connections_status_valid", sql`${table.status} in ('active','disabled','blocked')`),
     check("telegram_connections_version_positive", sql`${table.version} > 0`),
+    check("telegram_connections_menu_version_non_negative", sql`${table.menuDeliveredVersion} >= 0`),
+    check(
+      "telegram_connections_menu_claim_consistent",
+      sql`(${table.menuClaimVersion} is null and ${table.menuClaimedAt} is null)
+        or (${table.menuClaimVersion} is not null and ${table.menuClaimVersion} > 0
+          and ${table.menuClaimedAt} is not null)`,
+    ),
     check(
       "telegram_connections_disabled_fields_consistent",
       sql`(${table.status}='active' and ${table.disabledAt} is null)

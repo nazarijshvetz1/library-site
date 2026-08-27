@@ -1027,6 +1027,21 @@ export async function activateVisitTeacherTelegramSession(
         notify_visits=CASE WHEN telegram_connections.status='active'
           THEN (telegram_connections.notify_orders OR telegram_connections.notify_visits) ELSE 1 END,
         linked_at=excluded.linked_at,last_error_code=NULL,
+        menu_delivered_version=CASE
+          WHEN telegram_connections.status='active'
+            AND telegram_connections.telegram_user_id=excluded.telegram_user_id
+            AND telegram_connections.chat_id=excluded.chat_id
+          THEN telegram_connections.menu_delivered_version ELSE 0 END,
+        menu_claim_version=CASE
+          WHEN telegram_connections.status='active'
+            AND telegram_connections.telegram_user_id=excluded.telegram_user_id
+            AND telegram_connections.chat_id=excluded.chat_id
+          THEN telegram_connections.menu_claim_version ELSE NULL END,
+        menu_claimed_at=CASE
+          WHEN telegram_connections.status='active'
+            AND telegram_connections.telegram_user_id=excluded.telegram_user_id
+            AND telegram_connections.chat_id=excluded.chat_id
+          THEN telegram_connections.menu_claimed_at ELSE NULL END,
         version=telegram_connections.version+1,updated_at=excluded.updated_at`)
       .bind(
         input.telegramUserId,
