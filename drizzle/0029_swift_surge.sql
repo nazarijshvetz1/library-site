@@ -149,77 +149,120 @@ END;--> statement-breakpoint
 CREATE TRIGGER `procurement_plan_classes_before_insert`
 BEFORE INSERT ON `procurement_plan_classes`
 BEGIN
-	UPDATE `procurement_plans` SET `version` = `version` + 1, `updated_at` = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-	WHERE `id` = NEW.`plan_id` AND `status` = 'draft';
-	SELECT CASE WHEN changes() != 1 THEN RAISE(ABORT, 'procurement_plan_locked') END;
+	SELECT RAISE(ABORT, 'procurement_plan_locked') WHERE NOT EXISTS (
+		SELECT 1 FROM `procurement_plans` WHERE `id` = NEW.`plan_id` AND `status` = 'draft'
+	);
+END;--> statement-breakpoint
+CREATE TRIGGER `procurement_plan_classes_after_insert`
+AFTER INSERT ON `procurement_plan_classes`
+BEGIN
+	UPDATE `procurement_plans` SET `version` = `version` + 1, `updated_at` = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE `id` = NEW.`plan_id`;
 END;--> statement-breakpoint
 CREATE TRIGGER `procurement_plan_classes_before_update`
 BEFORE UPDATE ON `procurement_plan_classes`
 BEGIN
-	SELECT CASE WHEN NEW.`plan_id` != OLD.`plan_id` THEN RAISE(ABORT, 'procurement_plan_scope_immutable') END;
-	UPDATE `procurement_plans` SET `version` = `version` + 1, `updated_at` = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-	WHERE `id` = NEW.`plan_id` AND `status` = 'draft';
-	SELECT CASE WHEN changes() != 1 THEN RAISE(ABORT, 'procurement_plan_locked') END;
+	SELECT RAISE(ABORT, 'procurement_plan_locked') WHERE NEW.`plan_id` != OLD.`plan_id` OR NOT EXISTS (
+		SELECT 1 FROM `procurement_plans` WHERE `id` = NEW.`plan_id` AND `status` = 'draft'
+	);
+END;--> statement-breakpoint
+CREATE TRIGGER `procurement_plan_classes_after_update`
+AFTER UPDATE ON `procurement_plan_classes`
+BEGIN
+	UPDATE `procurement_plans` SET `version` = `version` + 1, `updated_at` = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE `id` = NEW.`plan_id`;
 END;--> statement-breakpoint
 CREATE TRIGGER `procurement_plan_classes_before_delete`
 BEFORE DELETE ON `procurement_plan_classes`
 BEGIN
-	UPDATE `procurement_plans` SET `version` = `version` + 1, `updated_at` = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-	WHERE `id` = OLD.`plan_id` AND `status` = 'draft';
-	SELECT CASE WHEN changes() != 1 THEN RAISE(ABORT, 'procurement_plan_locked') END;
+	SELECT RAISE(ABORT, 'procurement_plan_locked') WHERE NOT EXISTS (
+		SELECT 1 FROM `procurement_plans` WHERE `id` = OLD.`plan_id` AND `status` = 'draft'
+	);
+END;--> statement-breakpoint
+CREATE TRIGGER `procurement_plan_classes_after_delete`
+AFTER DELETE ON `procurement_plan_classes`
+BEGIN
+	UPDATE `procurement_plans` SET `version` = `version` + 1, `updated_at` = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE `id` = OLD.`plan_id`;
 END;--> statement-breakpoint
 CREATE TRIGGER `procurement_plan_resources_before_insert`
 BEFORE INSERT ON `procurement_plan_resources`
 BEGIN
-	UPDATE `procurement_plans` SET `version` = `version` + 1, `updated_at` = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-	WHERE `id` = NEW.`plan_id` AND `status` = 'draft';
-	SELECT CASE WHEN changes() != 1 THEN RAISE(ABORT, 'procurement_plan_locked') END;
+	SELECT RAISE(ABORT, 'procurement_plan_locked') WHERE NOT EXISTS (
+		SELECT 1 FROM `procurement_plans` WHERE `id` = NEW.`plan_id` AND `status` = 'draft'
+	);
+END;--> statement-breakpoint
+CREATE TRIGGER `procurement_plan_resources_after_insert`
+AFTER INSERT ON `procurement_plan_resources`
+BEGIN
+	UPDATE `procurement_plans` SET `version` = `version` + 1, `updated_at` = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE `id` = NEW.`plan_id`;
 END;--> statement-breakpoint
 CREATE TRIGGER `procurement_plan_resources_before_update`
 BEFORE UPDATE ON `procurement_plan_resources`
 BEGIN
-	SELECT CASE WHEN NEW.`plan_id` != OLD.`plan_id` THEN RAISE(ABORT, 'procurement_plan_scope_immutable') END;
-	UPDATE `procurement_plans` SET `version` = `version` + 1, `updated_at` = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-	WHERE `id` = NEW.`plan_id` AND `status` = 'draft';
-	SELECT CASE WHEN changes() != 1 THEN RAISE(ABORT, 'procurement_plan_locked') END;
+	SELECT RAISE(ABORT, 'procurement_plan_locked') WHERE NEW.`plan_id` != OLD.`plan_id` OR NOT EXISTS (
+		SELECT 1 FROM `procurement_plans` WHERE `id` = NEW.`plan_id` AND `status` = 'draft'
+	);
+END;--> statement-breakpoint
+CREATE TRIGGER `procurement_plan_resources_after_update`
+AFTER UPDATE ON `procurement_plan_resources`
+BEGIN
+	UPDATE `procurement_plans` SET `version` = `version` + 1, `updated_at` = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE `id` = NEW.`plan_id`;
 END;--> statement-breakpoint
 CREATE TRIGGER `procurement_plan_resources_before_delete`
 BEFORE DELETE ON `procurement_plan_resources`
 BEGIN
-	UPDATE `procurement_plans` SET `version` = `version` + 1, `updated_at` = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-	WHERE `id` = OLD.`plan_id` AND `status` = 'draft';
-	SELECT CASE WHEN changes() != 1 THEN RAISE(ABORT, 'procurement_plan_locked') END;
+	SELECT RAISE(ABORT, 'procurement_plan_locked') WHERE NOT EXISTS (
+		SELECT 1 FROM `procurement_plans` WHERE `id` = OLD.`plan_id` AND `status` = 'draft'
+	);
+END;--> statement-breakpoint
+CREATE TRIGGER `procurement_plan_resources_after_delete`
+AFTER DELETE ON `procurement_plan_resources`
+BEGIN
+	UPDATE `procurement_plans` SET `version` = `version` + 1, `updated_at` = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE `id` = OLD.`plan_id`;
 END;--> statement-breakpoint
 CREATE TRIGGER `procurement_plan_allocations_before_insert`
 BEFORE INSERT ON `procurement_plan_allocations`
 BEGIN
-	SELECT CASE WHEN
-		(SELECT `plan_id` FROM `procurement_plan_resources` WHERE `id` = NEW.`resource_id`) !=
-		(SELECT `plan_id` FROM `procurement_plan_classes` WHERE `id` = NEW.`class_id`)
-	THEN RAISE(ABORT, 'procurement_plan_allocation_scope_invalid') END;
-	UPDATE `procurement_plans` SET `version` = `version` + 1, `updated_at` = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-	WHERE `id` = (SELECT `plan_id` FROM `procurement_plan_resources` WHERE `id` = NEW.`resource_id`) AND `status` = 'draft';
-	SELECT CASE WHEN changes() != 1 THEN RAISE(ABORT, 'procurement_plan_locked') END;
+	SELECT RAISE(ABORT, 'procurement_plan_locked') WHERE NOT EXISTS (
+		SELECT 1 FROM `procurement_plan_resources` pr
+		JOIN `procurement_plan_classes` pc ON pc.`plan_id` = pr.`plan_id` AND pc.`id` = NEW.`class_id`
+		JOIN `procurement_plans` p ON p.`id` = pr.`plan_id` AND p.`status` = 'draft'
+		WHERE pr.`id` = NEW.`resource_id`
+	);
+END;--> statement-breakpoint
+CREATE TRIGGER `procurement_plan_allocations_after_insert`
+AFTER INSERT ON `procurement_plan_allocations`
+BEGIN
+	UPDATE `procurement_plans` SET `version` = `version` + 1, `updated_at` = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE `id` = (SELECT `plan_id` FROM `procurement_plan_resources` WHERE `id` = NEW.`resource_id`);
 END;--> statement-breakpoint
 CREATE TRIGGER `procurement_plan_allocations_before_update`
 BEFORE UPDATE ON `procurement_plan_allocations`
 BEGIN
-	SELECT CASE WHEN NEW.`resource_id` != OLD.`resource_id` THEN RAISE(ABORT, 'procurement_plan_scope_immutable') END;
-	SELECT CASE WHEN
-		(SELECT `plan_id` FROM `procurement_plan_resources` WHERE `id` = NEW.`resource_id`) !=
-		(SELECT `plan_id` FROM `procurement_plan_classes` WHERE `id` = NEW.`class_id`)
-	THEN RAISE(ABORT, 'procurement_plan_allocation_scope_invalid') END;
-	UPDATE `procurement_plans` SET `version` = `version` + 1, `updated_at` = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-	WHERE `id` = (SELECT `plan_id` FROM `procurement_plan_resources` WHERE `id` = NEW.`resource_id`) AND `status` = 'draft';
-	SELECT CASE WHEN changes() != 1 THEN RAISE(ABORT, 'procurement_plan_locked') END;
+	SELECT RAISE(ABORT, 'procurement_plan_locked') WHERE NEW.`resource_id` != OLD.`resource_id` OR NOT EXISTS (
+		SELECT 1 FROM `procurement_plan_resources` pr
+		JOIN `procurement_plan_classes` pc ON pc.`plan_id` = pr.`plan_id` AND pc.`id` = NEW.`class_id`
+		JOIN `procurement_plans` p ON p.`id` = pr.`plan_id` AND p.`status` = 'draft'
+		WHERE pr.`id` = NEW.`resource_id`
+	);
+END;--> statement-breakpoint
+CREATE TRIGGER `procurement_plan_allocations_after_update`
+AFTER UPDATE ON `procurement_plan_allocations`
+BEGIN
+	UPDATE `procurement_plans` SET `version` = `version` + 1, `updated_at` = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE `id` = (SELECT `plan_id` FROM `procurement_plan_resources` WHERE `id` = NEW.`resource_id`);
 END;--> statement-breakpoint
 CREATE TRIGGER `procurement_plan_allocations_before_delete`
 BEFORE DELETE ON `procurement_plan_allocations`
 BEGIN
-	UPDATE `procurement_plans` SET `version` = `version` + 1, `updated_at` = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-	WHERE `id` = COALESCE(
+	SELECT RAISE(ABORT, 'procurement_plan_locked') WHERE NOT EXISTS (
+		SELECT 1 FROM `procurement_plans` WHERE `id` = COALESCE(
+			(SELECT `plan_id` FROM `procurement_plan_resources` WHERE `id` = OLD.`resource_id`),
+			(SELECT `plan_id` FROM `procurement_plan_classes` WHERE `id` = OLD.`class_id`)
+		) AND `status` = 'draft'
+	);
+END;--> statement-breakpoint
+CREATE TRIGGER `procurement_plan_allocations_after_delete`
+AFTER DELETE ON `procurement_plan_allocations`
+BEGIN
+	UPDATE `procurement_plans` SET `version` = `version` + 1, `updated_at` = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE `id` = COALESCE(
 		(SELECT `plan_id` FROM `procurement_plan_resources` WHERE `id` = OLD.`resource_id`),
 		(SELECT `plan_id` FROM `procurement_plan_classes` WHERE `id` = OLD.`class_id`)
-	) AND `status` = 'draft';
-	SELECT CASE WHEN changes() != 1 THEN RAISE(ABORT, 'procurement_plan_locked') END;
+	);
 END;
