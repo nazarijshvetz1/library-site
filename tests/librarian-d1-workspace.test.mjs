@@ -544,6 +544,16 @@ test("new librarian route renders D1 workspace inside the shared branded shell",
   assert.match(workspace, /item\.year \? String\(item\.year\)/u);
   assert.doesNotMatch(workspace, /Ревізія/u);
 
+  const loanIssueForm = workspace.match(
+    /function LoanIssueForm[\s\S]*?(?=function ClassIssueWorkspace)/u,
+  )?.[0] ?? "";
+  assert.match(loanIssueForm, /const issueInFlightRef = useRef\(false\)/u);
+  assert.match(loanIssueForm, /if \(!writesEnabled \|\| !source \|\| !teacherUserId \|\| success \|\| issueInFlightRef\.current\) return/u);
+  assert.match(loanIssueForm, /issueInFlightRef\.current = true/u);
+  assert.match(loanIssueForm, /finally \{\s*issueInFlightRef\.current = false;/u);
+  assert.match(loanIssueForm, /disabled=\{!writesEnabled \|\| !source \|\| !teacherUserId \|\| saving \|\| success \|\| !quantity\}/u);
+  assert.doesNotMatch(loanIssueForm, /window\.confirm/u);
+
   const classIssue = workspace.match(
     /function ClassIssueWorkspace[\s\S]*?(?=function LoanReturnPanel)/u,
   )?.[0] ?? "";
@@ -554,10 +564,14 @@ test("new librarian route renders D1 workspace inside the shared branded shell",
   assert.match(classIssue, /expectedClassYearVersion: selectedClassYear\.version/u);
   assert.match(classIssue, /expectedAvailableQuantity: item\.expectedAvailableQuantity/u);
   assert.match(classIssue, /cart\.length >= 100/u);
-  assert.match(classIssue, /window\.confirm/u);
+  assert.doesNotMatch(classIssue, /window\.confirm/u);
   assert.match(classIssue, /"\/api\/librarian\/class-loans"/u);
   assert.match(classIssue, /writePendingClassCirculationIntent\(intent\)/u);
   assert.match(classIssue, /sendIssueIntent\(pendingIntent, true\)/u);
+  assert.match(classIssue, /const issueInFlightRef = useRef\(false\)/u);
+  assert.match(classIssue, /if \(issueInFlightRef\.current\) return/u);
+  assert.match(classIssue, /issueInFlightRef\.current = true/u);
+  assert.match(classIssue, /finally \{\s*issueInFlightRef\.current = false;/u);
   assert.match(classIssue, /max=\{selectedClassYear\?\.endDate\}/u);
   assert.match(classIssue, /ref=\{issuedAtInputRef\}/u);
   assert.match(classIssue, /ref=\{classDueAtInputRef\}/u);

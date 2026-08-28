@@ -4004,15 +4004,17 @@ function LoanIssueForm({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [success, setSuccess] = useState(false);
+  const issueInFlightRef = useRef(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!writesEnabled || !source || !teacherUserId) return;
+    if (!writesEnabled || !source || !teacherUserId || success || issueInFlightRef.current) return;
     const submittedDueAt = resolveLoanDueAtForSubmission(
       dueAtInputRef.current?.value,
       new FormData(event.currentTarget).get("dueAt"),
       dueAt,
     );
+    issueInFlightRef.current = true;
     setSaving(true);
     setSuccess(false);
     setMessage("");
@@ -4044,6 +4046,7 @@ function LoanIssueForm({
     } catch (requestError) {
       setMessage(errorMessage(requestError));
     } finally {
+      issueInFlightRef.current = false;
       setSaving(false);
     }
   }
@@ -4126,9 +4129,9 @@ function LoanIssueForm({
         <button
           className={styles.primaryButton}
           type="submit"
-          disabled={!writesEnabled || !source || !teacherUserId || saving || !quantity}
+          disabled={!writesEnabled || !source || !teacherUserId || saving || success || !quantity}
         >
-          {saving ? "Оформлюємо…" : "Оформити видачу"}
+          {saving ? "Оформлюємо…" : success ? "Видано" : "Оформити видачу"}
         </button>
       </div>
     </form>
@@ -4177,6 +4180,7 @@ function ClassIssueWorkspace({
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"error" | "success" | "info">("info");
   const [lastIssuedClassLoanId, setLastIssuedClassLoanId] = useState("");
+  const issueInFlightRef = useRef(false);
   const materialPickerRef = useRef<HTMLElement>(null);
   const lastFocusedMaterialIdRef = useRef("");
 
@@ -4345,9 +4349,12 @@ function ClassIssueWorkspace({
     intent: PendingClassCirculationIntent<ClassIssuePayload>,
     alreadyStored: boolean,
   ) {
+    if (issueInFlightRef.current) return;
+    issueInFlightRef.current = true;
     if (!alreadyStored && !writePendingClassCirculationIntent(intent)) {
       setMessageTone("error");
       setMessage("Не вдалося зберегти безпечний повтор запиту в цьому браузері. Видачу не надіслано.");
+      issueInFlightRef.current = false;
       return;
     }
     setPendingIntent(intent);
@@ -4389,6 +4396,7 @@ function ClassIssueWorkspace({
         setMessage("Відповідь сервера не підтверджена. Не створюйте нову видачу: натисніть «Перевірити результат».");
       }
     } finally {
+      issueInFlightRef.current = false;
       setSaving(false);
     }
   }
@@ -4426,13 +4434,6 @@ function ClassIssueWorkspace({
       setMessage("Дата повернення має бути не раніше видачі й не пізніше завершення класу.");
       return;
     }
-    const teacherName = teachers.find(
-      (teacher) => teacher.id === effectiveResponsibleTeacherUserId,
-    )?.fullName || "обраний учитель";
-    if (!window.confirm(
-      `Видати класу «${selectedClassYear.className}» ${cartCopies} прим. у ${cart.length} поз. Відповідальний: ${teacherName}?`,
-    )) return;
-
     const requestId = crypto.randomUUID();
     const payload: ClassIssuePayload = {
       requestId,
