@@ -129,6 +129,7 @@ const directoryStatuses = ["active", "inactive"] as const;
 const userRoles = ["admin", "librarian", "teacher"] as const;
 const holdingConditions = ["unspecified", "good", "worn", "damaged"] as const;
 const academicYearStatuses = ["draft", "active", "closed"] as const;
+const textbookAssignmentStatuses = ["draft", "published", "archived"] as const;
 const cohortStatuses = ["active", "graduated", "closed"] as const;
 const classYearStatuses = ["planned", "active", "closed"] as const;
 const loanStatuses = ["open", "closed", "cancelled"] as const;
@@ -764,6 +765,74 @@ export const academicYears = sqliteTable(
     ),
     check("academic_years_date_order", sql`${table.startDate} < ${table.endDate}`),
     check("academic_years_version_positive", sql`${table.version} > 0`),
+  ],
+);
+
+/**
+ * Curated electronic-textbook shelf. Bibliographic data, covers, and resource
+ * URLs remain canonical in `materials` and `material_links`; this table only
+ * controls which edition is visible for a grade in a specific school year.
+ */
+export const textbookAssignments = sqliteTable(
+  "textbook_assignments",
+  {
+    id: text("id").primaryKey(),
+    academicYearId: text("academic_year_id")
+      .notNull()
+      .references(() => academicYears.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    materialId: text("material_id")
+      .notNull()
+      .references(() => materials.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    grade: integer("grade").notNull(),
+    status: text("status", { enum: textbookAssignmentStatuses })
+      .notNull()
+      .default("draft"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    version: integer("version").notNull().default(1),
+    publishedAt: text("published_at"),
+    archivedAt: text("archived_at"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_textbook_assignments_year_grade_material").on(
+      table.academicYearId,
+      table.grade,
+      table.materialId,
+    ),
+    index("idx_textbook_assignments_public_listing").on(
+      table.academicYearId,
+      table.status,
+      table.grade,
+      table.sortOrder,
+      table.id,
+    ),
+    index("idx_textbook_assignments_material_status").on(
+      table.materialId,
+      table.status,
+    ),
+    check("textbook_assignments_grade_valid", sql`${table.grade} between 1 and 11`),
+    check(
+      "textbook_assignments_status_valid",
+      sql`${table.status} in ('draft', 'published', 'archived')`,
+    ),
+    check("textbook_assignments_sort_order_nonnegative", sql`${table.sortOrder} >= 0`),
+    check("textbook_assignments_version_positive", sql`${table.version} > 0`),
+    check(
+      "textbook_assignments_dates_consistent",
+      sql`(
+        ${table.status} = 'draft'
+        and ${table.publishedAt} is null
+        and ${table.archivedAt} is null
+      ) or (
+        ${table.status} = 'published'
+        and ${table.publishedAt} is not null
+        and ${table.archivedAt} is null
+      ) or (
+        ${table.status} = 'archived'
+        and ${table.archivedAt} is not null
+      )`,
+    ),
   ],
 );
 

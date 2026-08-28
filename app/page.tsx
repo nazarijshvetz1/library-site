@@ -26,10 +26,13 @@ export default async function Home() {
           </span>
         </a>
 
-        <a className="nav-link" href={PUBLIC_CATALOG_URL}>
-          Відкрити каталог
-          <SiteIcon name="external" size={17} />
-        </a>
+        <div className="hero-actions" style={{ marginTop: 0 }}>
+          <a className="nav-link" href="/textbooks">Е-підручники</a>
+          <a className="nav-link" href={PUBLIC_CATALOG_URL}>
+            Відкрити каталог
+            <SiteIcon name="external" size={17} />
+          </a>
+        </div>
       </nav>
 
       <section className="landing-hero" aria-labelledby="landing-title">
@@ -64,6 +67,9 @@ export default async function Home() {
             )}
             <a className="button button-secondary" href={PUBLIC_CATALOG_URL}>
               Переглянути каталог
+            </a>
+            <a className="button button-secondary" href="/textbooks">
+              Е-підручники 1–11 класів
             </a>
             <a className="button button-secondary" href="/suggest-book">
               Запропонувати книгу

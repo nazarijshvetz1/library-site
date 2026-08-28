@@ -34,6 +34,7 @@ const migrationFiles = [
   "drizzle/0027_naive_microbe.sql",
   "drizzle/0028_dusty_marten_broadcloak.sql",
   "drizzle/0029_swift_surge.sql",
+  "drizzle/0030_bizarre_dust.sql",
 ];
 
 async function migratedDatabase() {
@@ -599,6 +600,7 @@ test("core migration extends the existing draft database without recreating it",
     "telegram_teacher_activation_invites",
     "telegram_webhook_updates",
     "teacher_profiles",
+    "textbook_assignments",
     "material_request_reservations",
     "users",
     "visit_bookings",
@@ -698,6 +700,42 @@ test("core migration extends the existing draft database without recreating it",
     ],
   );
   tokenizedDatabase.close();
+});
+
+test("0030 creates a curated grade shelf and seeds only eligible HTTPS ebooks", async () => {
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON;");
+  for (const file of migrationFiles.slice(0, -1)) {
+    database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
+  }
+  const now = "2026-08-29T08:00:00.000Z";
+  database.exec(`
+    INSERT INTO academic_years (id,label,start_date,end_date,status,notes,version,created_at,updated_at)
+      VALUES ('YR-TEXTBOOKS','2026/2027','2026-08-01','2027-06-30','active','',1,'${now}','${now}');
+    INSERT INTO materials (id,catalog_number,title,sort_title,search_text,rubric,publication_type,subject,class_from,class_to,author,publication_year,isbn,isbn_normalized,publisher,notes,status,version,created_at,updated_at) VALUES
+      ('CAT-9101',9101,'Алгебра 7','алгебра 7','алгебра 7 автор математика','Підручники','Підручник','Математика',7,7,'Автор',2026,'','','Видавництво','','active',1,'${now}','${now}'),
+      ('CAT-9102',9102,'Робочий зошит','робочий зошит','робочий зошит','Зошити','Робочий зошит','Математика',7,7,'Автор',2026,'','','Видавництво','','active',1,'${now}','${now}'),
+      ('CAT-9103',9103,'Алгебра HTTP','алгебра http','алгебра http','Підручники','Підручник','Математика',7,7,'Автор',2026,'','','Видавництво','','active',1,'${now}','${now}');
+    INSERT INTO material_links (id,material_id,kind,label,url,is_public,sort_order,status,created_at,updated_at) VALUES
+      ('LINK-9101','CAT-9101','ebook','PDF','https://example.test/algebra.pdf',1,0,'active','${now}','${now}'),
+      ('LINK-9102','CAT-9102','ebook','PDF','https://example.test/workbook.pdf',1,0,'active','${now}','${now}'),
+      ('LINK-9103','CAT-9103','ebook','PDF','http://example.test/algebra.pdf',1,0,'active','${now}','${now}');
+  `);
+  database.exec(await readFile(new URL("../drizzle/0030_bizarre_dust.sql", import.meta.url), "utf8"));
+  assert.deepEqual(
+    database.prepare("SELECT academic_year_id,material_id,grade,status,sort_order,version FROM textbook_assignments").all().map((row) => ({ ...row })),
+    [{ academic_year_id: "YR-TEXTBOOKS", material_id: "CAT-9101", grade: 7, status: "published", sort_order: 9101, version: 1 }],
+  );
+  assert.throws(
+    () => database.prepare(`INSERT INTO textbook_assignments (id,academic_year_id,material_id,grade,status,sort_order,version,published_at,archived_at,created_at,updated_at) VALUES ('TXT-DUP','YR-TEXTBOOKS','CAT-9101',7,'published',0,1,?,NULL,?,?)`).run(now, now, now),
+    /UNIQUE constraint/u,
+  );
+  assert.throws(
+    () => database.prepare(`INSERT INTO textbook_assignments (id,academic_year_id,material_id,grade,status,sort_order,version,published_at,archived_at,created_at,updated_at) VALUES ('TXT-GRADE','YR-TEXTBOOKS','CAT-9101',12,'published',0,1,?,NULL,?,?)`).run(now, now, now),
+    /CHECK constraint/u,
+  );
+  assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+  database.close();
 });
 
 test("Telegram teacher activation grants keep personal tokens hashed and enforce terminal states", async () => {
