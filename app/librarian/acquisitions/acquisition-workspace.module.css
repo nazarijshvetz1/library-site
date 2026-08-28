@@ -93,6 +93,7 @@
 .metrics strong { font-size: 25px; }
 .metrics span { font-size: 9px; }
 .tools { gap: 8px; }
+.queue + .tools { margin-top: 8px; }
 .tools > div,
 .preview,
 .groups,

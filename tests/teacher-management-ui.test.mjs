@@ -66,9 +66,10 @@ test("librarian cabinet separates Telegram connection, notifications and teacher
 });
 
 test("teacher directory uses frozen server paging, search and status contract", async () => {
-  const [client, workspace] = await Promise.all([
+  const [client, workspace, css] = await Promise.all([
     read("app/librarian/teachers/teacher-management-client.ts"),
     read("app/librarian/teachers/teacher-management-workspace.tsx"),
+    read("app/librarian/teachers/teacher-management.module.css"),
   ]);
   assert.equal(
     teacherDirectoryUrl({ query: "Коваль", status: "inactive", limit: 30, cursor: "opaque" }),
@@ -89,6 +90,8 @@ test("teacher directory uses frozen server paging, search and status contract", 
   assert.match(workspace, /onNotice=\{handleDirectoryNotice\}/u);
   assert.doesNotMatch(workspace, /onNotice=\{\(message, tone/u);
   assert.doesNotMatch(workspace, /DirectoryAttention/u);
+  assert.match(css, /\.avatarFrame > img\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?inset:\s*0;[\s\S]*?width:\s*100%;[\s\S]*?height:\s*100%;/u);
+  assert.match(css, /\.telegramAvatarIndicator\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?z-index:\s*1;/u);
 });
 
 test("teacher directory exposes a controlled curator-change approval queue", async () => {

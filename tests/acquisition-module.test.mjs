@@ -194,6 +194,8 @@ test("acquisition interfaces expose catalog metadata, optional student fields an
   assert.match(librarianUi,/key=\{`\$\{record\.id\}:\$\{record\.version\}`\}/u);
   assert.match(librarianUi,/selectedMaximum = Math\.min/u);assert.match(librarianUi,/loadError \? <span role="alert">/u);
   assert.match(librarianUi,/promptNumber\("Погоджена кількість", record\.requestedQuantity, 1\)/u);
+  const metricsPosition=librarianUi.indexOf('<section className={styles.metrics}');const queuePosition=librarianUi.indexOf('<CollapsibleListSection className={styles.queue}');const toolsPosition=librarianUi.indexOf('<section className={styles.tools}');
+  assert.ok(metricsPosition>=0&&metricsPosition<queuePosition&&queuePosition<toolsPosition,"Заявки на комплектування мають бути одразу після загальних цифр і перед службовими інструментами");
   assert.match(storeSource,/line\.quantity_delta>COALESCE\(\(SELECT SUM\(a\.allocated_quantity\)/u);
   assert.match(librarianUi,/Копіювати QR-код/u);assert.match(librarianUi,/Завантажити QR/u);assert.match(librarianUi,/Друкувати QR/u);
   assert.doesNotMatch(librarianUi,/api\.qrserver|chart\.googleapis/iu);assert.match(librarianCss,/acquisition-student-qr-print/u);assert.match(librarianCss,/@page\{size:A4 portrait/u);
