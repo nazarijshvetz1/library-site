@@ -16,6 +16,7 @@ type SheetDefinition = {
 export function createLibrarianReportExcel(data: LibrarianReportData) {
   const normalizedData = normalizeAnnualReport(data);
   const definition = REPORT_DEFINITIONS[normalizedData.kind];
+  const currentSnapshot = normalizedData.kind === "inventory";
   const sheets = normalizedData.sections.map((section) => {
     const sheetDefinition = definition.sections[section.key];
     if (!sheetDefinition) throw new Error("Невідома секція звіту.");
@@ -24,8 +25,10 @@ export function createLibrarianReportExcel(data: LibrarianReportData) {
       columns: sheetDefinition.columns,
       rows: section.rows.map(sheetDefinition.row),
       reportTitle: sheetDefinition.title,
-      metadata: [["Період", `${displayDate(normalizedData.from)} — ${displayDate(normalizedData.to)}`]],
-      emptyMessage: "За вибраний період записів немає.",
+      metadata: currentSnapshot
+        ? [["Станом на", displayDate(normalizedData.generatedAt.slice(0, 10))]]
+        : [["Період", `${displayDate(normalizedData.from)} — ${displayDate(normalizedData.to)}`]],
+      emptyMessage: currentSnapshot ? "У фонді немає примірників." : "За вибраний період записів немає.",
       printLandscape: sheetDefinition.landscape ?? true,
       printFitToHeight: 0,
       compactRows: true,
@@ -37,7 +40,9 @@ export function createLibrarianReportExcel(data: LibrarianReportData) {
     bytes,
     rowCount: normalizedData.sections.reduce((sum, section) => sum + section.rows.length, 0),
     sheetCount: sheets.length,
-    fileName: safeFileName(`${definition.title} — ${normalizedData.from} — ${normalizedData.to}.xlsx`),
+    fileName: safeFileName(currentSnapshot
+      ? `${definition.title} — ${normalizedData.generatedAt.slice(0, 10)}.xlsx`
+      : `${definition.title} — ${normalizedData.from} — ${normalizedData.to}.xlsx`),
   };
 }
 

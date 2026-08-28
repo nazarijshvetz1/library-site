@@ -481,6 +481,12 @@ test("new librarian route renders D1 workspace inside the shared branded shell",
   assert.match(workspace, /expectedQuantity: source\?\.physicalQuantity/u);
   assert.match(workspace, /const expectedQuantity = holding\?\.physicalQuantity \?\? 0/u);
   assert.match(workspace, /const expectedQuantity = selected\?\.physicalQuantity \?\? 0/u);
+  assert.match(workspace, /Де знаходяться примірники/u);
+  assert.match(workspace, /physicalAtLocations/u);
+  assert.match(workspace, /holding\.physicalQuantity/u);
+  assert.match(workspace, /holding\.reservedQuantity/u);
+  assert.match(workspace, /holding\.availableQuantity/u);
+  assert.match(workspace, /onClick=\{\(\) => chooseHolding\(holding\)\}/u);
   assert.match(workspace, /max=\{source\?\.quantity \?\? 1\}/u);
   assert.match(workspace, /Фізично \{holding\.physicalQuantity\} · у резерві \{holding\.reservedQuantity\}/u);
   assert.match(workspace, /requestError\.code === "stock_quantity_conflict"/u);
@@ -555,6 +561,13 @@ test("new librarian route renders D1 workspace inside the shared branded shell",
   assert.match(classIssue, /max=\{selectedClassYear\?\.endDate\}/u);
   assert.match(classIssue, /ref=\{issuedAtInputRef\}/u);
   assert.match(classIssue, /ref=\{classDueAtInputRef\}/u);
+  assert.match(classIssue, /materialPickerRef/u);
+  assert.match(classIssue, /lastFocusedMaterialIdRef/u);
+  assert.match(classIssue, /referenceState !== "ready"/u);
+  assert.match(classIssue, /academicState !== "ready"/u);
+  assert.match(classIssue, /scrollIntoView\(\{ block: "start", behavior: "auto" \}\)/u);
+  assert.match(classIssue, /picker\.focus\(\{ preventScroll: true \}\);\s*lastFocusedMaterialIdRef\.current = detail\.id;/u);
+  assert.match(classIssue, /tabIndex=\{-1\}/u);
   assert.doesNotMatch(
     classIssue.match(/ref=\{issuedAtInputRef\}[\s\S]*?\/>/u)?.[0] ?? "",
     /onChange=/u,
@@ -630,6 +643,9 @@ test("D1 workspace opens on a grouped accessible dashboard and keeps every tool 
   assert.match(workspace, /"return",[\s\S]*?"issue",[\s\S]*?"class-issue",[\s\S]*?"receipt",[\s\S]*?"create",[\s\S]*?"count"/u);
   assert.match(workspace, /<IsbnCameraScanner disabled=\{false\} onDetected=\{searchScannedIsbn\}/u);
   assert.match(workspace, /const MATERIAL_ACTION_ITEMS: ToolItem\[\]/u);
+  assert.match(workspace, /\["issue", "return", "class-issue", "class-return"\]\.includes\(tool\)/u);
+  assert.match(workspace, /tool === "issue" \? "issue" : "catalog"/u);
+  assert.match(workspace, /tool === "catalog" \|\| tool === "class-issue"/u);
   assert.match(workspace, /subsections=\{shellSubsections\}/u);
   assert.match(workspace, /activeSubsection=\{librarianSubsectionForTool\(tool\)\}/u);
   assert.match(workspace, /onSubsectionNavigate=\{\(id\) => chooseTool\(id as Tool\)\}/u);

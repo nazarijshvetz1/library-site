@@ -62,6 +62,7 @@ export default function ReportsWorkspace({
   const [statements, setStatements] = useState<StatementSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [activeSubsection, setActiveSubsection] = useState("overview");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -83,9 +84,21 @@ export default function ReportsWorkspace({
     return () => controller.abort();
   }, []);
 
+  useEffect(() => {
+    const known = new Set(SUBSECTIONS.map((item) => item.id));
+    const syncHash = () => {
+      const next = window.location.hash.replace(/^#/u, "");
+      setActiveSubsection(known.has(next) ? next : "overview");
+    };
+    syncHash();
+    window.addEventListener("hashchange", syncHash);
+    return () => window.removeEventListener("hashchange", syncHash);
+  }, []);
+
   const validPeriod = /^\d{4}-\d{2}-\d{2}$/u.test(from) && /^\d{4}-\d{2}-\d{2}$/u.test(to) && from <= to;
   const query = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-  const visibleStatements = statements.filter((item) => !selectedClassId || item.classYearId === selectedClassId).slice(0, 100);
+  const filteredStatements = statements.filter((item) => !selectedClassId || item.classYearId === selectedClassId);
+  const visibleStatements = filteredStatements.slice(0, 100);
 
   return (
     <LibrarianShell
@@ -95,7 +108,7 @@ export default function ReportsWorkspace({
       signOutHref={signOutHref}
       telegramMiniApp={telegramMiniApp}
       subsections={SUBSECTIONS}
-      activeSubsection="overview"
+      activeSubsection={activeSubsection}
     >
       <main className={styles.page}>
         <header className={styles.intro} id="overview">
@@ -106,12 +119,25 @@ export default function ReportsWorkspace({
         <section className={styles.period} aria-label="Період звіту">
           <label><span>Від</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
           <label><span>До</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
-          <small>{validPeriod ? "Період застосовується до всіх звітів нижче." : "Перевірте дати: початок має бути не пізніше завершення."}</small>
+          <small>{validPeriod ? "Період застосовується до звітів про операції. Інвентаризація показує поточний стан." : "Перевірте дати: початок має бути не пізніше завершення."}</small>
         </section>
+
+        <nav className={styles.quickReports} aria-label="Найчастіші документи">
+          <a href="#classes">
+            <span aria-hidden="true"><SiteIcon name="issue-class" size={19} /></span>
+            <span><strong>Видані матеріали по класах</strong><small>Поточні списки й акти для друку</small></span>
+            <SiteIcon name="next" size={17} />
+          </a>
+          <a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=acquisitions&view=planning" : "/librarian/acquisitions/planning"}>
+            <span aria-hidden="true"><SiteIcon name="reports" size={19} /></span>
+            <span><strong>Потреба на новий навчальний рік</strong><small>Кількість учнів, наявність і дозамовлення</small></span>
+            <SiteIcon name="next" size={17} />
+          </a>
+        </nav>
 
         <section className={styles.reportGrid} aria-label="Основні звіти">
           {REPORTS.filter((item) => item.group === "overview").map((item) => (
-            <ReportCard key={item.kind} item={item} query={query} disabled={!validPeriod} />
+            <ReportCard key={item.kind} item={item} query={query} validPeriod={validPeriod} />
           ))}
         </section>
 
@@ -130,27 +156,36 @@ export default function ReportsWorkspace({
                 )}
                 <a className={styles.secondaryAction} href="/api/librarian/class-excel-export?all=true">Усі класи (.zip)</a>
               </div>
-              <div className={styles.statementList}>
-                <div className={styles.listHeader}><strong>Акт-відомості окремих видач</strong><span>Зберігаються після повернення</span></div>
-                {visibleStatements.length ? visibleStatements.map((item) => (
-                  <article key={item.classLoanId}>
-                    <div><strong>{item.className} · {displayDate(item.issuedAt)}</strong><span>{item.positionCount} найм. · {item.copyCount} прим. · {statusLabel(item.currentStatus)}</span>{item.origin === "legacy_backfill" ? <small>Відновлено з давньої видачі</small> : null}</div>
-                    <div><a href={`/librarian/class-loans/${encodeURIComponent(item.classLoanId)}/statement`} target="_blank" rel="noopener noreferrer">Відкрити / друкувати</a><a href={`/api/librarian/class-issue-statements/${encodeURIComponent(item.classLoanId)}/excel`}>Excel</a></div>
-                  </article>
-                )) : <p className={styles.info}>Для вибраного класу ще немає оформлених видач.</p>}
-              </div>
+              <details className={styles.statementList}>
+                <summary className={styles.listHeader}>
+                  <span><strong>Акт-відомості окремих видач</strong><small>Зберігаються після повернення</small></span>
+                  <span className={styles.statementSummary}>
+                    {filteredStatements.length > visibleStatements.length
+                      ? `Показано ${visibleStatements.length} із ${filteredStatements.length}`
+                      : `${visibleStatements.length} документів`} <SiteIcon name="expand" size={16} />
+                  </span>
+                </summary>
+                <div className={styles.statementRows}>
+                  {visibleStatements.length ? visibleStatements.map((item) => (
+                    <article key={item.classLoanId}>
+                      <div><strong>{item.className} · {displayDate(item.issuedAt)}</strong><span>{item.positionCount} найм. · {item.copyCount} прим. · {statusLabel(item.currentStatus)}</span>{item.origin === "legacy_backfill" ? <small>Відновлено з давньої видачі</small> : null}</div>
+                      <div><a href={`/librarian/class-loans/${encodeURIComponent(item.classLoanId)}/statement`} target="_blank" rel="noopener noreferrer">Відкрити / друкувати</a><a href={`/api/librarian/class-issue-statements/${encodeURIComponent(item.classLoanId)}/excel`}>Excel</a></div>
+                    </article>
+                  )) : <p className={styles.info}>Для вибраного класу ще немає оформлених видач.</p>}
+                </div>
+              </details>
             </>
           ) : null}
         </section>
 
         <section className={styles.section} id="fund" aria-labelledby="fund-title">
           <div className={styles.sectionHeading}><div><p>Фонд</p><h2 id="fund-title">Рух та інвентаризація</h2></div></div>
-          <div className={styles.reportGrid}>{REPORTS.filter((item) => item.group === "fund").map((item) => <ReportCard key={item.kind} item={item} query={query} disabled={!validPeriod} />)}</div>
+          <div className={styles.reportGrid}>{REPORTS.filter((item) => item.group === "fund").map((item) => <ReportCard key={item.kind} item={item} query={query} validPeriod={validPeriod} />)}</div>
         </section>
 
         <section className={styles.section} id="activity" aria-labelledby="activity-title">
           <div className={styles.sectionHeading}><div><p>Робота бібліотеки</p><h2 id="activity-title">Комплектування та відвідування</h2></div></div>
-          <div className={styles.reportGrid}>{REPORTS.filter((item) => item.group === "activity").map((item) => <ReportCard key={item.kind} item={item} query={query} disabled={!validPeriod} />)}<article className={styles.reportCard}><span aria-hidden="true"><SiteIcon name="reports" size={19} /></span><div><h3>Потреба на новий навчальний рік</h3><p>Майбутні класи, кількість учнів, придатний фонд і готовий список для замовлення.</p><small>Кількість учнів можна внести пізніше.</small></div><a href={telegramMiniApp ? "/librarian/telegram/cabinet?target=acquisitions&view=planning" : "/librarian/acquisitions/planning"}>Відкрити <SiteIcon name="next" size={15} /></a></article></div>
+          <div className={styles.reportGrid}>{REPORTS.filter((item) => item.group === "activity").map((item) => <ReportCard key={item.kind} item={item} query={query} validPeriod={validPeriod} />)}</div>
         </section>
 
         <section className={styles.backup} aria-label="Повний резервний експорт">
@@ -162,8 +197,13 @@ export default function ReportsWorkspace({
   );
 }
 
-function ReportCard({ item, query, disabled }: { item: (typeof REPORTS)[number]; query: string; disabled: boolean }) {
-  return <article className={styles.reportCard}><span aria-hidden="true"><SiteIcon name={item.icon} size={19} /></span><div><h3>{item.title}</h3><p>{item.description}</p>{item.note ? <small>{item.note}</small> : null}</div>{disabled ? <span aria-disabled="true">Excel <SiteIcon name="export" size={15} /></span> : <a href={`/api/librarian/reports/${item.kind}?${query}`}>Excel <SiteIcon name="export" size={15} /></a>}</article>;
+function ReportCard({ item, query, validPeriod }: { item: (typeof REPORTS)[number]; query: string; validPeriod: boolean }) {
+  const currentSnapshot = item.kind === "inventory";
+  const disabled = !currentSnapshot && !validPeriod;
+  const href = currentSnapshot
+    ? `/api/librarian/reports/${item.kind}`
+    : `/api/librarian/reports/${item.kind}?${query}`;
+  return <article className={styles.reportCard}><span aria-hidden="true"><SiteIcon name={item.icon} size={19} /></span><div><h3>{item.title}</h3><p>{item.description}</p>{currentSnapshot ? <small>Стан на момент формування.</small> : item.note ? <small>{item.note}</small> : null}</div>{disabled ? <span aria-disabled="true">Excel <SiteIcon name="export" size={15} /></span> : <a href={href}>Excel <SiteIcon name="export" size={15} /></a>}</article>;
 }
 
 function todayPeriod() {

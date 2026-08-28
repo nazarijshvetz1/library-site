@@ -77,6 +77,19 @@ test("LibrarianShell keeps the official emblem, full-page navigation, and access
   assert.match(source, /subsections\?: LibrarianSubsection\[\]/u);
   assert.match(source, /activeSubsection\?: string/u);
   assert.match(source, /onSubsectionNavigate\?: \(id: string\) => void/u);
+  assert.match(source, /function standardLibrarianSubsections\(telegramMiniApp: boolean\)/u);
+  assert.match(source, /function mergeSubsections/u);
+  assert.match(source, /function SectionControl/u);
+  assert.match(source, /if \(onToggle\) \{[\s\S]*?<button/u);
+  assert.match(source, /aria-expanded=\{expanded\}/u);
+  assert.match(source, /aria-controls=\{controlsId\}/u);
+  assert.match(source, /expanded && nested\.length/u);
+  assert.match(source, /openDrawerForSection\(event\.currentTarget, item\.id\)/u);
+  assert.match(source, /aria-expanded=\{drawerOpen && expandedSection === item\.id\}/u);
+  assert.match(source, /subsection\.section === activeSection \? onSubsectionNavigate : undefined/u);
+  for (const subsection of ["Видача вчителю", "Повернення", "Видача класу", "Повернення класу", "Планування фонду"]) {
+    assert.match(source, new RegExp(subsection, "u"));
+  }
   assert.match(source, /aria-label="Назад до попередньої сторінки"/u);
   assert.match(source, /aria-label="Вперед до наступної сторінки"/u);
   assert.match(source, /window\.sessionStorage\.getItem\(key\)/u);
@@ -96,5 +109,8 @@ test("LibrarianShell keeps the official emblem, full-page navigation, and access
   assert.match(css, /\.account > a \{ flex: 0 0 auto; white-space: nowrap; \}/u);
   assert.match(css, /\.content :is\(input,select,textarea\) \{ min-width: 0; max-width: 100%; font-size: 16px!important; \}/u);
   assert.match(css, /\.drawer > header button:focus-visible \{[\s\S]*?box-shadow: 0 0 0 3px rgba\(35, 88, 59, \.2\);/u);
+  assert.match(css, /\.sectionToggle \{[\s\S]*?width: 100%[\s\S]*?cursor: pointer/u);
+  assert.match(css, /\.sectionToggle \{[\s\S]*?appearance: none;[\s\S]*?background: transparent;/u);
+  assert.match(css, /\.sectionToggle\[aria-expanded="true"\] \.sectionChevron/u);
   assert.match(workspaceCss, /\.resultCopy strong,[\s\S]*?\.selectedSummary strong \{[\s\S]*?white-space: normal;[\s\S]*?overflow-wrap: anywhere;/u);
 });

@@ -170,6 +170,16 @@
   color: var(--lib-ink);
 }
 
+.sectionToggle {
+  width: 100%;
+  grid-template-columns: 42px minmax(0, 1fr) 18px;
+  appearance: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .sectionLink:hover,
 .sectionLink:focus-visible {
   border-color: rgba(35, 88, 59, .13);
@@ -199,10 +209,23 @@
   background: var(--lib-green);
 }
 
-.sectionLink > span:last-child {
+.sectionCopy {
   min-width: 0;
   display: grid;
   gap: 3px;
+}
+
+.sectionChevron {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  color: var(--lib-muted);
+  transition: transform .16s ease;
+}
+
+.sectionToggle[aria-expanded="true"] .sectionChevron {
+  transform: rotate(180deg);
 }
 
 .sectionLink strong {
@@ -616,6 +639,12 @@
     gap: 5px;
   }
 
+  .drawerSubsectionNav {
+    min-width: 0;
+    display: grid;
+    gap: 5px;
+  }
+
   .subsectionCompact {
     min-height: 46px;
     margin-left: 8px;
@@ -679,6 +708,7 @@
 .menuLabel { margin: 0 7px 7px; font-size: 8px; }
 .desktopNav { gap: 2px; }
 .sectionLink { min-height: 44px; padding: 5px 7px; grid-template-columns: 30px minmax(0,1fr); gap: 7px; border-radius: var(--system-radius-sm); }
+.sectionToggle { grid-template-columns: 30px minmax(0,1fr) 16px; }
 .sectionIcon { width: 30px; height: 30px; border-radius: 8px; font-size: 16px; }
 .sectionLink strong { font-size: 11px; }
 .sectionLink small { font-size: 8px; }

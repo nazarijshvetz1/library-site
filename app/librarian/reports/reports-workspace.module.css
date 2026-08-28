@@ -9,6 +9,13 @@
 .period label span, .classToolbar label span { font-size: 9px; font-weight: 800; }
 .period input, .classToolbar select { width: 100%; min-height: 38px; padding: 0 10px; border: 1px solid #cdd9cc; border-radius: 8px; background: #fff; color: #173d2b; font: 600 12px/1 Inter, "Segoe UI", sans-serif; }
 .period small { align-self: center; color: #6a7970; font-size: 10px; }
+.quickReports { margin-top: 10px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.quickReports a { min-width: 0; min-height: 62px; padding: 10px 12px; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 10px; border: 1px solid #cddacb; border-radius: 11px; background: linear-gradient(135deg, #eef5e9, #fffdfa); color: #173d2b; text-decoration: none; }
+.quickReports a:hover, .quickReports a:focus-visible { border-color: #8ead93; box-shadow: 0 5px 15px rgba(24, 67, 40, .07); }
+.quickReports a > span:first-child { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 9px; background: #1e5b37; color: #fff; }
+.quickReports a > span:nth-child(2) { min-width: 0; display: grid; gap: 3px; }
+.quickReports strong { font-size: 11px; }
+.quickReports small { overflow: hidden; color: #687970; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .reportGrid { margin-top: 10px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .reportCard { min-width: 0; min-height: 118px; padding: 12px; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: start; border: 1px solid #d8e1d6; border-radius: 12px; background: #fff; box-shadow: 0 5px 15px rgba(24, 67, 40, .045); }
 .reportCard > span[aria-hidden="true"] { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 9px; background: #e8f1e5; color: #26653d; }
@@ -28,9 +35,15 @@
 .primaryAction[aria-disabled="true"] { pointer-events: none; opacity: .45; }
 .statementList { margin-top: 10px; border: 1px solid #dbe4d9; border-radius: 10px; overflow: hidden; }
 .listHeader, .statementList article { padding: 9px 11px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid #e5ebe3; }
-.listHeader { background: #f0f5ed; }
+.listHeader { min-height: 46px; list-style: none; background: #f0f5ed; cursor: pointer; }
+.listHeader::-webkit-details-marker { display: none; }
 .listHeader strong, .statementList article strong { font-size: 11px; }
 .listHeader span, .statementList article span, .statementList article small { display: block; margin-top: 2px; color: #6b7a71; font-size: 9px; }
+.listHeader small { display: block; margin-top: 2px; color: #6b7a71; font-size: 9px; }
+.statementSummary { display: inline-flex!important; align-items: center; gap: 6px; white-space: nowrap; }
+.statementSummary svg { transition: transform .16s ease; }
+.statementList[open] .statementSummary svg { transform: rotate(180deg); }
+.statementRows { display: block; }
 .statementList article:last-child { border-bottom: 0; }
 .statementList article > div:last-child { display: flex; gap: 6px; }
 .statementList article a { min-height: 32px; padding: 0 9px; display: inline-flex; align-items: center; border: 1px solid #ccd8cb; border-radius: 7px; color: #1e5b37; font-size: 9px; font-weight: 800; text-decoration: none; white-space: nowrap; }
@@ -51,13 +64,15 @@
   .period { grid-template-columns: 1fr 1fr; }
   .period small { grid-column: 1 / -1; }
   .period input, .classToolbar select { min-height: 44px; font-size: 16px; }
+  .quickReports { grid-template-columns: 1fr; }
+  .quickReports a { min-height: 60px; }
   .reportGrid { grid-template-columns: 1fr; }
-  .reportCard { min-height: 108px; grid-template-columns: 34px minmax(0, 1fr); }
-  .reportCard > a, .reportCard > span[aria-disabled="true"] { grid-column: 1 / -1; min-height: 44px; justify-content: center; }
+  .reportCard { min-height: 94px; grid-template-columns: 34px minmax(0, 1fr) auto; }
+  .reportCard > a, .reportCard > span[aria-disabled="true"] { min-width: 56px; min-height: 44px; padding-inline: 8px; justify-content: center; }
   .section { padding: 10px; }
   .classToolbar { grid-template-columns: 1fr; }
   .primaryAction, .secondaryAction { min-height: 44px; }
-  .listHeader, .statementList article { align-items: stretch; flex-direction: column; }
+  .statementList article { align-items: stretch; flex-direction: column; }
   .statementList article > div:last-child { display: grid; grid-template-columns: 1fr 1fr; }
   .statementList article a { min-height: 44px; justify-content: center; white-space: normal; text-align: center; }
   .backup { align-items: stretch; flex-direction: column; }

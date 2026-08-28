@@ -13,6 +13,7 @@ import {
 import {
   LIBRARY_EMBLEM_URL,
   librarianSectionHref,
+  librarianToolHref,
   librarianUtilityHref,
   type LibrarianSection,
 } from "./librarian-routes";
@@ -78,7 +79,11 @@ export default function LibrarianShell({
   children,
 }: LibrarianShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const moreButtonRef = useRef<HTMLButtonElement>(null);
+  const [expandedState, setExpandedState] = useState<{
+    activeSection: LibrarianSection;
+    expandedSection: LibrarianSection | null;
+  }>({ activeSection, expandedSection: activeSection });
+  const drawerTriggerRef = useRef<HTMLButtonElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLElement>(null);
 
@@ -88,6 +93,13 @@ export default function LibrarianShell({
   const publicCatalogHref = librarianUtilityHref("publicCatalog", telegramMiniApp);
   const secondaryActive = SECONDARY_ITEMS.some((item) => item.id === activeSection);
   const navigationHistory = useLibrarianNavigationHistory(telegramMiniApp);
+  const navigationSubsections = mergeSubsections(
+    standardLibrarianSubsections(telegramMiniApp),
+    subsections,
+  );
+  const expandedSection = expandedState.activeSection === activeSection
+    ? expandedState.expandedSection
+    : activeSection;
 
   useEffect(() => {
     if (!drawerOpen) return;
@@ -96,7 +108,7 @@ export default function LibrarianShell({
       if (event.key === "Escape") {
         event.preventDefault();
         setDrawerOpen(false);
-        window.requestAnimationFrame(() => moreButtonRef.current?.focus());
+        window.requestAnimationFrame(() => drawerTriggerRef.current?.focus());
         return;
       }
       if (event.key !== "Tab") return;
@@ -122,8 +134,28 @@ export default function LibrarianShell({
   function closeDrawer(restoreFocus = false) {
     setDrawerOpen(false);
     if (restoreFocus) {
-      window.requestAnimationFrame(() => moreButtonRef.current?.focus());
+      window.requestAnimationFrame(() => drawerTriggerRef.current?.focus());
     }
+  }
+
+  function toggleSection(section: LibrarianSection) {
+    setExpandedState((current) => {
+      const currentExpanded = current.activeSection === activeSection
+        ? current.expandedSection
+        : activeSection;
+      return {
+        activeSection,
+        expandedSection: currentExpanded === section ? null : section,
+      };
+    });
+  }
+
+  function openDrawerForSection(trigger: HTMLButtonElement, section?: LibrarianSection) {
+    drawerTriggerRef.current = trigger;
+    if (section) {
+      setExpandedState({ activeSection, expandedSection: section });
+    }
+    setDrawerOpen(true);
   }
 
   return (
@@ -186,23 +218,27 @@ export default function LibrarianShell({
           <p className={styles.menuLabel}>Робоче місце</p>
           <nav className={styles.desktopNav} aria-label="Розділи кабінету бібліотекаря">
             {ALL_ITEMS.map((item) => {
-              const nested = subsections.filter((subsection) => subsection.section === item.id);
+              const nested = navigationSubsections.filter((subsection) => subsection.section === item.id);
               const active = item.id === activeSection;
+              const expanded = expandedSection === item.id;
               return (
                 <div className={styles.navigationGroup} key={item.id}>
-                  <SectionLink
+                  <SectionControl
                     item={item}
                     active={active}
                     telegramMiniApp={telegramMiniApp}
+                    expanded={expanded}
+                    controlsId={nested.length ? `librarian-subsections-${item.id}` : undefined}
+                    onToggle={nested.length ? () => toggleSection(item.id) : undefined}
                   />
-                  {active && nested.length ? (
-                    <nav className={styles.subsectionNav} aria-label={`Підрозділи: ${item.label}`}>
+                  {expanded && nested.length ? (
+                    <nav id={`librarian-subsections-${item.id}`} className={styles.subsectionNav} aria-label={`Підрозділи: ${item.label}`}>
                       {nested.map((subsection) => (
                         <SubsectionLink
                           key={subsection.id}
                           subsection={subsection}
                           active={subsection.id === activeSubsection}
-                          onNavigate={onSubsectionNavigate}
+                          onNavigate={subsection.section === activeSection ? onSubsectionNavigate : undefined}
                         />
                       ))}
                     </nav>
@@ -232,23 +268,38 @@ export default function LibrarianShell({
       </div>
 
       <nav className={styles.mobileNav} aria-label="Основні розділи кабінету бібліотекаря">
-        {PRIMARY_ITEMS.map((item) => (
-          <a
-            key={item.id}
-            href={librarianSectionHref(item.id, telegramMiniApp)}
-            aria-current={item.id === activeSection ? "page" : undefined}
-          >
-            <span aria-hidden="true"><SiteIcon name={item.icon} size={20} /></span>
-            <strong>{item.label}</strong>
-          </a>
-        ))}
+        {PRIMARY_ITEMS.map((item) => {
+          const nested = navigationSubsections.filter((subsection) => subsection.section === item.id);
+          const active = item.id === activeSection;
+          return nested.length ? (
+            <button
+              key={item.id}
+              type="button"
+              className={active ? styles.mobileCurrent : ""}
+              aria-expanded={drawerOpen && expandedSection === item.id}
+              aria-controls="librarian-more-menu"
+              onClick={(event) => openDrawerForSection(event.currentTarget, item.id)}
+            >
+              <span aria-hidden="true"><SiteIcon name={item.icon} size={20} /></span>
+              <strong>{item.label}</strong>
+            </button>
+          ) : (
+            <a
+              key={item.id}
+              href={librarianSectionHref(item.id, telegramMiniApp)}
+              aria-current={active ? "page" : undefined}
+            >
+              <span aria-hidden="true"><SiteIcon name={item.icon} size={20} /></span>
+              <strong>{item.label}</strong>
+            </a>
+          );
+        })}
         <button
-          ref={moreButtonRef}
           type="button"
           className={secondaryActive ? styles.mobileCurrent : ""}
           aria-expanded={drawerOpen}
           aria-controls="librarian-more-menu"
-          onClick={() => setDrawerOpen(true)}
+          onClick={(event) => openDrawerForSection(event.currentTarget)}
         >
           <span aria-hidden="true"><SiteIcon name="more" size={20} /></span>
           <strong>Ще</strong>
@@ -286,28 +337,41 @@ export default function LibrarianShell({
               </button>
             </header>
             <nav className={styles.drawerNav} aria-label="Усі розділи кабінету бібліотекаря">
-              {ALL_ITEMS.map((item) => (
-                <div className={styles.drawerNavigationGroup} key={item.id}>
-                  <SectionLink
-                    item={item}
-                    active={item.id === activeSection}
-                    telegramMiniApp={telegramMiniApp}
-                    compact
-                  />
-                  {item.id === activeSection ? subsections.filter((subsection) => subsection.section === item.id).map((subsection) => (
-                    <SubsectionLink
-                      key={subsection.id}
-                      subsection={subsection}
-                      active={subsection.id === activeSubsection}
-                      onNavigate={(id) => {
-                        closeDrawer();
-                        onSubsectionNavigate?.(id);
-                      }}
+              {ALL_ITEMS.map((item) => {
+                const nested = navigationSubsections.filter((subsection) => subsection.section === item.id);
+                const expanded = expandedSection === item.id;
+                return (
+                  <div className={styles.drawerNavigationGroup} key={item.id}>
+                    <SectionControl
+                      item={item}
+                      active={item.id === activeSection}
+                      telegramMiniApp={telegramMiniApp}
                       compact
+                      expanded={expanded}
+                      controlsId={nested.length ? `librarian-drawer-subsections-${item.id}` : undefined}
+                      onToggle={nested.length ? () => toggleSection(item.id) : undefined}
                     />
-                  )) : null}
-                </div>
-              ))}
+                    {expanded && nested.length ? (
+                      <nav
+                        id={`librarian-drawer-subsections-${item.id}`}
+                        className={styles.drawerSubsectionNav}
+                        aria-label={`Підрозділи: ${item.label}`}
+                      >
+                        {nested.map((subsection) => (
+                          <SubsectionLink
+                            key={subsection.id}
+                            subsection={subsection}
+                            active={subsection.id === activeSubsection}
+                            onNavigate={subsection.section === activeSection ? onSubsectionNavigate : undefined}
+                            onActivate={() => closeDrawer()}
+                            compact
+                          />
+                        ))}
+                      </nav>
+                    ) : null}
+                  </div>
+                );
+              })}
             </nav>
             <div className={styles.drawerUtilities}>
               <a href={publicCatalogHref ?? undefined} target="_blank" rel="noopener noreferrer">Публічний каталог <SiteIcon name="external" size={16} /></a>
@@ -327,11 +391,13 @@ function SubsectionLink({
   subsection,
   active,
   onNavigate,
+  onActivate,
   compact = false,
 }: {
   subsection: LibrarianSubsection;
   active: boolean;
   onNavigate?: (id: string) => void;
+  onActivate?: () => void;
   compact?: boolean;
 }) {
   return (
@@ -340,7 +406,9 @@ function SubsectionLink({
       href={subsection.href}
       aria-current={active ? "page" : undefined}
       onClick={(event) => {
-        if (!onNavigate || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        const plainPrimaryClick = event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+        if (plainPrimaryClick) onActivate?.();
+        if (!onNavigate || !plainPrimaryClick) return;
         event.preventDefault();
         onNavigate(subsection.id);
       }}
@@ -423,28 +491,93 @@ function writeNavigationHistory(key: string, value: StoredNavigationHistory) {
   try { window.sessionStorage.setItem(key, JSON.stringify(value)); } catch { /* Navigation still works through direct links. */ }
 }
 
-function SectionLink({
+function SectionControl({
   item,
   active,
   telegramMiniApp,
   compact = false,
+  expanded = false,
+  controlsId,
+  onToggle,
 }: {
   item: NavigationItem;
   active: boolean;
   telegramMiniApp: boolean;
   compact?: boolean;
+  expanded?: boolean;
+  controlsId?: string;
+  onToggle?: () => void;
 }) {
+  const content = (
+    <>
+      <span className={styles.sectionIcon} aria-hidden="true"><SiteIcon name={item.icon} size={20} /></span>
+      <span className={styles.sectionCopy}>
+        <strong>{item.label}</strong>
+        <small>{item.hint}</small>
+      </span>
+      {onToggle ? (
+        <span className={styles.sectionChevron} aria-hidden="true"><SiteIcon name="expand" size={16} /></span>
+      ) : null}
+    </>
+  );
+
+  if (onToggle) {
+    return (
+      <button
+        className={`${styles.sectionLink} ${styles.sectionToggle} ${active ? styles.sectionCurrent : ""} ${compact ? styles.compactLink : ""}`}
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={controlsId}
+        onClick={onToggle}
+      >
+        {content}
+      </button>
+    );
+  }
+
   return (
     <a
       className={`${styles.sectionLink} ${active ? styles.sectionCurrent : ""} ${compact ? styles.compactLink : ""}`}
       href={librarianSectionHref(item.id, telegramMiniApp)}
       aria-current={active ? "page" : undefined}
     >
-      <span className={styles.sectionIcon} aria-hidden="true"><SiteIcon name={item.icon} size={20} /></span>
-      <span>
-        <strong>{item.label}</strong>
-        <small>{item.hint}</small>
-      </span>
+      {content}
     </a>
   );
+}
+
+function standardLibrarianSubsections(telegramMiniApp: boolean): LibrarianSubsection[] {
+  const reportsBase = librarianSectionHref("reports", telegramMiniApp);
+  const acquisitionsBase = librarianSectionHref("acquisitions", telegramMiniApp);
+  return [
+    { id: "catalog", section: "fund", label: "Каталог", hint: "Пошук і картка", icon: "catalog", href: librarianToolHref("catalog", telegramMiniApp) },
+    { id: "create", section: "fund", label: "Новий матеріал", hint: "Додати до фонду", icon: "new-material", href: librarianToolHref("create", telegramMiniApp) },
+    { id: "issue", section: "circulation", label: "Видача вчителю", hint: "Оформити видачу", icon: "issue-teacher", href: librarianToolHref("issue", telegramMiniApp) },
+    { id: "return", section: "circulation", label: "Повернення", hint: "Прийняти книги", icon: "return", href: librarianToolHref("return", telegramMiniApp) },
+    { id: "class-issue", section: "circulation", label: "Видача класу", hint: "Кілька матеріалів", icon: "issue-class", href: librarianToolHref("class-issue", telegramMiniApp) },
+    { id: "class-return", section: "circulation", label: "Повернення класу", hint: "Частково або повністю", icon: "return-class", href: librarianToolHref("class-return", telegramMiniApp) },
+    { id: "requests", section: "acquisitions", label: "Заявки", hint: "Поточне комплектування", icon: "acquisitions", href: acquisitionsBase },
+    { id: "planning", section: "acquisitions", label: "Планування фонду", hint: "Потреба на новий рік", icon: "reports", href: telegramMiniApp ? `${acquisitionsBase}&view=planning` : "/librarian/acquisitions/planning" },
+    { id: "overview", section: "reports", label: "Огляд", hint: "Готові звіти", icon: "reports", href: `${reportsBase}#overview` },
+    { id: "classes", section: "reports", label: "Класи", hint: "Відомості й залишки", icon: "issue-class", href: `${reportsBase}#classes` },
+    { id: "fund", section: "reports", label: "Фонд", hint: "Рух та інвентаризація", icon: "fund", href: `${reportsBase}#fund` },
+    { id: "activity", section: "reports", label: "Робота бібліотеки", hint: "Заявки й відвідування", icon: "visits", href: `${reportsBase}#activity` },
+    { id: "academic-year", section: "management", label: "Новий навчальний рік", hint: "Створити період", icon: "academic-year", href: librarianToolHref("academic-year", telegramMiniApp) },
+    { id: "class-create", section: "management", label: "Відкрити клас", hint: "Додати до року", icon: "class-create", href: librarianToolHref("class-create", telegramMiniApp) },
+    { id: "class-update", section: "management", label: "Змінити клас", hint: "Керівник і кабінет", icon: "class-update", href: librarianToolHref("class-update", telegramMiniApp) },
+    { id: "class-close", section: "management", label: "Закрити клас", hint: "Зберегти історію", icon: "class-close", href: librarianToolHref("class-close", telegramMiniApp) },
+    { id: "class-reopen", section: "management", label: "Поновити клас", hint: "Виправити закриття", icon: "class-reopen", href: librarianToolHref("class-reopen", telegramMiniApp) },
+    { id: "rollover", section: "management", label: "Перехід на новий рік", hint: "Перевести всі класи", icon: "rollover", href: librarianToolHref("rollover", telegramMiniApp) },
+    { id: "locations", section: "management", label: "Кабінети", hint: "Розміщення фонду", icon: "locations", href: librarianToolHref("locations", telegramMiniApp) },
+    { id: "contacts", section: "management", label: "Контакти", hint: "Дані для відкритого сайту", icon: "contacts", href: librarianToolHref("contacts", telegramMiniApp) },
+  ];
+}
+
+function mergeSubsections(
+  defaults: LibrarianSubsection[],
+  overrides: LibrarianSubsection[],
+): LibrarianSubsection[] {
+  const merged = new Map(defaults.map((subsection) => [`${subsection.section}:${subsection.id}`, subsection]));
+  overrides.forEach((subsection) => merged.set(`${subsection.section}:${subsection.id}`, subsection));
+  return [...merged.values()];
 }

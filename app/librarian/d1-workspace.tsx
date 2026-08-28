@@ -486,13 +486,13 @@ function parseTool(value: string | null): Tool | null {
 
 function librarianSectionForTool(tool: Tool): LibrarianSection {
   if (tool === "dashboard") return "home";
-  if (["return", "class-issue", "class-return"].includes(tool)) return "circulation";
+  if (["issue", "return", "class-issue", "class-return"].includes(tool)) return "circulation";
   if (tool === "locations" || tool === "contacts" || isAcademicTool(tool)) return "management";
   return "fund";
 }
 
 function librarianSubsectionForTool(tool: Tool): string | undefined {
-  if (MATERIAL_ACTION_IDS.has(tool as MaterialActionTool)) return "catalog";
+  if (MATERIAL_ACTION_IDS.has(tool as MaterialActionTool)) return tool === "issue" ? "issue" : "catalog";
   return tool === "dashboard" ? undefined : tool;
 }
 
@@ -790,6 +790,8 @@ export default function D1LibrarianWorkspace({
     && tool !== "class-return"
     && tool !== "locations"
     && tool !== "contacts";
+  const materialSelectionOpen = Boolean(selectedId)
+    && (tool === "catalog" || tool === "class-issue" || MATERIAL_ACTION_IDS.has(tool as MaterialActionTool));
 
   return (
     <LibrarianShell
@@ -849,7 +851,7 @@ export default function D1LibrarianWorkspace({
               onChooseTool={chooseTool}
             />
           ) : (
-          <div className={`${tool === "create" ? styles.workGridCreate : showCatalogSearch ? styles.workGrid : styles.workGridWide} ${selectedId && (tool === "catalog" || MATERIAL_ACTION_IDS.has(tool as MaterialActionTool)) ? styles.workGridSelected : ""}`}>
+          <div className={`${tool === "create" ? styles.workGridCreate : showCatalogSearch ? styles.workGrid : styles.workGridWide} ${materialSelectionOpen ? styles.workGridSelected : ""}`}>
             {showCatalogSearch && tool !== "create" ? (
               <CatalogSearch
                 filters={filters}
@@ -871,7 +873,7 @@ export default function D1LibrarianWorkspace({
             ) : null}
 
             <section className={styles.actionPane}>
-              {selectedId && (tool === "catalog" || MATERIAL_ACTION_IDS.has(tool as MaterialActionTool)) ? (
+              {materialSelectionOpen ? (
                 <button className={styles.backToResults} type="button" onClick={clearMaterialSelection}>
                   <SiteIcon name="previous" size={17} /> Назад до результатів
                 </button>
@@ -3701,6 +3703,22 @@ function StockCountForm({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [success, setSuccess] = useState(false);
+  const visibleHoldings = useMemo(
+    () => [...detail.holdings]
+      .filter((holding) => (
+        holding.physicalQuantity > 0
+        || holding.reservedQuantity > 0
+        || holding.availableQuantity > 0
+      ))
+      .sort((left, right) => (
+        Number(right.locationStatus === "active" && right.locationType !== "service")
+        - Number(left.locationStatus === "active" && left.locationType !== "service")
+        || left.locationName.localeCompare(right.locationName, "uk")
+        || conditionLabel(left.condition).localeCompare(conditionLabel(right.condition), "uk")
+      )),
+    [detail.holdings],
+  );
+  const physicalAtLocations = visibleHoldings.reduce((total, holding) => total + holding.physicalQuantity, 0);
 
   function chooseLocation(value: string) {
     setLocationId(value);
@@ -3715,6 +3733,13 @@ function StockCountForm({
     setCondition(value);
     const next = holdings.find((holding) => holding.locationId === effectiveLocationId && (holding.condition || "unspecified") === value);
     setCountedQuantity(String(next?.physicalQuantity ?? 0));
+    setMessage("");
+  }
+
+  function chooseHolding(holding: MaterialHolding) {
+    setLocationId(holding.locationId);
+    setCondition(holding.condition || "unspecified");
+    setCountedQuantity(String(holding.physicalQuantity));
     setMessage("");
   }
 
@@ -3775,6 +3800,65 @@ function StockCountForm({
           <small>Система перевірить, чи залишок не змінився під час підрахунку.</small>
         </div>
       </div>
+
+      <section className={styles.stockDistribution} aria-labelledby="stock-distribution-title">
+        <div className={styles.stockDistributionHeading}>
+          <div>
+            <h3 id="stock-distribution-title">Де знаходяться примірники</h3>
+            <p>Натисніть активне місце, щоб одразу підставити його у форму підрахунку.</p>
+          </div>
+          <div className={styles.stockDistributionTotals} aria-label="Зведена кількість примірників">
+            <span><strong>{physicalAtLocations}</strong> на місцях</span>
+            <span><strong>{detail.loanedQuantity}</strong> видано</span>
+            <span><strong>{detail.reservedQuantity ?? 0}</strong> у резерві</span>
+            <span><strong>{detail.availableQuantity}</strong> доступно</span>
+          </div>
+        </div>
+        {visibleHoldings.length ? (
+          <div className={styles.stockLocationList}>
+            {visibleHoldings.map((holding) => {
+              const selectable = holding.locationStatus === "active" && holding.locationType !== "service";
+              const active = selectable
+                && holding.locationId === effectiveLocationId
+                && (holding.condition || "unspecified") === condition;
+              const content = (
+                <>
+                  <span className={styles.stockLocationIcon} aria-hidden="true"><SiteIcon name="locations" size={17} /></span>
+                  <span className={styles.stockLocationCopy}>
+                    <strong>{holding.locationName}</strong>
+                    <small>
+                      {conditionLabel(holding.condition)}
+                      {holding.locationStatus !== "active" ? " · місце закрите" : ""}
+                      {holding.locationType === "service" ? " · службове місце" : ""}
+                    </small>
+                  </span>
+                  <span className={styles.stockLocationFigures}>
+                    <strong>{holding.physicalQuantity}</strong>
+                    <small>фізично · {holding.reservedQuantity} у резерві · {holding.availableQuantity} доступно</small>
+                  </span>
+                </>
+              );
+              return selectable ? (
+                <button
+                  key={`${holding.locationId}-${holding.condition || "unspecified"}`}
+                  className={styles.stockLocationRow}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => chooseHolding(holding)}
+                >
+                  {content}
+                </button>
+              ) : (
+                <article className={`${styles.stockLocationRow} ${styles.stockLocationReadOnly}`} key={`${holding.locationId}-${holding.condition || "unspecified"}`}>
+                  {content}
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <InlineMessage tone="info">Для цього матеріалу ще немає примірників у місцях зберігання.</InlineMessage>
+        )}
+      </section>
 
       {countableLocations.length ? (
         <div className={styles.formGrid}>
@@ -4093,6 +4177,8 @@ function ClassIssueWorkspace({
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"error" | "success" | "info">("info");
   const [lastIssuedClassLoanId, setLastIssuedClassLoanId] = useState("");
+  const materialPickerRef = useRef<HTMLElement>(null);
+  const lastFocusedMaterialIdRef = useRef("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -4108,6 +4194,29 @@ function ClassIssueWorkspace({
     });
     return () => controller.abort();
   }, [academicReloadToken]);
+
+  useEffect(() => {
+    if (detailState === "idle" && !detail) {
+      lastFocusedMaterialIdRef.current = "";
+      return;
+    }
+    if (
+      detailState !== "ready"
+      || !detail
+      || referenceState !== "ready"
+      || academicState !== "ready"
+      || lastFocusedMaterialIdRef.current === detail.id
+    ) return;
+    if (!window.matchMedia("(max-width: 1080px)").matches) return;
+    const frame = window.requestAnimationFrame(() => {
+      const picker = materialPickerRef.current;
+      if (!picker) return;
+      picker.scrollIntoView({ block: "start", behavior: "auto" });
+      picker.focus({ preventScroll: true });
+      lastFocusedMaterialIdRef.current = detail.id;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [academicState, detail, detailState, referenceState]);
 
   const activeClassYears = useMemo(() => {
     if (!academicReference) return [];
@@ -4435,7 +4544,12 @@ function ClassIssueWorkspace({
           </div>
         )}
 
-        <section className={styles.classMaterialPicker} aria-labelledby="class-material-picker-title">
+        <section
+          ref={materialPickerRef}
+          className={styles.classMaterialPicker}
+          aria-labelledby="class-material-picker-title"
+          tabIndex={-1}
+        >
           <div>
             <h3 id="class-material-picker-title">Додати вибраний матеріал</h3>
             <p>Оберіть матеріал ліворуч, місце та кількість, тоді додайте його до кошика.</p>

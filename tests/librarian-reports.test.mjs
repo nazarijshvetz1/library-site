@@ -64,7 +64,12 @@ test("all operational report queries compile on the migrated schema", async () =
     assert.equal(report.kind, kind);
     const workbook = reportExcel.createLibrarianReportExcel(report);
     assert.ok(workbook.bytes.length > 0);
-    assert.doesNotMatch(workbookXml(workbook.bytes), /CAT-ID|CAT-\d{4,}|catalog_number|catalogNumber/iu);
+    const xml = workbookXml(workbook.bytes);
+    assert.doesNotMatch(xml, /CAT-ID|CAT-\d{4,}|catalog_number|catalogNumber/iu);
+    if (kind === "inventory") {
+      assert.match(xml, /Станом на/u);
+      assert.doesNotMatch(xml, /Період/u);
+    }
   }
   sqlite.close();
 });
@@ -73,7 +78,15 @@ test("reports center exposes class statement history and protected report downlo
   const ui = fs.readFileSync(path.join(root, "app/librarian/reports/reports-workspace.tsx"), "utf8");
   const printPage = fs.readFileSync(path.join(root, "app/librarian/class-loans/[classLoanId]/statement/page.tsx"), "utf8");
   assert.match(ui, /Видані матеріали по класах/u);
+  assert.match(ui, /aria-label="Найчастіші документи"/u);
+  assert.match(ui, /Потреба на новий навчальний рік/u);
   assert.match(ui, /Акт-відомості окремих видач/u);
+  assert.match(ui, /<details className=\{styles\.statementList\}>/u);
+  assert.match(ui, /window\.addEventListener\("hashchange", syncHash\)/u);
+  assert.match(ui, /activeSubsection=\{activeSubsection\}/u);
+  assert.match(ui, /currentSnapshot = item\.kind === "inventory"/u);
+  assert.match(ui, /Стан на момент формування/u);
+  assert.match(ui, /Показано \$\{visibleStatements\.length\} із \$\{filteredStatements\.length\}/u);
   assert.match(ui, /\/api\/librarian\/reports\/\$\{item\.kind\}/u);
   assert.match(printPage, /Акт-відомість видачі матеріалів класу/u);
   assert.doesNotMatch(printPage, /CAT-ID|catalogNumber|catalog_number|Номер документа|Фактичний відповідальний|Місце зберігання|Стан примірників/iu);
