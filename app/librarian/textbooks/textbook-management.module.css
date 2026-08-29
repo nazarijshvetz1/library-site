@@ -12,15 +12,6 @@
 .toolbar button { min-height: 38px; padding: 0 12px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid #ccd8c9; border-radius: 9px; background: var(--green-50); color: var(--green-900); cursor: pointer; font-size: 9px; font-weight: 850; }
 .notice { margin-top: 10px; padding: 10px 12px; display: flex; align-items: center; gap: 8px; border: 1px solid #cbdcc5; border-radius: 11px; background: #edf6e9; color: #2f6d3d; font-size: 10px; }
 .noticeError { border-color: #e2c2bb; background: #fff1ee; color: #923c31; }
-.isbnPanel { margin-top: 12px; padding: 11px 12px; display: flex; align-items: center; justify-content: space-between; gap: 18px; border: 1px solid #cbdcc5; border-radius: 13px; background: linear-gradient(100deg,#eef6e9,#fffefa); }
-.isbnPanel > div:first-child { min-width: 0; display: grid; gap: 3px; }
-.isbnPanel span { color: var(--green-700); font-size: 8px; font-weight: 900; letter-spacing: .09em; text-transform: uppercase; }
-.isbnPanel strong { color: var(--green-950); font-size: 12px; }
-.isbnPanel small { color: var(--muted); font-size: 8px; line-height: 1.35; }
-.isbnActions { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; }
-.isbnActions output { color: #52675a; font-size: 8px; white-space: nowrap; }
-.isbnActions button { min-height: 38px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 0; border-radius: 9px; background: var(--green-900); color: white; cursor: pointer; font-size: 8px; font-weight: 850; white-space: nowrap; }
-.isbnActions button:disabled { cursor: not-allowed; opacity: .55; }
 .layout { margin-top: 12px; display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(300px, .65fr); gap: 12px; align-items: start; }
 .listPanel, .addPanel { border: 1px solid var(--line); border-radius: 16px; background: #fffefa; box-shadow: 0 6px 22px rgba(23,53,34,.04); }
 .listPanel { padding: 16px; }
@@ -94,8 +85,6 @@
   .titleRow h1 { font-size: 29px; }
   .titleRow > div > span { font-size: 9px; line-height: 1.4; }
   .titleRow > a { min-height: 38px; padding: 0 9px; font-size: 8px; }
-  .isbnPanel { align-items: stretch; flex-direction: column; gap: 9px; }
-  .isbnActions { justify-content: space-between; }
   .toolbar { grid-template-columns: 1fr 1fr; }
   .toolbar label:first-child { grid-column: 1 / -1; }
   .listPanel, .addPanel { padding: 12px; }
@@ -112,9 +101,6 @@
 @media (max-width: 520px) {
   .titleRow { display: grid; }
   .titleRow > a { width: 100%; justify-content: center; }
-  .isbnActions { align-items: stretch; flex-direction: column; }
-  .isbnActions output { white-space: normal; }
-  .isbnActions button { width: 100%; }
   .toolbar { grid-template-columns: 1fr; }
   .toolbar label:first-child, .toolbar button { grid-column: auto; }
   .listPanel > header { display: block; }

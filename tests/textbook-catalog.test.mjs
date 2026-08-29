@@ -75,28 +75,6 @@ test("student and librarian UIs provide class selection, sorting, safe external 
   assert.match(adminUi, /Картки фонду, примірники та історія не видаляються/u);
   assert.match(adminUi, /Додати покликання/u);
   assert.match(adminUi, /Зберегти й додати/u);
-  assert.match(adminUi, /Застосувати перевірені ISBN/u);
-  assert.match(adminUi, /matchesCandidate/u);
   assert.match(shell, /label: "Е-підручники"/u);
   assert.match(home, /href="\/textbooks"/u);
-});
-
-test("verified ISBN enrichment queue contains only unique checksum-valid ISBN-13 values", async () => {
-  const source = await read("lib/isbn-enrichment-queue.ts");
-  const match = source.match(/VERIFIED_ISBN_CANDIDATES = (\[[\s\S]*\]) as const satisfies/u);
-  assert.ok(match, "generated ISBN queue must be readable");
-  const candidates = JSON.parse(match[1]);
-  assert.ok(candidates.length > 0);
-  assert.equal(new Set(candidates.map((item) => item.materialId)).size, candidates.length);
-  assert.equal(new Set(candidates.map((item) => item.isbn)).size, candidates.length);
-  for (const item of candidates) {
-    assert.match(item.materialId, /^CAT-\d{4,}$/u);
-    assert.match(item.isbn, /^(?:978|979)\d{10}$/u);
-    const sum = [...item.isbn].reduce(
-      (total, digit, index) => total + Number(digit) * (index % 2 === 0 ? 1 : 3),
-      0,
-    );
-    assert.equal(sum % 10, 0, item.materialId);
-    assert.match(item.evidenceUrl, /^https:\/\//u);
-  }
 });

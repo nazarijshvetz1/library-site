@@ -6,10 +6,6 @@
 import { useEffect, useMemo, useState } from "react";
 
 import SiteIcon from "@/app/_components/site-icon";
-import {
-  VERIFIED_ISBN_CANDIDATES,
-  type VerifiedIsbnCandidate,
-} from "@/lib/isbn-enrichment-queue";
 import LibrarianShell from "../_components/librarian-shell";
 import styles from "./textbook-management.module.css";
 
@@ -51,25 +47,6 @@ type Candidate = {
 
 type StatusFilter = "visible" | "hidden" | "all";
 type SortMode = "manual" | "title" | "subject" | "newest";
-type IsbnProgress = {
-  completed: number;
-  total: number;
-  applied: number;
-  verified: number;
-  skipped: number;
-  failed: number;
-};
-
-type MaterialDetailResponse = {
-  material: {
-    id: string;
-    title: string;
-    author: string;
-    year: number | null;
-    isbn: string;
-    version?: number;
-  };
-};
 
 export default function TextbookManagementWorkspace({
   displayName,
@@ -96,8 +73,6 @@ export default function TextbookManagementWorkspace({
   const [refreshKey, setRefreshKey] = useState(0);
   const [orderDrafts, setOrderDrafts] = useState<Record<string, string>>({});
   const [linkDrafts, setLinkDrafts] = useState<Record<string, string>>({});
-  const [isbnBusy, setIsbnBusy] = useState(false);
-  const [isbnProgress, setIsbnProgress] = useState<IsbnProgress | null>(null);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => setDebouncedQuery(query.trim()), 250);
@@ -253,69 +228,6 @@ export default function TextbookManagementWorkspace({
     }
   }
 
-  async function applyVerifiedIsbns() {
-    if (!writesEnabled || busyId || isbnBusy || VERIFIED_ISBN_CANDIDATES.length === 0) return;
-    setIsbnBusy(true);
-    setMessage(null);
-    setIsbnProgress({
-      completed: 0,
-      total: VERIFIED_ISBN_CANDIDATES.length,
-      applied: 0,
-      verified: 0,
-      skipped: 0,
-      failed: 0,
-    });
-    let nextIndex = 0;
-    const runCandidate = async (candidate: VerifiedIsbnCandidate) => {
-      let result: keyof Pick<IsbnProgress, "applied" | "verified" | "skipped" | "failed"> = "failed";
-      try {
-        const before = await apiJson<MaterialDetailResponse>(
-          `/api/librarian/materials/${encodeURIComponent(candidate.materialId)}`,
-        );
-        if (!matchesCandidate(before.material, candidate)) {
-          result = "skipped";
-        } else if (compactIsbn(before.material.isbn) === candidate.isbn) {
-          result = "verified";
-        } else if (compactIsbn(before.material.isbn)) {
-          result = "skipped";
-        } else if (!Number.isInteger(before.material.version) || Number(before.material.version) < 1) {
-          result = "failed";
-        } else {
-          await apiJson(`/api/librarian/materials/${encodeURIComponent(candidate.materialId)}`, {
-            method: "PATCH",
-            body: JSON.stringify({
-              requestId: crypto.randomUUID(),
-              expectedVersion: Number(before.material.version),
-              changes: { isbn: candidate.isbn },
-            }),
-          });
-          const after = await apiJson<MaterialDetailResponse>(
-            `/api/librarian/materials/${encodeURIComponent(candidate.materialId)}`,
-          );
-          result = compactIsbn(after.material.isbn) === candidate.isbn ? "applied" : "failed";
-        }
-      } catch {
-        result = "failed";
-      }
-      setIsbnProgress((current) => current ? {
-        ...current,
-        completed: current.completed + 1,
-        [result]: current[result] + 1,
-      } : current);
-    };
-    const worker = async () => {
-      while (nextIndex < VERIFIED_ISBN_CANDIDATES.length) {
-        const candidate = VERIFIED_ISBN_CANDIDATES[nextIndex];
-        nextIndex += 1;
-        await runCandidate(candidate);
-      }
-    };
-    await Promise.all(
-      Array.from({ length: Math.min(4, VERIFIED_ISBN_CANDIDATES.length) }, worker),
-    );
-    setIsbnBusy(false);
-  }
-
   return (
     <LibrarianShell
       activeSection="fund"
@@ -330,24 +242,6 @@ export default function TextbookManagementWorkspace({
           <div><p>Фонд · цифрова полиця</p><h1>Каталог е-підручників</h1><span>Керуйте лише публічним списком. Картки фонду, примірники та історія не видаляються.</span></div>
           <a href="/textbooks" target="_blank" rel="noopener noreferrer">Відкрити для учнів <SiteIcon name="external" size={17} /></a>
         </header>
-
-        {VERIFIED_ISBN_CANDIDATES.length > 0 ? (
-          <section className={styles.isbnPanel} aria-labelledby="verified-isbn-title">
-            <div>
-              <span>Перевірена черга</span>
-              <strong id="verified-isbn-title">ISBN для точних видань</strong>
-              <small>Заповнюються лише порожні поля; назва, автор, рік, версія картки та контрольна цифра перевіряються перед записом.</small>
-            </div>
-            <div className={styles.isbnActions}>
-              {isbnProgress
-                ? <output aria-live="polite">{isbnProgress.completed}/{isbnProgress.total} · додано {isbnProgress.applied} · уже було {isbnProgress.verified} · пропущено {isbnProgress.skipped} · помилок {isbnProgress.failed}</output>
-                : <output>{VERIFIED_ISBN_CANDIDATES.length} точних збігів</output>}
-              <button type="button" onClick={() => void applyVerifiedIsbns()} disabled={!writesEnabled || isbnBusy || Boolean(busyId)}>
-                <SiteIcon name={isbnBusy ? "loading" : "success"} size={17} /> {isbnBusy ? "Перевіряю та зберігаю…" : "Застосувати перевірені ISBN"}
-              </button>
-            </div>
-          </section>
-        ) : null}
 
         <section className={styles.toolbar} aria-label="Параметри списку">
           <label><span>Навчальний рік</span><strong>{academicYear || "Завантаження…"}</strong></label>
@@ -414,7 +308,7 @@ function Cover({ url, title, compact = false }: { url: string; title: string; co
   return <span className={`${styles.cover} ${compact ? styles.coverCompact : ""}`}>{url ? <img src={url} alt="" /> : <span>{title}</span>}</span>;
 }
 
-async function apiJson<T>(url: string, init: RequestInit = {}): Promise<T> {
+async function apiJson<T>(url: string, init: RequestInit): Promise<T> {
   const response = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...(init.headers ?? {}) } });
   const body = await response.json() as T & { success?: boolean; error?: string };
   if (!response.ok || body.success === false) throw new Error(body.error || "Не вдалося зберегти зміну.");
@@ -423,13 +317,6 @@ async function apiJson<T>(url: string, init: RequestInit = {}): Promise<T> {
 
 function compare(a: string, b: string): number { return a.localeCompare(b, "uk-UA", { sensitivity: "base" }); }
 function errorMessage(reason: unknown): string { return reason instanceof Error ? reason.message : "Сталася помилка. Спробуйте ще раз."; }
-function compactIsbn(value: string): string { return value.replace(/[^0-9X]/gi, "").toUpperCase(); }
-function compareText(value: string): string { return value.normalize("NFKC").replace(/[’`]/g, "'").replace(/\s+/g, " ").trim().toLocaleLowerCase("uk-UA"); }
-function matchesCandidate(material: MaterialDetailResponse["material"], candidate: VerifiedIsbnCandidate): boolean {
-  if (material.id !== candidate.materialId || compareText(material.title) !== compareText(candidate.title)) return false;
-  if (candidate.author && compareText(material.author) !== compareText(candidate.author)) return false;
-  return candidate.publicationYear === null || material.year === candidate.publicationYear;
-}
 function validHttpsUrl(value: string): string {
   try {
     const url = new URL(value.trim());
