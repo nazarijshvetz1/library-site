@@ -79,7 +79,7 @@ const insertRows = fieldRows.map((row) => ([
   row.expectedPublicationYear === null ? "NULL" : String(row.expectedPublicationYear),
   sqlString(row.expectedIsbn), sqlString(row.expectedPublisher), "0", "NULL", sqlString(row.createdAt),
 ]));
-const insertStatements = chunkInsertRows(insertRows, insertColumns, 64_000);
+const insertStatements = chunkInsertRows(insertRows, insertColumns, 64_000, 80);
 const guard = `e.batch_id = ${sqlString(batchId)}
       AND e.material_id = m.id
       AND e.expected_title = m.title
@@ -137,7 +137,7 @@ for (const [index, statement] of output.split("--> statement-breakpoint").entrie
 await writeFile(migrationPath, output, "utf8");
 console.log(JSON.stringify({ migrationPath, batchId, materials: manifest.records.length, fields: fieldRows.length, insertStatements: insertStatements.length }, null, 2));
 
-function chunkInsertRows(rows, columns, byteLimit) {
+function chunkInsertRows(rows, columns, byteLimit, rowLimit) {
   const prefix = `INSERT INTO material_metadata_enrichments (${columns.join(",")})\n`;
   const statements = [];
   let current = [];
@@ -146,7 +146,10 @@ function chunkInsertRows(rows, columns, byteLimit) {
   ).join("\nUNION ALL\n")}\n) AS staged\nWHERE EXISTS (SELECT 1 FROM materials m WHERE m.id = staged.material_id);`;
   for (const row of rows) {
     const candidate = render([...current, row]);
-    if (current.length && Buffer.byteLength(candidate, "utf8") > byteLimit) {
+    if (current.length && (
+      current.length >= rowLimit
+      || Buffer.byteLength(candidate, "utf8") > byteLimit
+    )) {
       statements.push(render(current));
       current = [row];
     } else {
