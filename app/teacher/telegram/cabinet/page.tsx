@@ -1,7 +1,12 @@
 import type { Metadata } from "next";
 
 import VisitBookingWorkspace from "@/app/visits/visit-booking-workspace";
-import { boundedTeacherTab, type TeacherPortalTab } from "@/app/teacher/_components/teacher-routes";
+import {
+  boundedTeacherOrderView,
+  boundedTeacherTab,
+  type TeacherOrderView,
+  type TeacherPortalTab,
+} from "@/app/teacher/_components/teacher-routes";
 
 export const dynamic = "force-dynamic";
 
@@ -17,16 +22,22 @@ type PageProps = {
 
 export default async function TelegramTeacherCabinetPage({ searchParams }: PageProps) {
   const params = await searchParams;
+  const initialOrderMaterialId = boundedMaterialId(params?.material);
   return (
     <VisitBookingWorkspace
       initialDate={boundedDate(params?.date)}
       initialStartTime={boundedTime(params?.start)}
       initialEndTime={boundedTime(params?.end)}
       initialTab={boundedTab(params?.tab)}
-      initialOrderMaterialId={boundedMaterialId(params?.material)}
+      initialOrderView={initialOrderMaterialId ? "catalog" : boundedOrderView(params?.view)}
+      initialOrderMaterialId={initialOrderMaterialId}
       telegramMiniApp
     />
   );
+}
+
+function boundedOrderView(value: string | string[] | undefined): TeacherOrderView | null {
+  return boundedTeacherOrderView(value);
 }
 
 function boundedDate(value: string | string[] | undefined): string {

@@ -7,6 +7,19 @@ export type CatalogSearchFilters = {
   available: boolean;
 };
 
+export function filterTeachersByFullName<T extends { fullName: string }>(
+  teachers: readonly T[],
+  query: string,
+  limit = 8,
+): T[] {
+  const tokens = normalizeTeacherSearchText(query).split(" ").filter(Boolean);
+  const boundedLimit = Number.isInteger(limit) ? Math.min(20, Math.max(1, limit)) : 8;
+  return teachers.filter((teacher) => {
+    const fullName = normalizeTeacherSearchText(teacher.fullName);
+    return tokens.every((token) => fullName.includes(token));
+  }).slice(0, boundedLimit);
+}
+
 export type ClassCirculationIntentKind = "class-issue" | "class-return";
 
 export type PendingClassCirculationIntent<Payload extends Record<string, unknown> = Record<string, unknown>> = {
@@ -226,4 +239,12 @@ function classCirculationStorageKey(kind: ClassCirculationIntentKind): string {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeTeacherSearchText(value: unknown): string {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .trim()
+    .replace(/\s+/gu, " ")
+    .toLocaleLowerCase("uk-UA");
 }

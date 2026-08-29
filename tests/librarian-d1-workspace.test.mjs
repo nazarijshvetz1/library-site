@@ -6,6 +6,7 @@ import {
   buildCatalogSearchUrl,
   clearPendingClassCirculationIntent,
   editDraftToChanges,
+  filterTeachersByFullName,
   gradeLabel,
   holdingKey,
   materialToEditDraft,
@@ -58,6 +59,20 @@ test("catalog search URL uses bounded D1 query filters and cursor", () => {
     assert.equal(preserved.searchParams.get("q"), q);
     assert.equal(preserved.searchParams.has("rubric"), false);
   }
+});
+
+test("teacher name suggestions normalize Ukrainian names and stay bounded", () => {
+  const teachers = [
+    { id: "1", fullName: "  Ірина   Петрівна Вчитель  " },
+    { id: "2", fullName: "Оксана Вчитель" },
+    { id: "3", fullName: "Петро Учитель" },
+  ];
+  assert.deepEqual(
+    filterTeachersByFullName(teachers, "ВЧИТЕЛЬ ірина").map((teacher) => teacher.id),
+    ["1"],
+  );
+  assert.deepEqual(filterTeachersByFullName(teachers, "", 2).map((teacher) => teacher.id), ["1", "2"]);
+  assert.deepEqual(filterTeachersByFullName(teachers, "відсутній"), []);
 });
 
 test("material edit conversion preserves nullable fields for PATCH", () => {
@@ -552,6 +567,15 @@ test("new librarian route renders D1 workspace inside the shared branded shell",
   assert.match(loanIssueForm, /issueInFlightRef\.current = true/u);
   assert.match(loanIssueForm, /finally \{\s*issueInFlightRef\.current = false;/u);
   assert.match(loanIssueForm, /disabled=\{!writesEnabled \|\| !source \|\| !teacherUserId \|\| saving \|\| success \|\| !quantity\}/u);
+  assert.match(loanIssueForm, /filterTeachersByFullName\(teachers, teacherQuery, 8\)/u);
+  assert.match(loanIssueForm, /role="combobox"/u);
+  assert.match(loanIssueForm, /role="listbox"/u);
+  assert.match(loanIssueForm, /role="option"/u);
+  assert.match(loanIssueForm, /setTeacherUserId\(""\)/u);
+  assert.match(loanIssueForm, /teacher\.subjectPosition/u);
+  assert.match(loanIssueForm, /teacher\.primaryLocation\?\.name/u);
+  assert.match(loanIssueForm, /event\.key === "ArrowDown"/u);
+  assert.match(loanIssueForm, /event\.key === "Enter"/u);
   assert.doesNotMatch(loanIssueForm, /window\.confirm/u);
 
   const classIssue = workspace.match(
@@ -599,6 +623,9 @@ test("new librarian route renders D1 workspace inside the shared branded shell",
   assert.match(classReturn, /sendReturnIntent\(pendingIntent, true\)/u);
   assert.match(classReturn, /ref=\{classReturnedAtInputRef\}/u);
   assert.match(classReturn, /aria-busy=\{locked\}/u);
+  assert.match(classReturn, /<ReturnMaterialCover item=\{item\} \/>/u);
+  assert.match(workspace, /alt=\{`Обкладинка: \$\{item\.materialTitle\}`\}/u);
+  assert.match(styles, /\.returnCover[\s\S]*?object-fit: contain/u);
   assert.match(styles, /\.classCirculationCard[\s\S]*?min-height: 44px/u);
 
   const academic = await read("app/librarian/academic-workspace.tsx");

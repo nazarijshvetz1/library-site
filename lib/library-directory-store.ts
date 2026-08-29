@@ -3,6 +3,8 @@ import type { CatalogD1Database } from "@/lib/catalog-d1";
 export type LibraryTeacher = {
   id: string;
   fullName: string;
+  subjectPosition: string;
+  primaryLocation: { id: string; name: string } | null;
 };
 
 export type LibraryLocation = {
@@ -18,6 +20,7 @@ export type OpenLoanItem = {
   materialTitle: string;
   materialAuthor: string;
   materialYear: number | null;
+  thumbnailUrl: string;
   sourceLocationId: string;
   sourceLocationName: string;
   condition: string;
@@ -43,6 +46,7 @@ export type OpenClassLoanItem = {
   materialTitle: string;
   materialAuthor: string;
   materialYear: number | null;
+  thumbnailUrl: string;
   sourceLocationId: string;
   sourceLocationName: string;
   condition: string;
@@ -76,9 +80,15 @@ export async function readLibraryReferenceData(
 ): Promise<{ teachers: LibraryTeacher[]; locations: LibraryLocation[] }> {
   const [teacherResult, locationResult] = await Promise.all([
     db.prepare(`
-      SELECT u.id, u.full_name
+      SELECT
+        u.id,
+        u.full_name,
+        tp.subject_position,
+        primary_location.id AS primary_location_id,
+        primary_location.name AS primary_location_name
       FROM users u
       JOIN teacher_profiles tp ON tp.teacher_user_id = u.id AND tp.closed_at IS NULL
+      LEFT JOIN locations primary_location ON primary_location.id = tp.primary_location_id
       WHERE u.status = 'active'
       ORDER BY u.sort_name ASC, u.id ASC
       LIMIT 1000
@@ -92,10 +102,19 @@ export async function readLibraryReferenceData(
     `).all(),
   ]);
   return {
-    teachers: (teacherResult.results ?? []).map((row) => ({
-      id: boundedText((row as DirectoryRow).id, 64),
-      fullName: boundedText((row as DirectoryRow).full_name, 300),
-    })).filter((row) => row.id && row.fullName),
+    teachers: (teacherResult.results ?? []).map((row) => {
+      const source = row as DirectoryRow;
+      const primaryLocationId = boundedText(source.primary_location_id, 64);
+      const primaryLocationName = boundedText(source.primary_location_name, 240);
+      return {
+        id: boundedText(source.id, 64),
+        fullName: boundedText(source.full_name, 300),
+        subjectPosition: boundedText(source.subject_position, 160),
+        primaryLocation: primaryLocationId && primaryLocationName
+          ? { id: primaryLocationId, name: primaryLocationName }
+          : null,
+      };
+    }).filter((row) => row.id && row.fullName),
     locations: (locationResult.results ?? []).map((row) => ({
       id: boundedText((row as DirectoryRow).id, 64),
       name: boundedText((row as DirectoryRow).name, 240),
@@ -129,6 +148,10 @@ export async function listOpenLoans(
       m.title AS material_title,
       m.author AS material_author,
       m.publication_year AS material_year,
+      cover.storage_provider AS cover_storage_provider,
+      cover.storage_key AS cover_storage_key,
+      cover.external_url AS cover_external_url,
+      cover.sha256 AS cover_sha256,
       li.source_location_id,
       loc.name AS source_location_name,
       li.condition,
@@ -146,6 +169,8 @@ export async function listOpenLoans(
     JOIN users u ON u.id = l.teacher_user_id
     JOIN loan_items li ON li.loan_id = l.id
     JOIN materials m ON m.id = li.material_id
+    LEFT JOIN material_cover_assets cover
+      ON cover.material_id = m.id AND cover.status = 'ready'
     JOIN locations loc ON loc.id = li.source_location_id
     WHERE li.quantity_returned < li.quantity_issued
     ORDER BY COALESCE(l.due_at, '9999-12-31') ASC, l.issued_at ASC,
@@ -181,6 +206,7 @@ export async function listOpenLoans(
       materialTitle: boundedText(row.material_title, 500),
       materialAuthor: boundedText(row.material_author, 500),
       materialYear: nullableYear(row.material_year),
+      thumbnailUrl: materialCoverUrl(row, materialId),
       sourceLocationId: boundedText(row.source_location_id, 64),
       sourceLocationName: boundedText(row.source_location_name, 240),
       condition: boundedText(row.condition, 80) || "unspecified",
@@ -228,6 +254,10 @@ export async function listOpenClassLoans(
       m.title AS material_title,
       m.author AS material_author,
       m.publication_year AS material_year,
+      cover.storage_provider AS cover_storage_provider,
+      cover.storage_key AS cover_storage_key,
+      cover.external_url AS cover_external_url,
+      cover.sha256 AS cover_sha256,
       cli.source_location_id,
       loc.name AS source_location_name,
       cli.condition,
@@ -248,6 +278,8 @@ export async function listOpenClassLoans(
     JOIN users teacher ON teacher.id = cl.responsible_teacher_user_id
     JOIN class_loan_items cli ON cli.class_loan_id = cl.id
     JOIN materials m ON m.id = cli.material_id
+    LEFT JOIN material_cover_assets cover
+      ON cover.material_id = m.id AND cover.status = 'ready'
     JOIN locations loc ON loc.id = cli.source_location_id
     WHERE cli.quantity_returned < cli.quantity_issued
     ORDER BY COALESCE(cl.due_at, '9999-12-31') ASC, cl.issued_at ASC,
@@ -290,6 +322,7 @@ export async function listOpenClassLoans(
       materialTitle: boundedText(row.material_title, 500),
       materialAuthor: boundedText(row.material_author, 500),
       materialYear: nullableYear(row.material_year),
+      thumbnailUrl: materialCoverUrl(row, materialId),
       sourceLocationId: boundedText(row.source_location_id, 64),
       sourceLocationName: boundedText(row.source_location_name, 240),
       condition: boundedText(row.condition, 80) || "unspecified",
@@ -303,6 +336,44 @@ export async function listOpenClassLoans(
 
 function boundedText(value: unknown, maxLength: number): string {
   return String(value ?? "").trim().slice(0, maxLength);
+}
+
+function materialCoverUrl(row: DirectoryRow, materialId: string): string {
+  const externalUrl = safeExternalImageUrl(row.cover_external_url);
+  if (externalUrl) return externalUrl;
+  const provider = boundedText(row.cover_storage_provider, 40).toLowerCase();
+  const storageKey = safeStorageKey(row.cover_storage_key);
+  if (provider !== "r2" || !storageKey) return "";
+  const sha256 = boundedText(row.cover_sha256, 64);
+  const version = /^[0-9a-f]{64}$/iu.test(sha256)
+    ? `?v=${sha256.slice(0, 12).toLowerCase()}`
+    : "";
+  return `/api/catalog-v2/covers/${encodeURIComponent(materialId)}${version}`;
+}
+
+function safeExternalImageUrl(value: unknown): string {
+  try {
+    const url = new URL(String(value ?? "").trim());
+    return url.protocol === "https:" && !url.username && !url.password ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+function safeStorageKey(value: unknown): string {
+  const key = String(value ?? "").trim();
+  if (
+    !key
+    || key.length > 512
+    || key.startsWith("/")
+    || key.includes("\\")
+    || key.split("/").some((part) => !part || part === "." || part === "..")
+    || Array.from(key).some((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint <= 0x1f || codePoint === 0x7f;
+    })
+  ) return "";
+  return key;
 }
 
 function nonNegativeInteger(value: unknown): number {

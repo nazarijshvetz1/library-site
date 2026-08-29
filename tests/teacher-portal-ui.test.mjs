@@ -35,13 +35,16 @@ test("teacher cabinet is the primary route and legacy visits keeps bounded deep 
   ]);
   assert.match(teacherPage, /title: "Кабінет учителя"/u);
   assert.match(teacherPage, /initialTab=\{boundedTab\(params\?\.tab\)\}/u);
-  assert.match(teacherPage, /initialOrderMaterialId=\{boundedMaterialId\(params\?\.material\)\}/u);
+  assert.match(teacherPage, /const initialOrderMaterialId = boundedMaterialId\(params\?\.material\)/u);
+  assert.match(teacherPage, /initialOrderView=\{initialOrderMaterialId \? "catalog" : boundedOrderView\(params\?\.view\)\}/u);
+  assert.match(teacherPage, /initialOrderMaterialId=\{initialOrderMaterialId\}/u);
   assert.match(teacherPage, /\^CAT-\\d\{4,\}\$/u);
   assert.match(visitsPage, /initialTab="visits"/u);
   assert.match(workspace, /initialDate=\{initialDate\}/u);
   assert.match(workspace, /initialStartTime=\{initialStartTime\}/u);
   assert.match(workspace, /initialEndTime=\{initialEndTime\}/u);
   assert.match(workspace, /initialOrderMaterialId=\{initialOrderMaterialId\}/u);
+  assert.match(workspace, /initialOrderView=\{initialOrderView\}/u);
 });
 
 test("teacher cabinet keeps a sans interface and Georgia display headings", async () => {
@@ -367,6 +370,16 @@ test("teacher orders and notifications page with the frozen opaque cursor", asyn
   assert.match(orders, /method: "PATCH"/u);
   assert.match(orders, /request\.teacherHiddenAt \? "Повернути" : "Приховати"/u);
   assert.match(orders, /Бібліотекар і надалі бачить замовлення/u);
+  assert.match(orders, /if \(!view\)/u);
+  assert.match(orders, /Оберіть потрібну дію/u);
+  assert.match(orders, /onViewChange\("catalog"\)/u);
+  assert.match(orders, /onViewChange\("history"\)/u);
+  assert.match(orders, /view === "catalog" \? <>/u);
+  assert.match(orders, /view === "history" \? \(/u);
+  assert.match(orders, /!catalogReady \|\| view !== "catalog"/u);
+  assert.match(orders, /view === "history" \|\| restored\?\.kind === "order-cancel"/u);
+  assert.match(orders, /className=\{styles\.orderChooserGrid\}/u);
+  assert.match(orders, /className=\{styles\.orderSubnav\}/u);
   const addFunction = orders.slice(orders.indexOf("function add("), orders.indexOf("function removeFromCart"));
   const successfulCreate = orders.slice(orders.indexOf('if (intent.kind === "order-create")'), orders.indexOf("await loadRequests(true)"));
   assert.doesNotMatch(addFunction, /setCatalogFilters|resetCatalogFilters|clearTeacherCatalogFilters/u);
@@ -607,6 +620,8 @@ test("teacher profile shows assigned information and keeps photo access private 
   assert.match(workspace, /Куратор класу/u);
   assert.match(workspace, /Зробити фото/u);
   assert.match(workspace, /Обрати з галереї/u);
+  assert.match(workspace, /aria-label="Змінити фото профілю"/u);
+  assert.match(workspace, /onClick=\{\(\) => galleryPhotoInputRef\.current\?\.click\(\)\}/u);
   assert.match(workspace, /normalizeCoverPhotoForUpload/u);
   assert.match(profileRoute, /requireVisitTeacherSession\(db, request\)/u);
   assert.match(profileRoute, /export async function PATCH\(request: Request\)/u);
@@ -634,6 +649,13 @@ test("teacher profile edits subject and room directly while curator changes stay
     read("lib/teacher-profile-store.ts"),
   ]);
   assert.match(workspace, /Редагувати інформацію/u);
+  assert.match(workspace, /aria-label="Редагувати предмет або посаду"/u);
+  assert.match(workspace, /aria-label="Редагувати основний кабінет"/u);
+  assert.match(workspace, /aria-label="Редагувати кураторський клас"/u);
+  assert.match(workspace, /subjectPositionInputRef\.current\?\.focus\(\)/u);
+  assert.match(workspace, /primaryLocationSelectRef\.current\?\.focus\(\)/u);
+  assert.match(workspace, /curatorClassSelectRef\.current\?\.focus\(\)/u);
+  assert.match(workspace, /aria-controls="teacher-profile-editor"/u);
   assert.match(workspace, /Зберегти профіль/u);
   assert.match(workspace, /Змінити клас куратора/u);
   assert.match(workspace, /зміну підтверджує бібліотекар/u);

@@ -87,11 +87,11 @@
 
 @media (max-width: 720px) {
   .headerInner, .hero, .gradePanel, .catalog, .footer { width: min(100% - 20px, 680px); }
-  .headerInner { min-height: 64px; }
+  .headerInner { min-height: 64px; gap: 10px; }
   .brand { min-width: 0; }
   .brand img { width: 40px; height: 40px; }
   .brand strong { font-size: 16px; }
-  .brand small { display: none; }
+  .brand small { display: block; font-size: 9px; }
   .nav a { display: none; }
   .navCurrent { display: inline-flex !important; min-height: 38px !important; padding-inline: 11px !important; }
   .hero { margin-top: 10px; padding: 26px 20px; display: block; border-radius: 20px; }

@@ -300,7 +300,7 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(html, /id="titleSuggestions" role="listbox"/);
   assert.match(html, /<option value="">Усі<\/option>/);
   assert.match(html, /href="\/styles\.css\?v=20260826-2"/);
-  assert.match(html, /href="\/brand\.css\?v=20260824-2"/);
+  assert.match(html, /href="\/brand\.css\?v=20260829-1"/);
   assert.match(html, /href="\/system\.css\?v=20260827-1"/);
   assert.match(brand, /\.stats\s*\{[^}]*margin-top:\s*24px;/s);
   assert.match(html, /<head>[\s\S]*?src="https:\/\/telegram\.org\/js\/telegram-web-app\.js\?63"[\s\S]*?<\/head>/u);
@@ -411,6 +411,7 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(brand, /--gold: #cda252/u);
   assert.match(brand, /\.suggestion-cta/u);
   assert.match(brand, /env\(safe-area-inset-bottom\)/u);
+  assert.match(brand, /grid-template-columns:\s*repeat\(6, minmax\(0, 1fr\)\)/u);
   assert.match(brand, /@media \(prefers-reduced-motion: reduce\)/u);
 });
 
@@ -426,8 +427,8 @@ test("ships an accessible responsive public visit schedule and protected handoff
   assert.match(html, /class="teacher-nav-link"[\s\S]*data-primary-section="teacher"[\s\S]*>Кабінет учителя<\/a>/);
   assert.match(html, /data-primary-section="textbooks"[\s\S]*href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/textbooks"[\s\S]*>Е-підручники<\/a>/u);
   const primaryNavigation = html.match(/data-primary-section=/gu) ?? [];
-  assert.equal(primaryNavigation.length, 5);
-  assert.match(html, /href="#contacts">Контакти<\/a>/u);
+  assert.equal(primaryNavigation.length, 6);
+  assert.match(html, /href="#contacts"[^>]*data-primary-section="contacts"[^>]*>Контакти<\/a>/u);
   assert.match(html, /href="#how-it-works"[^>]*data-primary-section="how-it-works"[^>]*>Як користуватися<\/a>/);
   assert.match(html, /Перевірте наявність/);
   assert.match(html, /Запишіться до бібліотеки/);

@@ -669,7 +669,7 @@ footer p { justify-self: end; max-width: 270px; margin: 0; color: #8fa79e; font-
   footer p { grid-column: 1 / -1; justify-self: start; max-width: none; text-align: left; }
 }
 
-/* Mobile uses the same five-destination pattern as the teacher cabinet. */
+/* Mobile uses the same six-destination pattern as the teacher cabinet. */
 @media (max-width: 820px) {
   body { padding-bottom: calc(92px + env(safe-area-inset-bottom)); }
   .site-header {
@@ -696,7 +696,7 @@ footer p { justify-self: end; max-width: 270px; margin: 0; color: #8fa79e; font-
     width: auto;
     padding: 7px;
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 4px;
     overflow: visible;
     border: 1px solid rgba(18, 61, 50, .13);

@@ -72,7 +72,10 @@ test("student and librarian UIs provide class selection, sorting, safe external 
   assert.match(publicUi, /Перевірені зовнішні джерела/u);
   assert.match(publicUi, /type="radio" name="grade"/u);
   assert.match(publicUi, /aria-live="polite"/u);
+  assert.match(publicUi, /<strong>Єдина бібліотека<\/strong><small>Міжнародний ліцей МАУП<\/small>/u);
   assert.match(publicCss, /@media \(max-width: 720px\)/u);
+  assert.match(publicCss, /\.brand small \{ display: block; font-size: 9px; \}/u);
+  assert.doesNotMatch(publicCss, /\.brand small \{ display: none; \}/u);
   assert.match(publicCss, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/u);
   assert.match(adminUi, /Вилучити зі списку/u);
   assert.match(adminUi, /Повернути до списку/u);

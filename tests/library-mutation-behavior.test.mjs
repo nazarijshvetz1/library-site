@@ -148,6 +148,21 @@ function seed(sqlite) {
     ) VALUES ('LOC-001', 'Бібліотека', 'library', 'active', 1, 1, ?, ?)
   `).run(now, now);
   sqlite.prepare(`
+    UPDATE teacher_profiles
+    SET subject_position = 'Учитель математики', primary_location_id = 'LOC-001'
+    WHERE teacher_user_id = 'USR-TCH'
+  `).run();
+  sqlite.prepare(`
+    INSERT INTO material_cover_assets (
+      id, material_id, storage_provider, storage_key, external_url, mime_type,
+      byte_length, width, height, sha256, status, version, created_at, updated_at
+    ) VALUES (
+      'COVER-CAT-0001', 'CAT-0001', 'external', NULL,
+      'https://example.com/covers/CAT-0001.jpg', 'image/jpeg',
+      1200, 400, 600, NULL, 'ready', 1, ?, ?
+    )
+  `).run(now, now);
+  sqlite.prepare(`
     INSERT INTO holdings (
       material_id, location_id, condition, quantity, version, updated_at
     ) VALUES ('CAT-0001', 'LOC-001', 'unspecified', 5, 1, ?)
@@ -872,7 +887,12 @@ test("actual count, teacher issue and partial/full returns keep one balanced sto
     "2026-09-01",
   );
   const reference = await directory.readLibraryReferenceData(d1);
-  assert.deepEqual(reference.teachers, [{ id: "USR-TCH", fullName: "Ірина Вчитель" }]);
+  assert.deepEqual(reference.teachers, [{
+    id: "USR-TCH",
+    fullName: "Ірина Вчитель",
+    subjectPosition: "Учитель математики",
+    primaryLocation: { id: "LOC-001", name: "Бібліотека" },
+  }]);
   assert.deepEqual(reference.locations, [{
     id: "LOC-001",
     name: "Бібліотека",
@@ -885,6 +905,7 @@ test("actual count, teacher issue and partial/full returns keep one balanced sto
   assert.equal(openLoans[0].dueAt, "2026-09-01");
   assert.equal(openLoans[0].items[0].loanItemId, loan.items[0].loanItemId);
   assert.equal(openLoans[0].items[0].quantityOutstanding, 2);
+  assert.equal(openLoans[0].items[0].thumbnailUrl, "https://example.com/covers/CAT-0001.jpg");
   assert.equal(sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 2);
   assert.deepEqual(
     plainRow(sqlite.prepare("SELECT total_quantity, library_quantity, loaned_quantity FROM material_stock_totals").get()),
@@ -1081,6 +1102,7 @@ test("class issue and partial/full return are idempotent, chronological and bala
   assert.equal(open[0].responsibleTeacherUserId, "USR-TCH");
   assert.equal(open[0].curatorUserId, "USR-TCH");
   assert.equal(open[0].items[0].materialAuthor, "Автор");
+  assert.equal(open[0].items[0].thumbnailUrl, "https://example.com/covers/CAT-0001.jpg");
   assert.equal(open[0].items[0].quantityOutstanding, 2);
   assert.equal((await directory.listOpenClassLoans(d1, { teacherUserId: "USR-TCH" })).length, 1);
   assert.equal((await directory.listOpenClassLoans(d1, { teacherUserId: "USR-OTHER" })).length, 0);
