@@ -259,7 +259,9 @@ export async function createTextbookAssignment(
     resolveActor(db, user),
     requireSingleActiveAcademicYear(db),
   ]);
-  const material = await requireEligibleMaterial(db, input.materialId, input.grade);
+  const material = await requireEligibleMaterial(db, input.materialId, input.grade, {
+    requireResource: input.publish,
+  });
   const existing = await db.prepare(`
     SELECT id FROM textbook_assignments
     WHERE academic_year_id = ? AND grade = ? AND material_id = ?
@@ -365,14 +367,20 @@ export async function mutateTextbookAssignment(
   let archivedAt = before.archivedAt;
   let sortOrder = before.sortOrder;
   if (input.action === "archive") {
-    if (before.status === "archived") throw new TextbookCatalogError("no_changes", 400, "Підручник уже приховано.");
+    if (before.status === "archived") throw new TextbookCatalogError("no_changes", 400, "Підручник уже вилучено зі списку.");
     status = "archived";
     archivedAt = now;
-  } else if (input.action === "publish" || input.action === "restore") {
+  } else if (input.action === "publish") {
     if (before.status === "published") throw new TextbookCatalogError("no_changes", 400, "Підручник уже опубліковано.");
-    await requireEligibleMaterial(db, before.materialId, before.grade);
+    await requireEligibleMaterial(db, before.materialId, before.grade, { requireResource: true });
     status = "published";
     publishedAt = now;
+    archivedAt = null;
+  } else if (input.action === "restore") {
+    if (before.status !== "archived") throw new TextbookCatalogError("no_changes", 400, "Підручник уже є у списку.");
+    await requireEligibleMaterial(db, before.materialId, before.grade, { requireResource: false });
+    status = "draft";
+    publishedAt = null;
     archivedAt = null;
   } else {
     if (input.sortOrder === undefined || input.sortOrder === before.sortOrder) {
@@ -467,7 +475,9 @@ async function listCandidates(
     WHERE m.status = 'active'
       AND m.archived_at IS NULL
       AND trim(m.publication_type) = 'Підручник'
-      AND (m.class_from IS NULL OR m.class_to IS NULL OR ? BETWEEN m.class_from AND m.class_to)
+      AND m.class_from IS NOT NULL
+      AND m.class_to IS NOT NULL
+      AND ? BETWEEN m.class_from AND m.class_to
       AND (m.search_text LIKE ? OR lower(m.id) LIKE ?)
       AND NOT EXISTS (
         SELECT 1 FROM textbook_assignments ta
@@ -549,6 +559,7 @@ async function requireEligibleMaterial(
   db: TextbookDatabase,
   materialId: string,
   grade: number,
+  options: { requireResource: boolean } = { requireResource: true },
 ): Promise<{
   title: string;
   author: string;
@@ -610,11 +621,14 @@ async function requireEligibleMaterial(
   }
   const classFrom = nullableGrade(row.class_from);
   const classTo = nullableGrade(row.class_to);
-  if ((classFrom !== null || classTo !== null) && (classFrom === null || classTo === null || grade < classFrom || grade > classTo)) {
+  if (classFrom === null || classTo === null) {
+    throw new TextbookCatalogError("textbook_grade_required", 409, "Спочатку вкажіть клас у картці підручника.");
+  }
+  if (grade < classFrom || grade > classTo) {
     throw new TextbookCatalogError("textbook_grade_mismatch", 409, "Обраний клас не відповідає картці підручника.");
   }
   const activeResourceCount = nonNegativeInteger(row.active_resource_count);
-  if (activeResourceCount < 1) {
+  if (options.requireResource && activeResourceCount < 1) {
     throw new TextbookCatalogError("textbook_link_required", 409, "Спочатку додайте до картки активне публічне HTTPS-посилання типу «Електронна версія».");
   }
   return {

@@ -78,6 +78,7 @@ test("LibrarianShell keeps the official emblem, full-page navigation, and access
   assert.match(source, /activeSubsection\?: string/u);
   assert.match(source, /onSubsectionNavigate\?: \(id: string\) => void/u);
   assert.match(source, /function standardLibrarianSubsections\(telegramMiniApp: boolean\)/u);
+  assert.match(source, /label: "Каталог"[\s\S]*?label: "Новий матеріал"[\s\S]*?label: "Е-підручники"/u);
   assert.match(source, /function mergeSubsections/u);
   assert.match(source, /function SectionControl/u);
   assert.match(source, /if \(onToggle\) \{[\s\S]*?<button/u);

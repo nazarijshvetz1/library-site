@@ -682,10 +682,13 @@ export default function D1LibrarianWorkspace({
     if (requestedTool !== "dashboard" && /^CAT-\d{4,}$/u.test(materialId)) {
       setFilters((current) => ({ ...current, q: materialId, available: false }));
       selectMaterial(materialId);
+      if (requestedTool === "catalog" && url.searchParams.get("edit") === "1" && writesEnabled) {
+        setEditing(true);
+      }
     }
 
     window.queueMicrotask(() => workspaceTitleRef.current?.focus());
-  }, [selectMaterial, telegramMiniApp]);
+  }, [selectMaterial, telegramMiniApp, writesEnabled]);
 
   useEffect(() => {
     const timer = window.setTimeout(applyToolFromLocation, 0);

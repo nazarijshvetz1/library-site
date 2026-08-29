@@ -46,6 +46,9 @@ test("librarian textbook mutations use authorization, same-origin, bounded JSON,
   assert.match(store, /INSERT INTO audit_events/u);
   assert.match(store, /CASE WHEN changes\(\) = 1 THEN \? ELSE NULL END/u);
   assert.match(store, /textbook_link_required/u);
+  assert.match(store, /requireResource: input\.publish/u);
+  assert.match(store, /input\.action === "restore"[\s\S]*?status = "draft"/u);
+  assert.match(store, /textbook_grade_required/u);
   assert.match(store, /textbook_grade_mismatch/u);
   assert.match(linkRoute, /validateMaterialEbookLinkCreateInput/u);
   assert.match(linkRoute, /appendMaterialEbookLinkDirect/u);
@@ -65,16 +68,25 @@ test("student and librarian UIs provide class selection, sorting, safe external 
     assert.match(publicUi, new RegExp(label, "u"));
   }
   assert.match(publicUi, /target="_blank" rel="noopener noreferrer"/u);
+  assert.match(publicUi, /Відкрити електронну версію/u);
+  assert.match(publicUi, /Перевірені зовнішні джерела/u);
   assert.match(publicUi, /type="radio" name="grade"/u);
   assert.match(publicUi, /aria-live="polite"/u);
   assert.match(publicCss, /@media \(max-width: 720px\)/u);
   assert.match(publicCss, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/u);
-  assert.match(adminUi, /Приховати/u);
+  assert.match(adminUi, /Вилучити зі списку/u);
+  assert.match(adminUi, /Повернути до списку/u);
   assert.match(adminUi, /Опублікувати/u);
+  assert.match(adminUi, /У списку/u);
+  assert.match(adminUi, /Чернетки/u);
   assert.match(adminUi, /Ручний порядок/u);
-  assert.match(adminUi, /Картки фонду, примірники та історія не видаляються/u);
+  assert.match(adminUi, /не видаляє картку фонду, примірники чи історію/u);
+  assert.match(adminUi, /Редагувати підручник/u);
+  assert.match(adminUi, /edit=1/u);
   assert.match(adminUi, /Додати покликання/u);
-  assert.match(adminUi, /Зберегти й додати/u);
+  assert.match(adminUi, /Додати до списку/u);
+  assert.match(adminUi, /Зберегти й опублікувати/u);
   assert.match(shell, /label: "Е-підручники"/u);
+  assert.match(shell, /label: "Каталог"[\s\S]*?label: "Новий матеріал"[\s\S]*?label: "Е-підручники"/u);
   assert.match(home, /href="\/textbooks"/u);
 });

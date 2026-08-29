@@ -551,10 +551,10 @@ function standardLibrarianSubsections(telegramMiniApp: boolean): LibrarianSubsec
   const acquisitionsBase = librarianSectionHref("acquisitions", telegramMiniApp);
   return [
     { id: "catalog", section: "fund", label: "Каталог", hint: "Пошук і картка", icon: "catalog", href: librarianToolHref("catalog", telegramMiniApp) },
+    { id: "create", section: "fund", label: "Новий матеріал", hint: "Додати до фонду", icon: "new-material", href: librarianToolHref("create", telegramMiniApp) },
     ...(telegramMiniApp ? [] : [
       { id: "textbooks", section: "fund" as const, label: "Е-підручники", hint: "Список для учнів", icon: "fund" as const, href: "/librarian/textbooks" },
     ]),
-    { id: "create", section: "fund", label: "Новий матеріал", hint: "Додати до фонду", icon: "new-material", href: librarianToolHref("create", telegramMiniApp) },
     { id: "issue", section: "circulation", label: "Видача вчителю", hint: "Оформити видачу", icon: "issue-teacher", href: librarianToolHref("issue", telegramMiniApp) },
     { id: "return", section: "circulation", label: "Повернення", hint: "Прийняти книги", icon: "return", href: librarianToolHref("return", telegramMiniApp) },
     { id: "class-issue", section: "circulation", label: "Видача класу", hint: "Кілька матеріалів", icon: "issue-class", href: librarianToolHref("class-issue", telegramMiniApp) },

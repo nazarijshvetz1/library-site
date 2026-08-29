@@ -45,7 +45,7 @@ type Candidate = {
   activeResourceCount: number;
 };
 
-type StatusFilter = "visible" | "hidden" | "all";
+type StatusFilter = "list" | "published" | "draft" | "archived" | "all";
 type SortMode = "manual" | "title" | "subject" | "newest";
 
 export default function TextbookManagementWorkspace({
@@ -62,7 +62,7 @@ export default function TextbookManagementWorkspace({
   const [grade, setGrade] = useState(1);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [status, setStatus] = useState<StatusFilter>("visible");
+  const [status, setStatus] = useState<StatusFilter>("list");
   const [sort, setSort] = useState<SortMode>("manual");
   const [items, setItems] = useState<ManagedTextbook[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -112,8 +112,10 @@ export default function TextbookManagementWorkspace({
 
   const visibleItems = useMemo(() => {
     const filtered = items.filter((item) => {
-      if (status === "visible") return item.status === "published";
-      if (status === "hidden") return item.status !== "published";
+      if (status === "list") return item.status !== "archived";
+      if (status === "published") return item.status === "published";
+      if (status === "draft") return item.status === "draft";
+      if (status === "archived") return item.status === "archived";
       return true;
     });
     return [...filtered].sort((a, b) => {
@@ -124,13 +126,18 @@ export default function TextbookManagementWorkspace({
     });
   }, [items, sort, status]);
 
-  async function addCandidate(candidate: Candidate) {
+  async function addCandidate(candidate: Candidate, publish: boolean) {
     await perform(candidate.materialId, async () => {
       const response = await apiJson<{ textbook: ManagedTextbook }>("/api/librarian/textbooks", {
         method: "POST",
-        body: JSON.stringify({ requestId: crypto.randomUUID(), materialId: candidate.materialId, grade, publish: true }),
+        body: JSON.stringify({ requestId: crypto.randomUUID(), materialId: candidate.materialId, grade, publish }),
       });
-      setMessage({ tone: "success", text: `«${response.textbook.title}» додано до ${grade} класу й опубліковано.` });
+      setMessage({
+        tone: "success",
+        text: publish
+          ? `«${response.textbook.title}» додано до ${grade} класу й опубліковано.`
+          : `«${response.textbook.title}» додано до списку ${grade} класу як чернетку.`,
+      });
     });
   }
 
@@ -181,7 +188,7 @@ export default function TextbookManagementWorkspace({
         }),
       });
       setLinkDrafts((current) => ({ ...current, [item.materialId]: "" }));
-      setMessage({ tone: "success", text: `Нове покликання для «${item.title}» збережено.` });
+      setMessage({ tone: "success", text: `Покликання на електронну версію для «${item.title}» збережено. Тепер підручник можна опублікувати.` });
     });
   }
 
@@ -204,10 +211,12 @@ export default function TextbookManagementWorkspace({
       setMessage({
         tone: "success",
         text: action === "archive"
-          ? `«${item.title}» приховано з учнівського списку.`
+          ? `«${item.title}» вилучено зі списку ${grade} класу. Картку каталогу збережено.`
           : action === "reorder"
             ? `Порядок «${item.title}» збережено.`
-            : `«${item.title}» знову опубліковано.`,
+            : action === "restore"
+              ? `«${item.title}» повернуто до списку ${grade} класу як чернетку.`
+              : `«${item.title}» опубліковано для учнів.`,
       });
       setItems((current) => current.map((entry) => entry.id === item.id ? response.textbook : entry));
       setOrderDrafts((current) => ({ ...current, [item.id]: String(response.textbook.sortOrder) }));
@@ -239,14 +248,14 @@ export default function TextbookManagementWorkspace({
     >
       <main className={styles.workspace}>
         <header className={styles.titleRow}>
-          <div><p>Фонд · цифрова полиця</p><h1>Каталог е-підручників</h1><span>Керуйте лише публічним списком. Картки фонду, примірники та історія не видаляються.</span></div>
+          <div><p>Фонд · цифрова полиця</p><h1>Каталог е-підручників</h1><span>Керуйте списками за класами. Вилучення зі списку не видаляє картку фонду, примірники чи історію.</span></div>
           <a href="/textbooks" target="_blank" rel="noopener noreferrer">Відкрити для учнів <SiteIcon name="external" size={17} /></a>
         </header>
 
         <section className={styles.toolbar} aria-label="Параметри списку">
           <label><span>Навчальний рік</span><strong>{academicYear || "Завантаження…"}</strong></label>
           <label><span>Клас</span><select value={grade} onChange={(event) => { setGrade(Number(event.target.value)); setQuery(""); }} aria-label="Клас">{Array.from({ length: 11 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1} клас</option>)}</select></label>
-          <label><span>Стан</span><select value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)} aria-label="Стан"><option value="visible">Опубліковані</option><option value="hidden">Приховані</option><option value="all">Усі</option></select></label>
+          <label><span>Стан</span><select value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)} aria-label="Стан"><option value="list">У списку</option><option value="published">Опубліковані</option><option value="draft">Чернетки</option><option value="archived">Вилучені</option><option value="all">Усі записи</option></select></label>
           <label><span>Сортування</span><select value={sort} onChange={(event) => setSort(event.target.value as SortMode)} aria-label="Сортування"><option value="manual">Ручний порядок</option><option value="title">За назвою</option><option value="subject">За предметом</option><option value="newest">За роком</option></select></label>
           <button type="button" onClick={() => setRefreshKey((value) => value + 1)} disabled={loading}><SiteIcon name={loading ? "loading" : "refresh"} size={17} /> Оновити</button>
         </section>
@@ -255,7 +264,7 @@ export default function TextbookManagementWorkspace({
 
         <div className={styles.layout}>
           <section className={styles.listPanel} aria-labelledby="current-textbooks-title">
-            <header><div><span>{visibleItems.length} у списку</span><h2 id="current-textbooks-title">Е-підручники {grade} класу</h2></div><small>Менше число = вище у «Рекомендованому».</small></header>
+            <header><div><span>{visibleItems.length} показано</span><h2 id="current-textbooks-title">Е-підручники {grade} класу</h2></div><small>Менше число = вище у «Рекомендованому».</small></header>
             {loading ? <p className={styles.loading}><SiteIcon name="loading" size={20} /> Завантаження…</p> : null}
             {!loading && visibleItems.length === 0 ? <div className={styles.empty}><SiteIcon name="fund" size={28} /><strong>У цьому списку записів немає</strong><span>Знайдіть підручник праворуч або змініть фільтр стану.</span></div> : null}
             <div className={styles.items}>
@@ -263,10 +272,10 @@ export default function TextbookManagementWorkspace({
                 <article key={item.id} className={styles.item}>
                   <Cover url={item.coverUrl} title={item.title} />
                   <div className={styles.itemBody}>
-                    <div className={styles.itemTop}><span className={item.status === "published" ? styles.live : styles.hidden}>{item.status === "published" ? "Опубліковано" : item.status === "archived" ? "Приховано" : "Чернетка"}</span><a href={`/librarian?tool=catalog&material=${encodeURIComponent(item.materialId)}`}>{item.materialId} <SiteIcon name="external" size={13} /></a></div>
+                    <div className={styles.itemTop}><span className={item.status === "published" ? styles.live : item.status === "draft" ? styles.draft : styles.hidden}>{item.status === "published" ? "Опубліковано" : item.status === "archived" ? "Вилучено зі списку" : item.activeResourceCount > 0 ? "Готовий до публікації" : "Потрібне покликання"}</span><a href={`/librarian?tool=catalog&material=${encodeURIComponent(item.materialId)}&edit=1`}><SiteIcon name="edit" size={13} /> Редагувати підручник</a></div>
                     <h3>{item.title}</h3>
                     <p>{[item.subject, item.author, item.publicationYear, item.publisher].filter(Boolean).join(" · ")}</p>
-                    <div className={styles.linkState}>{item.activeResourceCount > 0 ? <><SiteIcon name="success" size={15} /> {item.activeResourceCount} активне посилання</> : <><SiteIcon name="error" size={15} /> Немає активного посилання</>}{item.primaryResourceUrl ? <a href={item.primaryResourceUrl} target="_blank" rel="noopener noreferrer">Перевірити</a> : null}</div>
+                    <div className={styles.linkState}>{item.activeResourceCount > 0 ? <><SiteIcon name="success" size={15} /> {item.activeResourceCount} покликання на електронну версію</> : <><SiteIcon name="error" size={15} /> Потрібне покликання на електронну версію</>}{item.primaryResourceUrl ? <a href={item.primaryResourceUrl} target="_blank" rel="noopener noreferrer">Перевірити</a> : null}</div>
                     <details className={styles.linkAdder}>
                       <summary><SiteIcon name="add" size={14} /> Додати покликання</summary>
                       <div><input type="url" inputMode="url" placeholder="https://…" value={linkDrafts[item.materialId] ?? ""} onChange={(event) => setLinkDrafts((current) => ({ ...current, [item.materialId]: event.target.value }))} aria-label={`Покликання для ${item.title}`} /><button type="button" onClick={() => void addLinkToManaged(item)} disabled={!writesEnabled || Boolean(busyId)}>Зберегти</button></div>
@@ -274,7 +283,7 @@ export default function TextbookManagementWorkspace({
                     <div className={styles.itemActions}>
                       <label><span>Порядок</span><input type="number" min="0" max="999999" value={orderDrafts[item.id] ?? item.sortOrder} onChange={(event) => setOrderDrafts((current) => ({ ...current, [item.id]: event.target.value }))} /></label>
                       <button type="button" onClick={() => void changeItem(item, "reorder")} disabled={!writesEnabled || busyId === item.id || Number(orderDrafts[item.id]) === item.sortOrder}>Зберегти</button>
-                      {item.status === "published" ? <button type="button" className={styles.quietButton} onClick={() => void changeItem(item, "archive")} disabled={!writesEnabled || Boolean(busyId)}><SiteIcon name="hidden" size={15} /> Приховати</button> : <button type="button" className={styles.primaryButton} onClick={() => void changeItem(item, item.status === "archived" ? "restore" : "publish")} disabled={!writesEnabled || Boolean(busyId)}><SiteIcon name="visible" size={15} /> Опублікувати</button>}
+                      {item.status === "archived" ? <button type="button" className={styles.primaryButton} onClick={() => void changeItem(item, "restore")} disabled={!writesEnabled || Boolean(busyId)}><SiteIcon name="visible" size={15} /> Повернути до списку</button> : <>{item.status === "draft" ? <button type="button" className={styles.primaryButton} onClick={() => void changeItem(item, "publish")} disabled={!writesEnabled || Boolean(busyId) || item.activeResourceCount < 1}><SiteIcon name="visible" size={15} /> Опублікувати</button> : null}<button type="button" className={styles.quietButton} onClick={() => void changeItem(item, "archive")} disabled={!writesEnabled || Boolean(busyId)}><SiteIcon name="hidden" size={15} /> Вилучити зі списку</button></>}
                     </div>
                   </div>
                 </article>
@@ -292,8 +301,8 @@ export default function TextbookManagementWorkspace({
                 <article key={candidate.materialId} className={!candidate.resourceUrl ? styles.candidateNeedsLink : ""}>
                   <Cover url={candidate.coverUrl} title={candidate.title} compact />
                   <div><strong>{candidate.title}</strong><small>{[candidate.subject, candidate.author, candidate.publicationYear].filter(Boolean).join(" · ")}</small><span>{candidate.materialId}{candidate.resourceUrl ? " · покликання готове" : " · потрібне покликання"}</span></div>
-                  {candidate.resourceUrl ? <button type="button" onClick={() => void addCandidate(candidate)} disabled={!writesEnabled || Boolean(busyId)} aria-label={`Додати ${candidate.title}`}><SiteIcon name={busyId === candidate.materialId ? "loading" : "add"} size={17} /></button> : null}
-                  {!candidate.resourceUrl ? <div className={styles.candidateLinkForm}><input type="url" inputMode="url" placeholder="Офіційне HTTPS-покликання" value={linkDrafts[candidate.materialId] ?? ""} onChange={(event) => setLinkDrafts((current) => ({ ...current, [candidate.materialId]: event.target.value }))} aria-label={`Покликання для ${candidate.title}`} /><button type="button" onClick={() => void saveLinkAndAddCandidate(candidate)} disabled={!writesEnabled || Boolean(busyId)}>{busyId === candidate.materialId ? <SiteIcon name="loading" size={15} /> : <SiteIcon name="add" size={15} />} Зберегти й додати</button></div> : null}
+                  {candidate.resourceUrl ? <button type="button" onClick={() => void addCandidate(candidate, true)} disabled={!writesEnabled || Boolean(busyId)} aria-label={`Додати й опублікувати ${candidate.title}`} title="Додати й опублікувати"><SiteIcon name={busyId === candidate.materialId ? "loading" : "add"} size={17} /></button> : null}
+                  {!candidate.resourceUrl ? <><button type="button" className={styles.candidateDraftButton} onClick={() => void addCandidate(candidate, false)} disabled={!writesEnabled || Boolean(busyId)}><SiteIcon name={busyId === candidate.materialId ? "loading" : "add"} size={15} /> Додати до списку</button><div className={styles.candidateLinkForm}><input type="url" inputMode="url" placeholder="HTTPS-покликання на електронну версію" value={linkDrafts[candidate.materialId] ?? ""} onChange={(event) => setLinkDrafts((current) => ({ ...current, [candidate.materialId]: event.target.value }))} aria-label={`Покликання для ${candidate.title}`} /><button type="button" onClick={() => void saveLinkAndAddCandidate(candidate)} disabled={!writesEnabled || Boolean(busyId)}>{busyId === candidate.materialId ? <SiteIcon name="loading" size={15} /> : <SiteIcon name="add" size={15} />} Зберегти й опублікувати</button></div></> : null}
                 </article>
               ))}
             </div>

@@ -35,6 +35,7 @@ const migrationFiles = [
   "drizzle/0028_dusty_marten_broadcloak.sql",
   "drizzle/0029_swift_surge.sql",
   "drizzle/0030_bizarre_dust.sql",
+  "drizzle/0031_textbook_catalog_lists.sql",
 ];
 
 async function migratedDatabase() {
@@ -705,7 +706,7 @@ test("core migration extends the existing draft database without recreating it",
 test("0030 creates a curated grade shelf and seeds only eligible HTTPS ebooks", async () => {
   const database = new DatabaseSync(":memory:");
   database.exec("PRAGMA foreign_keys = ON;");
-  for (const file of migrationFiles.slice(0, -1)) {
+  for (const file of migrationFiles.slice(0, migrationFiles.indexOf("drizzle/0030_bizarre_dust.sql"))) {
     database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
   }
   const now = "2026-08-29T08:00:00.000Z";
@@ -734,6 +735,67 @@ test("0030 creates a curated grade shelf and seeds only eligible HTTPS ebooks", 
     () => database.prepare(`INSERT INTO textbook_assignments (id,academic_year_id,material_id,grade,status,sort_order,version,published_at,archived_at,created_at,updated_at) VALUES ('TXT-GRADE','YR-TEXTBOOKS','CAT-9101',12,'published',0,1,?,NULL,?,?)`).run(now, now, now),
     /CHECK constraint/u,
   );
+  assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+  database.close();
+});
+
+test("0031 builds editable class lists and publishes only verified electronic versions", async () => {
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON;");
+  for (const file of migrationFiles.slice(0, migrationFiles.indexOf("drizzle/0031_textbook_catalog_lists.sql"))) {
+    database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
+  }
+  const now = "2026-08-29T09:00:00.000Z";
+  database.exec(`
+    INSERT INTO academic_years (id,label,start_date,end_date,status,notes,version,created_at,updated_at)
+      VALUES ('YR-TEXTBOOK-LISTS','2026/2027','2026-08-01','2027-06-30','active','',1,'${now}','${now}');
+    INSERT INTO materials (id,catalog_number,title,sort_title,search_text,rubric,publication_type,subject,class_from,class_to,author,publication_year,isbn,isbn_normalized,publisher,notes,status,version,created_at,updated_at,archived_at) VALUES
+      ('CAT-9201',9201,'Українська мова 7–8','українська мова 7 8','українська мова 7 8','Підручники','Підручник','Українська мова',7,8,'Автор',2026,'','','Видавництво','','active',1,'${now}','${now}',NULL),
+      ('CAT-9202',9202,'Алгебра вилучена','алгебра вилучена','алгебра вилучена','Підручники','Підручник','Математика',7,7,'Автор',2026,'','','Видавництво','','active',1,'${now}','${now}',NULL),
+      ('CAT-9203',9203,'Історія 8','історія 8','історія 8','Підручники','Підручник','Історія',8,8,'Автор',2026,'','','Видавництво','','active',1,'${now}','${now}',NULL),
+      ('CAT-9204',9204,'Робочий зошит','робочий зошит','робочий зошит','Зошити','Робочий зошит','Математика',7,7,'Автор',2026,'','','Видавництво','','active',1,'${now}','${now}',NULL),
+      ('CAT-9205',9205,'Архівний підручник','архівний підручник','архівний підручник','Підручники','Підручник','Математика',7,7,'Автор',2026,'','','Видавництво','','archived',1,'${now}','${now}','${now}'),
+      ('CAT-9206',9206,'Без класу','без класу','без класу','Підручники','Підручник','Математика',NULL,NULL,'Автор',2026,'','','Видавництво','','active',1,'${now}','${now}',NULL),
+      ('CAT-9207',9207,'Географія 7','географія 7','географія 7','Підручники','Підручник','Географія',7,7,'Автор',2026,'','','Видавництво','','active',1,'${now}','${now}',NULL),
+      ('CAT-9208',9208,'Біологія 7','біологія 7','біологія 7','Підручники','Підручник','Біологія',7,7,'Автор',2026,'','','Видавництво','','active',1,'${now}','${now}',NULL),
+      ('CAT-9209',9209,'Фізика 7','фізика 7','фізика 7','Підручники','Підручник','Фізика',7,7,'Автор',2026,'','','Видавництво','','active',1,'${now}','${now}',NULL);
+    INSERT INTO material_links (id,material_id,kind,label,url,is_public,sort_order,status,created_at,updated_at) VALUES
+      ('LINK-9201','CAT-9201','details','Сторінка','https://pidruchnyk.com.ua/9201.html',1,0,'active','${now}','${now}'),
+      ('LINK-9203','CAT-9203','details','Опис','https://example.test/history',1,0,'active','${now}','${now}'),
+      ('LINK-9207','CAT-9207','store','Купити','https://shop.example.test/geography',1,0,'active','${now}','${now}'),
+      ('LINK-9208','CAT-9208','ebook','PDF','https://example.test/biology.pdf',1,0,'active','${now}','${now}'),
+      ('LINK-9209','CAT-9209','details','Підозрілий домен','https://pidruchnyk.com.ua.evil.test/physics',1,0,'active','${now}','${now}');
+    INSERT INTO textbook_assignments (id,academic_year_id,material_id,grade,status,sort_order,version,published_at,archived_at,created_at,updated_at)
+      VALUES ('TXT-KEEP-ARCHIVED','YR-TEXTBOOK-LISTS','CAT-9202',7,'archived',17,4,NULL,'${now}','${now}','${now}');
+  `);
+
+  const migration = await readFile(new URL("../drizzle/0031_textbook_catalog_lists.sql", import.meta.url), "utf8");
+  database.exec(migration);
+  assert.deepEqual(
+    database.prepare("SELECT material_id,grade,status,sort_order,version FROM textbook_assignments ORDER BY material_id,grade").all().map((row) => ({ ...row })),
+    [
+      { material_id: "CAT-9201", grade: 7, status: "published", sort_order: 9201, version: 1 },
+      { material_id: "CAT-9201", grade: 8, status: "published", sort_order: 9201, version: 1 },
+      { material_id: "CAT-9202", grade: 7, status: "archived", sort_order: 17, version: 4 },
+      { material_id: "CAT-9203", grade: 8, status: "draft", sort_order: 9203, version: 1 },
+      { material_id: "CAT-9207", grade: 7, status: "draft", sort_order: 9207, version: 1 },
+      { material_id: "CAT-9208", grade: 7, status: "published", sort_order: 9208, version: 1 },
+      { material_id: "CAT-9209", grade: 7, status: "draft", sort_order: 9209, version: 1 },
+    ],
+  );
+  assert.deepEqual(
+    database.prepare("SELECT id,kind,label FROM material_links ORDER BY id").all().map((row) => ({ ...row })),
+    [
+      { id: "LINK-9201", kind: "ebook", label: "Електронна версія" },
+      { id: "LINK-9203", kind: "details", label: "Опис" },
+      { id: "LINK-9207", kind: "store", label: "Купити" },
+      { id: "LINK-9208", kind: "ebook", label: "PDF" },
+      { id: "LINK-9209", kind: "details", label: "Підозрілий домен" },
+    ],
+  );
+  const beforeRepeat = database.prepare("SELECT count(*) AS count FROM textbook_assignments").get().count;
+  database.exec(migration);
+  assert.equal(database.prepare("SELECT count(*) AS count FROM textbook_assignments").get().count, beforeRepeat);
   assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
   database.close();
 });

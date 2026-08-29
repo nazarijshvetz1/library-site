@@ -164,7 +164,7 @@ export default function TextbookCatalog() {
         </div>
         <aside className={styles.heroNote}>
           <SiteIcon name="security" size={22} />
-          <span><strong>Офіційні зовнішні джерела</strong><small>Файли відкриваються на сайтах ІМЗО, МОН або видавців.</small></span>
+          <span><strong>Перевірені зовнішні джерела</strong><small>Електронні версії відкриваються на сайтах ІМЗО, МОН, видавців або освітніх бібліотек.</small></span>
         </aside>
       </section>
 
@@ -256,7 +256,7 @@ function TextbookCard({ item }: { item: Textbook }) {
         <div className={styles.resources}>
           {item.resources.map((resource) => (
             <a key={resource.id || resource.url} href={resource.url} target="_blank" rel="noopener noreferrer">
-              <span><strong>{resource.directPdf ? "Відкрити PDF" : "Читати онлайн"}</strong><small>{resource.sourceHost}</small></span>
+              <span><strong>Відкрити електронну версію</strong><small>{resource.directPdf ? "PDF" : "Онлайн"} · {resource.sourceHost}</small></span>
               <SiteIcon name={resource.directPdf ? "export" : "external"} size={18} />
             </a>
           ))}
