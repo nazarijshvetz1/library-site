@@ -256,6 +256,7 @@ test("catalog list applies bounded filters and returns year, stock and thumbnail
     assert.equal(query.limit, 48);
     const result = await listCatalogMaterials(db, query);
     assert.equal(result.items.length, 1);
+    assert.equal(result.total, 1);
     assert.deepEqual(result.items[0], {
       id: "CAT-0001",
       title: "Математика. 1 клас",
@@ -321,6 +322,7 @@ test("cursor pagination is stable, scoped to filters and supports newest sorting
     );
     const first = await listCatalogMaterials(db, firstQuery);
     assert.equal(first.items[0].id, "CAT-0002");
+    assert.equal(first.total, 3);
     assert.equal(first.hasMore, true);
     assert.ok(first.nextCursor);
 
@@ -329,6 +331,7 @@ test("cursor pagination is stable, scoped to filters and supports newest sorting
     );
     const second = await listCatalogMaterials(db, secondQuery);
     assert.equal(second.items[0].id, "CAT-0001");
+    assert.equal(second.total, null);
     assert.notEqual(second.items[0].id, first.items[0].id);
 
     assert.throws(
@@ -567,8 +570,9 @@ test("cover asset lookup returns only safe ready R2 metadata", async () => {
 });
 
 test("public routes are cacheable and librarian material routes require authorization", async () => {
-  const [publicList, publicDetail, cover, privateSearch, privateFacets, privateDetail] = await Promise.all([
+  const [publicList, publicFacets, publicDetail, cover, privateSearch, privateFacets, privateDetail] = await Promise.all([
     read("app/api/catalog-v2/route.ts"),
+    read("app/api/catalog-v2/facets/route.ts"),
     read("app/api/catalog-v2/[id]/route.ts"),
     read("app/api/catalog-v2/covers/[id]/route.ts"),
     read("app/api/librarian/materials/search/route.ts"),
@@ -576,6 +580,10 @@ test("public routes are cacheable and librarian material routes require authoriz
     read("app/api/librarian/materials/[id]/route.ts"),
   ]);
   assert.match(publicList, /stale-while-revalidate=300/);
+  assert.match(publicList, /total: result\.total/u);
+  assert.match(publicFacets, /listCatalogMaterialFacets/u);
+  assert.match(publicFacets, /stale-while-revalidate=3600/u);
+  assert.doesNotMatch(publicFacets, /authorizeLibrarianApi/u);
   assert.match(publicDetail, /getCatalogMaterialDetail\([\s\S]*"public"/);
   assert.match(cover, /COVER_UPLOADS\.get\(asset\.storageKey\)/);
   assert.match(cover, /max-age=31536000, immutable/);

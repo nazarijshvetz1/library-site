@@ -30,6 +30,7 @@ export async function GET(request: Request): Promise<Response> {
       items: result.items,
       page: {
         limit: query.limit,
+        total: result.total,
         hasMore: result.hasMore,
         nextCursor: result.nextCursor,
       },

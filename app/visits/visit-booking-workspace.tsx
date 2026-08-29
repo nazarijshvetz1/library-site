@@ -17,8 +17,10 @@ import CollapsibleListSection from "../_components/collapsible-list-section";
 
 import {
   busyPeriodParts,
+  clearTeacherCatalogFilters,
   clearPortalPendingIntent,
   clearVisitPendingIntent,
+  DEFAULT_TEACHER_CATALOG_FILTERS,
   formatTeacherAccessCode,
   formatVisitDateTime,
   isUncertainVisitFailure,
@@ -26,6 +28,7 @@ import {
   normalizedTeacherAccessCode,
   normalizedTeacherPin,
   readPortalPendingIntent,
+  readTeacherCatalogFilters,
   readVisitPendingIntent,
   publicVisitsUrl,
   publicVisitDisplayLabel,
@@ -33,11 +36,14 @@ import {
   teacherSessionUrl,
   teacherAccessCodeComplete,
   teacherOrderQuantityEdit,
+  teacherCatalogFiltersKey,
+  teacherCatalogRequestParams,
   teacherPinStrength,
   teacherVisitsUrl,
   type PublicVisitsEnvelope,
   type GuestVisitsEnvelope,
   type TeacherVisitsEnvelope,
+  type TeacherCatalogFilters,
   type VisitBooking,
   type VisitCancelPayload,
   type VisitCreatePayload,
@@ -60,6 +66,7 @@ import {
   visitPendingKey,
   weekdayKey,
   writePortalPendingIntent,
+  writeTeacherCatalogFilters,
   writeVisitPendingIntent,
 } from "./visit-client";
 import { normalizeCoverPhotoForUpload } from "@/lib/cover-client";
@@ -110,6 +117,7 @@ function clearTeacherPortalPendingStorage(storage: Storage, pendingScope: string
   clearVisitPendingIntent(storage, visitPendingKey("teacher", pendingScope));
   clearPortalPendingIntent(storage, `library.teacher.orders.pending.v1:${pendingScope}`);
   clearPortalPendingIntent(storage, `library.teacher.notifications.pending.v1:${pendingScope}`);
+  clearTeacherCatalogFilters(storage, teacherCatalogFiltersKey(pendingScope));
 }
 
 export default function VisitBookingWorkspace({
@@ -933,6 +941,7 @@ function VisitBookingPanel({
 }) {
   const storageKey = visitPendingKey("teacher", pendingScope);
   const [activeTab, setActiveTab] = useState(initialTab);
+  const [pendingOrderMaterialId, setPendingOrderMaterialId] = useState(initialOrderMaterialId);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const mobileMenuRef = useRef<HTMLElement | null>(null);
   const mobileMenuButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -1001,6 +1010,14 @@ function VisitBookingPanel({
     window.history[historyMode === "replace" ? "replaceState" : "pushState"]({}, "", href);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [telegramMiniApp]);
+
+  const consumeInitialOrderMaterial = useCallback(() => {
+    setPendingOrderMaterialId("");
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("material")) return;
+    url.searchParams.delete("material");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
 
   useEffect(() => {
     function syncTabFromHistory() {
@@ -1397,7 +1414,7 @@ function VisitBookingPanel({
             </CollapsibleListSection>
             </> : null}
 
-            {activeTab === "orders" ? <TeacherOrdersPanel pendingScope={pendingScope} initialMaterialId={initialOrderMaterialId} /> : null}
+            {activeTab === "orders" ? <TeacherOrdersPanel key={pendingScope} pendingScope={pendingScope} initialMaterialId={pendingOrderMaterialId} onInitialMaterialConsumed={consumeInitialOrderMaterial} /> : null}
             {activeTab === "acquisition" ? <TeacherAcquisitionPanel /> : null}
             {activeTab === "loans" ? <TeacherLoansPanel /> : null}
             {activeTab === "notifications" ? <TeacherNotificationsPanel pendingScope={pendingScope} /> : null}
@@ -1443,13 +1460,43 @@ type TeacherCatalogItem = {
   title: string;
   author: string;
   year: number | null;
+  isbn: string;
+  rubric: string;
+  subject: string;
+  publicationType: string;
+  classFrom: number | null;
+  classTo: number | null;
+  publisher: string;
   thumbnailUrl: string;
+  totalQuantity: number;
   availableQuantity: number;
+  loanedQuantity: number;
+  reservedQuantity: number;
 };
 
 type TeacherCatalogEnvelope = {
   success: true;
   items: TeacherCatalogItem[];
+  page: {
+    limit: number;
+    total: number | null;
+    hasMore: boolean;
+    nextCursor: string | null;
+  };
+};
+
+type TeacherCatalogFacetsEnvelope = {
+  success: true;
+  rubrics: string[];
+  subjects: string[];
+  publicationTypes: string[];
+};
+
+type TeacherCatalogDetailEnvelope = {
+  success: true;
+  material: TeacherCatalogItem & {
+    links: Array<{ kind: string; label: string; url: string }>;
+  };
 };
 
 type MaterialRequestStatus = "submitted" | "in_review" | "ready" | "partially_ready" | "completed" | "rejected" | "cancelled";
@@ -2065,9 +2112,34 @@ function teacherInitials(fullName: string): string {
     .map((part) => part[0]?.toLocaleUpperCase("uk-UA") ?? "").join("") || "В";
 }
 
-function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope: string; initialMaterialId: string }) {
-  const [query, setQuery] = useState(initialMaterialId);
+function TeacherOrdersPanel({
+  pendingScope,
+  initialMaterialId,
+  onInitialMaterialConsumed,
+}: {
+  pendingScope: string;
+  initialMaterialId: string;
+  onInitialMaterialConsumed: () => void;
+}) {
+  const [catalogFilters, setCatalogFilters] = useState<TeacherCatalogFilters>(DEFAULT_TEACHER_CATALOG_FILTERS);
+  const [committedCatalogFilters, setCommittedCatalogFilters] = useState<TeacherCatalogFilters>(DEFAULT_TEACHER_CATALOG_FILTERS);
+  const [catalogReady, setCatalogReady] = useState(false);
   const [items, setItems] = useState<TeacherCatalogItem[]>([]);
+  const [catalogPage, setCatalogPage] = useState<TeacherCatalogEnvelope["page"] | null>(null);
+  const [catalogFacets, setCatalogFacets] = useState<TeacherCatalogFacetsEnvelope>({
+    success: true,
+    rubrics: [],
+    subjects: [],
+    publicationTypes: [],
+  });
+  const [catalogFacetsError, setCatalogFacetsError] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [catalogUpdatedAt, setCatalogUpdatedAt] = useState("");
+  const [catalogError, setCatalogError] = useState("");
+  const [catalogLoadingMore, setCatalogLoadingMore] = useState(false);
+  const [catalogRefreshVersion, setCatalogRefreshVersion] = useState(0);
+  const [selectedDetail, setSelectedDetail] = useState<TeacherCatalogDetailEnvelope["material"] | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"success" | "error" | "info">("info");
@@ -2088,9 +2160,12 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
   const [submitting, setSubmitting] = useState(false);
   const [pending, setPending] = useState<OrderPendingIntent | null>(null);
   const initialMaterialApplied = useRef(false);
+  const catalogDialogRef = useRef<HTMLElement | null>(null);
+  const catalogDialogReturnFocus = useRef<HTMLElement | null>(null);
   const historyLoadRef = useRef(0);
-  const normalizedQuery = query.trim();
+  const catalogLoadRef = useRef(0);
   const storageKey = `library.teacher.orders.pending.v1:${pendingScope}`;
+  const catalogStorageKey = teacherCatalogFiltersKey(pendingScope);
 
   const loadRequests = useCallback(async (afterMutation = false, cursor: string | null = null) => {
     const loadId = ++historyLoadRef.current;
@@ -2134,62 +2209,197 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
+      const restored = readTeacherCatalogFilters(window.sessionStorage, catalogStorageKey);
+      setCatalogFilters(restored);
+      setCommittedCatalogFilters(restored);
+      setCatalogReady(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [catalogStorageKey]);
+
+  useEffect(() => {
+    if (!catalogReady) return;
+    writeTeacherCatalogFilters(window.sessionStorage, catalogStorageKey, catalogFilters);
+    const timer = window.setTimeout(() => setCommittedCatalogFilters(catalogFilters), 280);
+    return () => window.clearTimeout(timer);
+  }, [catalogFilters, catalogReady, catalogStorageKey]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
       setPending(readPortalPendingIntent<OrderPendingIntent>(window.sessionStorage, storageKey, ["order-create", "order-cancel"]));
       void loadRequests();
     }, 0);
     return () => window.clearTimeout(timer);
   }, [loadRequests, storageKey]);
 
+  const loadCatalog = useCallback(async (cursor = "") => {
+    const loadId = ++catalogLoadRef.current;
+    const append = Boolean(cursor);
+    if (append) setCatalogLoadingMore(true);
+    else {
+      setLoading(true);
+      setItems([]);
+      setCatalogPage(null);
+      setCatalogUpdatedAt("");
+    }
+    setCatalogError("");
+    try {
+      const params = teacherCatalogRequestParams(committedCatalogFilters, cursor);
+      const response = await visitApi<TeacherCatalogEnvelope>(
+        `/api/catalog-v2?${params.toString()}`,
+      );
+      if (loadId !== catalogLoadRef.current) return;
+      setItems((current) => append
+        ? mergePortalPageById(current, response.items)
+        : response.items);
+      setCatalogPage((current) => ({
+        ...response.page,
+        total: response.page.total ?? current?.total ?? null,
+      }));
+      setCatalogUpdatedAt(new Date().toISOString());
+    } catch {
+      if (loadId === catalogLoadRef.current) {
+        setCatalogError("Не вдалося завантажити каталог. Спробуйте ще раз.");
+      }
+    } finally {
+      if (loadId === catalogLoadRef.current) {
+        if (append) setCatalogLoadingMore(false);
+        else setLoading(false);
+      }
+    }
+  }, [committedCatalogFilters]);
+
   useEffect(() => {
-    if (normalizedQuery.length < 2) return;
+    if (!catalogReady) return;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
-      setLoading(true);
-      setNotice("");
       try {
-        const params = new URLSearchParams({ q: normalizedQuery, available: "true", limit: "12" });
-        const response = await visitApi<TeacherCatalogEnvelope>(`/api/catalog-v2?${params.toString()}`, { signal: controller.signal });
-        setItems(response.items);
-        if (initialMaterialId && !initialMaterialApplied.current) {
-          initialMaterialApplied.current = true;
-          const selected = response.items.find((item) => item.id === initialMaterialId);
-          if (selected) {
-            setCart((current) => current[selected.id]
-              ? current
-              : { ...current, [selected.id]: { item: selected, quantity: 1 } });
-            setCartOpen(true);
-            setNotice(`«${selected.title}» додано до кошика. Перевірте кількість і надішліть замовлення.`);
-            setNoticeTone("success");
-          } else {
-            setNotice("Цей матеріал зараз недоступний для замовлення. Можна знайти інший у каталозі нижче.");
-            setNoticeTone("info");
-          }
-        }
-        if (!response.items.length) {
-          if (!initialMaterialId) setNotice("За цим запитом доступних матеріалів не знайдено.");
-          setNoticeTone("info");
-        }
+        const response = await visitApi<TeacherCatalogFacetsEnvelope>(
+          "/api/catalog-v2/facets",
+          { signal: controller.signal },
+        );
+        setCatalogFacets(response);
+        setCatalogFacetsError("");
       } catch {
         if (!controller.signal.aborted) {
-          setNotice("Не вдалося виконати пошук у каталозі.");
-          setNoticeTone("error");
+          setCatalogFacetsError("Додаткові списки фільтрів тимчасово недоступні. Збережені параметри залишаються активними.");
         }
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
       }
-    }, 300);
+    }, 0);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [initialMaterialId, normalizedQuery]);
+  }, [catalogReady]);
 
-  function changeQuery(value: string) {
-    setQuery(value);
-    if (value.trim().length < 2) {
-      setItems([]);
-      setLoading(false);
-      setNotice("");
+  useEffect(() => {
+    if (!catalogReady) return;
+    const timer = window.setTimeout(() => void loadCatalog(), 0);
+    return () => window.clearTimeout(timer);
+  }, [catalogReady, catalogRefreshVersion, loadCatalog]);
+
+  useEffect(() => {
+    if (!catalogReady || !initialMaterialId || initialMaterialApplied.current) return;
+    initialMaterialApplied.current = true;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await visitApi<TeacherCatalogDetailEnvelope>(
+          `/api/catalog-v2/${encodeURIComponent(initialMaterialId)}`,
+          { signal: controller.signal },
+        );
+        const selected = response.material;
+        if (selected.availableQuantity < 1) {
+          setNotice("Цей матеріал зараз недоступний для замовлення. Можна обрати інший у каталозі.");
+          setNoticeTone("info");
+          return;
+        }
+        setCart((current) => current[selected.id]
+          ? current
+          : { ...current, [selected.id]: { item: selected, quantity: 1 } });
+        setCartOpen(true);
+        setNotice(`«${selected.title}» додано до кошика. Перевірте кількість і надішліть замовлення.`);
+        setNoticeTone("success");
+      } catch {
+        if (!controller.signal.aborted) {
+          setNotice("Цей матеріал не вдалося додати автоматично. Знайдіть його в каталозі нижче.");
+          setNoticeTone("info");
+        }
+      } finally {
+        onInitialMaterialConsumed();
+      }
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [catalogReady, initialMaterialId, onInitialMaterialConsumed]);
+
+  useEffect(() => {
+    if (!selectedDetail) return;
+    const dialog = catalogDialogRef.current;
+    if (!dialog) return;
+    const previousFocus = catalogDialogReturnFocus.current
+      ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    const focusableSelector = "button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector));
+    (focusable[0] ?? dialog).focus();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setSelectedDetail(null);
+        return;
+      }
+      if (event.key !== "Tab" || !focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+      catalogDialogReturnFocus.current = null;
+    };
+  }, [selectedDetail]);
+
+  function updateCatalogFilter<Key extends keyof TeacherCatalogFilters>(
+    key: Key,
+    value: TeacherCatalogFilters[Key],
+  ) {
+    setCatalogFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function resetCatalogFilters() {
+    setCatalogFilters({ ...DEFAULT_TEACHER_CATALOG_FILTERS });
+  }
+
+  async function openCatalogDetail(item: TeacherCatalogItem) {
+    catalogDialogReturnFocus.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    setDetailLoading(true);
+    try {
+      const response = await visitApi<TeacherCatalogDetailEnvelope>(
+        `/api/catalog-v2/${encodeURIComponent(item.id)}`,
+      );
+      setSelectedDetail(response.material);
+    } catch {
+      setNotice("Не вдалося відкрити деталі матеріалу.");
+      setNoticeTone("error");
+    } finally {
+      setDetailLoading(false);
     }
   }
 
@@ -2217,6 +2427,7 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
         setQuantityDrafts({});
         setNotes("");
         setCartOpen(false);
+        setCatalogRefreshVersion((current) => current + 1);
       }
       await loadRequests(true);
     } catch (error) {
@@ -2276,6 +2487,12 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
   }
 
   function add(item: TeacherCatalogItem) {
+    if (submitting || pending) return;
+    if (!cart[item.id] && cartRows.length >= 10) {
+      setNotice("В одному замовленні можна обрати до 10 різних матеріалів.");
+      setNoticeTone("info");
+      return;
+    }
     const currentQuantity = cart[item.id]?.quantity ?? 0;
     if (currentQuantity >= item.availableQuantity) {
       setNotice(`У кошику вже вся доступна кількість «${item.title}».`);
@@ -2334,28 +2551,98 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
 
   const cartRows = Object.values(cart);
   const cartQuantity = cartRows.reduce((sum, row) => sum + row.quantity, 0);
+  const activeCatalogFilterCount = [
+    catalogFilters.grade,
+    catalogFilters.rubric,
+    catalogFilters.subject,
+    catalogFilters.publicationType,
+    catalogFilters.availableOnly ? "available" : "",
+  ].filter(Boolean).length;
+  const catalogFound = catalogPage?.total;
   return (
     <section aria-labelledby="orders-title">
       {pending ? <div className={styles.pending} role="status"><span>Результат попередньої дії із замовленням не підтверджено.</span><button type="button" onClick={() => void sendOrderIntent(pending)} disabled={submitting}>Перевірити результат</button></div> : null}
       {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
       <div className={styles.orderLayout}>
       <div className={styles.card}>
-        <div className={styles.cardHeading}><div><span>Крок 1</span><h2 id="orders-title">Знайдіть матеріали</h2></div></div>
-        <label className={styles.portalSearch}>Назва, автор або CAT-ID
-          <input type="search" value={query} onChange={(event) => changeQuery(event.currentTarget.value)} placeholder="Введіть щонайменше 2 символи" autoComplete="off" />
+        <div className={styles.cardHeading}><div><span>Крок 1 · каталог фонду</span><h2 id="orders-title">Знайдіть матеріали</h2></div></div>
+        <div className={styles.catalogFreshness} role="status">
+          <span><i aria-hidden="true" /> {catalogUpdatedAt
+            ? `Каталог перевірено · ${formatPortalDate(catalogUpdatedAt)}`
+            : loading ? "Перевіряємо каталог…" : "Каталог ще не перевірено"}</span>
+          <small>Дані оновлюються автоматично під час пошуку й після замовлення</small>
+        </div>
+        <label className={styles.portalSearch}>Назва, автор, ISBN або CAT-ID
+          <input type="search" maxLength={180} value={catalogFilters.query} onChange={(event) => updateCatalogFilter("query", event.currentTarget.value)} placeholder="Почніть вводити або переглядайте весь каталог" autoComplete="off" />
         </label>
-        <div className={styles.searchStatus} role="status" aria-live="polite">{loading ? "Шукаємо…" : ""}</div>
+        <div className={styles.catalogToolbar}>
+          <div>
+            <strong>{catalogFound !== null && catalogFound !== undefined
+              ? `Знайдено ${catalogFound.toLocaleString("uk-UA")} матеріалів`
+              : loading ? "Шукаємо матеріали…" : "Кількість матеріалів невідома"}</strong>
+            <span>{loading ? "Оновлюємо…" : catalogPage ? `Показано ${items.length}` : "Очікуємо успішного завантаження"}</span>
+          </div>
+          <button type="button" aria-expanded={filtersOpen} aria-controls="teacher-catalog-filters" onClick={() => setFiltersOpen((value) => !value)}>
+            <SiteIcon name="filter" size={17} /> Фільтри{activeCatalogFilterCount ? ` · ${activeCatalogFilterCount}` : ""}
+          </button>
+          <label>Сортування
+            <select value={catalogFilters.sort} onChange={(event) => updateCatalogFilter("sort", event.currentTarget.value as TeacherCatalogFilters["sort"])}>
+              <option value="title">За назвою</option>
+              <option value="newest">Нові надходження</option>
+            </select>
+          </label>
+        </div>
+        {filtersOpen ? <div className={styles.catalogFilterPanel} id="teacher-catalog-filters">
+          <label>Клас
+            <select value={catalogFilters.grade ?? ""} onChange={(event) => updateCatalogFilter("grade", event.currentTarget.value ? Number(event.currentTarget.value) : null)}>
+              <option value="">Усі класи</option>
+              {Array.from({ length: 11 }, (_, index) => index + 1).map((grade) => <option value={grade} key={grade}>{grade} клас</option>)}
+            </select>
+          </label>
+          <label>Рубрика
+            <select value={catalogFilters.rubric} onChange={(event) => updateCatalogFilter("rubric", event.currentTarget.value)}>
+              <option value="">Усі рубрики</option>
+              {catalogFilters.rubric && !catalogFacets.rubrics.includes(catalogFilters.rubric) ? <option value={catalogFilters.rubric}>{catalogFilters.rubric}</option> : null}
+              {catalogFacets.rubrics.map((value) => <option value={value} key={value}>{value}</option>)}
+            </select>
+          </label>
+          <label>Предмет
+            <select value={catalogFilters.subject} onChange={(event) => updateCatalogFilter("subject", event.currentTarget.value)}>
+              <option value="">Усі предмети</option>
+              {catalogFilters.subject && !catalogFacets.subjects.includes(catalogFilters.subject) ? <option value={catalogFilters.subject}>{catalogFilters.subject}</option> : null}
+              {catalogFacets.subjects.map((value) => <option value={value} key={value}>{value}</option>)}
+            </select>
+          </label>
+          <label>Тип видання
+            <select value={catalogFilters.publicationType} onChange={(event) => updateCatalogFilter("publicationType", event.currentTarget.value)}>
+              <option value="">Усі типи</option>
+              {catalogFilters.publicationType && !catalogFacets.publicationTypes.includes(catalogFilters.publicationType) ? <option value={catalogFilters.publicationType}>{catalogFilters.publicationType}</option> : null}
+              {catalogFacets.publicationTypes.map((value) => <option value={value} key={value}>{value}</option>)}
+            </select>
+          </label>
+          <label className={styles.catalogAvailabilityToggle}><input type="checkbox" checked={catalogFilters.availableOnly} onChange={(event) => updateCatalogFilter("availableOnly", event.currentTarget.checked)} /> Лише в наявності</label>
+          <button type="button" className={styles.quiet} onClick={resetCatalogFilters}>Скинути фільтри</button>
+        </div> : null}
+        {catalogFacetsError ? <p className={styles.authHelp} role="status">{catalogFacetsError}</p> : null}
+        <div className={`${styles.searchStatus} ${styles.catalogRetryStatus}`} role="status" aria-live="polite">
+          {catalogError ? <><span>{catalogError}</span><button type="button" onClick={() => void loadCatalog()} disabled={loading}>Повторити</button></> : null}
+        </div>
         {items.length ? <div className={styles.catalogCards}>{items.map((item) => {
           const cartQuantity = cart[item.id]?.quantity ?? 0;
           const maximumInCart = cartQuantity >= item.availableQuantity;
           return <article key={item.id}>
-            <TeacherCover item={item} />
-            <div><strong>{item.title}</strong><span>{[item.author || "Автор не вказаний", item.year || "Рік не вказано"].join(" · ")}</span><small>{item.availableQuantity} доступно</small></div>
-            <button type="button" onClick={() => add(item)} disabled={item.availableQuantity < 1 || maximumInCart || cartRows.length >= 10 && !cart[item.id]}>
-              {maximumInCart ? "У кошику" : cartQuantity > 0 ? "Додати ще" : "Додати"}
-            </button>
+            <div className={styles.catalogCardBadges}><span>{catalogGradeLabel(item)}</span><span>{item.subject || item.rubric || "Матеріал"}</span><b data-available={item.availableQuantity > 0 ? "true" : "false"}>{item.availableQuantity > 0 ? "У наявності" : "Немає вільних"}</b></div>
+            <div className={styles.catalogCardBody}><TeacherCover item={item} /><div><strong>{item.title}</strong><span>{[item.author || "Автор не вказаний", item.year || "Рік не вказано"].join(" · ")}</span><small>{item.id}{item.publisher ? ` · ${item.publisher}` : ""}</small></div></div>
+            <div className={styles.catalogStock}><span><strong>{item.totalQuantity}</strong><small>примірників</small></span><span><strong>{item.availableQuantity}</strong><small>доступно</small></span></div>
+            <div className={styles.catalogCardActions}>
+              <button type="button" className={styles.catalogDetailsButton} aria-label={`Переглянути деталі: ${item.title}`} onClick={() => void openCatalogDetail(item)} disabled={detailLoading}><SiteIcon name="info" size={16} /> Детальніше</button>
+              <button type="button" aria-label={`${cartQuantity > 0 ? "Додати ще" : "Додати до кошика"}: ${item.title}`} onClick={() => add(item)} disabled={submitting || Boolean(pending) || item.availableQuantity < 1 || maximumInCart || cartRows.length >= 10 && !cart[item.id]}>
+                {maximumInCart ? "У кошику" : cartQuantity > 0 ? "Додати ще" : "Додати"}
+              </button>
+            </div>
           </article>
-        })}</div> : null}
+        })}</div> : !loading && !catalogError ? <p className={styles.empty}>За обраними параметрами матеріалів немає.</p> : null}
+        {catalogPage?.hasMore && catalogPage.nextCursor ? <button className={styles.loadMore} type="button" onClick={() => void loadCatalog(catalogPage.nextCursor ?? "")} disabled={loading || catalogLoadingMore}>{catalogLoadingMore ? "Завантажуємо…" : "Завантажити ще"}</button> : null}
       </div>
       {cartOpen ? <button className={styles.cartBackdrop} type="button" aria-label="Закрити кошик" onClick={() => setCartOpen(false)} /> : null}
       <aside className={`${styles.card} ${styles.orderCart} ${cartOpen ? styles.orderCartOpen : ""}`} aria-labelledby="cart-title">
@@ -2363,17 +2650,36 @@ function TeacherOrdersPanel({ pendingScope, initialMaterialId }: { pendingScope:
         {cartRows.length ? <ul className={styles.cartList}>{cartRows.map(({ item, quantity }) => (
           <li key={item.id}>
             <span><strong>{item.title}</strong><small>{item.id}</small></span>
-            <label>Кількість<input type="number" inputMode="numeric" min="1" step="1" max={item.availableQuantity} value={quantityDrafts[item.id] ?? String(quantity)} onChange={(event) => changeQuantityDraft(item.id, event.currentTarget.value)} onBlur={() => finishQuantityEdit(item.id)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }} /></label>
-            <button type="button" onClick={() => removeFromCart(item.id)} aria-label={`Прибрати ${item.title} з кошика`}><SiteIcon name="delete" size={18} /></button>
+            <label>Кількість<input type="number" inputMode="numeric" min="1" step="1" max={item.availableQuantity} value={quantityDrafts[item.id] ?? String(quantity)} onChange={(event) => changeQuantityDraft(item.id, event.currentTarget.value)} onBlur={() => finishQuantityEdit(item.id)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }} disabled={submitting || Boolean(pending)} /></label>
+            <button type="button" onClick={() => removeFromCart(item.id)} aria-label={`Прибрати ${item.title} з кошика`} disabled={submitting || Boolean(pending)}><SiteIcon name="delete" size={18} /></button>
           </li>
         ))}</ul> : <p className={styles.empty}>Додайте матеріали з результатів пошуку.</p>}
         <label className={styles.portalSearch}>Примітка бібліотекарю
-          <textarea maxLength={300} value={notes} onChange={(event) => setNotes(event.currentTarget.value)} placeholder="Необов’язково: для якого уроку або класу" />
+          <textarea maxLength={300} value={notes} onChange={(event) => setNotes(event.currentTarget.value)} placeholder="Необов’язково: для якого уроку або класу" disabled={submitting || Boolean(pending)} />
         </label>
         <button className={styles.primary} type="button" onClick={submitOrder} disabled={!cartRows.length || submitting || Boolean(pending)}>{submitting ? "Надсилаємо…" : "Надіслати замовлення"}</button>
         <p className={styles.authHelp}>Фактичний залишок бібліотекар перевірить під час підготовки замовлення.</p>
       </aside>
       </div>
+      {selectedDetail ? <>
+        <button className={styles.catalogDialogBackdrop} type="button" tabIndex={-1} aria-hidden="true" onClick={() => setSelectedDetail(null)} />
+        <section ref={catalogDialogRef} className={styles.catalogDialog} role="dialog" aria-modal="true" aria-labelledby="teacher-catalog-detail-title" tabIndex={-1}>
+          <button className={styles.catalogDialogClose} type="button" aria-label="Закрити" onClick={() => setSelectedDetail(null)}>×</button>
+          <div className={styles.catalogDialogHero}>
+            <TeacherCover item={selectedDetail} />
+            <div><span>{catalogGradeLabel(selectedDetail)} · {selectedDetail.publicationType || "Матеріал"}</span><h3 id="teacher-catalog-detail-title">{selectedDetail.title}</h3><p>{[selectedDetail.author, selectedDetail.year].filter(Boolean).join(" · ") || "Автор і рік не вказані"}</p></div>
+          </div>
+          <dl>
+            <div><dt>Предмет</dt><dd>{selectedDetail.subject || "Не вказано"}</dd></div>
+            <div><dt>Рубрика</dt><dd>{selectedDetail.rubric || "Не вказано"}</dd></div>
+            <div><dt>Видавництво</dt><dd>{selectedDetail.publisher || "Не вказано"}</dd></div>
+            <div><dt>ISBN</dt><dd>{selectedDetail.isbn || "Не вказано"}</dd></div>
+          </dl>
+          <div className={styles.catalogStock}><span><strong>{selectedDetail.totalQuantity}</strong><small>усього</small></span><span><strong>{selectedDetail.availableQuantity}</strong><small>доступно</small></span></div>
+          {selectedDetail.links.length ? <div className={styles.catalogDialogLinks}>{selectedDetail.links.map((link) => <a href={link.url} target="_blank" rel="noopener noreferrer" key={link.url}><SiteIcon name="external" size={15} /> {link.label}</a>)}</div> : null}
+          <button className={styles.primary} type="button" onClick={() => { add(selectedDetail); setSelectedDetail(null); }} disabled={submitting || Boolean(pending) || selectedDetail.availableQuantity < 1 || (cart[selectedDetail.id]?.quantity ?? 0) >= selectedDetail.availableQuantity || cartRows.length >= 10 && !cart[selectedDetail.id]}>Додати до кошика</button>
+        </section>
+      </> : null}
       <button className={styles.mobileCartBar} type="button" onClick={() => setCartOpen(true)} disabled={!cartRows.length} aria-expanded={cartOpen}>
         <span><SiteIcon name="orders" size={18} /><strong>Кошик</strong><small>{cartRows.length} поз. · {cartQuantity} прим.</small></span><b>Відкрити</b>
       </button>
@@ -2427,6 +2733,12 @@ function TeacherCover({ item }: { item: TeacherCatalogItem }) {
   return item.thumbnailUrl
     ? <img className={styles.orderCover} src={item.thumbnailUrl} alt="" width="54" height="78" loading="lazy" />
     : <span className={styles.orderCoverFallback} aria-hidden="true">{item.title.slice(0, 1)}</span>;
+}
+
+function catalogGradeLabel(item: Pick<TeacherCatalogItem, "classFrom" | "classTo">): string {
+  if (!item.classFrom) return "Без класу";
+  if (item.classTo && item.classTo !== item.classFrom) return `${item.classFrom}–${item.classTo} класи`;
+  return `${item.classFrom} клас`;
 }
 
 type NotificationPendingIntent =

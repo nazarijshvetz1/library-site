@@ -218,6 +218,105 @@ export type TeacherOrderQuantityEdit = {
   quantity: number;
 };
 
+export type TeacherCatalogFilters = {
+  query: string;
+  grade: number | null;
+  rubric: string;
+  subject: string;
+  publicationType: string;
+  availableOnly: boolean;
+  sort: "title" | "newest";
+};
+
+export const DEFAULT_TEACHER_CATALOG_FILTERS: TeacherCatalogFilters = {
+  query: "",
+  grade: null,
+  rubric: "",
+  subject: "",
+  publicationType: "",
+  availableOnly: false,
+  sort: "title",
+};
+
+export function teacherCatalogFiltersKey(pendingScope: string): string {
+  return `library.teacher.catalog.filters.v1:${pendingScope}`;
+}
+
+export function teacherCatalogRequestParams(
+  filters: TeacherCatalogFilters,
+  cursor = "",
+): URLSearchParams {
+  const params = new URLSearchParams({ limit: "24", sort: filters.sort });
+  const query = filters.query.trim();
+  if (query) params.set("q", query);
+  if (filters.grade !== null) params.set("grade", String(filters.grade));
+  if (filters.rubric) params.set("rubric", filters.rubric);
+  if (filters.subject) params.set("subject", filters.subject);
+  if (filters.publicationType) params.set("type", filters.publicationType);
+  if (filters.availableOnly) params.set("available", "true");
+  if (cursor) params.set("cursor", cursor);
+  return params;
+}
+
+export function readTeacherCatalogFilters(
+  storage: StorageLike,
+  key: string,
+): TeacherCatalogFilters {
+  try {
+    const raw = storage.getItem(key);
+    if (!raw) return { ...DEFAULT_TEACHER_CATALOG_FILTERS };
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return { ...DEFAULT_TEACHER_CATALOG_FILTERS };
+    }
+    const record = parsed as Record<string, unknown>;
+    if (record.version !== 1 || !record.value || typeof record.value !== "object") {
+      return { ...DEFAULT_TEACHER_CATALOG_FILTERS };
+    }
+    const value = record.value as Record<string, unknown>;
+    const query = catalogFilterText(value.query, 180);
+    const rubric = catalogFilterText(value.rubric, 180);
+    const subject = catalogFilterText(value.subject, 180);
+    const publicationType = catalogFilterText(value.publicationType, 120);
+    const grade = value.grade === null
+      ? null
+      : Number.isInteger(value.grade) && Number(value.grade) >= 1 && Number(value.grade) <= 11
+        ? Number(value.grade)
+        : DEFAULT_TEACHER_CATALOG_FILTERS.grade;
+    const sort = value.sort === "newest" ? "newest" : "title";
+    return {
+      query,
+      grade,
+      rubric,
+      subject,
+      publicationType,
+      availableOnly: typeof value.availableOnly === "boolean"
+        ? value.availableOnly
+        : DEFAULT_TEACHER_CATALOG_FILTERS.availableOnly,
+      sort,
+    };
+  } catch {
+    return { ...DEFAULT_TEACHER_CATALOG_FILTERS };
+  }
+}
+
+export function writeTeacherCatalogFilters(
+  storage: StorageLike,
+  key: string,
+  value: TeacherCatalogFilters,
+): boolean {
+  try {
+    storage.setItem(key, JSON.stringify({ version: 1, value }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function clearTeacherCatalogFilters(storage: StorageLike, key: string): void {
+  clearVisitPendingIntent(storage, key);
+}
+
 export function teacherOrderQuantityEdit(
   currentQuantity: number,
   rawValue: string,
@@ -241,6 +340,17 @@ export function teacherOrderQuantityEdit(
 
   const quantity = Math.min(parsed, maximum);
   return { draft: String(quantity), quantity };
+}
+
+function catalogFilterText(value: unknown, maximum: number): string {
+  if (typeof value !== "string") return "";
+  const normalized = value.normalize("NFKC").trim().replace(/\s+/gu, " ");
+  const hasControl = Array.from(normalized).some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || code === 127;
+  });
+  if (normalized.length > maximum || hasControl) return "";
+  return normalized;
 }
 
 export class VisitApiError extends Error {

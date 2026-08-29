@@ -116,6 +116,7 @@ export type CatalogListResult = {
   items: CatalogSummary[];
   nextCursor: string | null;
   hasMore: boolean;
+  total: number | null;
 };
 
 export type CatalogMaterialFacets = {
@@ -273,7 +274,10 @@ export async function listCatalogMaterials(
   const nextCursor = hasMore && lastRow
     ? encodeCatalogCursor(cursorFromRow(asRow(lastRow), query))
     : null;
-  return { items, nextCursor, hasMore };
+  const total = query.cursor
+    ? null
+    : nonNegativeInteger(asRow(rawRows[0] ?? {}).total_count);
+  return { items, nextCursor, hasMore, total };
 }
 
 export async function listCatalogRubrics(
@@ -493,6 +497,7 @@ function buildCatalogListStatement(query: CatalogListQuery, useFts: boolean): {
   return {
     sql: `
       SELECT
+        ${query.cursor ? "NULL" : "COUNT(*) OVER()"} AS total_count,
         m.id,
         m.catalog_number,
         m.title,

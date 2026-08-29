@@ -48,6 +48,19 @@ const migrationUrls = [
     "0017_fresh_robbie_robertson.sql",
     "0018_yielding_skaar.sql",
     "0019_kindly_wolfsbane.sql",
+    "0020_pretty_squadron_sinister.sql",
+    "0021_optional_student_acquisition_metadata.sql",
+    "0022_teacher_curator_change_requests.sql",
+    "0023_guest_public_teacher_name_consent.sql",
+    "0024_watery_miss_america.sql",
+    "0025_lying_lucky_pierre.sql",
+    "0026_typical_scalphunter.sql",
+    "0027_naive_microbe.sql",
+    "0028_dusty_marten_broadcloak.sql",
+    "0029_swift_surge.sql",
+    "0030_bizarre_dust.sql",
+    "0031_textbook_catalog_lists.sql",
+    "0032_fearless_alex_power.sql",
   ].map((file) => new URL(`../drizzle/${file}`, import.meta.url));
 
 async function fixturePlan() {
@@ -348,6 +361,21 @@ test("staging reset atomically clears domain/import rows while preserving migrat
   ).id;
   const materialId = plan.tables.materials[0].id;
   const locationId = plan.tables.locations.find((row) => row.type !== "service").id;
+  const academicYearId = plan.tables.academic_years[0].id;
+  database.prepare(`INSERT INTO textbook_assignments (
+    id,academic_year_id,material_id,grade,status,sort_order,version,published_at,
+    archived_at,created_at,updated_at
+  ) VALUES ('TXT-RESET',?,?,1,'draft',0,1,NULL,NULL,
+    '2026-09-10T00:00:00.000Z','2026-09-10T00:00:00.000Z')`)
+    .run(academicYearId, materialId);
+  database.prepare(`INSERT INTO material_metadata_enrichments (
+    id,batch_id,material_id,field,value,normalized_value,confidence,source_provider,
+    source_url,source_title,reason_code,material_fingerprint,expected_title,
+    expected_author,expected_publication_year,expected_isbn,expected_publisher,
+    applied,applied_at,created_at
+  ) VALUES ('MME-RESET','reset-batch',?,'isbn','9780306406157','9780306406157',
+    'doubtful','fixture','','Reset','fixture','${"a".repeat(64)}','Reset material','',
+    NULL,'','',0,NULL,'2026-09-10T00:00:00.000Z')`).run(materialId);
   database.prepare(`
     INSERT INTO class_loans (
       id, class_year_id, responsible_teacher_user_id, status, issued_at,
@@ -486,6 +514,8 @@ test("staging reset atomically clears domain/import rows while preserving migrat
   assert.equal(report.deletedByTable.material_request_reservations, 1);
   assert.equal(report.deletedByTable.portal_notifications, 1);
   assert.equal(report.deletedByTable.material_requests, 1);
+  assert.equal(report.deletedByTable.textbook_assignments, 1);
+  assert.equal(report.deletedByTable.material_metadata_enrichments, 1);
   assert.ok(report.batchStatements <= 50, `reset used ${report.batchStatements} statements`);
   assert.equal(database.prepare("SELECT count(*) AS count FROM librarian_drafts").get().count, 1);
   assert.equal(database.prepare("SELECT count(*) AS count FROM librarian_draft_events").get().count, 1);

@@ -58,6 +58,8 @@ export const STAGING_IMPORT_RESET_TABLES = Object.freeze([
   "material_stock_totals",
   "material_links",
   "material_cover_assets",
+  "textbook_assignments",
+  "material_metadata_enrichments",
   "class_years",
   "audit_events",
   "mutation_commands",

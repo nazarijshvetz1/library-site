@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   clearPortalPendingIntent,
+  DEFAULT_TEACHER_CATALOG_FILTERS,
   formatTeacherAccessCode,
   mergePortalPageById,
   normalizedTeacherAccessCode,
@@ -11,11 +12,15 @@ import {
   publicVisitsUrl,
   publicVisitDisplayLabel,
   readPortalPendingIntent,
+  readTeacherCatalogFilters,
   teacherAccessCodeComplete,
+  teacherCatalogFiltersKey,
+  teacherCatalogRequestParams,
   teacherOrderQuantityEdit,
   teacherPinStrength,
   visitHorizonEnd,
   writePortalPendingIntent,
+  writeTeacherCatalogFilters,
 } from "../app/visits/visit-client.ts";
 import { finishTelegramLogin } from "../app/teacher/telegram/telegram-login-finish.ts";
 
@@ -249,6 +254,53 @@ test("portal mutation recovery preserves exact requestId and payload in session 
   assert.equal(readPortalPendingIntent(storage, "teacher-scope", ["order-create"]), null);
 });
 
+test("teacher catalog filters round-trip by teacher and build bounded requests", () => {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  };
+  const firstKey = teacherCatalogFiltersKey("teacher-one");
+  const secondKey = teacherCatalogFiltersKey("teacher-two");
+  const filters = {
+    query: "  математика  ",
+    grade: 3,
+    rubric: "Навчальні матеріали",
+    subject: "Математика",
+    publicationType: "Підручник",
+    availableOnly: true,
+    sort: "newest",
+  };
+
+  assert.notEqual(firstKey, secondKey);
+  assert.equal(writeTeacherCatalogFilters(storage, firstKey, filters), true);
+  assert.deepEqual(readTeacherCatalogFilters(storage, firstKey), {
+    ...filters,
+    query: "математика",
+  });
+  assert.deepEqual(readTeacherCatalogFilters(storage, secondKey), DEFAULT_TEACHER_CATALOG_FILTERS);
+
+  storage.setItem(secondKey, "{not-json");
+  assert.deepEqual(readTeacherCatalogFilters(storage, secondKey), DEFAULT_TEACHER_CATALOG_FILTERS);
+
+  const defaults = teacherCatalogRequestParams(DEFAULT_TEACHER_CATALOG_FILTERS);
+  assert.equal(defaults.get("limit"), "24");
+  assert.equal(defaults.get("sort"), "title");
+  assert.equal(defaults.has("q"), false);
+  assert.equal(defaults.has("available"), false);
+
+  const params = teacherCatalogRequestParams(filters, "opaque-next");
+  assert.equal(params.get("q"), "математика");
+  assert.equal(params.get("grade"), "3");
+  assert.equal(params.get("rubric"), "Навчальні матеріали");
+  assert.equal(params.get("subject"), "Математика");
+  assert.equal(params.get("type"), "Підручник");
+  assert.equal(params.get("available"), "true");
+  assert.equal(params.get("sort"), "newest");
+  assert.equal(params.get("cursor"), "opaque-next");
+});
+
 test("opaque cursor pages append without duplicate portal records", () => {
   const first = [
     { id: "MR-1", version: 1 },
@@ -277,15 +329,36 @@ test("teacher orders and notifications page with the frozen opaque cursor", asyn
   assert.match(orders, /params\.set\("visibility", showHiddenHistory \? "all" : "visible"\)/u);
   assert.match(orders, /mergePortalPageById\(current, response\.requests\)/u);
   assert.match(orders, /requestPage\.nextCursor/u);
-  assert.match(orders, /useState\(initialMaterialId\)/u);
-  assert.match(orders, /response\.items\.find\(\(item\) => item\.id === initialMaterialId\)/u);
+  assert.match(orders, /readTeacherCatalogFilters\(window\.sessionStorage, catalogStorageKey\)/u);
+  assert.match(orders, /writeTeacherCatalogFilters\(window\.sessionStorage, catalogStorageKey, catalogFilters\)/u);
+  assert.match(orders, /teacherCatalogRequestParams\(committedCatalogFilters, cursor\)/u);
+  assert.match(orders, /\/api\/catalog-v2\/facets/u);
+  assert.match(orders, /`\/api\/catalog-v2\/\$\{encodeURIComponent\(initialMaterialId\)\}`/u);
+  assert.match(orders, /mergePortalPageById\(current, response\.items\)/u);
+  assert.match(orders, /catalogPage\?\.hasMore && catalogPage\.nextCursor/u);
   assert.match(orders, /\[selected\.id\]: \{ item: selected, quantity: 1 \}/u);
   assert.match(orders, /setCartOpen\(true\)/u);
   assert.match(orders, /styles\.orderCartOpen/u);
+  assert.match(orders, /Дані оновлюються автоматично/u);
+  assert.match(orders, /Фільтри/u);
+  assert.match(orders, /catalogFound !== null && catalogFound !== undefined/u);
+  assert.match(orders, /Кількість матеріалів невідома/u);
+  assert.match(orders, />Повторити</u);
+  assert.match(orders, /aria-label=\{`Переглянути деталі: \$\{item\.title\}`\}/u);
+  assert.match(orders, /Сортування/u);
+  assert.match(orders, /<label>Клас/u);
+  assert.match(orders, /<label>Рубрика/u);
+  assert.match(orders, /<label>Предмет/u);
+  assert.match(orders, /<label>Тип видання/u);
+  assert.match(orders, /catalogGradeLabel\(item\)/u);
+  assert.match(orders, /item\.subject/u);
+  assert.match(orders, /item\.totalQuantity/u);
+  assert.match(orders, /item\.availableQuantity/u);
+  assert.match(orders, /Детальніше/u);
   assert.match(orders, /currentQuantity >= item\.availableQuantity/u);
   assert.match(orders, /maximumInCart \? "У кошику" : cartQuantity > 0 \? "Додати ще" : "Додати"/u);
   assert.match(orders, /Кількість «\$\{item\.title\}» у кошику збільшено до \$\{nextQuantity\}/u);
-  assert.doesNotMatch(orders, /Number\(event\.currentTarget\.value\)/u);
+  assert.match(orders, /updateCatalogFilter\("grade", event\.currentTarget\.value \? Number\(event\.currentTarget\.value\) : null\)/u);
   assert.match(orders, /quantityDrafts\[item\.id\] \?\? String\(quantity\)/u);
   assert.match(orders, /onBlur=\{\(\) => finishQuantityEdit\(item\.id\)\}/u);
   assert.match(orders, /onClick=\{\(\) => removeFromCart\(item\.id\)\}/u);
@@ -294,6 +367,10 @@ test("teacher orders and notifications page with the frozen opaque cursor", asyn
   assert.match(orders, /method: "PATCH"/u);
   assert.match(orders, /request\.teacherHiddenAt \? "Повернути" : "Приховати"/u);
   assert.match(orders, /Бібліотекар і надалі бачить замовлення/u);
+  const addFunction = orders.slice(orders.indexOf("function add("), orders.indexOf("function removeFromCart"));
+  const successfulCreate = orders.slice(orders.indexOf('if (intent.kind === "order-create")'), orders.indexOf("await loadRequests(true)"));
+  assert.doesNotMatch(addFunction, /setCatalogFilters|resetCatalogFilters|clearTeacherCatalogFilters/u);
+  assert.doesNotMatch(successfulCreate, /setCatalogFilters|resetCatalogFilters|clearTeacherCatalogFilters/u);
   assert.match(notifications, /params\.set\("cursor", cursor\)/u);
   assert.match(notifications, /mergePortalPageById\(current\.notifications, response\.notifications\)/u);
   assert.match(notifications, /data\.page\.nextCursor/u);

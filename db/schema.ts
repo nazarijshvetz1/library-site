@@ -113,6 +113,8 @@ export const librarianDraftEvents = sqliteTable(
 );
 
 const materialStatuses = ["active", "archived"] as const;
+const materialMetadataFields = ["isbn", "publisher"] as const;
+const materialMetadataConfidences = ["exact", "probable", "doubtful"] as const;
 const linkKinds = [
   "ebook",
   "details",
@@ -288,6 +290,79 @@ export const materials = sqliteTable(
     check(
       "materials_archived_at_consistent",
       sql`${table.status} != 'active' or ${table.archivedAt} is null`,
+    ),
+  ],
+);
+
+/** Immutable provenance for bounded catalog metadata enrichment batches. */
+export const materialMetadataEnrichments = sqliteTable(
+  "material_metadata_enrichments",
+  {
+    id: text("id").primaryKey(),
+    batchId: text("batch_id").notNull(),
+    materialId: text("material_id")
+      .notNull()
+      .references(() => materials.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    field: text("field", { enum: materialMetadataFields }).notNull(),
+    value: text("value").notNull(),
+    normalizedValue: text("normalized_value").notNull(),
+    confidence: text("confidence", { enum: materialMetadataConfidences }).notNull(),
+    sourceProvider: text("source_provider").notNull(),
+    sourceUrl: text("source_url").notNull().default(""),
+    sourceTitle: text("source_title").notNull().default(""),
+    reasonCode: text("reason_code").notNull(),
+    materialFingerprint: text("material_fingerprint").notNull(),
+    expectedTitle: text("expected_title").notNull(),
+    expectedAuthor: text("expected_author").notNull().default(""),
+    expectedPublicationYear: integer("expected_publication_year"),
+    expectedIsbn: text("expected_isbn").notNull().default(""),
+    expectedPublisher: text("expected_publisher").notNull().default(""),
+    applied: integer("applied", { mode: "boolean" }).notNull().default(false),
+    appliedAt: text("applied_at"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_material_metadata_enrichments_batch_material_field").on(
+      table.batchId,
+      table.materialId,
+      table.field,
+    ),
+    index("idx_material_metadata_enrichments_material_created").on(
+      table.materialId,
+      table.createdAt,
+    ),
+    index("idx_material_metadata_enrichments_batch_applied").on(
+      table.batchId,
+      table.applied,
+    ),
+    check(
+      "material_metadata_enrichments_field_valid",
+      sql`${table.field} in ('isbn', 'publisher')`,
+    ),
+    check(
+      "material_metadata_enrichments_confidence_valid",
+      sql`${table.confidence} in ('exact', 'probable', 'doubtful')`,
+    ),
+    check("material_metadata_enrichments_value_not_blank", sql`length(trim(${table.value})) > 0`),
+    check("material_metadata_enrichments_normalized_not_blank", sql`length(trim(${table.normalizedValue})) > 0`),
+    check("material_metadata_enrichments_source_not_blank", sql`length(trim(${table.sourceProvider})) > 0`),
+    check("material_metadata_enrichments_reason_not_blank", sql`length(trim(${table.reasonCode})) > 0`),
+    check(
+      "material_metadata_enrichments_fingerprint_valid",
+      sql`length(${table.materialFingerprint}) = 64 and lower(${table.materialFingerprint}) not glob '*[^0-9a-f]*'`,
+    ),
+    check("material_metadata_enrichments_title_not_blank", sql`length(trim(${table.expectedTitle})) > 0`),
+    check(
+      "material_metadata_enrichments_year_valid",
+      sql`${table.expectedPublicationYear} is null or ${table.expectedPublicationYear} between 1000 and 3000`,
+    ),
+    check(
+      "material_metadata_enrichments_source_url_valid",
+      sql`${table.sourceUrl} = '' or ${table.sourceUrl} glob 'https://*'`,
+    ),
+    check(
+      "material_metadata_enrichments_applied_consistent",
+      sql`(${table.applied} = 0 and ${table.appliedAt} is null) or (${table.applied} = 1 and ${table.appliedAt} is not null)`,
     ),
   ],
 );

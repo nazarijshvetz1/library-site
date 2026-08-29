@@ -69,7 +69,11 @@ for (const candidate of singleMaterialCandidates) {
   selected.push(candidate);
 }
 selected.sort((a, b) => a.materialId.localeCompare(b.materialId, "en"));
-const publicSelected = selected.map(({ totalQuantity: _totalQuantity, ...candidate }) => candidate);
+const publicSelected = selected.map((candidate) => {
+  const publicCandidate = { ...candidate };
+  delete publicCandidate.totalQuantity;
+  return publicCandidate;
+});
 
 const header = `export type VerifiedIsbnCandidate = {
   materialId: string;

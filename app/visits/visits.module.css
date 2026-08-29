@@ -145,6 +145,8 @@
 .comboboxField { position: relative; display: grid; gap: 7px; color: #53645a; font-size: 11px; font-weight: 800; }
 .comboboxField > input { width: 100%; min-height: 48px; border: 1px solid #d5ded4; border-radius: 11px; background: #fff; padding: 11px 13px; color: var(--ink); }
 .searchStatus { min-height: 16px; color: var(--muted); font-size: 10px; font-weight: 500; }
+.catalogRetryStatus { display: flex; align-items: center; gap: 8px; }
+.catalogRetryStatus button { min-height: 30px; padding: 0 10px; border: 1px solid #c7d5c5; border-radius: 8px; color: var(--green-900); background: #fff; cursor: pointer; font-size: 10px; font-weight: 850; }
 .teacherResults { position: absolute; z-index: 5; top: calc(100% - 17px); right: 0; left: 0; max-height: 270px; margin: 0; padding: 6px; overflow-y: auto; border: 1px solid #cbd6cc; border-radius: 12px; background: #fff; box-shadow: 0 18px 40px rgba(23,53,34,.16); list-style: none; }
 .teacherResults li { margin: 0; }
 .teacherResults button { width: 100%; min-height: 48px; padding: 9px 11px; display: grid; gap: 3px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); cursor: pointer; text-align: left; }
@@ -163,15 +165,58 @@
 .portalSearch { display: grid; gap: 7px; color: #53645a; font-size: 11px; font-weight: 800; }
 .portalSearch input { width: 100%; min-height: 48px; padding: 11px 13px; border: 1px solid #d5ded4; border-radius: 11px; background: #fff; color: var(--ink); }
 .portalSearch textarea { width: 100%; min-height: 76px; padding: 11px 13px; resize: vertical; border: 1px solid #d5ded4; border-radius: 11px; background: #fff; color: var(--ink); }
-.catalogCards { display: grid; gap: 9px; margin-top: 12px; }
-.catalogCards article { padding: 10px; display: grid; grid-template-columns: 54px minmax(0, 1fr) auto; gap: 12px; align-items: center; border: 1px solid var(--line); border-radius: 12px; }
-.catalogCards article > div { min-width: 0; display: grid; gap: 3px; }
-.catalogCards strong { overflow: hidden; color: var(--green-950); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.catalogCards span, .catalogCards small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.catalogCards button { min-height: 40px; padding: 0 12px; border: 1px solid #bfd0bc; border-radius: 9px; background: var(--green-100); color: var(--green-900); cursor: pointer; font-weight: 800; }
+.catalogFreshness { margin: -3px 0 13px; display: flex; flex-wrap: wrap; align-items: center; gap: 7px 12px; }
+.catalogFreshness span { padding: 7px 10px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid #cfe0c9; border-radius: 8px; color: #326b48; background: #f0f8ed; font-size: 10px; font-weight: 800; }
+.catalogFreshness i { width: 8px; height: 8px; border-radius: 50%; background: #63af78; box-shadow: 0 0 0 4px rgba(99,175,120,.13); }
+.catalogFreshness small { color: var(--muted); font-size: 9px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
+.catalogToolbar { margin-top: 11px; display: grid; grid-template-columns: minmax(0,1fr) auto minmax(150px,.42fr); gap: 8px; align-items: end; }
+.catalogToolbar > div { min-width: 0; display: grid; gap: 2px; }
+.catalogToolbar > div strong { color: var(--green-950); font-size: 12px; }
+.catalogToolbar > div span { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.catalogToolbar > button { min-height: 38px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #c7d5c5; border-radius: 9px; color: var(--green-900); background: #fff; cursor: pointer; font-size: 11px; font-weight: 850; }
+.catalogToolbar > label, .catalogFilterPanel > label { min-width: 0; display: grid; gap: 5px; color: var(--muted); font-size: 9px; font-weight: 800; }
+.catalogToolbar select, .catalogFilterPanel select { width: 100%; min-height: 38px; padding: 6px 9px; border: 1px solid #cfd9ce; border-radius: 9px; color: var(--green-950); background: #fff; font-size: 11px; }
+.catalogFilterPanel { margin-top: 10px; padding: 12px; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; border: 1px solid #dbe4d8; border-radius: 12px; background: #f7faf5; }
+.catalogAvailabilityToggle { min-height: 38px; padding: 7px 10px; display: flex!important; grid-template-columns: auto 1fr; align-items: center; gap: 8px!important; border: 1px solid #cfd9ce; border-radius: 9px; color: var(--green-950)!important; background: #fff; }
+.catalogAvailabilityToggle input { width: 17px; height: 17px; margin: 0; accent-color: var(--green-900); }
+.catalogFilterPanel > button { min-height: 38px; align-self: end; }
+.catalogCards { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin-top: 12px; }
+.catalogCards article { min-width: 0; padding: 11px; display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 13px; background: linear-gradient(180deg,#fff 0%,#fbfcf9 100%); }
+.catalogCardBadges { min-width: 0; display: flex!important; flex-wrap: wrap; align-items: center; gap: 5px!important; }
+.catalogCardBadges span, .catalogCardBadges b { max-width: 100%; padding: 4px 6px; overflow: hidden; border-radius: 999px; color: #486151; background: #edf3eb; font-size: 8px; font-weight: 850; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.catalogCardBadges b { margin-left: auto; color: #7a5a1a; background: #fff0c7; }
+.catalogCardBadges b[data-available="true"] { color: #23623d; background: #e7f5e7; }
+.catalogCardBody { min-width: 0; display: grid!important; grid-template-columns: 54px minmax(0,1fr); gap: 10px!important; align-items: start; }
+.catalogCardBody > div { min-width: 0; display: grid; gap: 4px; }
+.catalogCards strong { overflow: hidden; color: var(--green-950); font-size: 12px; line-height: 1.35; text-overflow: ellipsis; }
+.catalogCards span, .catalogCards small { overflow: hidden; color: var(--muted); font-size: 9px; line-height: 1.35; text-overflow: ellipsis; }
+.catalogCardBody span, .catalogCardBody small { white-space: nowrap; }
+.catalogStock { padding: 8px 0; display: grid!important; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 0!important; border-top: 1px solid #e5ebe2; border-bottom: 1px solid #e5ebe2; }
+.catalogStock > span { display: grid; gap: 1px; text-align: center; }
+.catalogStock > span + span { border-left: 1px solid #e5ebe2; }
+.catalogStock strong { font: 700 17px/1 Georgia,serif; }
+.catalogStock small { font-size: 8px; letter-spacing: .04em; text-transform: uppercase; }
+.catalogCardActions { display: grid!important; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px!important; }
+.catalogCards button { min-height: 40px; padding: 0 9px; border: 1px solid #bfd0bc; border-radius: 9px; background: var(--green-100); color: var(--green-900); cursor: pointer; font-size: 10px; font-weight: 800; }
+.catalogCards .catalogDetailsButton { display: inline-flex; align-items: center; justify-content: center; gap: 5px; background: #fff; }
 .catalogCards button:disabled { opacity: .5; cursor: not-allowed; }
 .orderCover, .orderCoverFallback { width: 54px; height: 78px; border-radius: 3px 7px 7px 3px; object-fit: cover; }
 .orderCoverFallback { display: grid; place-items: center; color: var(--green-100); background: var(--green-900); font: 650 22px/1 Georgia, serif; }
+.catalogDialogBackdrop { position: fixed; z-index: 91; inset: 0; border: 0; background: rgba(7,31,24,.55); backdrop-filter: blur(3px); }
+.catalogDialog { position: fixed; z-index: 92; top: 50%; left: 50%; width: min(520px,calc(100vw - 28px)); max-height: min(82dvh,760px); padding: 20px; overflow-y: auto; border: 1px solid #d2ddd0; border-radius: 17px; background: #fff; box-shadow: 0 28px 90px rgba(7,31,24,.35); transform: translate(-50%,-50%); }
+.catalogDialogClose { position: absolute; top: 10px; right: 10px; width: 36px; height: 36px; border: 1px solid #d3ddd1; border-radius: 10px; color: var(--green-950); background: #fff; cursor: pointer; font-size: 22px; }
+.catalogDialogHero { padding-right: 34px; display: grid; grid-template-columns: 64px minmax(0,1fr); gap: 13px; align-items: start; }
+.catalogDialogHero .orderCover, .catalogDialogHero .orderCoverFallback { width: 64px; height: 92px; }
+.catalogDialogHero > div { min-width: 0; }
+.catalogDialogHero span { color: var(--green-700); font-size: 9px; font-weight: 850; letter-spacing: .04em; text-transform: uppercase; }
+.catalogDialogHero h3 { margin: 5px 0; color: var(--green-950); font: 700 21px/1.16 Georgia,serif; }
+.catalogDialogHero p { margin: 0; color: var(--muted); font-size: 11px; }
+.catalogDialog dl { margin: 17px 0 12px; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.catalogDialog dl div { min-width: 0; padding: 9px; border-radius: 9px; background: #f4f7f2; }
+.catalogDialog dt { color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+.catalogDialog dd { margin: 3px 0 0; overflow-wrap: anywhere; color: var(--green-950); font-size: 10px; font-weight: 750; }
+.catalogDialogLinks { margin: 12px 0; display: grid; gap: 7px; }
+.catalogDialogLinks a { min-height: 38px; padding: 8px 10px; display: flex; align-items: center; gap: 7px; border: 1px solid #cad8c8; border-radius: 9px; color: var(--green-900); text-decoration: none; font-size: 10px; font-weight: 800; }
 .cartList { margin: 0; padding: 0; display: grid; gap: 9px; list-style: none; }
 .cartList li { padding: 10px; display: grid; grid-template-columns: minmax(0, 1fr) 76px 34px; gap: 8px; align-items: center; border: 1px solid var(--line); border-radius: 11px; }
 .cartList li > span { min-width: 0; display: grid; gap: 3px; }
@@ -527,7 +572,8 @@
 .teacherPortalContent :is(.teacherLoanList header small,.loanMeta,.teacherLoanList > article > p,.teacherLoanItem small,.catalogCards span,.catalogCards small,.requestList time,.notificationList time,.notificationList small) { font-size: 11px; }
 .teacherPortalContent .orderCover,
 .teacherPortalContent .orderCoverFallback { width: 62px; height: 90px; }
-.teacherPortalContent .catalogCards article { grid-template-columns: 62px minmax(0,1fr) auto; padding: 13px; }
+.teacherPortalContent .catalogCards article { grid-template-columns: none; padding: 13px; }
+.teacherPortalContent .catalogCardBody { grid-template-columns: 62px minmax(0,1fr); }
 .teacherPortalContent .catalogCards strong { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .teacherPortalContent .notificationList p { font-size: 13px; }
 .teacherPortalContent .telegramConnectionCard { border-color: #b9dced; background: linear-gradient(145deg,#fffef9,#f1f9fd); }
@@ -873,4 +919,11 @@
   .teacherPortalContent .card.overviewActionCard { padding-top: 12px; }
   .adminFilters { display: grid; grid-template-columns: 1fr; }
   .adminFilters > * { width: 100%; }
+  .catalogToolbar { grid-template-columns: 1fr auto; }
+  .catalogToolbar > label { grid-column: 1 / -1; }
+  .catalogFilterPanel, .catalogCards { grid-template-columns: 1fr; }
+  .teacherPortalContent .catalogCards article { grid-template-columns: none; }
+  .teacherPortalContent .catalogCards button { grid-column: auto; }
+  .catalogDialog { top: auto; right: 8px; bottom: max(8px,env(safe-area-inset-bottom)); left: 8px; width: auto; max-height: min(82dvh,760px); padding: 17px 14px; transform: none; }
+  .catalogDialog dl { grid-template-columns: 1fr; }
 }

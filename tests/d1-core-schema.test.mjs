@@ -36,6 +36,7 @@ const migrationFiles = [
   "drizzle/0029_swift_surge.sql",
   "drizzle/0030_bizarre_dust.sql",
   "drizzle/0031_textbook_catalog_lists.sql",
+  "drizzle/0032_fearless_alex_power.sql",
 ];
 
 async function migratedDatabase() {
@@ -796,6 +797,66 @@ test("0031 builds editable class lists and publishes only verified electronic ve
   const beforeRepeat = database.prepare("SELECT count(*) AS count FROM textbook_assignments").get().count;
   database.exec(migration);
   assert.equal(database.prepare("SELECT count(*) AS count FROM textbook_assignments").get().count, beforeRepeat);
+  assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+  database.close();
+});
+
+test("0032 enriches only exact live snapshots, preserves drift and rebuilds catalog search", async () => {
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON;");
+  for (const file of migrationFiles.slice(0, migrationFiles.indexOf("drizzle/0032_fearless_alex_power.sql"))) {
+    database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
+  }
+  const now = "2026-08-29T10:00:00.000Z";
+  const insert = database.prepare(`INSERT INTO materials (
+    id,catalog_number,title,sort_title,search_text,author,publication_year,isbn,isbn_normalized,
+    publisher,status,version,created_at,updated_at,archived_at
+  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const rows = [
+    ["CAT-0922", 922, "Aladdin. Level 2", "aladdin level 2", "aladdin level 2 mitchell", "Mitchell H.", 2005, "", "", "", "active", 1, now, now, null],
+    ["CAT-1037", 1037, "Cambridge Primary English Phonics Workbook A (оригінал)", "cambridge primary english phonics workbook a", "cambridge primary english phonics workbook a", "Gill Budgell, Kate Ruttle", 2021, "9780306406157", "9780306406157", "Existing Publisher", "active", 1, now, now, null],
+    ["CAT-1140", 1140, "Cambridge Primary. English. Learner`s 1", "cambridge primary english learners 1", "cambridge primary english learners 1", "", null, "", "", "", "active", 1, now, now, null],
+    ["CAT-1041", 1041, "Cambridge Primary. English. Learner`s 1 (оригінал)", "cambridge primary english learners 1 original", "cambridge primary english learners 1 original", "Еллі Шотман", 2021, "", "", "", "active", 1, now, now, null],
+    ["CAT-1157", 1157, "Cambridge Primary. English. Learner`s 4", "cambridge primary english learners 4", "cambridge primary english learners 4", "", null, "", "", "", "archived", 1, now, now, now],
+    ["CAT-1198", 1198, "Beste Freunde A2/2 — drifted", "beste freunde a2 2 drifted", "beste freunde a2 2 drifted", "Мануела Джорджіякакі", 2016, "", "", "", "active", 1, now, now, null],
+  ];
+  for (const row of rows) insert.run(...row);
+
+  const migration = await readFile(new URL("../drizzle/0032_fearless_alex_power.sql", import.meta.url), "utf8");
+  for (const [index, statement] of migration.split("--> statement-breakpoint").entries()) {
+    assert.ok(Buffer.byteLength(statement, "utf8") < 70_000, `0032 statement ${index + 1} exceeds the guarded D1 size`);
+  }
+  database.exec(migration);
+
+  assert.deepEqual(
+    { ...database.prepare("SELECT isbn,publisher,version FROM materials WHERE id='CAT-0922'").get() },
+    { isbn: "9789604430062", publisher: "MM Publications", version: 2 },
+  );
+  assert.deepEqual(
+    { ...database.prepare("SELECT isbn,publisher,version FROM materials WHERE id='CAT-1037'").get() },
+    { isbn: "9780306406157", publisher: "Existing Publisher", version: 1 },
+  );
+  assert.deepEqual(
+    database.prepare("SELECT id,isbn,publisher,version FROM materials WHERE id IN ('CAT-1140','CAT-1041') ORDER BY id").all().map((row) => ({ ...row })),
+    [
+      { id: "CAT-1041", isbn: "9781108963619", publisher: "Cambridge University Press & Assessment", version: 2 },
+      { id: "CAT-1140", isbn: "9781108963619", publisher: "Cambridge University Press & Assessment", version: 2 },
+    ],
+  );
+  assert.equal(database.prepare("SELECT COUNT(*) count FROM materials WHERE isbn='9781108963619'").get().count, 2);
+  assert.deepEqual(
+    database.prepare("SELECT id,isbn,publisher,version FROM materials WHERE id IN ('CAT-1157','CAT-1198') ORDER BY id").all().map((row) => ({ ...row })),
+    [
+      { id: "CAT-1157", isbn: "", publisher: "", version: 1 },
+      { id: "CAT-1198", isbn: "", publisher: "", version: 1 },
+    ],
+  );
+  assert.deepEqual(
+    { ...database.prepare("SELECT COUNT(*) total,SUM(applied) applied FROM material_metadata_enrichments").get() },
+    { total: 12, applied: 6 },
+  );
+  assert.equal(database.prepare("SELECT COUNT(*) count FROM materials_fts WHERE materials_fts MATCH '9789604430062'").get().count, 1);
+  assert.equal(database.prepare("SELECT COUNT(*) count FROM materials_fts WHERE materials_fts MATCH 'cambridge'").get().count, 4);
   assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
   database.close();
 });

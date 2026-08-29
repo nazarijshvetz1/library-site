@@ -225,6 +225,13 @@
       "when": 1787990400000,
       "tag": "0031_textbook_catalog_lists",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1787993275581,
+      "tag": "0032_fearless_alex_power",
+      "breakpoints": true
     }
   ]
 }
