@@ -138,12 +138,11 @@ await writeFile(migrationPath, output, "utf8");
 console.log(JSON.stringify({ migrationPath, batchId, materials: manifest.records.length, fields: fieldRows.length, insertStatements: insertStatements.length }, null, 2));
 
 function chunkInsertRows(rows, columns, byteLimit, rowLimit) {
-  const prefix = `INSERT INTO material_metadata_enrichments (${columns.join(",")})\n`;
   const statements = [];
   let current = [];
-  const render = (values) => `${prefix}SELECT ${columns.join(",")} FROM (\n${values.map((row, rowIndex) =>
-    `SELECT ${row.map((value, columnIndex) => rowIndex === 0 ? `${value} AS ${columns[columnIndex]}` : value).join(",")}`
-  ).join("\nUNION ALL\n")}\n) AS staged\nWHERE EXISTS (SELECT 1 FROM materials m WHERE m.id = staged.material_id);`;
+  const render = (values) => `WITH staged (${columns.join(",")}) AS (\nVALUES\n${values.map((row) =>
+    `(${row.join(",")})`
+  ).join(",\n")}\n)\nINSERT INTO material_metadata_enrichments (${columns.join(",")})\nSELECT ${columns.join(",")} FROM staged\nWHERE EXISTS (SELECT 1 FROM materials m WHERE m.id = staged.material_id);`;
   for (const row of rows) {
     const candidate = render([...current, row]);
     if (current.length && (

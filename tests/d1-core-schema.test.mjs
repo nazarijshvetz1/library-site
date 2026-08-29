@@ -825,7 +825,7 @@ test("0032 enriches only exact live snapshots, preserves drift and rebuilds cata
   const migration = await readFile(new URL("../drizzle/0032_fearless_alex_power.sql", import.meta.url), "utf8");
   for (const [index, statement] of migration.split("--> statement-breakpoint").entries()) {
     assert.ok(Buffer.byteLength(statement, "utf8") < 70_000, `0032 statement ${index + 1} exceeds the guarded D1 size`);
-    assert.ok((statement.match(/UNION ALL/gu) ?? []).length < 80, `0032 statement ${index + 1} exceeds the guarded D1 compound-select limit`);
+    assert.doesNotMatch(statement, /UNION ALL/gu, `0032 statement ${index + 1} must not depend on D1 compound-select limits`);
   }
   database.exec(migration);
 
