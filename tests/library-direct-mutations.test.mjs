@@ -85,6 +85,45 @@ test("material links allow only HTTP(S) without embedded credentials", () => {
   }
 });
 
+test("the compact e-textbook link contract is HTTPS-only and rejects overposting", () => {
+  const valid = validation.validateMaterialEbookLinkCreateInput({
+    requestId: REQUEST_ID,
+    expectedVersion: 3,
+    url: "https://example.com/textbook.pdf",
+  });
+  assert.equal(valid.ok, true);
+  assert.equal(valid.value.url, "https://example.com/textbook.pdf");
+
+  for (const input of [
+    { requestId: REQUEST_ID, expectedVersion: 3, url: "http://example.com/book.pdf" },
+    { requestId: REQUEST_ID, expectedVersion: 3, url: "https://user:pass@example.com/book.pdf" },
+    { requestId: REQUEST_ID, expectedVersion: 3, url: "https://example.com/book.pdf", label: "Інше" },
+  ]) {
+    const result = validation.validateMaterialEbookLinkCreateInput(input);
+    assert.equal(result.ok, false);
+  }
+});
+
+test("material ISBN validation checks the ISBN-10 and ISBN-13 control digit", () => {
+  for (const isbn of ["0-306-40615-2", "978-0-306-40615-7"]) {
+    const result = validation.validateMaterialUpdateInput({
+      requestId: REQUEST_ID,
+      expectedVersion: 1,
+      changes: { isbn },
+    });
+    assert.equal(result.ok, true, isbn);
+  }
+  for (const isbn of ["0-306-40615-3", "978-0-306-40615-8", "1234567890123", "2005000013027"]) {
+    const result = validation.validateMaterialUpdateInput({
+      requestId: REQUEST_ID,
+      expectedVersion: 1,
+      changes: { isbn },
+    });
+    assert.equal(result.ok, false, isbn);
+    assert.ok(result.fieldErrors["changes.isbn"]);
+  }
+});
+
 test("new material and receipt validation share the direct stock contract", () => {
   const material = validation.validateMaterialCreateInput({
     requestId: REQUEST_ID,
@@ -96,7 +135,7 @@ test("new material and receipt validation share the direct stock contract", () =
     classTo: 6,
     author: "Автор",
     publicationYear: 2025,
-    isbn: "9786170000000",
+    isbn: "9780306406157",
     publisher: "Видавництво",
     notes: null,
     links: [],

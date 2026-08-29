@@ -46,6 +46,7 @@ export type PublicTextbook = {
 export type ManagedTextbook = {
   id: string;
   materialId: string;
+  materialVersion: number;
   grade: number;
   status: "draft" | "published" | "archived";
   sortOrder: number;
@@ -67,6 +68,7 @@ export type ManagedTextbook = {
 
 export type TextbookCandidate = {
   materialId: string;
+  materialVersion: number;
   title: string;
   author: string;
   publicationYear: number | null;
@@ -76,6 +78,7 @@ export type TextbookCandidate = {
   classTo: number | null;
   coverUrl: string;
   resourceUrl: string;
+  activeResourceCount: number;
 };
 
 type Row = Record<string, unknown>;
@@ -200,6 +203,7 @@ export async function listManagedTextbooks(
       ta.updated_at,
       ta.published_at,
       ta.archived_at,
+      m.version AS material_version,
       m.title,
       m.author,
       m.publication_year,
@@ -285,6 +289,7 @@ export async function createTextbookAssignment(
     status,
     sortOrder,
     version: 1,
+    materialVersion: material.materialVersion,
     title: material.title,
     author: material.author,
     publicationYear: material.publicationYear,
@@ -432,6 +437,7 @@ async function listCandidates(
   const response = await db.prepare(`
     SELECT
       m.id AS material_id,
+      m.version AS material_version,
       m.title,
       m.author,
       m.publication_year,
@@ -439,6 +445,12 @@ async function listCandidates(
       m.publisher,
       m.class_from,
       m.class_to,
+      (
+        SELECT count(*) FROM material_links ml
+        WHERE ml.material_id = m.id AND ml.kind = 'ebook'
+          AND ml.is_public = 1 AND ml.status = 'active'
+          AND ml.url GLOB 'https://*'
+      ) AS active_resource_count,
       (
         SELECT ml.url FROM material_links ml
         WHERE ml.material_id = m.id AND ml.kind = 'ebook'
@@ -457,12 +469,6 @@ async function listCandidates(
       AND trim(m.publication_type) = 'Підручник'
       AND (m.class_from IS NULL OR m.class_to IS NULL OR ? BETWEEN m.class_from AND m.class_to)
       AND (m.search_text LIKE ? OR lower(m.id) LIKE ?)
-      AND EXISTS (
-        SELECT 1 FROM material_links ml
-        WHERE ml.material_id = m.id AND ml.kind = 'ebook'
-          AND ml.is_public = 1 AND ml.status = 'active'
-          AND ml.url GLOB 'https://*'
-      )
       AND NOT EXISTS (
         SELECT 1 FROM textbook_assignments ta
         WHERE ta.academic_year_id = ? AND ta.grade = ? AND ta.material_id = m.id
@@ -474,6 +480,7 @@ async function listCandidates(
     const materialId = boundedText(row.material_id, 64);
     return {
       materialId,
+      materialVersion: positiveInteger(row.material_version),
       title: boundedText(row.title, 500),
       author: boundedText(row.author, 500),
       publicationYear: nullableYear(row.publication_year),
@@ -483,8 +490,9 @@ async function listCandidates(
       classTo: nullableGrade(row.class_to),
       coverUrl: coverUrl(row, materialId),
       resourceUrl: safeHttpsUrl(row.resource_url),
+      activeResourceCount: nonNegativeInteger(row.active_resource_count),
     };
-  }).filter((candidate) => candidate.materialId && candidate.resourceUrl);
+  }).filter((candidate) => candidate.materialId);
 }
 
 async function requireManagedTextbook(db: TextbookDatabase, id: string): Promise<ManagedTextbook> {
@@ -500,6 +508,7 @@ async function requireManagedTextbook(db: TextbookDatabase, id: string): Promise
       ta.updated_at,
       ta.published_at,
       ta.archived_at,
+      m.version AS material_version,
       m.title,
       m.author,
       m.publication_year,
@@ -550,10 +559,12 @@ async function requireEligibleMaterial(
   activeResourceCount: number;
   brokenResourceCount: number;
   primaryResourceUrl: string;
+  materialVersion: number;
 }> {
   const row = await db.prepare(`
     SELECT
       m.id,
+      m.version AS material_version,
       m.title,
       m.author,
       m.publication_year,
@@ -616,6 +627,7 @@ async function requireEligibleMaterial(
     activeResourceCount,
     brokenResourceCount: nonNegativeInteger(row.broken_resource_count),
     primaryResourceUrl: safeHttpsUrl(row.primary_resource_url),
+    materialVersion: positiveInteger(row.material_version),
   };
 }
 
@@ -642,6 +654,7 @@ function toManagedTextbook(row: Row): ManagedTextbook {
   return {
     id: boundedText(row.id, 160),
     materialId,
+    materialVersion: positiveInteger(row.material_version),
     grade: gradeInteger(row.grade),
     status: status === "published" || status === "archived" ? status : "draft",
     sortOrder: nonNegativeInteger(row.sort_order),

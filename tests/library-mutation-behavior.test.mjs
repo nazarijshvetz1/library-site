@@ -315,7 +315,7 @@ test("direct material edit commits once, preserves history and rejects stale ver
     SELECT
       'CAT-0002', 2, 'Інший матеріал', 'інший матеріал', 'інший матеріал', rubric,
       publication_type, subject, class_from, class_to, author,
-      publication_year, '9786170000000', '9786170000000', publisher, notes,
+      publication_year, '9780306406157', '9780306406157', publisher, notes,
       status, 1, created_at, updated_at, NULL
     FROM materials WHERE id = 'CAT-0001'
   `).run();
@@ -326,7 +326,7 @@ test("direct material edit commits once, preserves history and rejects stale ver
       {
         requestId: "10000000-0000-4000-8000-000000000098",
         expectedVersion: 2,
-        changes: { isbn: "9786170000000" },
+        changes: { isbn: "9780306406157" },
       },
       d1,
     ),
@@ -334,6 +334,48 @@ test("direct material edit commits once, preserves history and rejects stale ver
       && error.status === 409
       && error.code === "duplicate_isbn"
       && error.details.materialId === "CAT-0002",
+  );
+});
+
+test("a compact e-textbook link append preserves existing links and replays once", async () => {
+  const { sqlite, d1 } = openDatabase();
+  const now = "2026-08-11T08:00:00.000Z";
+  sqlite.prepare(`
+    INSERT INTO material_links (
+      id, material_id, kind, label, url, is_public, sort_order,
+      status, created_at, updated_at
+    ) VALUES ('LINK-DETAILS', 'CAT-0001', 'details', 'Про видання',
+      'https://example.com/details', 1, 0, 'active', ?, ?)
+  `).run(now, now);
+  const input = {
+    requestId: "10000000-0000-4000-8000-000000000097",
+    expectedVersion: 1,
+    url: "https://example.com/textbook.pdf",
+  };
+
+  const first = await mutation.appendMaterialEbookLinkDirect(actor, "CAT-0001", input, d1);
+  const replay = await mutation.appendMaterialEbookLinkDirect(actor, "CAT-0001", input, d1);
+  assert.deepEqual(replay, first);
+  assert.equal(first.version, 2);
+  assert.deepEqual(
+    sqlite.prepare("SELECT kind, label, url, sort_order FROM material_links WHERE material_id='CAT-0001' ORDER BY sort_order").all().map(plainRow),
+    [
+      { kind: "details", label: "Про видання", url: "https://example.com/details", sort_order: 0 },
+      { kind: "ebook", label: "Електронна версія", url: input.url, sort_order: 10 },
+    ],
+  );
+  assert.equal(sqlite.prepare("SELECT version FROM materials WHERE id='CAT-0001'").get().version, 2);
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM audit_events WHERE action='material.ebook_link_added'").get().count, 1);
+  assert.equal(sqlite.prepare("SELECT count(*) AS count FROM mutation_commands WHERE id=?").get(input.requestId).count, 1);
+
+  await assert.rejects(
+    mutation.appendMaterialEbookLinkDirect(actor, "CAT-0001", {
+      ...input,
+      requestId: "10000000-0000-4000-8000-000000000096",
+      expectedVersion: 2,
+    }, d1),
+    (error) => error instanceof mutation.LibraryMutationError
+      && error.code === "material_link_exists",
   );
 });
 

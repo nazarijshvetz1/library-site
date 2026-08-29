@@ -17,7 +17,7 @@ function validIsbn10(value: string): boolean {
 }
 
 function validIsbn13(value: string): boolean {
-  if (!/^\d{13}$/.test(value)) return false;
+  if (!/^(?:978|979)\d{10}$/.test(value)) return false;
   const sum = [...value.slice(0, 12)].reduce(
     (total, character, index) =>
       total + Number(character) * (index % 2 === 0 ? 1 : 3),

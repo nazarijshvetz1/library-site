@@ -424,6 +424,10 @@ test("ships an accessible responsive public visit schedule and protected handoff
   assert.match(html, /href="#visit-schedule"[^>]*>Графік<\/a>/);
   assert.match(html, /href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/teacher"[\s\S]*>Кабінет учителя<\/a>/);
   assert.match(html, /class="teacher-nav-link"[\s\S]*data-primary-section="teacher"[\s\S]*>Кабінет учителя<\/a>/);
+  assert.match(html, /data-primary-section="textbooks"[\s\S]*href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/textbooks"[\s\S]*>Е-підручники<\/a>/u);
+  const primaryNavigation = html.match(/data-primary-section=/gu) ?? [];
+  assert.equal(primaryNavigation.length, 5);
+  assert.match(html, /href="#contacts">Контакти<\/a>/u);
   assert.match(html, /href="#how-it-works"[^>]*data-primary-section="how-it-works"[^>]*>Як користуватися<\/a>/);
   assert.match(html, /Перевірте наявність/);
   assert.match(html, /Запишіться до бібліотеки/);

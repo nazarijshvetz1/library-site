@@ -27,12 +27,13 @@ test("public e-textbook route exposes only the curated HTTPS projection", async 
 });
 
 test("librarian textbook mutations use authorization, same-origin, bounded JSON, versions, commands, and audit", async () => {
-  const [collectionRoute, itemRoute, store] = await Promise.all([
+  const [collectionRoute, itemRoute, linkRoute, store] = await Promise.all([
     read("app/api/librarian/textbooks/route.ts"),
     read("app/api/librarian/textbooks/[id]/route.ts"),
+    read("app/api/librarian/materials/[id]/ebook-links/route.ts"),
     read("lib/textbook-catalog-store.ts"),
   ]);
-  for (const source of [collectionRoute, itemRoute]) {
+  for (const source of [collectionRoute, itemRoute, linkRoute]) {
     assert.match(source, /authorizeLibrarianApi/u);
     assert.match(source, /writesEnabled/u);
     assert.match(source, /isSameOriginRequest/u);
@@ -46,6 +47,10 @@ test("librarian textbook mutations use authorization, same-origin, bounded JSON,
   assert.match(store, /CASE WHEN changes\(\) = 1 THEN \? ELSE NULL END/u);
   assert.match(store, /textbook_link_required/u);
   assert.match(store, /textbook_grade_mismatch/u);
+  assert.match(linkRoute, /validateMaterialEbookLinkCreateInput/u);
+  assert.match(linkRoute, /appendMaterialEbookLinkDirect/u);
+  assert.match(store, /AS active_resource_count/u);
+  assert.match(store, /filter\(\(candidate\) => candidate\.materialId\)/u);
 });
 
 test("student and librarian UIs provide class selection, sorting, safe external actions, and reversible hiding", async () => {
@@ -68,6 +73,30 @@ test("student and librarian UIs provide class selection, sorting, safe external 
   assert.match(adminUi, /Опублікувати/u);
   assert.match(adminUi, /Ручний порядок/u);
   assert.match(adminUi, /Картки фонду, примірники та історія не видаляються/u);
+  assert.match(adminUi, /Додати покликання/u);
+  assert.match(adminUi, /Зберегти й додати/u);
+  assert.match(adminUi, /Застосувати перевірені ISBN/u);
+  assert.match(adminUi, /matchesCandidate/u);
   assert.match(shell, /label: "Е-підручники"/u);
   assert.match(home, /href="\/textbooks"/u);
+});
+
+test("verified ISBN enrichment queue contains only unique checksum-valid ISBN-13 values", async () => {
+  const source = await read("lib/isbn-enrichment-queue.ts");
+  const match = source.match(/VERIFIED_ISBN_CANDIDATES = (\[[\s\S]*\]) as const satisfies/u);
+  assert.ok(match, "generated ISBN queue must be readable");
+  const candidates = JSON.parse(match[1]);
+  assert.ok(candidates.length > 0);
+  assert.equal(new Set(candidates.map((item) => item.materialId)).size, candidates.length);
+  assert.equal(new Set(candidates.map((item) => item.isbn)).size, candidates.length);
+  for (const item of candidates) {
+    assert.match(item.materialId, /^CAT-\d{4,}$/u);
+    assert.match(item.isbn, /^(?:978|979)\d{10}$/u);
+    const sum = [...item.isbn].reduce(
+      (total, digit, index) => total + Number(digit) * (index % 2 === 0 ? 1 : 3),
+      0,
+    );
+    assert.equal(sum % 10, 0, item.materialId);
+    assert.match(item.evidenceUrl, /^https:\/\//u);
+  }
 });

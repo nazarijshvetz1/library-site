@@ -1,7 +1,9 @@
 import type { ChatGPTUser } from "@/app/chatgpt-auth";
+import { normalizeIsbn as normalizeCheckedIsbn } from "./isbn.ts";
 import type {
   ClassLoanCreateInput,
   ClassLoanReturnInput,
+  MaterialEbookLinkCreateInput,
   LoanCreateInput,
   LoanReturnInput,
   MaterialArchiveInput,
@@ -103,6 +105,11 @@ export type MaterialMutationResult = {
   materialId: string;
   version: number;
   updatedAt: string;
+};
+
+export type MaterialEbookLinkMutationResult = MaterialMutationResult & {
+  linkId: string;
+  url: string;
 };
 
 export type MaterialArchiveResult = {
@@ -859,6 +866,167 @@ export async function updateMaterialDirect(
     {
       code: "material_version_conflict",
       message: "Матеріал уже змінено в іншій вкладці. Оновіть картку.",
+    },
+  );
+  return replayed ?? result;
+}
+
+export async function appendMaterialEbookLinkDirect(
+  user: ChatGPTUser,
+  materialId: string,
+  input: MaterialEbookLinkCreateInput,
+  providedDb?: LibraryD1Database,
+): Promise<MaterialEbookLinkMutationResult> {
+  const db = database(providedDb);
+  const actor = await resolveMutationActor(db, user);
+  const requestHash = await mutationHash({
+    kind: "material.ebook_link.create",
+    actorUserId: actor.id,
+    materialId,
+    input,
+  });
+  const replay = await replayCompletedCommand<MaterialEbookLinkMutationResult>(
+    db,
+    input.requestId,
+    requestHash,
+  );
+  if (replay) return replay;
+
+  const material = await db.prepare(`
+    SELECT
+      id, catalog_number, title, sort_title, search_text, rubric,
+      publication_type, subject, class_from, class_to, author,
+      publication_year, isbn, isbn_normalized, publisher, notes,
+      status, version, updated_at, archived_at
+    FROM materials
+    WHERE id = ? AND status = 'active' AND archived_at IS NULL
+    LIMIT 1
+  `).bind(materialId).first<MaterialRow>();
+  if (!material) {
+    throw new LibraryMutationError(
+      "material_not_found",
+      404,
+      "Матеріал не знайдено або він заархівований.",
+    );
+  }
+  if (Number(material.version) !== input.expectedVersion) {
+    throw new LibraryMutationError(
+      "material_version_conflict",
+      409,
+      "Картку вже змінено. Оновіть список і повторіть дію.",
+      { currentVersion: Number(material.version) },
+    );
+  }
+
+  const currentLinks = await readMaterialLinks(db, materialId);
+  if (currentLinks.some((link) => link.status === "active" && link.url === input.url)) {
+    throw new LibraryMutationError(
+      "material_link_exists",
+      409,
+      "Це посилання вже додано до картки підручника.",
+    );
+  }
+  const orderRow = await db.prepare(`
+    SELECT COALESCE(MAX(sort_order), -10) + 10 AS next_order
+    FROM material_links
+    WHERE material_id = ?
+  `).bind(materialId).first<{ next_order: number }>();
+  const sortOrder = Math.max(0, Number(orderRow?.next_order) || 0);
+  const linkId = `LINK-${crypto.randomUUID()}`;
+  const updatedAt = new Date().toISOString();
+  const nextVersion = input.expectedVersion + 1;
+  const result: MaterialEbookLinkMutationResult = {
+    materialId,
+    linkId,
+    url: input.url,
+    version: nextVersion,
+    updatedAt,
+  };
+  const before = materialSnapshot(material, currentLinks);
+  const after = {
+    ...before,
+    version: nextVersion,
+    links: [
+      ...currentLinks,
+      {
+        id: linkId,
+        kind: "ebook",
+        label: "Електронна версія",
+        url: input.url,
+        isPublic: true,
+        sortOrder,
+        status: "active",
+      },
+    ],
+  };
+  const replayed = await executeIdempotentBatch<MaterialEbookLinkMutationResult>(
+    db,
+    [
+      insertCommandStatement(
+        db,
+        input.requestId,
+        requestHash,
+        actor.id,
+        "material.ebook_link.create",
+        "material",
+        materialId,
+        updatedAt,
+      ),
+      db.prepare(`
+        UPDATE materials
+        SET version = version + 1, updated_at = ?
+        WHERE id = ? AND version = ? AND status = 'active' AND archived_at IS NULL
+      `).bind(updatedAt, materialId, input.expectedVersion),
+      db.prepare(`
+        INSERT INTO material_links (
+          id, material_id, kind, label, url, is_public, sort_order,
+          status, created_at, updated_at
+        )
+        SELECT ?, m.id, 'ebook', 'Електронна версія', ?, 1, ?,
+          'active', ?, ?
+        FROM materials m
+        WHERE m.id = ? AND m.version = ? AND m.updated_at = ?
+      `).bind(
+        linkId,
+        input.url,
+        sortOrder,
+        updatedAt,
+        updatedAt,
+        materialId,
+        nextVersion,
+        updatedAt,
+      ),
+      db.prepare(`
+        INSERT INTO audit_events (
+          id, actor_user_id, actor_email, action, entity_type, entity_id,
+          request_id, before_json, after_json, metadata_json, created_at
+        ) VALUES (
+          ?, ?, ?, 'material.ebook_link_added', 'material',
+          (
+            SELECT id FROM materials
+            WHERE id = ? AND version = ? AND updated_at = ? AND changes() = 1
+          ),
+          ?, ?, ?, NULL, ?
+        )
+      `).bind(
+        crypto.randomUUID(),
+        actor.id,
+        actor.email,
+        materialId,
+        nextVersion,
+        updatedAt,
+        input.requestId,
+        JSON.stringify(before),
+        JSON.stringify(after),
+        updatedAt,
+      ),
+      completeCommandStatement(db, input.requestId, result, updatedAt),
+    ],
+    input.requestId,
+    requestHash,
+    {
+      code: "material_version_conflict",
+      message: "Картку вже змінено. Оновіть список і повторіть дію.",
     },
   );
   return replayed ?? result;
@@ -3960,8 +4128,7 @@ function normalizeSearchText(value: unknown): string {
 }
 
 function normalizeIsbn(value: unknown): string {
-  const normalized = String(value ?? "").toUpperCase().replace(/[\s-]+/gu, "");
-  return /^(?:\d{13}|\d{9}[\dX])$/u.test(normalized) ? normalized : "";
+  return normalizeCheckedIsbn(value) ?? "";
 }
 
 function nullableNumber(value: number | null): number | null {

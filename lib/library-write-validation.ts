@@ -1,3 +1,5 @@
+import { normalizeIsbn } from "./isbn.ts";
+
 export type ValidationResult<T> =
   | { ok: true; value: T }
   | { ok: false; fieldErrors: Record<string, string> };
@@ -37,6 +39,12 @@ export type MaterialUpdateInput = {
     notes?: string | null;
     links?: MaterialLinkInput[];
   };
+};
+
+export type MaterialEbookLinkCreateInput = {
+  requestId: string;
+  expectedVersion: number;
+  url: string;
 };
 
 export type MaterialArchiveInput = {
@@ -214,6 +222,9 @@ export function validateMaterialCreateInput(
     new Date().getUTCFullYear() + 1,
   );
   const isbn = readOptionalText(input.isbn ?? null, "isbn", errors, 32);
+  if (isbn && !normalizeIsbn(isbn)) {
+    errors.isbn = "Укажіть ISBN-10 або ISBN-13 з правильною контрольною цифрою.";
+  }
   const publisher = readOptionalText(input.publisher ?? null, "publisher", errors, 200);
   const notes = readOptionalText(input.notes ?? null, "notes", errors, 2000);
   const links = readLinks(input.links ?? [], errors, "links");
@@ -344,6 +355,9 @@ export function validateMaterialUpdateInput(
         );
       }
     }
+    if ("isbn" in changesValue && changes.isbn && !normalizeIsbn(changes.isbn)) {
+      errors["changes.isbn"] = "Укажіть ISBN-10 або ISBN-13 з правильною контрольною цифрою.";
+    }
     if ("classFrom" in changesValue) {
       changes.classFrom = readNullableInteger(
         changesValue.classFrom,
@@ -410,6 +424,34 @@ export function validateMaterialArchiveInput(
     errors,
   );
   return finish(errors, { requestId, expectedVersion });
+}
+
+export function validateMaterialEbookLinkCreateInput(
+  input: unknown,
+): ValidationResult<MaterialEbookLinkCreateInput> {
+  const errors: Record<string, string> = {};
+  if (!isRecord(input)) {
+    return invalid("body", "Очікується об’єкт із посиланням.");
+  }
+  assertExactKeys(input, ["requestId", "expectedVersion", "url"], errors);
+  const requestId = readUuid(input.requestId, "requestId", errors);
+  const expectedVersion = readPositiveInteger(
+    input.expectedVersion,
+    "expectedVersion",
+    errors,
+  );
+  const rawUrl = readRequiredText(input.url, "url", errors, 2000);
+  let url = rawUrl;
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+      throw new Error("unsupported URL");
+    }
+    url = parsed.toString();
+  } catch {
+    errors.url = "Укажіть коректне HTTPS-посилання без логіна й пароля.";
+  }
+  return finish(errors, { requestId, expectedVersion, url });
 }
 
 export function validateStockAdjustmentInput(

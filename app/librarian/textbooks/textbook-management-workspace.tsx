@@ -6,12 +6,17 @@
 import { useEffect, useMemo, useState } from "react";
 
 import SiteIcon from "@/app/_components/site-icon";
+import {
+  VERIFIED_ISBN_CANDIDATES,
+  type VerifiedIsbnCandidate,
+} from "@/lib/isbn-enrichment-queue";
 import LibrarianShell from "../_components/librarian-shell";
 import styles from "./textbook-management.module.css";
 
 type ManagedTextbook = {
   id: string;
   materialId: string;
+  materialVersion: number;
   grade: number;
   status: "draft" | "published" | "archived";
   sortOrder: number;
@@ -31,6 +36,7 @@ type ManagedTextbook = {
 
 type Candidate = {
   materialId: string;
+  materialVersion: number;
   title: string;
   author: string;
   publicationYear: number | null;
@@ -40,10 +46,30 @@ type Candidate = {
   classTo: number | null;
   coverUrl: string;
   resourceUrl: string;
+  activeResourceCount: number;
 };
 
 type StatusFilter = "visible" | "hidden" | "all";
 type SortMode = "manual" | "title" | "subject" | "newest";
+type IsbnProgress = {
+  completed: number;
+  total: number;
+  applied: number;
+  verified: number;
+  skipped: number;
+  failed: number;
+};
+
+type MaterialDetailResponse = {
+  material: {
+    id: string;
+    title: string;
+    author: string;
+    year: number | null;
+    isbn: string;
+    version?: number;
+  };
+};
 
 export default function TextbookManagementWorkspace({
   displayName,
@@ -69,6 +95,9 @@ export default function TextbookManagementWorkspace({
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [orderDrafts, setOrderDrafts] = useState<Record<string, string>>({});
+  const [linkDrafts, setLinkDrafts] = useState<Record<string, string>>({});
+  const [isbnBusy, setIsbnBusy] = useState(false);
+  const [isbnProgress, setIsbnProgress] = useState<IsbnProgress | null>(null);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => setDebouncedQuery(query.trim()), 250);
@@ -130,6 +159,57 @@ export default function TextbookManagementWorkspace({
     });
   }
 
+  async function saveLinkAndAddCandidate(candidate: Candidate) {
+    const url = validHttpsUrl(linkDrafts[candidate.materialId] ?? "");
+    if (!url) {
+      setMessage({ tone: "error", text: "Укажіть коректне HTTPS-посилання без логіна й пароля." });
+      return;
+    }
+    let linkSaved = false;
+    await perform(candidate.materialId, async () => {
+      await apiJson(`/api/librarian/materials/${encodeURIComponent(candidate.materialId)}/ebook-links`, {
+        method: "POST",
+        body: JSON.stringify({
+          requestId: crypto.randomUUID(),
+          expectedVersion: candidate.materialVersion,
+          url,
+        }),
+      });
+      linkSaved = true;
+      try {
+        const response = await apiJson<{ textbook: ManagedTextbook }>("/api/librarian/textbooks", {
+          method: "POST",
+          body: JSON.stringify({ requestId: crypto.randomUUID(), materialId: candidate.materialId, grade, publish: true }),
+        });
+        setLinkDrafts((current) => ({ ...current, [candidate.materialId]: "" }));
+        setMessage({ tone: "success", text: `Посилання збережено, а «${response.textbook.title}» додано до ${grade} класу.` });
+      } catch (reason) {
+        throw new Error(`Посилання збережено, але підручник не опубліковано: ${errorMessage(reason)}`);
+      }
+    }, false);
+    if (linkSaved) setRefreshKey((value) => value + 1);
+  }
+
+  async function addLinkToManaged(item: ManagedTextbook) {
+    const url = validHttpsUrl(linkDrafts[item.materialId] ?? "");
+    if (!url) {
+      setMessage({ tone: "error", text: "Укажіть коректне HTTPS-посилання без логіна й пароля." });
+      return;
+    }
+    await perform(`link-${item.materialId}`, async () => {
+      await apiJson(`/api/librarian/materials/${encodeURIComponent(item.materialId)}/ebook-links`, {
+        method: "POST",
+        body: JSON.stringify({
+          requestId: crypto.randomUUID(),
+          expectedVersion: item.materialVersion,
+          url,
+        }),
+      });
+      setLinkDrafts((current) => ({ ...current, [item.materialId]: "" }));
+      setMessage({ tone: "success", text: `Нове покликання для «${item.title}» збережено.` });
+    });
+  }
+
   async function changeItem(item: ManagedTextbook, action: "archive" | "restore" | "publish" | "reorder") {
     const parsedOrder = Number(orderDrafts[item.id]);
     if (action === "reorder" && (!Number.isInteger(parsedOrder) || parsedOrder < 0 || parsedOrder > 999999)) {
@@ -173,6 +253,69 @@ export default function TextbookManagementWorkspace({
     }
   }
 
+  async function applyVerifiedIsbns() {
+    if (!writesEnabled || busyId || isbnBusy || VERIFIED_ISBN_CANDIDATES.length === 0) return;
+    setIsbnBusy(true);
+    setMessage(null);
+    setIsbnProgress({
+      completed: 0,
+      total: VERIFIED_ISBN_CANDIDATES.length,
+      applied: 0,
+      verified: 0,
+      skipped: 0,
+      failed: 0,
+    });
+    let nextIndex = 0;
+    const runCandidate = async (candidate: VerifiedIsbnCandidate) => {
+      let result: keyof Pick<IsbnProgress, "applied" | "verified" | "skipped" | "failed"> = "failed";
+      try {
+        const before = await apiJson<MaterialDetailResponse>(
+          `/api/librarian/materials/${encodeURIComponent(candidate.materialId)}`,
+        );
+        if (!matchesCandidate(before.material, candidate)) {
+          result = "skipped";
+        } else if (compactIsbn(before.material.isbn) === candidate.isbn) {
+          result = "verified";
+        } else if (compactIsbn(before.material.isbn)) {
+          result = "skipped";
+        } else if (!Number.isInteger(before.material.version) || Number(before.material.version) < 1) {
+          result = "failed";
+        } else {
+          await apiJson(`/api/librarian/materials/${encodeURIComponent(candidate.materialId)}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              requestId: crypto.randomUUID(),
+              expectedVersion: Number(before.material.version),
+              changes: { isbn: candidate.isbn },
+            }),
+          });
+          const after = await apiJson<MaterialDetailResponse>(
+            `/api/librarian/materials/${encodeURIComponent(candidate.materialId)}`,
+          );
+          result = compactIsbn(after.material.isbn) === candidate.isbn ? "applied" : "failed";
+        }
+      } catch {
+        result = "failed";
+      }
+      setIsbnProgress((current) => current ? {
+        ...current,
+        completed: current.completed + 1,
+        [result]: current[result] + 1,
+      } : current);
+    };
+    const worker = async () => {
+      while (nextIndex < VERIFIED_ISBN_CANDIDATES.length) {
+        const candidate = VERIFIED_ISBN_CANDIDATES[nextIndex];
+        nextIndex += 1;
+        await runCandidate(candidate);
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(4, VERIFIED_ISBN_CANDIDATES.length) }, worker),
+    );
+    setIsbnBusy(false);
+  }
+
   return (
     <LibrarianShell
       activeSection="fund"
@@ -187,6 +330,24 @@ export default function TextbookManagementWorkspace({
           <div><p>Фонд · цифрова полиця</p><h1>Каталог е-підручників</h1><span>Керуйте лише публічним списком. Картки фонду, примірники та історія не видаляються.</span></div>
           <a href="/textbooks" target="_blank" rel="noopener noreferrer">Відкрити для учнів <SiteIcon name="external" size={17} /></a>
         </header>
+
+        {VERIFIED_ISBN_CANDIDATES.length > 0 ? (
+          <section className={styles.isbnPanel} aria-labelledby="verified-isbn-title">
+            <div>
+              <span>Перевірена черга</span>
+              <strong id="verified-isbn-title">ISBN для точних видань</strong>
+              <small>Заповнюються лише порожні поля; назва, автор, рік, версія картки та контрольна цифра перевіряються перед записом.</small>
+            </div>
+            <div className={styles.isbnActions}>
+              {isbnProgress
+                ? <output aria-live="polite">{isbnProgress.completed}/{isbnProgress.total} · додано {isbnProgress.applied} · уже було {isbnProgress.verified} · пропущено {isbnProgress.skipped} · помилок {isbnProgress.failed}</output>
+                : <output>{VERIFIED_ISBN_CANDIDATES.length} точних збігів</output>}
+              <button type="button" onClick={() => void applyVerifiedIsbns()} disabled={!writesEnabled || isbnBusy || Boolean(busyId)}>
+                <SiteIcon name={isbnBusy ? "loading" : "success"} size={17} /> {isbnBusy ? "Перевіряю та зберігаю…" : "Застосувати перевірені ISBN"}
+              </button>
+            </div>
+          </section>
+        ) : null}
 
         <section className={styles.toolbar} aria-label="Параметри списку">
           <label><span>Навчальний рік</span><strong>{academicYear || "Завантаження…"}</strong></label>
@@ -212,6 +373,10 @@ export default function TextbookManagementWorkspace({
                     <h3>{item.title}</h3>
                     <p>{[item.subject, item.author, item.publicationYear, item.publisher].filter(Boolean).join(" · ")}</p>
                     <div className={styles.linkState}>{item.activeResourceCount > 0 ? <><SiteIcon name="success" size={15} /> {item.activeResourceCount} активне посилання</> : <><SiteIcon name="error" size={15} /> Немає активного посилання</>}{item.primaryResourceUrl ? <a href={item.primaryResourceUrl} target="_blank" rel="noopener noreferrer">Перевірити</a> : null}</div>
+                    <details className={styles.linkAdder}>
+                      <summary><SiteIcon name="add" size={14} /> Додати покликання</summary>
+                      <div><input type="url" inputMode="url" placeholder="https://…" value={linkDrafts[item.materialId] ?? ""} onChange={(event) => setLinkDrafts((current) => ({ ...current, [item.materialId]: event.target.value }))} aria-label={`Покликання для ${item.title}`} /><button type="button" onClick={() => void addLinkToManaged(item)} disabled={!writesEnabled || Boolean(busyId)}>Зберегти</button></div>
+                    </details>
                     <div className={styles.itemActions}>
                       <label><span>Порядок</span><input type="number" min="0" max="999999" value={orderDrafts[item.id] ?? item.sortOrder} onChange={(event) => setOrderDrafts((current) => ({ ...current, [item.id]: event.target.value }))} /></label>
                       <button type="button" onClick={() => void changeItem(item, "reorder")} disabled={!writesEnabled || busyId === item.id || Number(orderDrafts[item.id]) === item.sortOrder}>Зберегти</button>
@@ -224,16 +389,17 @@ export default function TextbookManagementWorkspace({
           </section>
 
           <aside className={styles.addPanel} aria-labelledby="add-textbook-title">
-            <header><span>Додати з чинного каталогу</span><h2 id="add-textbook-title">Знайти підручник</h2><p>Показуємо лише підручники з активним публічним HTTPS-посиланням типу «Електронна версія».</p></header>
+            <header><span>Додати з чинного каталогу</span><h2 id="add-textbook-title">Знайти підручник</h2><p>Знайдіть підручник у фонді. Якщо електронного покликання ще немає, його можна додати прямо тут.</p></header>
             <label className={styles.search}><span>Назва, автор або CAT-ID</span><div><SiteIcon name="search" size={18} /><input type="search" value={query} maxLength={120} placeholder="Введіть щонайменше 2 символи" onChange={(event) => setQuery(event.target.value)} /></div></label>
             {debouncedQuery.length < 2 ? <p className={styles.searchHint}>Пошук почнеться після двох символів.</p> : null}
             {debouncedQuery.length >= 2 && !loading && candidates.length === 0 ? <p className={styles.searchHint}>Вільних підручників із таким запитом не знайдено.</p> : null}
             <div className={styles.candidates}>
               {candidates.map((candidate) => (
-                <article key={candidate.materialId}>
+                <article key={candidate.materialId} className={!candidate.resourceUrl ? styles.candidateNeedsLink : ""}>
                   <Cover url={candidate.coverUrl} title={candidate.title} compact />
-                  <div><strong>{candidate.title}</strong><small>{[candidate.subject, candidate.author, candidate.publicationYear].filter(Boolean).join(" · ")}</small><span>{candidate.materialId}</span></div>
-                  <button type="button" onClick={() => void addCandidate(candidate)} disabled={!writesEnabled || Boolean(busyId)} aria-label={`Додати ${candidate.title}`}><SiteIcon name={busyId === candidate.materialId ? "loading" : "add"} size={17} /></button>
+                  <div><strong>{candidate.title}</strong><small>{[candidate.subject, candidate.author, candidate.publicationYear].filter(Boolean).join(" · ")}</small><span>{candidate.materialId}{candidate.resourceUrl ? " · покликання готове" : " · потрібне покликання"}</span></div>
+                  {candidate.resourceUrl ? <button type="button" onClick={() => void addCandidate(candidate)} disabled={!writesEnabled || Boolean(busyId)} aria-label={`Додати ${candidate.title}`}><SiteIcon name={busyId === candidate.materialId ? "loading" : "add"} size={17} /></button> : null}
+                  {!candidate.resourceUrl ? <div className={styles.candidateLinkForm}><input type="url" inputMode="url" placeholder="Офіційне HTTPS-покликання" value={linkDrafts[candidate.materialId] ?? ""} onChange={(event) => setLinkDrafts((current) => ({ ...current, [candidate.materialId]: event.target.value }))} aria-label={`Покликання для ${candidate.title}`} /><button type="button" onClick={() => void saveLinkAndAddCandidate(candidate)} disabled={!writesEnabled || Boolean(busyId)}>{busyId === candidate.materialId ? <SiteIcon name="loading" size={15} /> : <SiteIcon name="add" size={15} />} Зберегти й додати</button></div> : null}
                 </article>
               ))}
             </div>
@@ -248,7 +414,7 @@ function Cover({ url, title, compact = false }: { url: string; title: string; co
   return <span className={`${styles.cover} ${compact ? styles.coverCompact : ""}`}>{url ? <img src={url} alt="" /> : <span>{title}</span>}</span>;
 }
 
-async function apiJson<T>(url: string, init: RequestInit): Promise<T> {
+async function apiJson<T>(url: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...(init.headers ?? {}) } });
   const body = await response.json() as T & { success?: boolean; error?: string };
   if (!response.ok || body.success === false) throw new Error(body.error || "Не вдалося зберегти зміну.");
@@ -257,3 +423,18 @@ async function apiJson<T>(url: string, init: RequestInit): Promise<T> {
 
 function compare(a: string, b: string): number { return a.localeCompare(b, "uk-UA", { sensitivity: "base" }); }
 function errorMessage(reason: unknown): string { return reason instanceof Error ? reason.message : "Сталася помилка. Спробуйте ще раз."; }
+function compactIsbn(value: string): string { return value.replace(/[^0-9X]/gi, "").toUpperCase(); }
+function compareText(value: string): string { return value.normalize("NFKC").replace(/[’`]/g, "'").replace(/\s+/g, " ").trim().toLocaleLowerCase("uk-UA"); }
+function matchesCandidate(material: MaterialDetailResponse["material"], candidate: VerifiedIsbnCandidate): boolean {
+  if (material.id !== candidate.materialId || compareText(material.title) !== compareText(candidate.title)) return false;
+  if (candidate.author && compareText(material.author) !== compareText(candidate.author)) return false;
+  return candidate.publicationYear === null || material.year === candidate.publicationYear;
+}
+function validHttpsUrl(value: string): string {
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" && !url.username && !url.password ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
