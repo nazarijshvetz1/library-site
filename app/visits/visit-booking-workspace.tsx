@@ -72,8 +72,11 @@ import {
 import { normalizeCoverPhotoForUpload } from "@/lib/cover-client";
 import TeacherAcquisitionPanel from "@/app/teacher/acquisition/teacher-acquisition-panel";
 import {
+  boundedTeacherOrderView,
   boundedTeacherTab,
+  teacherOrderPortalHref,
   teacherPortalHref,
+  type TeacherOrderView,
   type TeacherPortalTab,
 } from "@/app/teacher/_components/teacher-routes";
 import styles from "./visits.module.css";
@@ -86,6 +89,7 @@ type Props = {
   initialStartTime: string;
   initialEndTime: string;
   initialTab?: TeacherPortalTab;
+  initialOrderView?: TeacherOrderView | null;
   initialOrderMaterialId?: string;
   telegramMiniApp?: boolean;
 };
@@ -125,6 +129,7 @@ export default function VisitBookingWorkspace({
   initialStartTime,
   initialEndTime,
   initialTab = "overview",
+  initialOrderView = null,
   initialOrderMaterialId = "",
   telegramMiniApp = false,
 }: Props) {
@@ -276,6 +281,7 @@ export default function VisitBookingWorkspace({
       initialStartTime={initialStartTime}
       initialEndTime={initialEndTime}
       initialTab={initialTab}
+      initialOrderView={initialOrderView}
       initialOrderMaterialId={initialOrderMaterialId}
       telegramMiniApp={telegramMiniApp}
     />
@@ -923,6 +929,7 @@ function VisitBookingPanel({
   initialStartTime,
   initialEndTime,
   initialTab,
+  initialOrderView,
   initialOrderMaterialId,
   telegramMiniApp,
 }: {
@@ -936,11 +943,15 @@ function VisitBookingPanel({
   initialStartTime: string;
   initialEndTime: string;
   initialTab: TeacherTab;
+  initialOrderView: TeacherOrderView | null;
   initialOrderMaterialId: string;
   telegramMiniApp: boolean;
 }) {
   const storageKey = visitPendingKey("teacher", pendingScope);
   const [activeTab, setActiveTab] = useState(initialTab);
+  const [activeOrderView, setActiveOrderView] = useState<TeacherOrderView | null>(
+    initialOrderMaterialId ? "catalog" : initialOrderView,
+  );
   const [pendingOrderMaterialId, setPendingOrderMaterialId] = useState(initialOrderMaterialId);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const mobileMenuRef = useRef<HTMLElement | null>(null);
@@ -1005,24 +1016,38 @@ function VisitBookingPanel({
 
   const selectTeacherTab = useCallback((tab: TeacherTab, historyMode: "push" | "replace" = "push") => {
     setActiveTab(tab);
+    setActiveOrderView(null);
     setMobileMenuOpen(false);
     const href = teacherPortalHref(tab, telegramMiniApp, new URL(window.location.href));
     window.history[historyMode === "replace" ? "replaceState" : "pushState"]({}, "", href);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [telegramMiniApp]);
 
+  const selectTeacherOrderView = useCallback((view: TeacherOrderView, historyMode: "push" | "replace" = "push") => {
+    setActiveTab("orders");
+    setActiveOrderView(view);
+    setMobileMenuOpen(false);
+    const href = teacherOrderPortalHref(view, telegramMiniApp, new URL(window.location.href));
+    window.history[historyMode === "replace" ? "replaceState" : "pushState"]({}, "", href);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [telegramMiniApp]);
+
   const consumeInitialOrderMaterial = useCallback(() => {
     setPendingOrderMaterialId("");
+    setActiveOrderView("catalog");
     const url = new URL(window.location.href);
-    if (!url.searchParams.has("material")) return;
+    url.searchParams.set("tab", "orders");
+    url.searchParams.set("view", "catalog");
     url.searchParams.delete("material");
     window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
   }, []);
 
   useEffect(() => {
     function syncTabFromHistory() {
-      const tab = boundedTeacherTab(new URL(window.location.href).searchParams.get("tab"));
+      const url = new URL(window.location.href);
+      const tab = boundedTeacherTab(url.searchParams.get("tab"));
       setActiveTab(tab);
+      setActiveOrderView(tab === "orders" ? boundedTeacherOrderView(url.searchParams.get("view")) : null);
       setMobileMenuOpen(false);
     }
     window.addEventListener("popstate", syncTabFromHistory);
@@ -1284,7 +1309,26 @@ function VisitBookingPanel({
               <span><small>Персональний кабінет</small><strong>{teacherDisplayName}</strong></span>
             </div>
             <nav className={styles.teacherSidebarNav} aria-label="Розділи кабінету">
-              {TEACHER_TABS.map((tab) => (
+              {TEACHER_TABS.map((tab) => tab.id === "orders" ? (
+                <div className={styles.teacherNavGroup} key={tab.id}>
+                  <button
+                    type="button"
+                    aria-current={activeTab === tab.id && !activeOrderView ? "page" : undefined}
+                    aria-expanded={activeTab === "orders"}
+                    aria-controls="teacher-order-sidebar-choices"
+                    onClick={() => selectTeacherTab("orders")}
+                  >
+                    <span className={styles.teacherNavIcon} aria-hidden="true"><SiteIcon name={tab.icon} /></span>
+                    <span><strong>{tab.label}</strong><small>{tab.eyebrow}</small></span>
+                  </button>
+                  {activeTab === "orders" ? (
+                    <div id="teacher-order-sidebar-choices" className={styles.teacherOrderSidebarChoices}>
+                      <button type="button" aria-current={activeOrderView === "catalog" ? "page" : undefined} onClick={() => selectTeacherOrderView("catalog")}><SiteIcon name="catalog" size={16} /> Знайдіть матеріали</button>
+                      <button type="button" aria-current={activeOrderView === "history" ? "page" : undefined} onClick={() => selectTeacherOrderView("history")}><SiteIcon name="requests" size={16} /> Історія замовлень</button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
                 <button
                   key={tab.id}
                   type="button"
@@ -1337,7 +1381,7 @@ function VisitBookingPanel({
                 bookings={activeBookings}
                 loading={loading}
                 onOpenVisits={() => selectTeacherTab("visits")}
-                onOpenOrders={() => selectTeacherTab("orders")}
+                onOpenOrders={() => selectTeacherOrderView("catalog")}
                 onOpenAcquisition={() => selectTeacherTab("acquisition")}
                 onOpenLoans={() => selectTeacherTab("loans")}
               />
@@ -1414,7 +1458,7 @@ function VisitBookingPanel({
             </CollapsibleListSection>
             </> : null}
 
-            {activeTab === "orders" ? <TeacherOrdersPanel key={pendingScope} pendingScope={pendingScope} initialMaterialId={pendingOrderMaterialId} onInitialMaterialConsumed={consumeInitialOrderMaterial} /> : null}
+            {activeTab === "orders" ? <TeacherOrdersPanel key={pendingScope} pendingScope={pendingScope} view={activeOrderView} onViewChange={selectTeacherOrderView} onChoose={() => selectTeacherTab("orders")} initialMaterialId={pendingOrderMaterialId} onInitialMaterialConsumed={consumeInitialOrderMaterial} /> : null}
             {activeTab === "acquisition" ? <TeacherAcquisitionPanel /> : null}
             {activeTab === "loans" ? <TeacherLoansPanel /> : null}
             {activeTab === "notifications" ? <TeacherNotificationsPanel pendingScope={pendingScope} /> : null}
@@ -1710,21 +1754,28 @@ function TeacherOverview({
   const [curatorBusy, setCuratorBusy] = useState(false);
   const [profileNotice, setProfileNotice] = useState("");
   const [profileNoticeTone, setProfileNoticeTone] = useState<"success" | "error">("success");
+  const galleryPhotoInputRef = useRef<HTMLInputElement>(null);
+  const subjectPositionInputRef = useRef<HTMLInputElement>(null);
+  const primaryLocationSelectRef = useRef<HTMLSelectElement>(null);
+  const curatorClassSelectRef = useRef<HTMLSelectElement>(null);
 
-  function toggleProfileEditor() {
+  function openProfileEditor(target?: "subject" | "room" | "curator") {
     if (!profile) return;
-    if (editingProfile) {
-      setEditingProfile(false);
-      return;
+    if (!editingProfile) {
+      setFullName(profile.fullName);
+      setSubjectPosition(profile.subjectPosition);
+      setPrimaryLocationId(profile.primaryLocation?.id ?? "");
+      setServiceContact(profile.serviceContact);
+      setCuratorClassYearId(profile.pendingCuratorRequest?.requestedClassYearId ?? profile.curatedClasses[0]?.id ?? "");
+      setCuratorNote("");
+      setEditingProfile(true);
     }
-    setFullName(profile.fullName);
-    setSubjectPosition(profile.subjectPosition);
-    setPrimaryLocationId(profile.primaryLocation?.id ?? "");
-    setServiceContact(profile.serviceContact);
-    setCuratorClassYearId(profile.pendingCuratorRequest?.requestedClassYearId ?? profile.curatedClasses[0]?.id ?? "");
-    setCuratorNote("");
-    setEditingProfile(true);
     setProfileNotice("");
+    window.setTimeout(() => {
+      if (target === "subject") subjectPositionInputRef.current?.focus();
+      if (target === "room") primaryLocationSelectRef.current?.focus();
+      if (target === "curator") curatorClassSelectRef.current?.focus();
+    }, 0);
   }
 
   async function submitCuratorRequest(event: FormEvent<HTMLFormElement>) {
@@ -1823,7 +1874,7 @@ function TeacherOverview({
   }
 
   async function uploadPhoto(file: File | null) {
-    if (!file || !profile || photoBusy) return;
+    if (!file || !profile || photoBusy || profileBusy) return;
     setPhotoBusy(true);
     setProfileNotice("");
     try {
@@ -1839,13 +1890,14 @@ function TeacherOverview({
     } catch (error) {
       setProfileNotice(errorMessage(error));
       setProfileNoticeTone("error");
+      if (error instanceof VisitApiError && error.status === 409) await onProfileReload();
     } finally {
       setPhotoBusy(false);
     }
   }
 
   async function deletePhoto() {
-    if (!profile?.photoUrl || photoBusy || !window.confirm("Видалити фото профілю?")) return;
+    if (!profile?.photoUrl || photoBusy || profileBusy || !window.confirm("Видалити фото профілю?")) return;
     setPhotoBusy(true);
     setProfileNotice("");
     try {
@@ -1859,6 +1911,7 @@ function TeacherOverview({
     } catch (error) {
       setProfileNotice(errorMessage(error));
       setProfileNoticeTone("error");
+      if (error instanceof VisitApiError && error.status === 409) await onProfileReload();
     } finally {
       setPhotoBusy(false);
     }
@@ -1868,47 +1921,54 @@ function TeacherOverview({
     <section className={styles.overviewGrid} aria-label="Огляд кабінету">
       <article className={`${styles.card} ${styles.welcomeCard}`}>
         <div className={styles.profileSummary}>
-          <div className={styles.profilePortrait}>
+          <button
+            className={styles.profilePortrait}
+            type="button"
+            aria-label="Змінити фото профілю"
+            aria-controls="teacher-profile-photo-actions"
+            disabled={!profile || photoBusy || profileBusy}
+            onClick={() => galleryPhotoInputRef.current?.click()}
+          >
             <TeacherAvatar className={styles.profilePortraitAvatar} fullName={teacherName} photoUrl={profile?.photoUrl} />
-          </div>
+          </button>
           <div className={styles.profileDetails}>
             <span>Підтверджений профіль</span>
             <h2>{teacherName}</h2>
             {profileLoading ? <p>Оновлюємо відомості…</p> : profile ? (
               <dl>
-                <div><dt>Предмет / посада</dt><dd>{profile.subjectPosition || "Не вказано"}</dd></div>
-                <div><dt>Основний кабінет</dt><dd>{profile.primaryLocation?.name || "Не вказано"}</dd></div>
-                <div><dt>Куратор класу</dt><dd>{profile.curatedClasses.length
+                <div><dt>Предмет / посада</dt><dd><button className={styles.profileInlineEdit} type="button" aria-label="Редагувати предмет або посаду" aria-expanded={editingProfile} aria-controls="teacher-profile-editor" onClick={() => openProfileEditor("subject")}><span>{profile.subjectPosition || "Не вказано"}</span><SiteIcon name="edit" size={15} /></button></dd></div>
+                <div><dt>Основний кабінет</dt><dd><button className={styles.profileInlineEdit} type="button" aria-label="Редагувати основний кабінет" aria-expanded={editingProfile} aria-controls="teacher-profile-editor" onClick={() => openProfileEditor("room")}><span>{profile.primaryLocation?.name || "Не вказано"}</span><SiteIcon name="edit" size={15} /></button></dd></div>
+                <div><dt>Куратор класу</dt><dd><button className={styles.profileInlineEdit} type="button" aria-label="Редагувати кураторський клас" aria-expanded={editingProfile} aria-controls="teacher-profile-editor" onClick={() => openProfileEditor("curator")}><span>{profile.curatedClasses.length
                   ? profile.curatedClasses.map((item) => `${item.className}${item.location?.name ? ` · ${item.location.name}` : ""}`).join(", ")
-                  : "Не призначено"}</dd></div>
+                  : "Не призначено"}</span><SiteIcon name="edit" size={15} /></button></dd></div>
                 {profile.serviceContact ? <div><dt>Мобільний номер</dt><dd>{profile.serviceContact}</dd></div> : null}
               </dl>
             ) : <p>Відомості профілю зараз недоступні.</p>}
           </div>
         </div>
-        <div className={styles.photoActions} aria-label="Фото профілю">
-          <label className={styles.quiet} aria-disabled={photoBusy || !profile}>
-            <input type="file" accept="image/jpeg,image/png,image/webp" capture="user" disabled={photoBusy || !profile} onChange={(event) => { const file = event.currentTarget.files?.[0] ?? null; event.currentTarget.value = ""; void uploadPhoto(file); }} />
+        <div id="teacher-profile-photo-actions" className={styles.photoActions} aria-label="Фото профілю">
+          <label className={styles.quiet} aria-disabled={photoBusy || profileBusy || !profile}>
+            <input type="file" accept="image/jpeg,image/png,image/webp" capture="user" disabled={photoBusy || profileBusy || !profile} onChange={(event) => { const file = event.currentTarget.files?.[0] ?? null; event.currentTarget.value = ""; void uploadPhoto(file); }} />
             Зробити фото
           </label>
-          <label className={styles.quiet} aria-disabled={photoBusy || !profile}>
-            <input type="file" accept="image/jpeg,image/png,image/webp" disabled={photoBusy || !profile} onChange={(event) => { const file = event.currentTarget.files?.[0] ?? null; event.currentTarget.value = ""; void uploadPhoto(file); }} />
+          <label className={styles.quiet} aria-disabled={photoBusy || profileBusy || !profile}>
+            <input ref={galleryPhotoInputRef} type="file" accept="image/jpeg,image/png,image/webp" disabled={photoBusy || profileBusy || !profile} onChange={(event) => { const file = event.currentTarget.files?.[0] ?? null; event.currentTarget.value = ""; void uploadPhoto(file); }} />
             Обрати з галереї
           </label>
-          {profile?.photoUrl ? <button className={styles.danger} type="button" disabled={photoBusy} onClick={() => void deletePhoto()}>Видалити фото</button> : null}
-          {profile ? <button className={styles.quiet} type="button" disabled={profileBusy || photoBusy} onClick={toggleProfileEditor}>{editingProfile ? "Закрити редагування" : "Редагувати інформацію"}</button> : null}
+          {profile?.photoUrl ? <button className={styles.danger} type="button" disabled={photoBusy || profileBusy} onClick={() => void deletePhoto()}>Видалити фото</button> : null}
+          {profile ? <button className={styles.quiet} type="button" disabled={profileBusy || photoBusy} onClick={() => editingProfile ? setEditingProfile(false) : openProfileEditor()}>{editingProfile ? "Закрити редагування" : "Редагувати інформацію"}</button> : null}
         </div>
         {editingProfile && profile ? (
-          <div className={styles.teacherProfileEditor}>
+          <div id="teacher-profile-editor" className={styles.teacherProfileEditor}>
             <form className={styles.teacherProfileForm} onSubmit={saveProfile}>
               <label>Прізвище та ім’я
                 <input required minLength={3} maxLength={120} value={fullName} onChange={(event) => setFullName(event.currentTarget.value)} placeholder="Прізвище Ім’я По батькові" />
               </label>
               <label>Предмет / посада
-                <input maxLength={160} value={subjectPosition} onChange={(event) => setSubjectPosition(event.currentTarget.value)} placeholder="Наприклад, учитель математики" />
+                <input ref={subjectPositionInputRef} maxLength={160} value={subjectPosition} onChange={(event) => setSubjectPosition(event.currentTarget.value)} placeholder="Наприклад, учитель математики" />
               </label>
               <label>Основний кабінет
-                <select value={primaryLocationId} onChange={(event) => setPrimaryLocationId(event.currentTarget.value)}>
+                <select ref={primaryLocationSelectRef} value={primaryLocationId} onChange={(event) => setPrimaryLocationId(event.currentTarget.value)}>
                   <option value="">Не вказано</option>
                   {profile.options.locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
                 </select>
@@ -1928,7 +1988,7 @@ function TeacherOverview({
                 <small>Щоб не порушити облік виданих класу матеріалів, зміну підтверджує бібліотекар.</small>
               </div>
               <label>Клас
-                <select required value={curatorClassYearId} onChange={(event) => setCuratorClassYearId(event.currentTarget.value)}>
+                <select ref={curatorClassSelectRef} required value={curatorClassYearId} onChange={(event) => setCuratorClassYearId(event.currentTarget.value)}>
                   <option value="">Оберіть клас</option>
                   {profile.options.curatorClasses.map((item) => {
                     const assignedToOther = Boolean(item.assignedTeacherName && item.assignedTeacherName !== profile.fullName);
@@ -2114,10 +2174,16 @@ function teacherInitials(fullName: string): string {
 
 function TeacherOrdersPanel({
   pendingScope,
+  view,
+  onViewChange,
+  onChoose,
   initialMaterialId,
   onInitialMaterialConsumed,
 }: {
   pendingScope: string;
+  view: TeacherOrderView | null;
+  onViewChange: (view: TeacherOrderView, historyMode?: "push" | "replace") => void;
+  onChoose: () => void;
   initialMaterialId: string;
   onInitialMaterialConsumed: () => void;
 }) {
@@ -2208,6 +2274,7 @@ function TeacherOrdersPanel({
   }, [historyQuery]);
 
   useEffect(() => {
+    if (view !== "catalog" && !initialMaterialId) return;
     const timer = window.setTimeout(() => {
       const restored = readTeacherCatalogFilters(window.sessionStorage, catalogStorageKey);
       setCatalogFilters(restored);
@@ -2215,22 +2282,26 @@ function TeacherOrdersPanel({
       setCatalogReady(true);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [catalogStorageKey]);
+  }, [catalogStorageKey, initialMaterialId, view]);
 
   useEffect(() => {
-    if (!catalogReady) return;
+    if (!catalogReady || view !== "catalog") return;
     writeTeacherCatalogFilters(window.sessionStorage, catalogStorageKey, catalogFilters);
     const timer = window.setTimeout(() => setCommittedCatalogFilters(catalogFilters), 280);
     return () => window.clearTimeout(timer);
-  }, [catalogFilters, catalogReady, catalogStorageKey]);
+  }, [catalogFilters, catalogReady, catalogStorageKey, view]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setPending(readPortalPendingIntent<OrderPendingIntent>(window.sessionStorage, storageKey, ["order-create", "order-cancel"]));
-      void loadRequests();
+      const restored = readPortalPendingIntent<OrderPendingIntent>(window.sessionStorage, storageKey, ["order-create", "order-cancel"]);
+      setPending(restored);
+      if (restored && view === null) {
+        onViewChange(restored.kind === "order-create" ? "catalog" : "history", "replace");
+      }
+      if (view === "history" || restored?.kind === "order-cancel") void loadRequests();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [loadRequests, storageKey]);
+  }, [loadRequests, onViewChange, storageKey, view]);
 
   const loadCatalog = useCallback(async (cursor = "") => {
     const loadId = ++catalogLoadRef.current;
@@ -2270,7 +2341,7 @@ function TeacherOrdersPanel({
   }, [committedCatalogFilters]);
 
   useEffect(() => {
-    if (!catalogReady) return;
+    if (!catalogReady || view !== "catalog") return;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       try {
@@ -2290,16 +2361,16 @@ function TeacherOrdersPanel({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [catalogReady]);
+  }, [catalogReady, view]);
 
   useEffect(() => {
-    if (!catalogReady) return;
+    if (!catalogReady || view !== "catalog") return;
     const timer = window.setTimeout(() => void loadCatalog(), 0);
     return () => window.clearTimeout(timer);
-  }, [catalogReady, catalogRefreshVersion, loadCatalog]);
+  }, [catalogReady, catalogRefreshVersion, loadCatalog, view]);
 
   useEffect(() => {
-    if (!catalogReady || !initialMaterialId || initialMaterialApplied.current) return;
+    if (view !== "catalog" || !catalogReady || !initialMaterialId || initialMaterialApplied.current) return;
     initialMaterialApplied.current = true;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
@@ -2333,7 +2404,7 @@ function TeacherOrdersPanel({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [catalogReady, initialMaterialId, onInitialMaterialConsumed]);
+  }, [catalogReady, initialMaterialId, onInitialMaterialConsumed, view]);
 
   useEffect(() => {
     if (!selectedDetail) return;
@@ -2559,10 +2630,41 @@ function TeacherOrdersPanel({
     catalogFilters.availableOnly ? "available" : "",
   ].filter(Boolean).length;
   const catalogFound = catalogPage?.total;
+  if (!view) {
+    return (
+      <section className={styles.orderChooser} aria-labelledby="orders-title">
+        {pending ? <div className={styles.pending} role="status"><span>Результат попередньої дії із замовленням не підтверджено.</span><button type="button" onClick={() => void sendOrderIntent(pending)} disabled={submitting}>Перевірити результат</button></div> : null}
+        {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
+        <div className={`${styles.card} ${styles.orderChooserCard}`}>
+          <div className={styles.cardHeading}><div><span>Оберіть потрібну дію</span><h2 id="orders-title">Замовлення матеріалів</h2></div></div>
+          <p>Спочатку оберіть: знайти матеріали для нового замовлення чи переглянути вже надіслані заявки.</p>
+          <div className={styles.orderChooserGrid}>
+            <button type="button" onClick={() => onViewChange("catalog")}>
+              <span aria-hidden="true"><SiteIcon name="catalog" size={24} /></span>
+              <strong>Знайдіть матеріали</strong>
+              <small>Пошук у фонді, кошик і нове замовлення</small>
+              <SiteIcon name="next" size={18} />
+            </button>
+            <button type="button" onClick={() => onViewChange("history")}>
+              <span aria-hidden="true"><SiteIcon name="requests" size={24} /></span>
+              <strong>Історія замовлень</strong>
+              <small>Статуси, скасування та приховані записи</small>
+              <SiteIcon name="next" size={18} />
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
   return (
-    <section aria-labelledby="orders-title">
+    <section aria-label="Замовлення матеріалів">
       {pending ? <div className={styles.pending} role="status"><span>Результат попередньої дії із замовленням не підтверджено.</span><button type="button" onClick={() => void sendOrderIntent(pending)} disabled={submitting}>Перевірити результат</button></div> : null}
       {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
+      <nav className={styles.orderSubnav} aria-label="Підрозділи замовлень">
+        <button type="button" onClick={() => onViewChange(view === "catalog" ? "history" : "catalog")}><SiteIcon name={view === "catalog" ? "requests" : "catalog"} size={17} /> {view === "catalog" ? "Історія замовлень" : "Знайдіть матеріали"}</button>
+        <button type="button" onClick={onChoose}><SiteIcon name="previous" size={17} /> До вибору</button>
+      </nav>
+      {view === "catalog" ? <>
       <div className={styles.orderLayout}>
       <div className={styles.card}>
         <div className={styles.cardHeading}><div><span>Крок 1 · каталог фонду</span><h2 id="orders-title">Знайдіть матеріали</h2></div></div>
@@ -2683,6 +2785,8 @@ function TeacherOrdersPanel({
       <button className={styles.mobileCartBar} type="button" onClick={() => setCartOpen(true)} disabled={!cartRows.length} aria-expanded={cartOpen}>
         <span><SiteIcon name="orders" size={18} /><strong>Кошик</strong><small>{cartRows.length} поз. · {cartQuantity} прим.</small></span><b>Відкрити</b>
       </button>
+      </> : null}
+      {view === "history" ? (
       <CollapsibleListSection className={`${styles.card} ${styles.requestHistory}`} flatOnMobile titleId="request-history-title" eyebrow="Лише для вас" title="Історія замовлень" actions={<button className={styles.quiet} type="button" onClick={() => void loadRequests()} disabled={historyLoading || historyLoadingMore || submitting}><SiteIcon name="refresh" size={18} /> Оновити</button>}>
         <div className={styles.historyToolbar}>
           <label className={styles.historySearch}>Пошук
@@ -2725,6 +2829,7 @@ function TeacherOrdersPanel({
         ))}</div> : <p className={styles.empty}>Замовлень ще немає.</p>}
         {requestPage?.hasMore && requestPage.nextCursor ? <button className={styles.loadMore} type="button" onClick={() => void loadRequests(false, requestPage.nextCursor)} disabled={historyLoading || historyLoadingMore || submitting}>{historyLoadingMore ? "Завантажуємо…" : "Завантажити ще"}</button> : null}
       </CollapsibleListSection>
+      ) : null}
     </section>
   );
 }

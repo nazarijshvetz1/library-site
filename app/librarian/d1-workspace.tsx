@@ -7,6 +7,7 @@ import {
   type KeyboardEvent,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -16,6 +17,7 @@ import {
   buildCatalogSearchUrl,
   clearPendingClassCirculationIntent as clearStoredClassCirculationIntent,
   editDraftToChanges,
+  filterTeachersByFullName,
   gradeLabel,
   holdingKey,
   type CatalogSearchFilters,
@@ -174,6 +176,8 @@ type ApiFailure = {
 type LibraryTeacher = {
   id: string;
   fullName: string;
+  subjectPosition: string;
+  primaryLocation: { id: string; name: string } | null;
 };
 
 type LibraryLocation = {
@@ -238,6 +242,7 @@ type OpenLoanItem = {
   materialYear: number | null;
   materialIsbn: string;
   coverUrl: string;
+  thumbnailUrl: string;
   sourceLocationId: string;
   sourceLocationName: string;
   condition: string;
@@ -336,7 +341,9 @@ type OpenClassLoanItem = {
   classLoanItemId: string;
   materialId: string;
   materialTitle: string;
+  materialAuthor: string;
   materialYear: number | null;
+  thumbnailUrl: string;
   sourceLocationId: string;
   sourceLocationName: string;
   condition: CopyCondition;
@@ -4177,7 +4184,15 @@ function LoanIssueForm({
       && holding.locationType !== "service"
       && holding.quantity > 0,
   );
-  const [teacherUserId, setTeacherUserId] = useState(teachers[0]?.id || "");
+  const [teacherUserId, setTeacherUserId] = useState("");
+  const [teacherQuery, setTeacherQuery] = useState("");
+  const [teacherSuggestionsOpen, setTeacherSuggestionsOpen] = useState(false);
+  const [activeTeacherSuggestion, setActiveTeacherSuggestion] = useState(-1);
+  const teacherListboxId = useId();
+  const teacherInputId = useId();
+  const teacherSuggestions = filterTeachersByFullName(teachers, teacherQuery, 8);
+  const teacherSuggestionsVisible = teacherSuggestionsOpen && teacherSuggestions.length > 0;
+  const selectedTeacher = teachers.find((teacher) => teacher.id === teacherUserId) ?? null;
   const [sourceKey, setSourceKey] = useState(() => availableHoldings[0] ? holdingKey(availableHoldings[0]) : "");
   const source = availableHoldings.find((holding) => holdingKey(holding) === sourceKey) ?? null;
   const [quantity, setQuantity] = useState("1");
@@ -4189,6 +4204,49 @@ function LoanIssueForm({
   const [message, setMessage] = useState("");
   const [success, setSuccess] = useState(false);
   const issueInFlightRef = useRef(false);
+
+  function selectTeacher(teacher: LibraryTeacher) {
+    setTeacherUserId(teacher.id);
+    setTeacherQuery(teacher.fullName);
+    setTeacherSuggestionsOpen(false);
+    setActiveTeacherSuggestion(-1);
+  }
+
+  function handleTeacherKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      if (teacherSuggestionsOpen) event.preventDefault();
+      setTeacherSuggestionsOpen(false);
+      setActiveTeacherSuggestion(-1);
+      return;
+    }
+    if (event.key === "Tab") {
+      setTeacherSuggestionsOpen(false);
+      setActiveTeacherSuggestion(-1);
+      return;
+    }
+    if (!teacherSuggestions.length) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setTeacherSuggestionsOpen(true);
+      setActiveTeacherSuggestion((current) => (current + 1) % teacherSuggestions.length);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setTeacherSuggestionsOpen(true);
+      setActiveTeacherSuggestion((current) => current <= 0 ? teacherSuggestions.length - 1 : current - 1);
+      return;
+    }
+    if (event.key === "Enter" && teacherSuggestionsVisible) {
+      const teacher = teacherSuggestions[activeTeacherSuggestion] ?? (
+        teacherSuggestions.length === 1 ? teacherSuggestions[0] : null
+      );
+      if (teacher) {
+        event.preventDefault();
+        selectTeacher(teacher);
+      }
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -4255,13 +4313,82 @@ function LoanIssueForm({
 
       {availableHoldings.length ? (
         <div className={styles.formGrid}>
-          <EditField label="Учитель" required wide>
-            <select value={teacherUserId} onChange={(event) => setTeacherUserId(event.target.value)} required>
-              {teachers.map((teacher) => (
-                <option key={teacher.id} value={teacher.id}>{teacher.fullName}</option>
-              ))}
-            </select>
-          </EditField>
+          <div
+            className={`${styles.fieldWide} ${styles.teacherPicker}`}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) {
+                setTeacherSuggestionsOpen(false);
+                setActiveTeacherSuggestion(-1);
+              }
+            }}
+          >
+            <label htmlFor={teacherInputId}>Учитель <b aria-hidden="true">*</b></label>
+            <input
+              id={teacherInputId}
+              type="search"
+              role="combobox"
+              value={teacherQuery}
+              onChange={(event) => {
+                setTeacherQuery(event.target.value);
+                setTeacherUserId("");
+                setTeacherSuggestionsOpen(true);
+                setActiveTeacherSuggestion(-1);
+              }}
+              onFocus={() => setTeacherSuggestionsOpen(true)}
+              onKeyDown={handleTeacherKeyDown}
+              placeholder="Почніть вводити прізвище, ім’я або по батькові"
+              autoComplete="off"
+              required
+              aria-autocomplete="list"
+              aria-expanded={teacherSuggestionsVisible}
+              aria-controls={teacherListboxId}
+              aria-activedescendant={teacherSuggestionsVisible && activeTeacherSuggestion >= 0
+                ? `${teacherListboxId}-option-${activeTeacherSuggestion}`
+                : undefined}
+              aria-invalid={Boolean(teacherQuery.trim() && !teacherUserId)}
+              aria-describedby={`${teacherListboxId}-help`}
+            />
+            <span id={`${teacherListboxId}-help`} className={styles.teacherPickerHelp}>
+              Оберіть учителя з підказок, щоб оформити видачу.
+            </span>
+            {teacherSuggestionsVisible ? (
+              <div id={teacherListboxId} className={styles.teacherSuggestions} role="listbox" aria-label="Знайдені вчителі">
+                {teacherSuggestions.map((teacher, index) => (
+                  <button
+                    id={`${teacherListboxId}-option-${index}`}
+                    key={teacher.id}
+                    className={index === activeTeacherSuggestion ? styles.teacherSuggestionActive : styles.teacherSuggestion}
+                    type="button"
+                    role="option"
+                    aria-selected={index === activeTeacherSuggestion}
+                    onMouseEnter={() => setActiveTeacherSuggestion(index)}
+                    onClick={() => selectTeacher(teacher)}
+                  >
+                    <strong>{teacher.fullName}</strong>
+                    <small>{[
+                      teacher.subjectPosition || "Предмет або посаду не вказано",
+                      teacher.primaryLocation?.name || "Основний кабінет не вказано",
+                    ].join(" · ")}</small>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {teacherQuery.trim() && !teacherSuggestions.length ? (
+              <span className={styles.teacherPickerEmpty} role="status">Учителя не знайдено.</span>
+            ) : null}
+            {selectedTeacher ? (
+              <div className={styles.selectedTeacher} aria-live="polite">
+                <span aria-hidden="true">✓</span>
+                <div>
+                  <strong>{selectedTeacher.fullName}</strong>
+                  <small>{[
+                    selectedTeacher.subjectPosition || "Предмет або посаду не вказано",
+                    selectedTeacher.primaryLocation?.name || "Основний кабінет не вказано",
+                  ].join(" · ")}</small>
+                </div>
+              </div>
+            ) : null}
+          </div>
           <EditField label="Звідки видати" required wide>
             <select value={sourceKey} onChange={(event) => setSourceKey(event.target.value)} required>
               {availableHoldings.map((holding) => (
@@ -5808,9 +5935,11 @@ function ClassReturnForm({
                     onChange={(event) => updateRow(item.classLoanItemId, { selected: event.target.checked })}
                   />
                 </label>
+                <ReturnMaterialCover item={item} />
                 <div>
                   <strong>{item.materialTitle}</strong>
-                  <small>{[item.materialId, item.materialYear, item.sourceLocationName].filter(Boolean).join(" · ")}</small>
+                  <small>{[item.materialAuthor, item.materialYear].filter(Boolean).join(" · ")}</small>
+                  <small>{[item.materialId, item.sourceLocationName].filter(Boolean).join(" · ")}</small>
                   <small>Видано {item.quantityIssued} · уже повернено {item.quantityReturned} · залишилося {item.quantityOutstanding}</small>
                 </div>
                 <label>
@@ -5904,6 +6033,22 @@ function Cover({ material }: { material: CatalogMaterial }) {
         <img src={material.thumbnailUrl} alt="" loading="lazy" />
       ) : (
         <span aria-hidden="true">Б</span>
+      )}
+    </span>
+  );
+}
+
+function ReturnMaterialCover({
+  item,
+}: {
+  item: Pick<OpenLoanItem, "materialTitle" | "thumbnailUrl">;
+}) {
+  return (
+    <span className={styles.returnCover}>
+      {item.thumbnailUrl ? (
+        <img src={item.thumbnailUrl} alt={`Обкладинка: ${item.materialTitle}`} loading="lazy" />
+      ) : (
+        <span aria-hidden="true">{item.materialTitle.slice(0, 1) || "Б"}</span>
       )}
     </span>
   );

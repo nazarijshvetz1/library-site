@@ -3,8 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  boundedTeacherOrderView,
   boundedTeacherTab,
+  TEACHER_ORDER_VIEWS,
   TEACHER_PORTAL_TABS,
+  teacherOrderPortalHref,
   teacherPortalHref,
   teacherTelegramCabinetHref,
 } from "../app/teacher/_components/teacher-routes.ts";
@@ -24,6 +27,10 @@ test("teacher route helper keeps web and Telegram Mini App destinations bounded"
   assert.equal(boundedTeacherTab(["orders", "visits"]), "orders");
   assert.equal(boundedTeacherTab("unknown"), "overview");
   assert.equal(boundedTeacherTab(null), "overview");
+  assert.deepEqual([...TEACHER_ORDER_VIEWS], ["catalog", "history"]);
+  assert.equal(boundedTeacherOrderView("catalog"), "catalog");
+  assert.equal(boundedTeacherOrderView(["history", "catalog"]), "history");
+  assert.equal(boundedTeacherOrderView("unknown"), null);
 });
 
 test("Telegram launch target preserves only a bounded order material", () => {
@@ -44,9 +51,20 @@ test("Telegram launch target preserves only a bounded order material", () => {
 test("teacher route helper preserves only parameters relevant to the selected section", () => {
   const current = new URL("https://library.example/teacher?material=CAT-0195&date=2026-09-01&start=09%3A00&end=09%3A40");
   const orders = new URL(teacherPortalHref("orders", false, current), current);
-  assert.equal(orders.searchParams.get("material"), "CAT-0195");
+  assert.equal(orders.searchParams.get("material"), null);
+  assert.equal(orders.searchParams.get("view"), null);
   assert.equal(orders.searchParams.get("date"), null);
   assert.equal(orders.searchParams.get("tab"), "orders");
+
+  const catalog = new URL(teacherOrderPortalHref("catalog", false, current), current);
+  assert.equal(catalog.searchParams.get("view"), "catalog");
+  assert.equal(catalog.searchParams.get("material"), "CAT-0195");
+  assert.equal(catalog.searchParams.get("date"), null);
+
+  const history = new URL(teacherOrderPortalHref("history", true, current), current);
+  assert.equal(history.pathname, "/teacher/telegram/cabinet");
+  assert.equal(history.searchParams.get("view"), "history");
+  assert.equal(history.searchParams.get("material"), null);
 
   const visits = new URL(teacherPortalHref("visits", true, current), current);
   assert.equal(visits.pathname, "/teacher/telegram/cabinet");
@@ -74,6 +92,10 @@ test("teacher workspace has premium responsive navigation and accessible mobile 
   assert.match(workspace, /const dialogRef = useRef<HTMLElement \| null>\(null\)/u);
   assert.match(workspace, /window\.history\[historyMode === "replace" \? "replaceState" : "pushState"\]/u);
   assert.match(workspace, /window\.addEventListener\("popstate", syncTabFromHistory\)/u);
+  assert.match(workspace, /boundedTeacherOrderView\(url\.searchParams\.get\("view"\)\)/u);
+  assert.match(workspace, /aria-controls="teacher-order-sidebar-choices"/u);
+  assert.match(workspace, /Знайдіть матеріали/u);
+  assert.match(workspace, /Історія замовлень/u);
   assert.match(workspace, /window\.matchMedia\("\(min-width: 901px\)"\)/u);
   assert.match(workspace, /if \(event\.matches\) setMobileMenuOpen\(false\)/u);
   assert.match(workspace, /teacherPortalHref\(tab, telegramMiniApp/u);
