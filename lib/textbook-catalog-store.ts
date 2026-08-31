@@ -74,6 +74,7 @@ export type TextbookCandidate = {
   publicationYear: number | null;
   subject: string;
   publisher: string;
+  publicationType: string;
   classFrom: number | null;
   classTo: number | null;
   coverUrl: string;
@@ -136,7 +137,6 @@ export async function listPublicTextbooks(
       AND ta.status = 'published'
       AND m.status = 'active'
       AND m.archived_at IS NULL
-      AND trim(m.publication_type) = 'Підручник'
       AND ml.kind = 'ebook'
       AND ml.is_public = 1
       AND ml.status = 'active'
@@ -451,6 +451,7 @@ async function listCandidates(
       m.publication_year,
       m.subject,
       m.publisher,
+      m.publication_type,
       m.class_from,
       m.class_to,
       (
@@ -474,18 +475,22 @@ async function listCandidates(
     LEFT JOIN material_cover_assets c ON c.material_id = m.id AND c.status = 'ready'
     WHERE m.status = 'active'
       AND m.archived_at IS NULL
-      AND trim(m.publication_type) = 'Підручник'
-      AND m.class_from IS NOT NULL
-      AND m.class_to IS NOT NULL
-      AND ? BETWEEN m.class_from AND m.class_to
       AND (m.search_text LIKE ? OR lower(m.id) LIKE ?)
       AND NOT EXISTS (
         SELECT 1 FROM textbook_assignments ta
         WHERE ta.academic_year_id = ? AND ta.grade = ? AND ta.material_id = m.id
       )
-    ORDER BY m.sort_title ASC, m.id ASC
+    ORDER BY
+      CASE
+        WHEN m.class_from IS NOT NULL AND m.class_to IS NOT NULL
+          AND ? BETWEEN m.class_from AND m.class_to THEN 0
+        WHEN m.class_from IS NULL AND m.class_to IS NULL THEN 1
+        ELSE 2
+      END,
+      m.sort_title ASC,
+      m.id ASC
     LIMIT 30
-  `).bind(grade, like, `%${normalized.toLocaleLowerCase("uk-UA")}%`, academicYearId, grade).all<Row>();
+  `).bind(like, `%${normalized.toLocaleLowerCase("uk-UA")}%`, academicYearId, grade, grade).all<Row>();
   return (response.results ?? []).map((row) => {
     const materialId = boundedText(row.material_id, 64);
     return {
@@ -496,6 +501,7 @@ async function listCandidates(
       publicationYear: nullableYear(row.publication_year),
       subject: boundedText(row.subject, 240),
       publisher: boundedText(row.publisher, 240),
+      publicationType: boundedText(row.publication_type, 120),
       classFrom: nullableGrade(row.class_from),
       classTo: nullableGrade(row.class_to),
       coverUrl: coverUrl(row, materialId),
@@ -616,17 +622,11 @@ async function requireEligibleMaterial(
   if (boundedText(row.status, 20) !== "active" || row.archived_at) {
     throw new TextbookCatalogError("textbook_not_eligible", 409, "Архівний матеріал не можна опублікувати.");
   }
-  if (boundedText(row.publication_type, 120).trim() !== "Підручник") {
-    throw new TextbookCatalogError("textbook_not_eligible", 409, "До учнівської бази можна додавати лише підручники.");
-  }
-  const classFrom = nullableGrade(row.class_from);
-  const classTo = nullableGrade(row.class_to);
-  if (classFrom === null || classTo === null) {
-    throw new TextbookCatalogError("textbook_grade_required", 409, "Спочатку вкажіть клас у картці підручника.");
-  }
-  if (grade < classFrom || grade > classTo) {
-    throw new TextbookCatalogError("textbook_grade_mismatch", 409, "Обраний клас не відповідає картці підручника.");
-  }
+  // The librarian curates the electronic shelf explicitly.  Every active
+  // fund card may therefore be assigned to a grade, even when an imported
+  // record has no publication type or class range yet.  The assignment — not
+  // imperfect legacy metadata — is the authoritative inclusion decision.
+  void grade;
   const activeResourceCount = nonNegativeInteger(row.active_resource_count);
   if (options.requireResource && activeResourceCount < 1) {
     throw new TextbookCatalogError("textbook_link_required", 409, "Спочатку додайте до картки активне публічне HTTPS-посилання типу «Електронна версія».");

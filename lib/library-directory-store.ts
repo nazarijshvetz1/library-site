@@ -15,9 +15,12 @@ export type LibraryLocation = {
 export type OpenLoanItem = {
   loanItemId: string;
   materialId: string;
+  materialCatalogNumber: number;
   materialTitle: string;
   materialAuthor: string;
   materialYear: number | null;
+  materialIsbn: string;
+  coverUrl: string;
   sourceLocationId: string;
   sourceLocationName: string;
   condition: string;
@@ -126,9 +129,15 @@ export async function listOpenLoans(
       l.version,
       li.id AS loan_item_id,
       li.material_id,
+      m.catalog_number AS material_catalog_number,
       m.title AS material_title,
       m.author AS material_author,
       m.publication_year AS material_year,
+      m.isbn_normalized AS material_isbn,
+      c.storage_provider AS cover_storage_provider,
+      c.storage_key AS cover_storage_key,
+      c.external_url AS cover_external_url,
+      c.sha256 AS cover_sha256,
       li.source_location_id,
       loc.name AS source_location_name,
       li.condition,
@@ -146,9 +155,10 @@ export async function listOpenLoans(
     JOIN users u ON u.id = l.teacher_user_id
     JOIN loan_items li ON li.loan_id = l.id
     JOIN materials m ON m.id = li.material_id
+    LEFT JOIN material_cover_assets c ON c.material_id = m.id AND c.status = 'ready'
     JOIN locations loc ON loc.id = li.source_location_id
     WHERE li.quantity_returned < li.quantity_issued
-    ORDER BY COALESCE(l.due_at, '9999-12-31') ASC, l.issued_at ASC,
+    ORDER BY l.issued_at DESC, COALESCE(l.due_at, '9999-12-31') ASC,
       l.id ASC, li.created_at ASC, li.id ASC
   `).bind(...bindings).all();
 
@@ -178,9 +188,12 @@ export async function listOpenLoans(
     loan.items.push({
       loanItemId,
       materialId,
+      materialCatalogNumber: nonNegativeInteger(row.material_catalog_number),
       materialTitle: boundedText(row.material_title, 500),
       materialAuthor: boundedText(row.material_author, 500),
       materialYear: nullableYear(row.material_year),
+      materialIsbn: boundedText(row.material_isbn, 40),
+      coverUrl: materialCoverUrl(row, materialId),
       sourceLocationId: boundedText(row.source_location_id, 64),
       sourceLocationName: boundedText(row.source_location_name, 240),
       condition: boundedText(row.condition, 80) || "unspecified",
@@ -320,4 +333,27 @@ function nullableYear(value: unknown): number | null {
   return Number.isSafeInteger(number) && number >= 1000 && number <= 9999
     ? number
     : null;
+}
+
+function materialCoverUrl(row: DirectoryRow, materialId: string): string {
+  const external = safeHttpsUrl(row.cover_external_url);
+  if (external) return external;
+  const provider = boundedText(row.cover_storage_provider, 40).toLowerCase();
+  const key = boundedText(row.cover_storage_key, 500);
+  if (provider !== "r2" || !key) return "";
+  const hash = /^[0-9a-f]{64}$/iu.test(String(row.cover_sha256 ?? ""))
+    ? `?v=${String(row.cover_sha256).slice(0, 12).toLowerCase()}`
+    : "";
+  return `/api/catalog-v2/covers/${encodeURIComponent(materialId)}${hash}`;
+}
+
+function safeHttpsUrl(value: unknown): string {
+  const candidate = boundedText(value, 2_000);
+  if (!candidate) return "";
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "https:" && !url.username && !url.password ? url.toString() : "";
+  } catch {
+    return "";
+  }
 }

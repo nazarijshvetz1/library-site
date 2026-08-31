@@ -29,7 +29,11 @@ import {
   todayInKyiv,
   writePendingClassCirculationIntent as writeStoredClassCirculationIntent,
 } from "@/lib/librarian-d1-client";
-import { normalizeCoverPhotoForUpload } from "@/lib/cover-client";
+import {
+  editCoverPhotoForUpload,
+  normalizeCoverPhotoForUpload,
+  type CoverPhotoEdit,
+} from "@/lib/cover-client";
 import { normalizeIsbn } from "@/lib/isbn";
 import {
   clearPendingInventoryIntent as clearStoredInventoryIntent,
@@ -228,8 +232,12 @@ type BookLookupEnvelope = {
 type OpenLoanItem = {
   loanItemId: string;
   materialId: string;
+  materialCatalogNumber: number;
   materialTitle: string;
+  materialAuthor: string;
   materialYear: number | null;
+  materialIsbn: string;
+  coverUrl: string;
   sourceLocationId: string;
   sourceLocationName: string;
   condition: string;
@@ -776,7 +784,7 @@ export default function D1LibrarianWorkspace({
     window.queueMicrotask(() => workspaceTitleRef.current?.focus());
   }
 
-  function clearMaterialSelection() {
+  const clearMaterialSelection = useCallback(() => {
     selectedIdRef.current = null;
     detailRequestRef.current += 1;
     setSelectedId(null);
@@ -784,8 +792,7 @@ export default function D1LibrarianWorkspace({
     setDetailState("idle");
     setDetailError("");
     setEditing(false);
-    if (MATERIAL_ACTION_IDS.has(tool as MaterialActionTool)) chooseTool("catalog");
-  }
+  }, []);
 
   const showCatalogSearch = tool !== "dashboard"
     && !isAcademicTool(tool)
@@ -795,6 +802,23 @@ export default function D1LibrarianWorkspace({
     && tool !== "contacts";
   const materialSelectionOpen = Boolean(selectedId)
     && (tool === "catalog" || tool === "class-issue" || MATERIAL_ACTION_IDS.has(tool as MaterialActionTool));
+  const materialModalCloseRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!materialSelectionOpen) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    document.body.style.overflow = "hidden";
+    window.queueMicrotask(() => materialModalCloseRef.current?.focus());
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") clearMaterialSelection();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+      window.queueMicrotask(() => previouslyFocused?.focus({ preventScroll: true }));
+    };
+  }, [clearMaterialSelection, materialSelectionOpen]);
 
   return (
     <LibrarianShell
@@ -875,14 +899,26 @@ export default function D1LibrarianWorkspace({
               />
             ) : null}
 
-            <section className={styles.actionPane}>
+            <div
+              className={materialSelectionOpen ? styles.materialModalBackdrop : styles.actionPaneHost}
+              role={materialSelectionOpen ? "presentation" : undefined}
+              onMouseDown={materialSelectionOpen ? (event) => {
+                if (event.target === event.currentTarget) clearMaterialSelection();
+              } : undefined}
+            >
+            <section
+              className={`${styles.actionPane} ${materialSelectionOpen ? styles.materialModalPanel : ""}`}
+              role={materialSelectionOpen ? "dialog" : undefined}
+              aria-modal={materialSelectionOpen || undefined}
+              aria-label={materialSelectionOpen ? "Картка матеріалу та доступні дії" : undefined}
+            >
               {materialSelectionOpen ? (
-                <button className={styles.backToResults} type="button" onClick={clearMaterialSelection}>
-                  <SiteIcon name="previous" size={17} /> Назад до результатів
+                <button ref={materialModalCloseRef} className={styles.backToResults} type="button" onClick={clearMaterialSelection}>
+                  <SiteIcon name="close" size={17} /> Закрити картку
                 </button>
               ) : null}
               {MATERIAL_ACTION_IDS.has(tool as MaterialActionTool) && detail ? (
-                <MaterialActionContext detail={detail} tool={tool as MaterialActionTool} onBack={() => chooseTool("catalog")} />
+                <MaterialActionContext detail={detail} tool={tool as MaterialActionTool} onBack={clearMaterialSelection} />
               ) : null}
               {tool === "catalog" ? (
                 <MaterialCard
@@ -1050,6 +1086,7 @@ export default function D1LibrarianWorkspace({
                 />
               ) : null}
             </section>
+            </div>
             {tool === "create" ? (
               <CatalogSearch
                 filters={filters}
@@ -1990,13 +2027,41 @@ function CoverPhotoField({
   disabled: boolean;
 }) {
   const [remoteUrl, setRemoteUrl] = useState("");
+  const [editorFile, setEditorFile] = useState<File | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorBusy, setEditorBusy] = useState(false);
+  const [editorError, setEditorError] = useState("");
+  const [sourcePreviewUrl, setSourcePreviewUrl] = useState("");
   const previewUrl = upload.previewUrl || currentUrl;
-  const pickerDisabled = disabled || upload.normalizing;
+  const pickerDisabled = disabled || upload.normalizing || editorBusy;
+
+  useEffect(() => () => {
+    if (sourcePreviewUrl) URL.revokeObjectURL(sourcePreviewUrl);
+  }, [sourcePreviewUrl]);
 
   function choosePhoto(input: HTMLInputElement) {
     const file = input.files?.[0] ?? null;
     input.value = "";
-    void upload.choose(file);
+    if (!file) return;
+    setEditorFile(file);
+    setSourcePreviewUrl(URL.createObjectURL(file));
+    setEditorError("");
+    setEditorOpen(true);
+  }
+
+  async function applyPhotoEdit(edit: CoverPhotoEdit) {
+    if (!editorFile) return;
+    setEditorBusy(true);
+    setEditorError("");
+    try {
+      const edited = await editCoverPhotoForUpload(editorFile, edit);
+      await upload.choose(edited);
+      setEditorOpen(false);
+    } catch (error) {
+      setEditorError(errorMessage(error));
+    } finally {
+      setEditorBusy(false);
+    }
   }
 
   return (
@@ -2035,6 +2100,12 @@ function CoverPhotoField({
               onChange={(event) => choosePhoto(event.currentTarget)}
             />
           </label>
+          {upload.file && editorFile ? (
+            <button type="button" className={styles.secondaryButton} disabled={pickerDisabled} onClick={() => {
+              setEditorError("");
+              setEditorOpen(true);
+            }}>Редагувати фото</button>
+          ) : null}
           {upload.file ? <button type="button" className={styles.secondaryButton} disabled={disabled} onClick={upload.clear}>Прибрати нове фото</button> : null}
         </div>
         <div className={styles.remoteCoverActions}>
@@ -2051,8 +2122,118 @@ function CoverPhotoField({
           </button>
         </div>
         <small className={styles.remoteCoverHint}>Для інших сайтів збережіть дозволене фото на пристрій і скористайтеся «Обрати фото».</small>
+        {editorError ? <InlineMessage tone="error">{editorError}</InlineMessage> : null}
       </div>
+      {editorOpen && editorFile && sourcePreviewUrl ? (
+        <CoverPhotoEditorModal
+          previewUrl={sourcePreviewUrl}
+          busy={editorBusy}
+          onApply={(edit) => void applyPhotoEdit(edit)}
+          onClose={() => {
+            if (!editorBusy) setEditorOpen(false);
+          }}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function CoverPhotoEditorModal({
+  previewUrl,
+  busy,
+  onApply,
+  onClose,
+}: {
+  previewUrl: string;
+  busy: boolean;
+  onApply: (edit: CoverPhotoEdit) => void;
+  onClose: () => void;
+}) {
+  const [rotation, setRotation] = useState<CoverPhotoEdit["rotation"]>(0);
+  const [zoom, setZoom] = useState(1);
+  const [offsetX, setOffsetX] = useState(0);
+  const [offsetY, setOffsetY] = useState(0);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeRef.current?.focus();
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [onClose]);
+
+  function rotate(direction: -90 | 90) {
+    setRotation((current) => {
+      const next = (current + direction + 360) % 360;
+      return next as CoverPhotoEdit["rotation"];
+    });
+  }
+
+  return (
+    <div className={styles.coverEditorBackdrop} role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget && !busy) onClose();
+    }}>
+      <section className={styles.coverEditor} role="dialog" aria-modal="true" aria-labelledby="cover-editor-title">
+        <header>
+          <div>
+            <small>Редактор фото</small>
+            <h3 id="cover-editor-title">Підготуйте обкладинку</h3>
+          </div>
+          <button ref={closeRef} type="button" disabled={busy} onClick={onClose} aria-label="Закрити редактор">×</button>
+        </header>
+        <div className={styles.coverEditorWorkspace}>
+          <div className={styles.coverEditorPreview}>
+            <img
+              src={previewUrl}
+              alt="Попередній перегляд кадрування"
+              style={{
+                transform: `translate(${offsetX * 18}%, ${offsetY * 18}%) rotate(${rotation}deg) scale(${zoom})`,
+              }}
+            />
+            <span aria-hidden="true" />
+          </div>
+          <div className={styles.coverEditorControls}>
+            <div className={styles.coverEditorRotate}>
+              <button type="button" disabled={busy} onClick={() => rotate(-90)}>↺ Повернути ліворуч</button>
+              <button type="button" disabled={busy} onClick={() => rotate(90)}>↻ Повернути праворуч</button>
+            </div>
+            <label>
+              <span>Масштаб</span>
+              <input type="range" min="1" max="2.5" step="0.05" value={zoom} disabled={busy} onChange={(event) => setZoom(Number(event.target.value))} />
+            </label>
+            <label>
+              <span>По горизонталі</span>
+              <input type="range" min="-1" max="1" step="0.05" value={offsetX} disabled={busy} onChange={(event) => setOffsetX(Number(event.target.value))} />
+            </label>
+            <label>
+              <span>По вертикалі</span>
+              <input type="range" min="-1" max="1" step="0.05" value={offsetY} disabled={busy} onChange={(event) => setOffsetY(Number(event.target.value))} />
+            </label>
+            <button type="button" className={styles.secondaryButton} disabled={busy} onClick={() => {
+              setRotation(0);
+              setZoom(1);
+              setOffsetX(0);
+              setOffsetY(0);
+            }}>Скинути</button>
+          </div>
+        </div>
+        <footer>
+          <button type="button" className={styles.secondaryButton} disabled={busy} onClick={onClose}>Скасувати</button>
+          <button type="button" className={styles.primaryButton} disabled={busy} onClick={() => onApply({ rotation, zoom, offsetX, offsetY })}>
+            {busy ? "Готуємо фото…" : "Застосувати фото"}
+          </button>
+        </footer>
+      </section>
+    </div>
   );
 }
 
@@ -4218,7 +4399,6 @@ function ClassIssueWorkspace({
     const frame = window.requestAnimationFrame(() => {
       const picker = materialPickerRef.current;
       if (!picker) return;
-      picker.scrollIntoView({ block: "start", behavior: "auto" });
       picker.focus({ preventScroll: true });
       lastFocusedMaterialIdRef.current = detail.id;
     });
@@ -4743,27 +4923,41 @@ function LoanReturnWorkspace({
   locations: LibraryLocation[];
   onSaved: () => Promise<void>;
 }) {
-  const [teacherFilter, setTeacherFilter] = useState("");
+  const [teacherQuery, setTeacherQuery] = useState("");
+  const [selectedTeacherId, setSelectedTeacherId] = useState("");
+  const [teacherPickerOpen, setTeacherPickerOpen] = useState(false);
   const [loans, setLoans] = useState<OpenLoan[]>([]);
-  const [selectedLoanId, setSelectedLoanId] = useState("");
-  const [state, setState] = useState<LoadState>("loading");
+  const [state, setState] = useState<LoadState>("idle");
   const [error, setError] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
   const [completionMessage, setCompletionMessage] = useState("");
+  const [completionTone, setCompletionTone] = useState<"error" | "success" | "info">("success");
+
+  const filteredTeachers = useMemo(() => {
+    const query = normalizeTeacherSearch(teacherQuery);
+    const tokens = query.split(" ").filter(Boolean);
+    return teachers
+      .filter((teacher) => {
+        const normalizedName = normalizeTeacherSearch(teacher.fullName);
+        return tokens.every((token) => normalizedName.includes(token));
+      })
+      .slice(0, 12);
+  }, [teacherQuery, teachers]);
+  const selectedTeacher = teachers.find((teacher) => teacher.id === selectedTeacherId) ?? null;
 
   useEffect(() => {
+    if (!selectedTeacherId) {
+      return undefined;
+    }
     const controller = new AbortController();
-    const params = new URLSearchParams({ limit: "100" });
-    if (teacherFilter) params.set("teacherUserId", teacherFilter);
+    const params = new URLSearchParams({ limit: "200", teacherUserId: selectedTeacherId });
     void apiJson<LoansEnvelope>(`/api/librarian/loans?${params}`, {
       signal: controller.signal,
     }).then((response) => {
-      setLoans(response.loans);
-      setSelectedLoanId((current) =>
-        response.loans.some((loan) => loan.loanId === current)
-          ? current
-          : response.loans[0]?.loanId || "",
-      );
+      setLoans([...response.loans].sort((left, right) => (
+        right.issuedAt.localeCompare(left.issuedAt)
+        || right.loanId.localeCompare(left.loanId)
+      )));
       setState("ready");
     }).catch((requestError) => {
       if (controller.signal.aborted) return;
@@ -4771,9 +4965,16 @@ function LoanReturnWorkspace({
       setError(errorMessage(requestError));
     });
     return () => controller.abort();
-  }, [reloadToken, teacherFilter]);
+  }, [reloadToken, selectedTeacherId]);
 
-  const selectedLoan = loans.find((loan) => loan.loanId === selectedLoanId) ?? null;
+  function selectTeacher(teacher: LibraryTeacher) {
+    setState("loading");
+    setError("");
+    setSelectedTeacherId(teacher.id);
+    setTeacherQuery(teacher.fullName);
+    setTeacherPickerOpen(false);
+    setCompletionMessage("");
+  }
 
   return (
     <div className={styles.returnCard}>
@@ -4781,62 +4982,105 @@ function LoanReturnWorkspace({
         <div>
           <p>Відкриті видачі</p>
           <h2>Прийняти повернення</h2>
-          <small>Знайдіть учителя й оберіть потрібну видачу.</small>
+          <small>Почніть вводити прізвище або ім’я. Після вибору побачите всі видані примірники одним списком.</small>
         </div>
         <button type="button" onClick={() => {
-          setState("loading");
-          setError("");
-          setReloadToken((value) => value + 1);
-        }} title="Оновити" aria-label="Оновити відкриті видачі"><SiteIcon name="refresh" size={18} /></button>
+          if (selectedTeacherId) {
+            setState("loading");
+            setError("");
+            setReloadToken((value) => value + 1);
+          }
+        }} disabled={!selectedTeacherId || state === "loading"} title="Оновити" aria-label="Оновити відкриті видачі"><SiteIcon name="refresh" size={18} /></button>
       </div>
 
-      <label className={styles.returnFilter}>
-        <span>Учитель</span>
-        <select value={teacherFilter} onChange={(event) => {
-          setState("loading");
-          setError("");
-          setCompletionMessage("");
-          setTeacherFilter(event.target.value);
-        }}>
-          <option value="">Усі вчителі з відкритими видачами</option>
-          {teachers.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.fullName}</option>)}
-        </select>
-      </label>
+      <div className={styles.returnTeacherPicker}>
+        <label htmlFor="return-teacher-search">Учитель</label>
+        <div className={styles.returnTeacherSearch}>
+          <SiteIcon name="search" size={18} />
+          <input
+            id="return-teacher-search"
+            type="search"
+            autoComplete="off"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={teacherPickerOpen}
+            aria-controls="return-teacher-options"
+            value={teacherQuery}
+            placeholder="Прізвище або ім’я"
+            onFocus={() => setTeacherPickerOpen(true)}
+            onBlur={() => window.setTimeout(() => setTeacherPickerOpen(false), 100)}
+            onChange={(event) => {
+              setTeacherQuery(event.target.value);
+              setTeacherPickerOpen(true);
+              if (selectedTeacherId) {
+                setSelectedTeacherId("");
+                setLoans([]);
+                setState("idle");
+              }
+              setCompletionMessage("");
+            }}
+          />
+          {teacherQuery ? (
+            <button type="button" onClick={() => {
+              setTeacherQuery("");
+              setSelectedTeacherId("");
+              setLoans([]);
+              setState("idle");
+              setTeacherPickerOpen(true);
+              setCompletionMessage("");
+            }} aria-label="Очистити пошук учителя">×</button>
+          ) : null}
+        </div>
+        {teacherPickerOpen ? (
+          <div id="return-teacher-options" className={styles.returnTeacherOptions} role="listbox">
+            {filteredTeachers.length ? filteredTeachers.map((teacher) => (
+              <button
+                key={teacher.id}
+                type="button"
+                role="option"
+                aria-selected={teacher.id === selectedTeacherId}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => selectTeacher(teacher)}
+              >
+                <span aria-hidden="true">{teacherInitials(teacher.fullName)}</span>
+                <strong>{teacher.fullName}</strong>
+              </button>
+            )) : <p>Збігів у довіднику немає.</p>}
+          </div>
+        ) : null}
+      </div>
 
+      {state === "idle" ? (
+        <div className={styles.returnPrompt}>
+          <SiteIcon name="teachers" size={24} />
+          <strong>Оберіть учителя</strong>
+          <span>Список відфільтровується під час введення.</span>
+        </div>
+      ) : null}
       {state === "loading" ? <PanelLoading /> : null}
       {state === "error" ? <InlineMessage tone="error">{error}</InlineMessage> : null}
-      {completionMessage ? <InlineMessage tone="success">{completionMessage}</InlineMessage> : null}
+      {completionMessage ? <InlineMessage tone={completionTone}>{completionMessage}</InlineMessage> : null}
       {state === "ready" && !loans.length ? (
         <div className={styles.noLoans}>
           <span aria-hidden="true"><SiteIcon name="success" size={20} /></span>
           <strong>Відкритих видач немає</strong>
-          <p>Для вибраного вчителя все повернено.</p>
+          <p>{selectedTeacher?.fullName || "Для вибраного вчителя"}: усе повернено.</p>
         </div>
       ) : null}
 
-      {loans.length ? (
-        <label className={styles.returnFilter}>
-          <span>Видача</span>
-          <select value={selectedLoanId} onChange={(event) => setSelectedLoanId(event.target.value)}>
-            {loans.map((loan) => (
-              <option key={loan.loanId} value={loan.loanId}>
-                {loan.teacherName} · видано {formatDate(loan.issuedAt)} · {loan.items.length} поз.
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
-
-      {selectedLoan ? (
+      {state === "ready" && selectedTeacher && loans.length ? (
         <LoanReturnForm
-          key={`${selectedLoan.loanId}-${selectedLoan.version}`}
-          loan={selectedLoan}
+          key={`${selectedTeacher.id}-${reloadToken}-${loans.map((loan) => `${loan.loanId}:${loan.version}`).join("|")}`}
+          teacher={selectedTeacher}
+          loans={loans}
           locations={locations}
           writesEnabled={writesEnabled}
-          onSaved={async (message) => {
+          onSaved={async (message, tone = "success") => {
             setCompletionMessage(message);
+            setCompletionTone(tone);
             await onSaved();
             setState("loading");
+            setError("");
             setReloadToken((value) => value + 1);
           }}
         />
@@ -4851,31 +5095,53 @@ type ReturnRow = {
   condition: string;
 };
 
+type ReturnableLoanItem = OpenLoanItem & {
+  loanId: string;
+  issuedAt: string;
+  dueAt: string | null;
+  loanVersion: number;
+};
+
 function LoanReturnForm({
-  loan,
+  teacher,
+  loans,
   locations,
   writesEnabled,
   onSaved,
 }: {
-  loan: OpenLoan;
+  teacher: LibraryTeacher;
+  loans: OpenLoan[];
   locations: LibraryLocation[];
   writesEnabled: boolean;
-  onSaved: (message: string) => Promise<void>;
+  onSaved: (message: string, tone?: "error" | "success" | "info") => Promise<void>;
 }) {
+  const items = useMemo<ReturnableLoanItem[]>(() => loans.flatMap((loan) => loan.items.map((item) => ({
+    ...item,
+    loanId: loan.loanId,
+    issuedAt: loan.issuedAt,
+    dueAt: loan.dueAt,
+    loanVersion: loan.version,
+  }))).sort((left, right) => (
+    right.issuedAt.localeCompare(left.issuedAt)
+    || left.materialTitle.localeCompare(right.materialTitle, "uk")
+    || left.loanItemId.localeCompare(right.loanItemId)
+  )), [loans]);
   const defaultLocationId = locations.find((location) => location.type === "library")?.id || locations[0]?.id || "";
   const [returnLocationId, setReturnLocationId] = useState(defaultLocationId);
   const [returnedAt, setReturnedAt] = useState(() => todayInKyiv());
   const [notes, setNotes] = useState("");
   const [rows, setRows] = useState<Record<string, ReturnRow>>(() => Object.fromEntries(
-    loan.items.map((item) => [item.loanItemId, {
+    items.map((item) => [item.loanItemId, {
       selected: true,
       quantity: String(item.quantityOutstanding),
       condition: item.condition || "unspecified",
     }]),
   ));
+  const [previewItemId, setPreviewItemId] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [success, setSuccess] = useState(false);
+  const returnInFlightRef = useRef(false);
 
   function updateRow(loanItemId: string, changes: Partial<ReturnRow>) {
     setRows((current) => ({
@@ -4884,40 +5150,61 @@ function LoanReturnForm({
     }));
   }
 
-  const selectedItems = loan.items.filter((item) => {
+  const selectedItems = items.filter((item) => {
     const row = rows[item.loanItemId];
     return row?.selected && Number(row.quantity) > 0;
   });
+  const previewItem = items.find((item) => item.loanItemId === previewItemId) ?? null;
+  const allSelected = items.length > 0 && selectedItems.length === items.length;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!writesEnabled || !returnLocationId || !selectedItems.length) return;
+    if (!writesEnabled || !returnLocationId || !selectedItems.length || returnInFlightRef.current) return;
+    returnInFlightRef.current = true;
     setSaving(true);
     setSuccess(false);
     setMessage("");
+    const byLoan = new Map<string, ReturnableLoanItem[]>();
+    for (const item of selectedItems) {
+      byLoan.set(item.loanId, [...(byLoan.get(item.loanId) ?? []), item]);
+    }
+    const groups = [...byLoan.entries()];
     try {
-      const response = await apiJson<MutationEnvelope<{ status: "open" | "closed" }>>(
-        "/api/librarian/loans/returns",
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            requestId: crypto.randomUUID(),
-            loanId: loan.loanId,
-            returnedAt,
-            notes: notes.trim() || null,
-            items: selectedItems.map((item) => ({
-              loanItemId: item.loanItemId,
-              quantity: Number(rows[item.loanItemId].quantity),
-              returnLocationId,
-              condition: rows[item.loanItemId].condition,
-            })),
-          }),
-        },
-      );
-      const resultMessage = response.result.status === "closed"
-        ? "Усю видачу повернено."
-        : "Часткове повернення збережено.";
+      const results = await Promise.allSettled(groups.map(([loanId, groupItems]) => (
+        apiJson<MutationEnvelope<{ status: "open" | "closed" }>>(
+          "/api/librarian/loans/returns",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              requestId: crypto.randomUUID(),
+              loanId,
+              returnedAt,
+              notes: notes.trim() || null,
+              items: groupItems.map((item) => ({
+                loanItemId: item.loanItemId,
+                quantity: Number(rows[item.loanItemId].quantity),
+                returnLocationId,
+                condition: rows[item.loanItemId].condition,
+              })),
+            }),
+          },
+        )
+      )));
+      const savedGroups = results.filter((result) => result.status === "fulfilled").length;
+      const firstFailure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (firstFailure) {
+        const failedMessage = errorMessage(firstFailure.reason);
+        const partialMessage = savedGroups
+          ? `Повернення збережено для ${savedGroups} із ${groups.length} видач. Не збережено: ${failedMessage}`
+          : failedMessage;
+        setMessage(partialMessage);
+        await onSaved(partialMessage, savedGroups ? "info" : "error");
+        return;
+      }
+      const resultMessage = selectedItems.length === items.length
+        ? `Повернення всіх ${selectedItems.length} позицій збережено.`
+        : `Повернення ${selectedItems.length} позицій збережено.`;
       setSuccess(true);
       setMessage(resultMessage);
       await onSaved(resultMessage);
@@ -4925,28 +5212,37 @@ function LoanReturnForm({
       setMessage(errorMessage(requestError));
     } finally {
       setSaving(false);
+      returnInFlightRef.current = false;
     }
   }
 
   return (
     <form className={styles.returnForm} aria-busy={saving} onSubmit={submit}>
-      <div className={styles.loanSummary}>
+      <div className={styles.returnTeacherSummary}>
+        <span aria-hidden="true">{teacherInitials(teacher.fullName)}</span>
         <div>
-          <span>Учитель</span>
-          <strong>{loan.teacherName}</strong>
+          <small>Повна картка видач</small>
+          <strong>{teacher.fullName}</strong>
+          <p>{items.length} {ukrainianCountLabel(items.length, "позиція", "позиції", "позицій")} · спочатку новіші видачі</p>
         </div>
-        <div>
-          <span>Видано</span>
-          <strong>{formatDate(loan.issuedAt)}</strong>
-        </div>
-        <div>
-          <span>Повернути до</span>
-          <strong>{loan.dueAt ? formatDate(loan.dueAt) : "Без строку"}</strong>
-        </div>
+        <label>
+          <input
+            type="checkbox"
+            checked={allSelected}
+            onChange={(event) => {
+              const selected = event.target.checked;
+              setRows((current) => Object.fromEntries(items.map((item) => [
+                item.loanItemId,
+                { ...current[item.loanItemId], selected },
+              ])));
+            }}
+          />
+          <span>{allSelected ? "Зняти всі" : "Обрати всі"}</span>
+        </label>
       </div>
 
       <div className={styles.returnItems}>
-        {loan.items.map((item) => {
+        {items.map((item) => {
           const row = rows[item.loanItemId];
           return (
             <article key={item.loanItemId} className={row?.selected ? styles.returnItemSelected : ""}>
@@ -4956,10 +5252,18 @@ function LoanReturnForm({
                 checked={row?.selected ?? false}
                 onChange={(event) => updateRow(item.loanItemId, { selected: event.target.checked })}
               />
-              <div>
-                <strong>{item.materialTitle}</strong>
-                <small>{[item.materialId, item.materialYear, item.sourceLocationName].filter(Boolean).join(" · ")}</small>
-              </div>
+              <button className={styles.returnItemIdentity} type="button" onClick={() => setPreviewItemId(item.loanItemId)}>
+                <span className={styles.returnItemCover}>
+                  {item.coverUrl ? <img src={item.coverUrl} alt="" /> : <span aria-hidden="true">{item.materialTitle.slice(0, 1).toUpperCase()}</span>}
+                </span>
+                <span>
+                  <strong>{item.materialTitle}</strong>
+                  <small>{[item.materialAuthor, item.materialYear].filter(Boolean).join(" · ") || "Автор і рік не вказані"}</small>
+                  <small>{item.materialCatalogNumber ? `Обліковий № ${item.materialCatalogNumber} · ` : ""}{item.materialId} · {item.sourceLocationName}</small>
+                  <small>Видано {formatDate(item.issuedAt)} · {item.dueAt ? `до ${formatDate(item.dueAt)}` : "без строку"}</small>
+                </span>
+                <SiteIcon name="visible" size={17} />
+              </button>
               <label>
                 <span>Кількість</span>
                 <input
@@ -4996,7 +5300,7 @@ function LoanReturnForm({
           </select>
         </EditField>
         <EditField label="Дата повернення" required>
-          <input type="date" min={loan.issuedAt} value={returnedAt} onChange={(event) => setReturnedAt(event.target.value)} required />
+          <input type="date" value={returnedAt} onChange={(event) => setReturnedAt(event.target.value)} required />
         </EditField>
         <EditField label="Примітка" wide>
           <textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Стан, комплектність або інша примітка" />
@@ -5007,17 +5311,127 @@ function LoanReturnForm({
       {message ? <InlineMessage tone={success ? "success" : "error"}>{message}</InlineMessage> : null}
 
       <div className={styles.formActions}>
-        <span>Обрано позицій: {selectedItems.length}</span>
+        <span>Обрано: {selectedItems.length} із {items.length}</span>
         <button
           className={styles.primaryButton}
           type="submit"
           disabled={!writesEnabled || !returnLocationId || !selectedItems.length || saving}
         >
-          {saving ? "Зберігаємо…" : "Зберегти повернення"}
+          {saving ? "Зберігаємо…" : "Прийняти вибране"}
         </button>
       </div>
+
+      {previewItem ? (
+        <ReturnItemModal
+          item={previewItem}
+          row={rows[previewItem.loanItemId]}
+          onChange={(changes) => updateRow(previewItem.loanItemId, changes)}
+          onClose={() => setPreviewItemId("")}
+        />
+      ) : null}
     </form>
   );
+}
+
+function ReturnItemModal({
+  item,
+  row,
+  onChange,
+  onClose,
+}: {
+  item: ReturnableLoanItem;
+  row: ReturnRow;
+  onChange: (changes: Partial<ReturnRow>) => void;
+  onClose: () => void;
+}) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeRef.current?.focus();
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div className={styles.materialQuickViewBackdrop} role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
+      <section className={styles.returnItemModal} role="dialog" aria-modal="true" aria-labelledby="return-item-title">
+        <header>
+          <div>
+            <small>Картка виданого примірника</small>
+            <h3 id="return-item-title">{item.materialTitle}</h3>
+          </div>
+          <button ref={closeRef} type="button" onClick={onClose} aria-label="Закрити картку">×</button>
+        </header>
+        <div className={styles.returnItemModalBody}>
+          <div className={styles.returnItemModalCover}>
+            {item.coverUrl ? <img src={item.coverUrl} alt={`Обкладинка: ${item.materialTitle}`} /> : <span aria-hidden="true">{item.materialTitle.slice(0, 1).toUpperCase()}</span>}
+          </div>
+          <dl>
+            <div><dt>Автор</dt><dd>{item.materialAuthor || "Не вказано"}</dd></div>
+            <div><dt>Рік</dt><dd>{item.materialYear || "Не вказано"}</dd></div>
+            <div><dt>Обліковий №</dt><dd>{item.materialCatalogNumber || "Не вказано"}</dd></div>
+            <div><dt>CAT-ID</dt><dd>{item.materialId}</dd></div>
+            <div><dt>ISBN</dt><dd>{item.materialIsbn || "Не вказано"}</dd></div>
+            <div><dt>Видано</dt><dd>{formatDate(item.issuedAt)}</dd></div>
+            <div><dt>Повернути до</dt><dd>{item.dueAt ? formatDate(item.dueAt) : "Без строку"}</dd></div>
+            <div><dt>Звідки видано</dt><dd>{item.sourceLocationName}</dd></div>
+            <div><dt>Залишилося</dt><dd>{item.quantityOutstanding}</dd></div>
+          </dl>
+        </div>
+        <div className={styles.returnItemModalActions}>
+          <label>
+            <input type="checkbox" checked={row?.selected ?? false} onChange={(event) => onChange({ selected: event.target.checked })} />
+            <span>Прийняти зараз</span>
+          </label>
+          <label>
+            <span>Кількість</span>
+            <input type="number" min="1" max={item.quantityOutstanding} disabled={!row?.selected} value={row?.quantity ?? ""} onChange={(event) => onChange({ quantity: event.target.value })} />
+          </label>
+          <label>
+            <span>Стан</span>
+            <select disabled={!row?.selected} value={row?.condition ?? "unspecified"} onChange={(event) => onChange({ condition: event.target.value })}>
+              <option value="unspecified">Не уточнено</option>
+              <option value="good">Добрий</option>
+              <option value="worn">Зношений</option>
+              <option value="damaged">Пошкоджений</option>
+            </select>
+          </label>
+          <button className={styles.primaryButton} type="button" onClick={onClose}>Готово</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function normalizeTeacherSearch(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[’'`-]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .toLocaleLowerCase("uk");
+}
+
+function teacherInitials(fullName: string): string {
+  return fullName.split(/\s+/u).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || "").join("");
+}
+
+function ukrainianCountLabel(value: number, one: string, few: string, many: string): string {
+  const mod100 = value % 100;
+  const mod10 = value % 10;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
 }
 
 function ClassReturnWorkspace({

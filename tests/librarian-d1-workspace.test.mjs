@@ -354,13 +354,18 @@ test("shared cover field offers separate accessible camera and gallery controls 
   assert.equal(coverField.match(/type="file"/gu)?.length, 2);
   assert.equal(coverField.match(/capture="environment"/gu)?.length, 1);
   assert.equal(coverField.match(/onChange=\{\(event\) => choosePhoto\(event\.currentTarget\)\}/gu)?.length, 2);
-  assert.match(coverField, /function choosePhoto\(input: HTMLInputElement\)[\s\S]*?upload\.choose\(file\)/u);
+  assert.match(coverField, /function choosePhoto\(input: HTMLInputElement\)[\s\S]*?setEditorFile\(file\)[\s\S]*?setEditorOpen\(true\)/u);
+  assert.match(coverField, /editCoverPhotoForUpload\(editorFile, edit\)/u);
+  assert.match(coverField, /Редагувати фото/u);
+  assert.match(coverField, /Повернути ліворуч/u);
+  assert.match(coverField, /Застосувати фото/u);
   assert.equal(workspace.match(/<CoverPhotoField/gu)?.length, 2);
 
   assert.match(styles, /\.directCoverActions label \{[\s\S]*?min-height: 44px/u);
   assert.match(styles, /@media \(max-width: 500px\)[\s\S]*?\.directCoverField \{ grid-template-columns: 1fr;/u);
   assert.match(styles, /@media \(max-width: 500px\)[\s\S]*?\.directCoverActions \{ display: grid; grid-template-columns: 1fr; \}/u);
   assert.match(styles, /\.directCoverActions label:focus-within/u);
+  assert.match(styles, /\.coverEditorPreview/u);
 });
 
 test("active D1 ISBN scanner keeps mobile camera access independent from native detection", async () => {
@@ -501,6 +506,17 @@ test("new librarian route renders D1 workspace inside the shared branded shell",
   assert.match(workspace, /role=\{tone === "error" \? "alert" : "status"\}/u);
   assert.match(workspace, /\/api\/librarian\/isbn-lookup\?isbn=/u);
   assert.match(workspace, /<LoanReturnPanel[\s\S]*?locations=\{locations\}/u);
+  assert.match(workspace, /id="return-teacher-search"[\s\S]*?role="combobox"/u);
+  assert.match(workspace, /tokens\.every\(\(token\) => normalizedName\.includes\(token\)\)/u);
+  assert.match(workspace, /loans\.flatMap\(\(loan\) => loan\.items\.map/u);
+  assert.match(workspace, /right\.issuedAt\.localeCompare\(left\.issuedAt\)/u);
+  assert.match(workspace, /item\.coverUrl \? <img/u);
+  assert.match(workspace, /function ReturnItemModal/u);
+  assert.match(workspace, /materialQuickViewBackdrop/u);
+  assert.match(workspace, /className=\{materialSelectionOpen \? styles\.materialModalBackdrop/u);
+  assert.match(workspace, /role=\{materialSelectionOpen \? "dialog"/u);
+  assert.match(workspace, /document\.body\.style\.overflow = "hidden"/u);
+  assert.doesNotMatch(workspace, /<select value=\{selectedLoanId\}/u);
   assert.match(workspace, /\/api\/librarian\/locations/u);
   assert.match(workspace, /function LocationManagementPanel/u);
   assert.match(workspace, /function IsbnCameraScanner/u);
@@ -579,7 +595,7 @@ test("new librarian route renders D1 workspace inside the shared branded shell",
   assert.match(classIssue, /lastFocusedMaterialIdRef/u);
   assert.match(classIssue, /referenceState !== "ready"/u);
   assert.match(classIssue, /academicState !== "ready"/u);
-  assert.match(classIssue, /scrollIntoView\(\{ block: "start", behavior: "auto" \}\)/u);
+  assert.doesNotMatch(classIssue, /scrollIntoView/u);
   assert.match(classIssue, /picker\.focus\(\{ preventScroll: true \}\);\s*lastFocusedMaterialIdRef\.current = detail\.id;/u);
   assert.match(classIssue, /tabIndex=\{-1\}/u);
   assert.doesNotMatch(

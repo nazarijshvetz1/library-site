@@ -885,6 +885,10 @@ test("actual count, teacher issue and partial/full returns keep one balanced sto
   assert.equal(openLoans[0].dueAt, "2026-09-01");
   assert.equal(openLoans[0].items[0].loanItemId, loan.items[0].loanItemId);
   assert.equal(openLoans[0].items[0].quantityOutstanding, 2);
+  assert.equal(openLoans[0].items[0].materialCatalogNumber, 1);
+  assert.equal(openLoans[0].items[0].materialAuthor, "Автор");
+  assert.equal(openLoans[0].items[0].materialYear, 2020);
+  assert.equal(openLoans[0].items[0].coverUrl, "");
   assert.equal(sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 2);
   assert.deepEqual(
     plainRow(sqlite.prepare("SELECT total_quantity, library_quantity, loaned_quantity FROM material_stock_totals").get()),

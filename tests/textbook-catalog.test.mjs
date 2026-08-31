@@ -16,7 +16,7 @@ test("public e-textbook route exposes only the curated HTTPS projection", async 
   assert.match(route, /no-store/u);
   assert.match(store, /FROM textbook_assignments ta/u);
   assert.match(store, /ta\.status = 'published'/u);
-  assert.match(store, /trim\(m\.publication_type\) = 'Підручник'/u);
+  assert.doesNotMatch(store, /WHERE[\s\S]*?ta\.status = 'published'[\s\S]*?trim\(m\.publication_type\) = 'Підручник'/u);
   assert.match(store, /ml\.kind = 'ebook'/u);
   assert.match(store, /ml\.is_public = 1/u);
   assert.match(store, /ml\.status = 'active'/u);
@@ -48,8 +48,8 @@ test("librarian textbook mutations use authorization, same-origin, bounded JSON,
   assert.match(store, /textbook_link_required/u);
   assert.match(store, /requireResource: input\.publish/u);
   assert.match(store, /input\.action === "restore"[\s\S]*?status = "draft"/u);
-  assert.match(store, /textbook_grade_required/u);
-  assert.match(store, /textbook_grade_mismatch/u);
+  assert.match(store, /Every active[\s\S]*fund card may therefore be assigned to a grade/u);
+  assert.match(store, /publicationType: boundedText\(row\.publication_type/u);
   assert.match(linkRoute, /validateMaterialEbookLinkCreateInput/u);
   assert.match(linkRoute, /appendMaterialEbookLinkDirect/u);
   assert.match(store, /AS active_resource_count/u);
@@ -71,6 +71,8 @@ test("student and librarian UIs provide class selection, sorting, safe external 
   assert.match(publicUi, /Відкрити електронну версію/u);
   assert.match(publicUi, /Перевірені зовнішні джерела/u);
   assert.match(publicUi, /type="radio" name="grade"/u);
+  assert.match(publicUi, /Повернутися в каталог/u);
+  assert.match(publicUi, /До кабінету вчителя/u);
   assert.match(publicUi, /aria-live="polite"/u);
   assert.match(publicCss, /@media \(max-width: 720px\)/u);
   assert.match(publicCss, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/u);
@@ -80,12 +82,14 @@ test("student and librarian UIs provide class selection, sorting, safe external 
   assert.match(adminUi, /У списку/u);
   assert.match(adminUi, /Чернетки/u);
   assert.match(adminUi, /Ручний порядок/u);
-  assert.match(adminUi, /не видаляє картку фонду, примірники чи історію/u);
-  assert.match(adminUi, /Редагувати підручник/u);
-  assert.match(adminUi, /edit=1/u);
+  assert.match(adminUi, /не видаляє картку, примірники чи історію/u);
+  assert.match(adminUi, /Керувати в картці/u);
+  assert.match(adminUi, /function ManagedTextbookModal/u);
+  assert.match(adminUi, /Місце у «Рекомендованому»/u);
   assert.match(adminUi, /Додати покликання/u);
   assert.match(adminUi, /Додати до списку/u);
   assert.match(adminUi, /Зберегти й опублікувати/u);
+  assert.match(adminUi, /Пошук охоплює весь активний фонд/u);
   assert.match(shell, /label: "Е-підручники"/u);
   assert.match(shell, /label: "Каталог"[\s\S]*?label: "Новий матеріал"[\s\S]*?label: "Е-підручники"/u);
   assert.match(home, /href="\/textbooks"/u);

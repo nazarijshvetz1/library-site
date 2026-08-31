@@ -3,7 +3,8 @@
 .titleRow > div > p { margin: 0 0 5px; color: var(--green-700); font-size: 9px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
 .titleRow h1 { margin: 0; color: var(--green-950); font: 650 clamp(28px, 3vw, 39px)/1 Georgia, serif; }
 .titleRow > div > span { display: block; margin-top: 7px; color: var(--muted); font-size: 10px; }
-.titleRow > a { min-height: 42px; padding: 0 14px; display: inline-flex; align-items: center; gap: 8px; border: 1px solid #cdd9ca; border-radius: 10px; background: white; color: var(--green-900); font-size: 10px; font-weight: 850; white-space: nowrap; }
+.titleActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.titleActions a { min-height: 42px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid #cdd9ca; border-radius: 10px; background: white; color: var(--green-900); font-size: 10px; font-weight: 850; white-space: nowrap; }
 .toolbar { margin-top: 16px; padding: 11px; display: grid; grid-template-columns: minmax(150px, 1fr) repeat(3, minmax(120px, .65fr)) auto; gap: 8px; align-items: end; border: 1px solid var(--line); border-radius: 14px; background: white; }
 .toolbar label { min-width: 0; display: grid; gap: 5px; }
 .toolbar label > span, .itemActions label > span, .search > span { color: #607067; font-size: 8px; font-weight: 850; letter-spacing: .05em; text-transform: uppercase; }
@@ -31,8 +32,10 @@
 .live { background: #e8f4e3; color: #347342; }
 .draft { background: #fff3d6; color: #8a5a12; }
 .hidden { background: #f0f0ec; color: #747b75; }
-.itemTop > a { display: inline-flex; align-items: center; gap: 4px; color: var(--green-700); font-size: 8px; font-weight: 800; }
+.itemTop > button { padding: 0; display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; color: var(--green-700); cursor: pointer; font-size: 8px; font-weight: 800; }
 .item h3 { margin: 6px 0 3px; color: var(--green-950); font-size: 12px; line-height: 1.25; }
+.item h3 button { max-width: 100%; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; text-align: left; }
+.item h3 button:hover, .item h3 button:focus-visible { color: var(--green-700); outline: none; text-decoration: underline; text-underline-offset: 3px; }
 .itemBody > p { margin: 0; color: var(--muted); font-size: 8px; line-height: 1.35; }
 .linkState { margin-top: 6px; display: flex; align-items: center; gap: 5px; color: #57705e; font-size: 8px; }
 .linkState > a { margin-left: 5px; color: var(--green-700); font-weight: 800; text-decoration: underline; }
@@ -43,7 +46,7 @@
 .linkAdder input, .candidateLinkForm input { min-width: 0; width: 100%; height: 34px; padding: 0 9px; border: 1px solid #cfdacc; border-radius: 8px; background: white; color: var(--green-950); font-size: 9px; }
 .linkAdder button, .candidateLinkForm button { min-height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: var(--green-900); color: white; cursor: pointer; font-size: 8px; font-weight: 850; }
 .itemActions { margin-top: 8px; display: flex; align-items: end; gap: 6px; flex-wrap: wrap; }
-.itemActions label { width: 86px; display: grid; gap: 3px; }
+.itemActions label { width: 122px; display: grid; gap: 3px; }
 .itemActions input { width: 100%; height: 34px; padding: 0 8px; border: 1px solid #d4ded2; border-radius: 8px; font-size: 10px; }
 .itemActions button { min-height: 34px; padding: 0 9px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid #ced9cb; border-radius: 8px; background: #f7f9f5; color: var(--green-900); cursor: pointer; font-size: 8px; font-weight: 850; }
 .itemActions button:disabled, .toolbar button:disabled, .candidates button:disabled { cursor: not-allowed; opacity: .5; }
@@ -74,6 +77,31 @@
 .empty strong { margin-top: 7px; color: var(--green-950); font-size: 10px; }
 .empty span { margin-top: 3px; font-size: 8px; }
 
+.itemModalBackdrop { position: fixed; inset: 0; z-index: 220; padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); display: grid; place-items: center; background: rgba(6,35,24,.55); backdrop-filter: blur(6px); }
+.itemModal { width: min(760px, 100%); max-height: calc(100dvh - 32px); overflow-y: auto; border: 1px solid #d4dfd1; border-radius: 18px; background: #fffefa; box-shadow: 0 28px 80px rgba(6,35,24,.3); }
+.itemModal > header { position: sticky; top: 0; z-index: 2; padding: 14px 16px; display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--line); background: rgba(255,254,250,.96); backdrop-filter: blur(8px); }
+.itemModal header span { color: var(--green-700); font-size: 8px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.itemModal header h2 { margin: 3px 0 0; color: var(--green-950); font: 650 22px/1.1 Georgia, serif; }
+.itemModal header > button { width: 38px; height: 38px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 10px; background: white; color: var(--green-950); cursor: pointer; font-size: 22px; }
+.itemModalBody { padding: 16px; display: grid; grid-template-columns: 108px minmax(0,1fr); gap: 16px; }
+.itemModalBody .cover { width: 108px; }
+.itemModalInfo { min-width: 0; }
+.itemModalInfo > p { margin: 0 0 10px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.itemModalInfo dl { margin: 0; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; }
+.itemModalInfo dl div { min-width: 0; padding: 9px; border: 1px solid var(--line); border-radius: 9px; background: #f7f9f5; }
+.itemModalInfo dt { color: var(--muted); font-size: 7px; font-weight: 850; text-transform: uppercase; }
+.itemModalInfo dd { margin: 3px 0 0; overflow-wrap: anywhere; color: var(--green-950); font-size: 9px; font-weight: 800; }
+.itemModalControls { padding: 0 16px 16px; display: grid; grid-template-columns: minmax(170px,.7fr) auto minmax(240px,1.4fr) auto; gap: 8px; align-items: end; }
+.itemModalControls label { min-width: 0; display: grid; gap: 5px; }
+.itemModalControls label span { color: var(--muted); font-size: 8px; font-weight: 800; }
+.itemModalControls input { min-width: 0; width: 100%; height: 40px; padding: 0 9px; border: 1px solid #cfdacc; border-radius: 9px; background: white; color: var(--green-950); }
+.itemModalControls > button { min-height: 40px; padding: 0 11px; border: 1px solid #cdd9ca; border-radius: 9px; background: var(--green-50); color: var(--green-900); cursor: pointer; font-size: 8px; font-weight: 850; }
+.itemModal > footer { padding: 14px 16px calc(14px + env(safe-area-inset-bottom)); display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid var(--line); }
+.itemModal footer > a { display: inline-flex; align-items: center; gap: 6px; color: var(--green-700); font-size: 8px; font-weight: 850; }
+.itemModal footer > span { color: var(--muted); font-size: 8px; }
+.itemModal footer > div { display: flex; gap: 7px; }
+.itemModal footer button { min-height: 40px; padding: 0 12px; border: 1px solid #cdd9ca; border-radius: 9px; cursor: pointer; font-size: 8px; font-weight: 850; }
+
 @media (max-width: 1080px) {
   .toolbar { grid-template-columns: repeat(2, 1fr); }
   .toolbar button { grid-column: 1 / -1; }
@@ -86,7 +114,7 @@
   .titleRow { align-items: flex-start; }
   .titleRow h1 { font-size: 29px; }
   .titleRow > div > span { font-size: 9px; line-height: 1.4; }
-  .titleRow > a { min-height: 38px; padding: 0 9px; font-size: 8px; }
+  .titleActions a { min-height: 38px; padding: 0 9px; font-size: 8px; }
   .toolbar { grid-template-columns: 1fr 1fr; }
   .toolbar label:first-child { grid-column: 1 / -1; }
   .listPanel, .addPanel { padding: 12px; }
@@ -94,7 +122,7 @@
   .item { grid-template-columns: 58px minmax(0,1fr); padding: 8px; gap: 9px; }
   .cover { width: 58px; }
   .coverCompact { width: 42px; }
-  .itemActions label { width: 76px; }
+  .itemActions label { width: 112px; }
   .itemActions button { min-height: 38px; }
   .linkAdder > div, .candidateLinkForm { grid-template-columns: 1fr; }
   .linkAdder button, .candidates .candidateLinkForm button { width: 100%; min-height: 38px; }
@@ -102,10 +130,21 @@
 
 @media (max-width: 520px) {
   .titleRow { display: grid; }
-  .titleRow > a { width: 100%; justify-content: center; }
+  .titleActions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
   .toolbar { grid-template-columns: 1fr; }
   .toolbar label:first-child, .toolbar button { grid-column: auto; }
   .listPanel > header { display: block; }
   .listPanel > header small { display: block; margin-top: 5px; }
   .quietButton, .primaryButton { margin-left: 0; }
+  .itemModalBackdrop { padding: max(8px, env(safe-area-inset-top)) 0 0; place-items: end stretch; }
+  .itemModal { width: 100%; max-height: calc(100dvh - max(8px, env(safe-area-inset-top))); border-radius: 20px 20px 0 0; }
+  .itemModalBody { grid-template-columns: 76px minmax(0,1fr); padding: 12px; }
+  .itemModalBody .cover { width: 76px; }
+  .itemModalInfo dl { grid-template-columns: 1fr; }
+  .itemModalControls { padding: 0 12px 12px; grid-template-columns: 1fr auto; }
+  .itemModalLink { grid-column: 1 / -1; }
+  .itemModalControls > button:last-child { grid-column: 1 / -1; }
+  .itemModal > footer { align-items: stretch; flex-direction: column; }
+  .itemModal footer > div { display: grid; grid-template-columns: 1fr 1fr; }
+  .itemModal footer button { width: 100%; }
 }

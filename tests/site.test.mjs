@@ -427,8 +427,8 @@ test("ships an accessible responsive public visit schedule and protected handoff
   assert.match(html, /data-primary-section="textbooks"[\s\S]*href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/textbooks"[\s\S]*>Е-підручники<\/a>/u);
   const primaryNavigation = html.match(/data-primary-section=/gu) ?? [];
   assert.equal(primaryNavigation.length, 5);
-  assert.match(html, /href="#contacts">Контакти<\/a>/u);
-  assert.match(html, /href="#how-it-works"[^>]*data-primary-section="how-it-works"[^>]*>Як користуватися<\/a>/);
+  assert.match(html, /href="#contacts"[^>]*data-primary-section="contacts"[^>]*>Контакти<\/a>/u);
+  assert.match(html, /href="#how-it-works"[^>]*>Як користуватися<\/a>/);
   assert.match(html, /Перевірте наявність/);
   assert.match(html, /Запишіться до бібліотеки/);
   assert.match(html, /Почніть у Telegram/);

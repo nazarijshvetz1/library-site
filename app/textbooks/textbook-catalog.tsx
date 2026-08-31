@@ -154,6 +154,10 @@ export default function TextbookCatalog() {
             <a href="/teacher">Кабінет учителя</a>
           </nav>
         </div>
+        <nav className={styles.returnNav} aria-label="Повернення з е-підручників">
+          <a href={PUBLIC_CATALOG_URL}><SiteIcon name="previous" size={16} /> Повернутися в каталог</a>
+          <a href="/teacher"><SiteIcon name="teachers" size={16} /> До кабінету вчителя</a>
+        </nav>
       </header>
 
       <section className={styles.hero} aria-labelledby="textbooks-title">

@@ -114,6 +114,9 @@ test("browser normalization produces only a compact final JPEG", () => {
   assert.match(coverClient, /const attempts = \[0\.82,/);
   assert.match(coverClient, /context\.fillStyle = "#ffffff"/);
   assert.match(coverClient, /canvasToBlob\(canvas, "image\/jpeg", quality\)/);
+  assert.match(coverClient, /export async function editCoverPhotoForUpload/u);
+  assert.match(coverClient, /context\.rotate\(rotation \* Math\.PI \/ 180\)/u);
+  assert.match(coverClient, /const zoom = Math\.min\(2\.5/u);
   assert.doesNotMatch(coverClient, /safeOriginalFallback/);
 });
 
