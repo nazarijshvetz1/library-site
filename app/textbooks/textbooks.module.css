@@ -115,6 +115,13 @@
 
 @media (max-width: 390px) {
   .headerInner, .hero, .gradePanel, .catalog, .footer { width: calc(100% - 12px); }
+  .headerInner { gap: 6px; }
+  .brand { gap: 7px; }
+  .brand img { width: 34px; height: 34px; flex: 0 0 34px; }
+  .brand span { min-width: 0; }
+  .brand strong { font-size: 14px; white-space: nowrap; }
+  .brand small { font-size: 8px; white-space: nowrap; }
+  .navCurrent { min-height: 34px !important; padding-inline: 8px !important; font-size: 10px !important; white-space: nowrap; }
   .hero { padding-inline: 16px; }
   .filters { grid-template-columns: 1fr; }
   .filters label:first-child, .resetButton { grid-column: auto; }
