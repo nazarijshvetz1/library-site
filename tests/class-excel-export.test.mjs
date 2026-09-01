@@ -70,6 +70,12 @@ function seed(sqlite) {
     VALUES ('CLI-1','CLOAN-1','CAT-0001','LOC-LIB','good',10,2,'',?,?),
       ('CLI-2','CLOAN-1','CAT-0002','LOC-LIB','good',5,1,'',?,?),
       ('CLI-3','CLOAN-1','CAT-0003','LOC-LIB','good',2,0,'',?,?)`).run(now, now, now, now, now, now);
+  sqlite.prepare(`INSERT INTO class_loan_transactions (id,request_id,class_loan_id,kind,occurred_at,notes,actor_user_id,created_at)
+    VALUES ('CLTX-1','REQ-CLASS-ISSUE-1','CLOAN-1','issue','2026-09-01T08:00:00.000Z','','USR-LIB',?),
+      ('CLTX-2','REQ-CLASS-ISSUE-2','CLOAN-1','issue','2026-09-05T08:00:00.000Z','','USR-LIB',?)`).run(now, now);
+  sqlite.prepare(`INSERT INTO class_loan_transaction_lines (id,transaction_id,class_loan_item_id,material_id,location_id,condition,quantity_delta,quantity_before,quantity_after,created_at)
+    VALUES ('CLINE-1','CLTX-1','CLI-1','CAT-0001','LOC-LIB','good',-10,20,10,?),
+      ('CLINE-3','CLTX-2','CLI-3','CAT-0003','LOC-LIB','good',-2,5,3,?)`).run(now, now);
 }
 
 test("class export reads active classes and only outstanding class-loan quantities", async () => {
@@ -85,6 +91,9 @@ test("class export reads active classes and only outstanding class-loan quantiti
   assert.equal(snapshot.classes[0].lines.find((line) => line.title === "Математика 5 клас")?.remainingQuantity, 8);
   assert.equal(snapshot.classes[0].lines.find((line) => line.title === "Робочий зошит")?.remainingQuantity, 4);
   assert.equal(snapshot.classes[0].lines.find((line) => line.title === "Атлас світу")?.remainingQuantity, 2);
+  assert.equal(snapshot.classes[0].lines.find((line) => line.title === "Математика 5 клас")?.issuedAt, "2026-09-01");
+  assert.equal(snapshot.classes[0].lines.find((line) => line.title === "Робочий зошит")?.issuedAt, "2026-08-20");
+  assert.equal(snapshot.classes[0].lines.find((line) => line.title === "Атлас світу")?.issuedAt, "2026-09-05");
   assert.equal(snapshot.classes[1].teacherName, "Не призначено");
   assert.equal(snapshot.classes[1].lines.length, 0);
   sqlite.close();

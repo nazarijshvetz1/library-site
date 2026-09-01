@@ -44,21 +44,7 @@ test("class issue statement contains only compact reader-facing fields", () => {
 });
 
 test("all operational report queries compile on the migrated schema", async () => {
-  const sqlite = new DatabaseSync(":memory:");
-  sqlite.exec("PRAGMA foreign_keys=ON");
-  for (const file of fs.readdirSync(path.join(root, "drizzle")).filter((name) => /^\d{4}_.+\.sql$/u.test(name)).sort()) {
-    const sql = fs.readFileSync(path.join(root, "drizzle", file), "utf8");
-    for (const statement of sql.split(/-->\s*statement-breakpoint/gu)) if (statement.trim()) sqlite.exec(statement);
-  }
-  const db = {
-    prepare(sql) {
-      return {
-        bind(...values) {
-          return { all: async () => ({ results: sqlite.prepare(sql).all(...values) }) };
-        },
-      };
-    },
-  };
+  const { sqlite, db } = openReportDatabase();
   for (const kind of reportStore.LIBRARIAN_REPORT_KINDS) {
     const report = await reportStore.readLibrarianReport(db, kind, "2026-01-01", "2026-12-31", "2026-08-28T08:00:00.000Z");
     assert.equal(report.kind, kind);
@@ -71,6 +57,55 @@ test("all operational report queries compile on the migrated schema", async () =
       assert.doesNotMatch(xml, /Період/u);
     }
   }
+  sqlite.close();
+});
+
+test("class reports date appended items by their issue transaction", async () => {
+  const { sqlite, db } = openReportDatabase();
+  const createdAt = "2026-08-20T09:00:00.000Z";
+  sqlite.prepare(`INSERT INTO users (id,full_name,sort_name,email,auth_user_id,role,status,created_at,updated_at)
+    VALUES ('USR-REPORT-LIB','Бібліотекар','бібліотекар',NULL,NULL,'librarian','active',?,?),
+      ('USR-REPORT-TEACH','Учитель Тестовий','учитель тестовий',NULL,NULL,'teacher','active',?,?)`).run(createdAt, createdAt, createdAt, createdAt);
+  sqlite.prepare(`INSERT INTO locations (id,name,type,status,is_public,sort_order,created_at,updated_at)
+    VALUES ('LOC-REPORT','Бібліотека','library','active',1,1,?,?)`).run(createdAt, createdAt);
+  sqlite.prepare(`INSERT INTO academic_years (id,label,start_date,end_date,status,notes,version,created_at,updated_at)
+    VALUES ('YR-REPORT','2026/2027','2026-09-01','2027-06-30','active','',1,?,?)`).run(createdAt, createdAt);
+  sqlite.prepare(`INSERT INTO cohorts (id,status,notes,created_at,updated_at)
+    VALUES ('COH-REPORT','active','',?,?)`).run(createdAt, createdAt);
+  sqlite.prepare(`INSERT INTO class_years (id,academic_year_id,cohort_id,class_name,grade,code,teacher_user_id,location_id,start_date,end_date,status,notes,version,created_at,updated_at)
+    VALUES ('CY-REPORT','YR-REPORT','COH-REPORT','5-А',5,'А','USR-REPORT-TEACH',NULL,'2026-09-01','2027-06-30','active','',1,?,?)`).run(createdAt, createdAt);
+  sqlite.prepare(`INSERT INTO materials (id,catalog_number,title,sort_title,search_text,rubric,publication_type,subject,class_from,class_to,author,publication_year,isbn,isbn_normalized,publisher,notes,status,version,created_at,updated_at)
+    VALUES ('CAT-9101',9101,'Старий підручник','старий підручник','старий підручник','Підручники','Підручник','Математика',5,5,'Автор',2025,'','','','', 'active',1,?,?),
+      ('CAT-9102',9102,'Доданий підручник','доданий підручник','доданий підручник','Підручники','Підручник','Математика',5,5,'Автор',2026,'','','','', 'active',1,?,?)`).run(createdAt, createdAt, createdAt, createdAt);
+  sqlite.prepare(`INSERT INTO class_loans (id,class_year_id,responsible_teacher_user_id,status,issued_at,due_at,notes,issued_by_user_id,version,created_at,updated_at)
+    VALUES ('CLOAN-REPORT','CY-REPORT','USR-REPORT-TEACH','open','2026-08-20T09:00:00.000Z','2027-06-01','', 'USR-REPORT-LIB',1,?,?)`).run(createdAt, createdAt);
+  sqlite.prepare(`INSERT INTO class_loan_items (id,class_loan_id,material_id,source_location_id,condition,quantity_issued,quantity_returned,notes,created_at,updated_at)
+    VALUES ('CLI-REPORT-OLD','CLOAN-REPORT','CAT-9101','LOC-REPORT','good',2,0,'',?,?),
+      ('CLI-REPORT-NEW','CLOAN-REPORT','CAT-9102','LOC-REPORT','good',3,0,'','2026-09-05T10:00:00.000Z','2026-09-05T10:00:00.000Z')`).run(createdAt, createdAt);
+  sqlite.prepare(`INSERT INTO class_loan_transactions (id,request_id,class_loan_id,kind,occurred_at,notes,actor_user_id,created_at)
+    VALUES ('CLTX-REPORT-NEW','REQ-REPORT-NEW','CLOAN-REPORT','issue','2026-09-05T10:00:00.000Z','', 'USR-REPORT-LIB','2026-09-05T10:00:00.000Z')`).run();
+  sqlite.prepare(`INSERT INTO class_loan_transaction_lines (id,transaction_id,class_loan_item_id,material_id,location_id,condition,quantity_delta,quantity_before,quantity_after,created_at)
+    VALUES ('CLTL-REPORT-NEW','CLTX-REPORT-NEW','CLI-REPORT-NEW','CAT-9102','LOC-REPORT','good',-3,3,0,'2026-09-05T10:00:00.000Z')`).run();
+
+  const septemberReturns = await reportStore.readLibrarianReport(db, "returns", "2026-09-01", "2026-09-30");
+  const classRows = septemberReturns.sections.find((section) => section.key === "classes").rows;
+  assert.deepEqual(classRows.map((row) => ({ title: row.title, issuedAt: row.issuedAt })), [
+    { title: "Доданий підручник", issuedAt: "2026-09-05T10:00:00.000Z" },
+  ]);
+  const septemberProvision = await reportStore.readLibrarianReport(db, "provision", "2026-09-01", "2026-09-30");
+  assert.deepEqual(septemberProvision.sections[0].rows.map((row) => ({ title: row.title, issued: row.issued })), [
+    { title: "Доданий підручник", issued: 3 },
+  ]);
+  const septemberAnnual = await reportStore.readLibrarianReport(db, "annual", "2026-09-01", "2026-09-30");
+  assert.equal(septemberAnnual.sections[0].rows[0].issuedToClasses, 3);
+
+  const augustReturns = await reportStore.readLibrarianReport(db, "returns", "2026-08-01", "2026-08-31");
+  const legacyRows = augustReturns.sections.find((section) => section.key === "classes").rows;
+  assert.deepEqual(legacyRows.map((row) => ({ title: row.title, issuedAt: row.issuedAt })), [
+    { title: "Старий підручник", issuedAt: "2026-08-20T09:00:00.000Z" },
+  ]);
+  const augustAnnual = await reportStore.readLibrarianReport(db, "annual", "2026-08-01", "2026-08-31");
+  assert.equal(augustAnnual.sections[0].rows[0].issuedToClasses, 2);
   sqlite.close();
 });
 
@@ -94,6 +129,25 @@ test("reports center exposes class statement history and protected report downlo
 
 function workbookXml(bytes) {
   return [...unzipStored(bytes).values()].map((value) => new TextDecoder().decode(value)).join("\n");
+}
+
+function openReportDatabase() {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec("PRAGMA foreign_keys=ON");
+  for (const file of fs.readdirSync(path.join(root, "drizzle")).filter((name) => /^\d{4}_.+\.sql$/u.test(name)).sort()) {
+    const sql = fs.readFileSync(path.join(root, "drizzle", file), "utf8");
+    for (const statement of sql.split(/-->\s*statement-breakpoint/gu)) if (statement.trim()) sqlite.exec(statement);
+  }
+  const db = {
+    prepare(sql) {
+      return {
+        bind(...values) {
+          return { all: async () => ({ results: sqlite.prepare(sql).all(...values) }) };
+        },
+      };
+    },
+  };
+  return { sqlite, db };
 }
 
 function unzipStored(bytes) {

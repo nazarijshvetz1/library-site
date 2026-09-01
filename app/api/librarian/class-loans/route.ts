@@ -103,7 +103,7 @@ export async function POST(request: Request): Promise<Response> {
     );
     return librarianJson(
       { success: true, result, writesEnabled: true },
-      { status: 201 },
+      { status: result.appended ? 200 : 201 },
     );
   } catch (error) {
     if (error instanceof LibraryMutationError) {

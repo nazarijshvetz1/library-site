@@ -80,6 +80,10 @@ function seed(sqlite) {
     VALUES ('CLOAN-1','CY-2026-001','USR-TEACH','open',?,'2027-06-01','', 'USR-LIB',1,?,?)`).run(now, now, now);
   sqlite.prepare(`INSERT INTO class_loan_items (id,class_loan_id,material_id,source_location_id,condition,quantity_issued,quantity_returned,notes,created_at,updated_at)
     VALUES ('CLI-1','CLOAN-1','CAT-0001','LOC-001','good',1,0,'',?,?)`).run(now, now);
+  sqlite.prepare(`INSERT INTO class_loan_transactions (id,request_id,class_loan_id,kind,occurred_at,notes,actor_user_id,created_at)
+    VALUES ('CLTX-1','REQ-CLASS-ISSUE-1','CLOAN-1','issue','2026-09-05T08:30:00.000Z','','USR-LIB',?)`).run(now);
+  sqlite.prepare(`INSERT INTO class_loan_transaction_lines (id,transaction_id,class_loan_item_id,material_id,location_id,condition,quantity_delta,quantity_before,quantity_after,created_at)
+    VALUES ('CLINE-1','CLTX-1','CLI-1','CAT-0001','LOC-001','good',-1,4,3,?)`).run(now);
   sqlite.prepare(`INSERT INTO material_requests (id,teacher_user_id,status,teacher_notes,librarian_note,rejection_reason,pickup_location_id,due_at,reviewed_by_user_id,version,submitted_at,ready_at,created_at,updated_at)
     VALUES ('REQ-1','USR-TEACH','ready','Для уроку','Готово','','LOC-001','2027-06-01','USR-LIB',1,?,?,?,?)`).run(now, now, now, now);
   sqlite.prepare(`INSERT INTO material_request_items (id,request_id,material_id,title_snapshot,author_snapshot,requested_quantity,approved_quantity,fulfilled_quantity,sort_order,created_at,updated_at)
@@ -98,6 +102,7 @@ test("export reads all requested blocks in one bounded batch and excludes authen
   assert.equal(snapshot.holdings[0].availableQuantity, 3);
   assert.equal(snapshot.teacherLoans[0].remainingQuantity, 1);
   assert.equal(snapshot.classLoans[0].remainingQuantity, 1);
+  assert.equal(snapshot.classLoans[0].issuedAt, "2026-09-05T08:30:00.000Z");
   assert.equal(snapshot.materialRequests[0].activeReservedQuantity, 1);
   assert.equal(Object.hasOwn(snapshot.teachers[0], "email"), false);
   assert.equal(JSON.stringify(snapshot).includes("teacher@example.test"), false);

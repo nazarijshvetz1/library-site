@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
+import { readClassIssueStatement } from "../lib/class-issue-statement-store.ts";
+
 const migrationFiles = [
   "drizzle/0000_librarian_drafts.sql",
   "drizzle/0001_draft_workflow.sql",
@@ -38,6 +40,7 @@ const migrationFiles = [
   "drizzle/0031_textbook_catalog_lists.sql",
   "drizzle/0032_fearless_alex_power.sql",
   "drizzle/0033_burly_human_fly.sql",
+  "drizzle/0034_worthless_big_bertha.sql",
 ];
 
 async function migratedDatabase() {
@@ -47,6 +50,15 @@ async function migratedDatabase() {
     database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
   }
   return database;
+}
+
+function asD1(database) {
+  const statement = (sql, bindings = []) => ({
+    bind: (...values) => statement(sql, values),
+    first: async () => database.prepare(sql).get(...bindings) ?? null,
+    all: async () => ({ results: database.prepare(sql).all(...bindings) }),
+  });
+  return { prepare: (sql) => statement(sql) };
 }
 
 test("0026 adds reversible teacher history visibility without changing existing requests", async () => {
@@ -155,8 +167,173 @@ test("0028 stores immutable issue-time class statements without changing operati
     () => database.prepare("UPDATE class_loans SET issue_statement_json='{}' WHERE id='CLOAN-STATEMENT-TEST'").run(),
     /class issue statement is immutable/u,
   );
+  database.prepare("UPDATE class_years SET class_name='7-Б' WHERE id='CY-STATEMENT'").run();
+  database.prepare("UPDATE users SET full_name='Змінений Класний Керівник' WHERE id='USR-STATEMENT-TEACHER'").run();
+  const preservedStatement = await readClassIssueStatement(asD1(database), "CLOAN-STATEMENT-TEST");
+  assert.equal(preservedStatement.className, "7-А");
+  assert.equal(preservedStatement.curatorName, "Класний керівник");
+  assert.equal(preservedStatement.classroomName, "Кабінет №108");
   database.prepare("UPDATE class_loans SET version=2,updated_at=? WHERE id='CLOAN-STATEMENT-TEST'").run(now);
   assert.equal(database.prepare("SELECT version FROM class_loans WHERE id='CLOAN-STATEMENT-TEST'").get().version, 2);
+  assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+  database.close();
+});
+
+test("0034 consolidates duplicate open class issues without losing their audit history", async () => {
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON;");
+  for (const file of migrationFiles.slice(0, migrationFiles.indexOf("drizzle/0034_worthless_big_bertha.sql"))) {
+    database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
+  }
+  const createdAt = "2026-09-01T07:00:00.000Z";
+  const laterCreatedAt = "2026-09-01T07:01:00.000Z";
+  const firstSnapshot = JSON.stringify({
+    schemaVersion: 1,
+    className: "5-А",
+    academicYearLabel: "2026/2027",
+    classroomName: "",
+    curatorName: "Учитель Тестовий",
+    issuedAt: "2026-09-01",
+    dueAt: "2027-05-31",
+    lines: [{ position: 1, subject: "Українська мова", title: "Українська мова", author: "Автор 1", publicationYear: 2024, rubric: "Підручники", quantityIssued: 1 }],
+  });
+  const secondSnapshot = JSON.stringify({
+    schemaVersion: 1,
+    className: "5-А",
+    academicYearLabel: "2026/2027",
+    classroomName: "",
+    curatorName: "Учитель Тестовий",
+    issuedAt: "2026-09-01",
+    dueAt: "2027-05-31",
+    lines: [{ position: 1, subject: "Українська література", title: "Українська література", author: "Автор 2", publicationYear: 2025, rubric: "Підручники", quantityIssued: 17 }],
+  });
+  database.prepare(`
+    INSERT INTO users (id,full_name,sort_name,email,auth_user_id,role,status,created_at,updated_at)
+    VALUES
+      ('USR-MERGE-LIB','Бібліотекар','бібліотекар',NULL,NULL,'librarian','active',?,?),
+      ('USR-MERGE-TEACHER','Учитель Тестовий','учитель тестовий',NULL,NULL,'teacher','active',?,?)
+  `).run(createdAt, createdAt, createdAt, createdAt);
+  database.prepare(`
+    INSERT INTO academic_years (id,label,start_date,end_date,status,notes,version,created_at,updated_at)
+    VALUES ('YR-MERGE','2026/2027','2026-09-01','2027-05-31','active','',1,?,?)
+  `).run(createdAt, createdAt);
+  database.prepare(`INSERT INTO cohorts (id,status,notes,created_at,updated_at)
+    VALUES ('COH-MERGE','active','',?,?)`).run(createdAt, createdAt);
+  database.prepare(`
+    INSERT INTO class_years (
+      id,academic_year_id,cohort_id,class_name,grade,code,teacher_user_id,location_id,
+      start_date,end_date,status,actual_closed_date,notes,version,created_at,updated_at
+    ) VALUES (
+      'CY-MERGE','YR-MERGE','COH-MERGE','5-А',5,'А','USR-MERGE-TEACHER',NULL,
+      '2026-09-01','2027-05-31','active',NULL,'',1,?,?
+    )
+  `).run(createdAt, createdAt);
+  database.prepare(`
+    INSERT INTO locations (id,name,type,status,is_public,sort_order,created_at,updated_at)
+    VALUES ('LOC-MERGE','Фонд','library','active',1,1,?,?)
+  `).run(createdAt, createdAt);
+  database.prepare(`
+    INSERT INTO materials (
+      id,catalog_number,title,sort_title,search_text,rubric,publication_type,subject,
+      author,publication_year,isbn,isbn_normalized,publisher,notes,status,version,
+      created_at,updated_at,archived_at
+    ) VALUES
+      ('CAT-9101',9101,'Українська мова','українська мова','українська мова','Підручники','Підручник','Українська мова','Автор 1',2024,'','','','', 'active',1,?,?,NULL),
+      ('CAT-9102',9102,'Українська література','українська література','українська література','Підручники','Підручник','Українська література','Автор 2',2025,'','','','', 'active',1,?,?,NULL)
+  `).run(createdAt, createdAt, createdAt, createdAt);
+  database.prepare(`
+    INSERT INTO class_loans (
+      id,class_year_id,responsible_teacher_user_id,status,issued_at,due_at,closed_at,notes,
+      issue_statement_schema_version,issue_statement_json,issue_statement_origin,
+      issued_by_user_id,closed_by_user_id,version,created_at,updated_at
+    ) VALUES
+      ('CLOAN-MERGE-A','CY-MERGE','USR-MERGE-TEACHER','open','2026-09-01','2027-05-31',NULL,'',1,?,'issued','USR-MERGE-LIB',NULL,1,?,?),
+      ('CLOAN-MERGE-B','CY-MERGE','USR-MERGE-TEACHER','open','2026-09-01','2027-05-31',NULL,'',1,?,'issued','USR-MERGE-LIB',NULL,1,?,?)
+  `).run(firstSnapshot, createdAt, createdAt, secondSnapshot, laterCreatedAt, laterCreatedAt);
+  database.prepare(`
+    INSERT INTO class_loans (
+      id,class_year_id,responsible_teacher_user_id,status,issued_at,due_at,closed_at,notes,
+      issue_statement_schema_version,issue_statement_json,issue_statement_origin,
+      issued_by_user_id,closed_by_user_id,version,created_at,updated_at
+    ) VALUES (
+      'CLOAN-MERGE-LEGACY','CY-MERGE','USR-MERGE-TEACHER','closed','2026-08-20',
+      '2026-08-31','2026-09-01','',0,'','legacy','USR-MERGE-LIB','USR-MERGE-LIB',1,?,?
+    )
+  `).run(createdAt, createdAt);
+  database.prepare(`
+    INSERT INTO class_loan_items (
+      id,class_loan_id,material_id,source_location_id,condition,quantity_issued,
+      quantity_returned,notes,created_at,updated_at
+    ) VALUES
+      ('CLI-MERGE-A','CLOAN-MERGE-A','CAT-9101','LOC-MERGE','good',1,0,'',?,?),
+      ('CLI-MERGE-B','CLOAN-MERGE-B','CAT-9102','LOC-MERGE','good',17,0,'',?,?),
+      ('CLI-MERGE-LEGACY','CLOAN-MERGE-LEGACY','CAT-9101','LOC-MERGE','good',2,2,'',?,?)
+  `).run(createdAt, createdAt, laterCreatedAt, laterCreatedAt, createdAt, createdAt);
+  database.prepare(`
+    INSERT INTO class_loan_transactions (
+      id,request_id,class_loan_id,kind,occurred_at,notes,actor_user_id,created_at
+    ) VALUES
+      ('CLTX-MERGE-A','REQ-MERGE-A','CLOAN-MERGE-A','issue','2026-09-01','','USR-MERGE-LIB',?),
+      ('CLTX-MERGE-B','REQ-MERGE-B','CLOAN-MERGE-B','issue','2026-09-01','','USR-MERGE-LIB',?)
+  `).run(createdAt, laterCreatedAt);
+  database.prepare(`
+    INSERT INTO class_loan_transaction_lines (
+      id,transaction_id,class_loan_item_id,material_id,location_id,condition,
+      quantity_delta,quantity_before,quantity_after,created_at
+    ) VALUES
+      ('CLINE-MERGE-A','CLTX-MERGE-A','CLI-MERGE-A','CAT-9101','LOC-MERGE','good',-1,1,0,?),
+      ('CLINE-MERGE-B','CLTX-MERGE-B','CLI-MERGE-B','CAT-9102','LOC-MERGE','good',-17,17,0,?)
+  `).run(createdAt, laterCreatedAt);
+
+  database.exec(await readFile(new URL("../drizzle/0034_worthless_big_bertha.sql", import.meta.url), "utf8"));
+
+  assert.deepEqual(
+    database.prepare(`
+      SELECT id,status,merged_into_class_loan_id AS mergedInto
+      FROM class_loans ORDER BY id
+    `).all().map((row) => ({ ...row })),
+    [
+      { id: "CLOAN-MERGE-A", status: "open", mergedInto: null },
+      { id: "CLOAN-MERGE-B", status: "cancelled", mergedInto: "CLOAN-MERGE-A" },
+      { id: "CLOAN-MERGE-LEGACY", status: "closed", mergedInto: null },
+    ],
+  );
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM class_loan_items WHERE class_loan_id='CLOAN-MERGE-A'").get().count, 2);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM class_loan_transactions WHERE class_loan_id='CLOAN-MERGE-A'").get().count, 2);
+  assert.deepEqual(
+    database.prepare("SELECT id FROM class_loan_transactions WHERE class_loan_id='CLOAN-MERGE-A' ORDER BY id").all().map((row) => row.id),
+    ["CLTX-MERGE-A", "CLTX-MERGE-B"],
+  );
+  assert.equal(database.prepare("SELECT SUM(quantity_issued) AS copies FROM class_loan_statement_lines WHERE class_loan_id='CLOAN-MERGE-A'").get().copies, 18);
+  assert.deepEqual(
+    { ...database.prepare(`
+      SELECT title,quantity_issued AS quantityIssued
+      FROM class_loan_statement_lines WHERE class_loan_id='CLOAN-MERGE-LEGACY'
+    `).get() },
+    { title: "Українська мова", quantityIssued: 2 },
+  );
+  const oldUrlStatement = await readClassIssueStatement(asD1(database), "CLOAN-MERGE-B");
+  assert.equal(oldUrlStatement.classLoanId, "CLOAN-MERGE-A");
+  assert.equal(oldUrlStatement.lines.length, 2);
+  assert.equal(oldUrlStatement.lines.reduce((total, line) => total + line.quantityIssued, 0), 18);
+  assert.throws(
+    () => database.prepare(`
+      INSERT INTO class_loans (
+        id,class_year_id,responsible_teacher_user_id,status,issued_at,due_at,closed_at,notes,
+        issue_statement_schema_version,issue_statement_json,issue_statement_origin,
+        issued_by_user_id,closed_by_user_id,version,created_at,updated_at
+      ) VALUES ('CLOAN-MERGE-C','CY-MERGE','USR-MERGE-TEACHER','open','2026-09-01',NULL,NULL,'',1,?,'issued','USR-MERGE-LIB',NULL,1,?,?)
+    `).run(firstSnapshot, laterCreatedAt, laterCreatedAt),
+    /UNIQUE constraint failed: class_loans.class_year_id/u,
+  );
+  assert.throws(
+    () => database.prepare("UPDATE class_loan_statement_lines SET quantity_issued=99 WHERE class_loan_id='CLOAN-MERGE-A'").run(),
+    /class issue statement line is immutable/u,
+  );
+  assert.throws(
+    () => database.prepare("DELETE FROM class_loan_statement_lines WHERE class_loan_id='CLOAN-MERGE-A'").run(),
+    /class issue statement line is immutable/u,
+  );
   assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
   database.close();
 });
@@ -567,10 +744,7 @@ test("core migration extends the existing draft database without recreating it",
     "audit_events",
     "class_years",
     "class_loan_items",
-    "class_loan_transaction_lines",
-    "class_loan_transactions",
-    "class_loans",
-    "class_loan_items",
+    "class_loan_statement_lines",
     "class_loan_transaction_lines",
     "class_loan_transactions",
     "class_loans",

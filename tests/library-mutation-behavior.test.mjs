@@ -15,6 +15,9 @@ const catalog = await import(
 const directory = await import(
   pathToFileURL(path.join(root, "lib/library-directory-store.ts")).href
 );
+const statements = await import(
+  pathToFileURL(path.join(root, "lib/class-issue-statement-store.ts")).href
+);
 
 class PreparedStatement {
   constructor(database, sql, bindings = []) {
@@ -99,6 +102,7 @@ function openDatabase() {
     "0018_yielding_skaar.sql",
     "0019_kindly_wolfsbane.sql",
     "0028_dusty_marten_broadcloak.sql",
+    "0034_worthless_big_bertha.sql",
   ]) {
     const sql = fs.readFileSync(path.join(root, "drizzle", file), "utf8");
     for (const statement of sql.split(/-->\s*statement-breakpoint/gu)) {
@@ -1181,6 +1185,218 @@ test("class issue and partial/full return are idempotent, chronological and bala
     `).get()),
     { total_quantity: 5, library_quantity: 5, loaned_quantity: 0 },
   );
+});
+
+test("later class issues append to one cumulative loan and statement", async () => {
+  const { sqlite, d1 } = openDatabase();
+  seedActiveClassYear(sqlite);
+  const now = "2026-08-11T08:00:00.000Z";
+  sqlite.prepare(`
+    UPDATE holdings SET quantity = 5, version = 2
+    WHERE material_id = 'CAT-0001' AND location_id = 'LOC-001'
+  `).run();
+  sqlite.prepare(`
+    INSERT INTO materials (
+      id, catalog_number, title, sort_title, search_text, rubric,
+      publication_type, subject, author, publication_year, isbn,
+      isbn_normalized, publisher, notes, status, version,
+      created_at, updated_at, archived_at
+    ) VALUES (
+      'CAT-0002', 2, 'Українська література', 'українська література',
+      'українська література автор', 'Підручники', 'Підручник',
+      'Українська література', 'Другий автор', 2025, '', '', '', '',
+      'active', 1, ?, ?, NULL
+    )
+  `).run(now, now);
+  sqlite.prepare(`
+    INSERT INTO holdings (material_id, location_id, condition, quantity, version, updated_at)
+    VALUES ('CAT-0002', 'LOC-001', 'unspecified', 20, 1, ?)
+  `).run(now);
+
+  const firstInput = {
+    requestId: "21000000-0000-4000-8000-000000000001",
+    classYearId: "CY-2026-001",
+    expectedClassYearVersion: 1,
+    responsibleTeacherUserId: "USR-TCH",
+    issuedAt: "2026-09-01",
+    dueAt: "2027-06-30",
+    notes: "Перший список",
+    items: [{
+      materialId: "CAT-0001",
+      sourceLocationId: "LOC-001",
+      condition: "unspecified",
+      quantity: 1,
+      expectedAvailableQuantity: 5,
+    }],
+  };
+  const first = await mutation.issueLoanToClass(actor, firstInput, d1);
+  assert.equal(first.appended, false);
+  assert.equal(first.version, 1);
+
+  const second = await mutation.issueLoanToClass(actor, {
+    ...firstInput,
+    requestId: "21000000-0000-4000-8000-000000000002",
+    issuedAt: "2026-09-02",
+    notes: "Додано до списку",
+    items: [{
+      materialId: "CAT-0002",
+      sourceLocationId: "LOC-001",
+      condition: "unspecified",
+      quantity: 17,
+      expectedAvailableQuantity: 20,
+    }],
+  }, d1);
+  assert.equal(second.classLoanId, first.classLoanId);
+  assert.equal(second.appended, true);
+  assert.equal(second.version, 2);
+
+  const thirdInput = {
+    ...firstInput,
+    requestId: "21000000-0000-4000-8000-000000000003",
+    issuedAt: "2026-09-03",
+    notes: "Ще примірники першої назви",
+    items: [{
+      materialId: "CAT-0001",
+      sourceLocationId: "LOC-001",
+      condition: "unspecified",
+      quantity: 2,
+      expectedAvailableQuantity: 4,
+    }],
+  };
+  const third = await mutation.issueLoanToClass(actor, thirdInput, d1);
+  assert.equal(third.classLoanId, first.classLoanId);
+  assert.equal(third.version, 3);
+  assert.deepEqual(await mutation.issueLoanToClass(actor, thirdInput, d1), third);
+
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM class_loans").get().count, 1);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM class_loan_transactions").get().count, 3);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM class_loan_items").get().count, 3);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM class_loan_statement_lines").get().count, 3);
+  const statement = await statements.readClassIssueStatement(d1, first.classLoanId);
+  assert.equal(statement.classLoanId, first.classLoanId);
+  assert.deepEqual(statement.lines.map((line) => ({
+    title: line.title,
+    quantityIssued: line.quantityIssued,
+  })), [
+    { title: "Стара назва", quantityIssued: 3 },
+    { title: "Українська література", quantityIssued: 17 },
+  ]);
+  await assert.rejects(
+    mutation.returnClassLoanItems(actor, {
+      requestId: "21000000-0000-4000-8000-000000000004",
+      classLoanId: first.classLoanId,
+      expectedVersion: 3,
+      returnedAt: "2026-09-01",
+      notes: null,
+      items: [{
+        classLoanItemId: second.items[0].classLoanItemId,
+        quantity: 1,
+        returnLocationId: "LOC-001",
+        condition: "unspecified",
+      }],
+    }, d1),
+    (error) => error?.code === "return_date_invalid"
+      && error?.details?.issuedAt === "2026-09-02",
+  );
+  assert.equal(sqlite.prepare("SELECT version FROM class_loans").get().version, 3);
+});
+
+test("a concurrent append cannot use the version written by another class issue", async () => {
+  const { sqlite, d1 } = openDatabase();
+  seedActiveClassYear(sqlite);
+  const first = await mutation.issueLoanToClass(actor, {
+    requestId: "22000000-0000-4000-8000-000000000001",
+    classYearId: "CY-2026-001",
+    expectedClassYearVersion: 1,
+    responsibleTeacherUserId: "USR-TCH",
+    issuedAt: "2026-09-01",
+    dueAt: "2027-06-30",
+    notes: null,
+    items: [{
+      materialId: "CAT-0001",
+      sourceLocationId: "LOC-001",
+      condition: "unspecified",
+      quantity: 1,
+      expectedAvailableQuantity: 5,
+    }],
+  }, d1);
+  d1.beforeBatch = () => {
+    sqlite.prepare("UPDATE class_loans SET version=version+1 WHERE id=?").run(first.classLoanId);
+  };
+  await assert.rejects(
+    mutation.issueLoanToClass(actor, {
+      requestId: "22000000-0000-4000-8000-000000000002",
+      classYearId: "CY-2026-001",
+      expectedClassYearVersion: 1,
+      responsibleTeacherUserId: "USR-TCH",
+      issuedAt: "2026-09-02",
+      dueAt: "2027-06-30",
+      notes: null,
+      items: [{
+        materialId: "CAT-0001",
+        sourceLocationId: "LOC-001",
+        condition: "unspecified",
+        quantity: 1,
+        expectedAvailableQuantity: 4,
+      }],
+    }, d1),
+    (error) => error?.code === "class_loan_version_conflict" && error?.status === 409,
+  );
+  assert.equal(sqlite.prepare("SELECT version FROM class_loans").get().version, 2);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM class_loan_transactions").get().count, 1);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM class_loan_items").get().count, 1);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM class_loan_statement_lines").get().count, 1);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM mutation_commands").get().count, 1);
+  assert.equal(sqlite.prepare("SELECT quantity FROM holdings WHERE material_id='CAT-0001'").get().quantity, 4);
+});
+
+test("the first append backfills a post-migration legacy class issue into the cumulative statement", async () => {
+  const { sqlite, d1 } = openDatabase();
+  seedActiveClassYear(sqlite);
+  const createdAt = "2026-09-01T08:00:00.000Z";
+  sqlite.prepare(`
+    INSERT INTO class_loans (
+      id,class_year_id,responsible_teacher_user_id,status,issued_at,due_at,closed_at,notes,
+      issue_statement_schema_version,issue_statement_json,issue_statement_origin,
+      issued_by_user_id,closed_by_user_id,version,created_at,updated_at
+    ) VALUES (
+      'CLOAN-POST-MIGRATION-LEGACY','CY-2026-001','USR-TCH','open','2026-09-01',
+      '2027-06-30',NULL,'',0,'','legacy','USR-LIB',NULL,1,?,?
+    )
+  `).run(createdAt, createdAt);
+  sqlite.prepare(`
+    INSERT INTO class_loan_items (
+      id,class_loan_id,material_id,source_location_id,condition,quantity_issued,
+      quantity_returned,notes,created_at,updated_at
+    ) VALUES (
+      'CLI-POST-MIGRATION-LEGACY','CLOAN-POST-MIGRATION-LEGACY','CAT-0001',
+      'LOC-001','unspecified',1,0,'',?,?
+    )
+  `).run(createdAt, createdAt);
+
+  const appended = await mutation.issueLoanToClass(actor, {
+    requestId: "23000000-0000-4000-8000-000000000001",
+    classYearId: "CY-2026-001",
+    expectedClassYearVersion: 1,
+    responsibleTeacherUserId: "USR-TCH",
+    issuedAt: "2026-09-02",
+    dueAt: "2027-06-30",
+    notes: null,
+    items: [{
+      materialId: "CAT-0001",
+      sourceLocationId: "LOC-001",
+      condition: "unspecified",
+      quantity: 1,
+      expectedAvailableQuantity: 5,
+    }],
+  }, d1);
+  assert.equal(appended.classLoanId, "CLOAN-POST-MIGRATION-LEGACY");
+  assert.equal(appended.appended, true);
+  const statement = await statements.readClassIssueStatement(d1, appended.classLoanId);
+  assert.equal(statement.lines.length, 1);
+  assert.equal(statement.lines[0].title, "Стара назва");
+  assert.equal(statement.lines[0].quantityIssued, 2);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM class_loan_statement_lines").get().count, 2);
 });
 
 test("class circulation keeps a constant D1 query and batch budget for 100 items", async () => {

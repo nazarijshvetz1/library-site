@@ -204,6 +204,7 @@ export type ClassLoanMutationResult = {
   dueAt: string | null;
   closedAt: string | null;
   version: number;
+  appended?: boolean;
   transactionId: string;
   items: Array<{
     classLoanItemId: string;
@@ -2948,6 +2949,56 @@ export async function issueLoanToClass(
     );
   }
 
+  const existingClassLoan = await db.prepare(`
+    SELECT cl.id, cl.responsible_teacher_user_id, cl.issued_at, cl.due_at,
+      cl.version, COALESCE(u.full_name, '') AS responsible_teacher_name,
+      (
+        SELECT MAX(tx.occurred_at)
+        FROM class_loan_transactions tx
+        WHERE tx.class_loan_id = cl.id
+      ) AS last_transaction_at
+    FROM class_loans cl
+    LEFT JOIN users u ON u.id = cl.responsible_teacher_user_id
+    WHERE cl.class_year_id = ? AND cl.status = 'open'
+      AND cl.merged_into_class_loan_id IS NULL
+    ORDER BY cl.created_at, cl.id
+    LIMIT 1
+  `).bind(input.classYearId).first<{
+    id: string;
+    responsible_teacher_user_id: string;
+    responsible_teacher_name: string;
+    issued_at: string;
+    due_at: string | null;
+    version: number;
+    last_transaction_at: string | null;
+  }>();
+  if (
+    existingClassLoan
+    && existingClassLoan.responsible_teacher_user_id !== responsibleTeacher.id
+  ) {
+    throw new LibraryMutationError(
+      "class_loan_responsible_teacher_conflict",
+      409,
+      `Для цього класу вже відкрита спільна видача на ${existingClassLoan.responsible_teacher_name || "іншого вчителя"}.`,
+      {
+        classLoanId: existingClassLoan.id,
+        responsibleTeacherUserId: existingClassLoan.responsible_teacher_user_id,
+        responsibleTeacherName: existingClassLoan.responsible_teacher_name,
+      },
+    );
+  }
+  if (
+    existingClassLoan?.last_transaction_at
+    && input.issuedAt < existingClassLoan.last_transaction_at
+  ) {
+    throw new LibraryMutationError(
+      "class_loan_issue_date_conflict",
+      409,
+      "Дата додавання не може бути ранішою за останню операцію у спільній видачі класу.",
+      { lastTransactionAt: existingClassLoan.last_transaction_at },
+    );
+  }
+
   const requestedItemsJson = JSON.stringify(input.items);
   const itemStateResult = await db.prepare(`
     WITH requested AS (
@@ -3049,13 +3100,20 @@ export async function issueLoanToClass(
   }
 
   const createdAt = new Date().toISOString();
-  const classLoanId = `CLOAN-${crypto.randomUUID()}`;
+  const classLoanId = existingClassLoan?.id ?? `CLOAN-${crypto.randomUUID()}`;
   const transactionId = `CLTX-${crypto.randomUUID()}`;
   const classLoanItemIds = input.items.map(() => `CLI-${crypto.randomUUID()}`);
   const issueRows = input.items.map((item, index) => ({
     ...item,
     classLoanItemId: classLoanItemIds[index],
     lineId: `CLINE-${crypto.randomUUID()}`,
+    statementLineId: `CLSL-${crypto.randomUUID()}`,
+    statementPosition: index + 1,
+    statementSubject: itemStates[index].subject,
+    statementTitle: itemStates[index].title,
+    statementAuthor: itemStates[index].author,
+    statementPublicationYear: itemStates[index].publicationYear,
+    statementRubric: itemStates[index].rubric,
     quantityBefore: itemStates[index].quantity,
     versionBefore: itemStates[index].version,
     quantityAfter: itemStates[index].quantity - item.quantity,
@@ -3085,12 +3143,13 @@ export async function issueLoanToClass(
     classLoanId,
     status: "open",
     classYearId: input.classYearId,
-    responsibleTeacherUserId: responsibleTeacher.id,
-    responsibleTeacherName: responsibleTeacher.full_name,
-    issuedAt: input.issuedAt,
-    dueAt: input.dueAt,
+    responsibleTeacherUserId: existingClassLoan?.responsible_teacher_user_id ?? responsibleTeacher.id,
+    responsibleTeacherName: existingClassLoan?.responsible_teacher_name || responsibleTeacher.full_name,
+    issuedAt: existingClassLoan?.issued_at ?? input.issuedAt,
+    dueAt: existingClassLoan?.due_at ?? input.dueAt,
     closedAt: null,
-    version: 1,
+    version: existingClassLoan ? Number(existingClassLoan.version) + 1 : 1,
+    appended: Boolean(existingClassLoan),
     transactionId,
     items: input.items.map((item, index) => ({
       classLoanItemId: classLoanItemIds[index],
@@ -3110,7 +3169,41 @@ export async function issueLoanToClass(
       classLoanId,
       createdAt,
     ),
-    db.prepare(`
+  ];
+  if (existingClassLoan) {
+    statements.push(db.prepare(`
+      UPDATE class_loans
+      SET version = version + 1, updated_at = ?
+      WHERE id = ? AND class_year_id = ? AND status = 'open'
+        AND merged_into_class_loan_id IS NULL AND version = ?
+        AND EXISTS (
+          SELECT 1
+          FROM class_years cy
+          JOIN academic_years ay ON ay.id = cy.academic_year_id AND ay.status = 'active'
+          JOIN cohorts c ON c.id = cy.cohort_id AND c.status = 'active'
+          WHERE cy.id = class_loans.class_year_id
+            AND cy.version = ? AND cy.status = 'active'
+            AND ? BETWEEN cy.start_date AND cy.end_date
+            AND (? IS NULL OR ? <= cy.end_date)
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM users u
+          JOIN teacher_profiles tp ON tp.teacher_user_id = u.id AND tp.closed_at IS NULL
+          WHERE u.id = class_loans.responsible_teacher_user_id AND u.status = 'active'
+        )
+    `).bind(
+      createdAt,
+      classLoanId,
+      input.classYearId,
+      existingClassLoan.version,
+      input.expectedClassYearVersion,
+      input.issuedAt,
+      input.dueAt,
+      input.dueAt,
+    ));
+  } else {
+    statements.push(db.prepare(`
       INSERT INTO class_loans (
         id, class_year_id, responsible_teacher_user_id, status,
         issued_at, due_at, closed_at, notes,
@@ -3147,22 +3240,66 @@ export async function issueLoanToClass(
       actor.id,
       createdAt,
       createdAt,
-    ),
+    ));
+  }
+  statements.push(
     db.prepare(`
       INSERT INTO class_loan_transactions (
         id, request_id, class_loan_id, kind, occurred_at, notes,
         actor_user_id, created_at
-      ) VALUES (?, ?, ?, 'issue', ?, ?, ?, ?)
+      ) VALUES (?, ?, (
+        SELECT id FROM class_loans
+        WHERE id = ? AND class_year_id = ? AND status = 'open'
+          AND merged_into_class_loan_id IS NULL AND version = ? AND changes() = 1
+      ), 'issue', ?, ?, ?, ?)
     `).bind(
       transactionId,
       input.requestId,
       classLoanId,
+      input.classYearId,
+      result.version,
       input.issuedAt,
       input.notes ?? "",
       actor.id,
       createdAt,
     ),
-  ];
+  );
+  if (existingClassLoan) {
+    statements.push(db.prepare(`
+      INSERT INTO class_loan_statement_lines (
+        id, class_loan_id, transaction_id, position, subject, title,
+        author, publication_year, rubric, quantity_issued, created_at
+      )
+      SELECT
+        'CLSL-APPEND-BACKFILL-' || cli.id,
+        cli.class_loan_id,
+        (
+          SELECT issue_tx.id
+          FROM class_loan_transaction_lines issue_line
+          JOIN class_loan_transactions issue_tx
+            ON issue_tx.id = issue_line.transaction_id AND issue_tx.kind = 'issue'
+          WHERE issue_line.class_loan_item_id = cli.id
+          ORDER BY issue_tx.occurred_at, issue_tx.created_at, issue_tx.id
+          LIMIT 1
+        ),
+        ROW_NUMBER() OVER (ORDER BY cli.created_at, cli.id),
+        COALESCE(m.subject, ''),
+        COALESCE(NULLIF(trim(m.title), ''), 'Матеріал'),
+        COALESCE(m.author, ''),
+        CASE WHEN m.publication_year BETWEEN 1000 AND 3000 THEN m.publication_year ELSE NULL END,
+        COALESCE(m.rubric, ''),
+        cli.quantity_issued,
+        cli.created_at
+      FROM class_loan_items cli
+      JOIN materials m ON m.id = cli.material_id
+      WHERE cli.class_loan_id = ?
+        AND NOT EXISTS (
+          SELECT 1 FROM class_loan_statement_lines existing_line
+          WHERE existing_line.class_loan_id = cli.class_loan_id
+        )
+      ORDER BY cli.created_at, cli.id
+    `).bind(classLoanId));
+  }
 
   statements.push(
     db.prepare(`
@@ -3194,6 +3331,28 @@ export async function issueLoanToClass(
         ?
       FROM requested
     `).bind(issueRowsJson, classLoanId, createdAt, createdAt),
+    db.prepare(`
+      WITH requested AS (
+        SELECT value FROM json_each(?)
+      )
+      INSERT INTO class_loan_statement_lines (
+        id, class_loan_id, transaction_id, position, subject, title,
+        author, publication_year, rubric, quantity_issued, created_at
+      )
+      SELECT
+        json_extract(value, '$.statementLineId'),
+        ?,
+        ?,
+        CAST(json_extract(value, '$.statementPosition') AS INTEGER),
+        COALESCE(json_extract(value, '$.statementSubject'), ''),
+        json_extract(value, '$.statementTitle'),
+        COALESCE(json_extract(value, '$.statementAuthor'), ''),
+        json_extract(value, '$.statementPublicationYear'),
+        COALESCE(json_extract(value, '$.statementRubric'), ''),
+        CAST(json_extract(value, '$.quantity') AS INTEGER),
+        ?
+      FROM requested
+    `).bind(issueRowsJson, classLoanId, transactionId, createdAt),
   );
   if (nonzeroHoldingCount > 0) {
     statements.push(
@@ -3326,13 +3485,21 @@ export async function issueLoanToClass(
       INSERT INTO audit_events (
         id, actor_user_id, actor_email, action, entity_type, entity_id,
         request_id, before_json, after_json, metadata_json, created_at
-      ) VALUES (?, ?, ?, 'class_loan.issued', 'class_loan', ?, ?, NULL, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, 'class_loan', ?, ?, ?, ?, ?, ?)
     `).bind(
       crypto.randomUUID(),
       actor.id,
       actor.email,
+      existingClassLoan ? "class_loan.appended" : "class_loan.issued",
       classLoanId,
       input.requestId,
+      existingClassLoan
+        ? JSON.stringify({
+          classLoanId,
+          version: existingClassLoan.version,
+          itemCountAdded: input.items.length,
+        })
+        : null,
       JSON.stringify({
         ...result,
         className: classYear.class_name,
@@ -3342,7 +3509,8 @@ export async function issueLoanToClass(
       }),
       JSON.stringify({
         transactionId,
-        responsibleTeacherName: responsibleTeacher.full_name,
+        responsibleTeacherName: result.responsibleTeacherName,
+        appended: Boolean(existingClassLoan),
       }),
       createdAt,
     ),
@@ -3461,6 +3629,13 @@ export async function returnClassLoanItems(
       cli.material_id,
       cli.quantity_issued,
       cli.quantity_returned,
+      COALESCE((
+        SELECT MIN(issue_tx.occurred_at)
+        FROM class_loan_transaction_lines issue_line
+        JOIN class_loan_transactions issue_tx
+          ON issue_tx.id = issue_line.transaction_id AND issue_tx.kind = 'issue'
+        WHERE issue_line.class_loan_item_id = cli.id
+      ), ?) AS item_issued_at,
       CASE WHEN loc.status = 'active' AND loc.type != 'service' THEN loc.id END
         AS active_location_id,
       h.quantity AS holding_quantity,
@@ -3474,12 +3649,13 @@ export async function returnClassLoanItems(
       AND h.location_id = requested.return_location_id
       AND h.condition = requested.return_condition
     ORDER BY requested.item_index
-  `).bind(requestedReturnsJson, input.classLoanId).all<{
+  `).bind(requestedReturnsJson, loan.issued_at, input.classLoanId).all<{
     item_index: number;
     class_loan_item_id: string | null;
     material_id: string | null;
     quantity_issued: number | null;
     quantity_returned: number | null;
+    item_issued_at: string | null;
     active_location_id: string | null;
     holding_quantity: number | null;
     holding_version: number | null;
@@ -3510,6 +3686,15 @@ export async function returnClassLoanItems(
     }
     const quantityIssued = Number(row.quantity_issued ?? 0);
     const quantityReturned = Number(row.quantity_returned ?? 0);
+    const itemIssuedAt = row.item_issued_at ?? loan.issued_at;
+    if (input.returnedAt < itemIssuedAt) {
+      throw new LibraryMutationError(
+        "return_date_invalid",
+        400,
+        "Дата повернення не може передувати даті видачі вибраного підручника.",
+        { classLoanItemId: item.classLoanItemId, issuedAt: itemIssuedAt },
+      );
+    }
     const remaining = quantityIssued - quantityReturned;
     if (item.quantity > remaining) {
       throw new LibraryMutationError(
@@ -4529,8 +4714,10 @@ function isOptimisticGuardFailure(error: unknown): boolean {
     || message.includes("NOT NULL constraint failed: class_loan_transaction_lines.material_id")
     || message.includes("NOT NULL constraint failed: class_loan_items.material_id")
     || message.includes("NOT NULL constraint failed: class_loan_items.source_location_id")
+    || message.includes("NOT NULL constraint failed: class_loan_transactions.class_loan_id")
     || message.includes("NOT NULL constraint failed: class_loans.class_year_id")
     || message.includes("NOT NULL constraint failed: class_loans.responsible_teacher_user_id")
+    || message.includes("UNIQUE constraint failed: class_loans.class_year_id")
     || message.includes("NOT NULL constraint failed: holdings.material_id")
     || message.includes("NOT NULL constraint failed: holdings.location_id")
     || message.includes(
@@ -4555,6 +4742,15 @@ function classifyClassLoanIssueRace(
     return {
       code: "responsible_teacher_not_found",
       message: "Профіль відповідального вчителя став неактивним. Оберіть іншого вчителя.",
+    };
+  }
+  if (
+    message.includes("NOT NULL constraint failed: class_loan_transactions.class_loan_id")
+    || message.includes("UNIQUE constraint failed: class_loans.class_year_id")
+  ) {
+    return {
+      code: "class_loan_version_conflict",
+      message: "Спільну видачу класу вже змінили. Оновіть форму та повторіть додавання.",
     };
   }
   return null;

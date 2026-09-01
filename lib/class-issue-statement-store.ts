@@ -79,37 +79,44 @@ export async function readClassIssueStatement(
     throw new ClassIssueStatementError("statement_not_found", "Відомість не знайдено.");
   }
 
-  const schemaVersion = integer(row.schemaVersion);
-  const origin = text(row.origin);
-  if (schemaVersion === 1 && origin === "issued") {
-    const parsed = parseSnapshot(text(row.snapshotJson));
-    return {
-      classLoanId: id,
-      ...parsed,
-      origin: "issued",
-      currentStatus: status(row.currentStatus),
-      createdAt: text(row.createdAt),
-    };
-  }
+  const snapshotHeader = integer(row.schemaVersion) === 1
+    ? parseSnapshotHeader(text(row.snapshotJson))
+    : null;
 
   let lineRows: Record<string, unknown>[];
   try {
-    const result = await db.prepare(LEGACY_LINES_SQL).bind(id).all<Record<string, unknown>>();
+    const result = await db.prepare(STATEMENT_LINES_SQL)
+      .bind(text(row.classLoanId))
+      .all<Record<string, unknown>>();
     lineRows = result.results ?? [];
   } catch {
-    throw new ClassIssueStatementError("statement_unavailable", "Не вдалося відновити давню відомість.");
+    throw new ClassIssueStatementError("statement_unavailable", "Не вдалося прочитати позиції відомості.");
+  }
+  let resolvedOrigin: ClassIssueStatement["origin"] = (
+    integer(row.schemaVersion) === 1 && text(row.origin) === "issued"
+  ) ? "issued" : "legacy_backfill";
+  if (!lineRows.length) {
+    try {
+      const result = await db.prepare(LEGACY_LINES_SQL)
+        .bind(text(row.classLoanId))
+        .all<Record<string, unknown>>();
+      lineRows = result.results ?? [];
+      resolvedOrigin = "legacy_backfill";
+    } catch {
+      throw new ClassIssueStatementError("statement_unavailable", "Не вдалося відновити давню відомість.");
+    }
   }
   return {
-    classLoanId: id,
+    classLoanId: text(row.classLoanId),
     schemaVersion: 1,
-    origin: "legacy_backfill",
+    origin: resolvedOrigin,
     currentStatus: status(row.currentStatus),
-    className: text(row.className),
-    academicYearLabel: text(row.academicYearLabel),
-    classroomName: text(row.classroomName),
-    curatorName: text(row.curatorName),
-    issuedAt: text(row.issuedAt),
-    dueAt: nullableText(row.dueAt),
+    className: snapshotHeader?.className ?? text(row.className),
+    academicYearLabel: snapshotHeader?.academicYearLabel ?? text(row.academicYearLabel),
+    classroomName: snapshotHeader?.classroomName ?? text(row.classroomName),
+    curatorName: snapshotHeader?.curatorName ?? text(row.curatorName),
+    issuedAt: snapshotHeader?.issuedAt ?? text(row.issuedAt),
+    dueAt: snapshotHeader ? snapshotHeader.dueAt : nullableText(row.dueAt),
     createdAt: text(row.createdAt),
     lines: lineRows.map((line, index) => ({
       position: index + 1,
@@ -150,39 +157,6 @@ export async function listClassIssueStatements(
   }
 }
 
-function parseSnapshot(value: string): Omit<ClassIssueStatement, "classLoanId" | "origin" | "currentStatus" | "createdAt"> {
-  try {
-    const parsed = JSON.parse(value) as Record<string, unknown>;
-    if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.lines)) throw new Error("schema");
-    const lines = parsed.lines.map((raw, index) => {
-      const line = raw as Record<string, unknown>;
-      const title = text(line.title);
-      if (!title) throw new Error("title");
-      return {
-        position: positiveInteger(line.position) || index + 1,
-        subject: text(line.subject),
-        title,
-        author: text(line.author),
-        publicationYear: nullableInteger(line.publicationYear),
-        rubric: text(line.rubric),
-        quantityIssued: positiveInteger(line.quantityIssued),
-      };
-    });
-    return {
-      schemaVersion: 1,
-      className: text(parsed.className),
-      academicYearLabel: text(parsed.academicYearLabel),
-      classroomName: text(parsed.classroomName),
-      curatorName: text(parsed.curatorName),
-      issuedAt: text(parsed.issuedAt),
-      dueAt: nullableText(parsed.dueAt),
-      lines,
-    };
-  } catch {
-    throw new ClassIssueStatementError("statement_invalid", "Збережена відомість пошкоджена.");
-  }
-}
-
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : value == null ? "" : String(value).trim();
 }
@@ -205,11 +179,46 @@ function nullableInteger(value: unknown): number | null {
   return value == null || value === "" ? null : integer(value);
 }
 
+function parseSnapshotHeader(value: string): Pick<
+  ClassIssueStatement,
+  "className" | "academicYearLabel" | "classroomName" | "curatorName" | "issuedAt" | "dueAt"
+> {
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.lines)) throw new Error("schema");
+    return {
+      className: text(parsed.className),
+      academicYearLabel: text(parsed.academicYearLabel),
+      classroomName: text(parsed.classroomName),
+      curatorName: text(parsed.curatorName),
+      issuedAt: text(parsed.issuedAt),
+      dueAt: nullableText(parsed.dueAt),
+    };
+  } catch {
+    throw new ClassIssueStatementError("statement_invalid", "Збережена відомість пошкоджена.");
+  }
+}
+
 function status(value: unknown): ClassIssueStatement["currentStatus"] {
   return value === "closed" || value === "cancelled" ? value : "open";
 }
 
 const HEADER_SQL = `
+  WITH RECURSIVE resolved(id, merged_into_class_loan_id, depth) AS (
+    SELECT id, merged_into_class_loan_id, 0
+    FROM class_loans
+    WHERE id = ?
+    UNION ALL
+    SELECT next.id, next.merged_into_class_loan_id, resolved.depth + 1
+    FROM class_loans next
+    JOIN resolved ON next.id = resolved.merged_into_class_loan_id
+    WHERE resolved.merged_into_class_loan_id IS NOT NULL AND resolved.depth < 31
+  ), canonical AS (
+    SELECT id
+    FROM resolved
+    ORDER BY depth DESC
+    LIMIT 1
+  )
   SELECT cl.id AS classLoanId, cl.status AS currentStatus, cl.issued_at AS issuedAt,
     cl.due_at AS dueAt, cl.created_at AS createdAt,
     cl.issue_statement_schema_version AS schemaVersion,
@@ -222,31 +231,71 @@ const HEADER_SQL = `
   JOIN academic_years ay ON ay.id = cy.academic_year_id
   LEFT JOIN locations classroom ON classroom.id = cy.location_id
   LEFT JOIN users curator ON curator.id = cy.teacher_user_id
-  WHERE cl.id = ?
+  WHERE cl.id = (SELECT id FROM canonical)
   LIMIT 1`;
 
+const STATEMENT_LINES_SQL = `
+  SELECT trim(subject) AS subject, trim(title) AS title, trim(author) AS author,
+    publication_year AS publicationYear, trim(rubric) AS rubric,
+    SUM(quantity_issued) AS quantityIssued,
+    MIN(created_at) AS firstCreatedAt, MIN(position) AS firstPosition,
+    MIN(id) AS firstId
+  FROM class_loan_statement_lines
+  WHERE class_loan_id = ?
+  GROUP BY trim(subject), trim(title), trim(author), publication_year, trim(rubric)
+  ORDER BY firstCreatedAt, firstPosition, firstId`;
+
 const LEGACY_LINES_SQL = `
-  SELECT m.subject AS subject, m.title AS title, m.author AS author,
-    m.publication_year AS publicationYear, m.rubric AS rubric,
-    cli.quantity_issued AS quantityIssued
+  SELECT trim(m.subject) AS subject, trim(m.title) AS title, trim(m.author) AS author,
+    m.publication_year AS publicationYear, trim(m.rubric) AS rubric,
+    SUM(cli.quantity_issued) AS quantityIssued,
+    MIN(cli.created_at) AS firstCreatedAt, MIN(cli.id) AS firstId
   FROM class_loan_items cli
   JOIN materials m ON m.id = cli.material_id
   WHERE cli.class_loan_id = ?
-  ORDER BY cli.created_at, cli.id`;
+  GROUP BY trim(m.subject), trim(m.title), trim(m.author), m.publication_year, trim(m.rubric)
+  ORDER BY firstCreatedAt, firstId`;
 
 const LIST_SQL = `
+  WITH statement_bibliography AS (
+    SELECT class_loan_id, trim(subject) AS subject, trim(title) AS title,
+      trim(author) AS author, publication_year, trim(rubric) AS rubric,
+      SUM(quantity_issued) AS quantityIssued
+    FROM class_loan_statement_lines
+    GROUP BY class_loan_id, trim(subject), trim(title), trim(author), publication_year, trim(rubric)
+  ), statement_counts AS (
+    SELECT class_loan_id, COUNT(*) AS positionCount,
+      COALESCE(SUM(quantityIssued), 0) AS copyCount
+    FROM statement_bibliography
+    GROUP BY class_loan_id
+  ), legacy_bibliography AS (
+    SELECT cli.class_loan_id, trim(m.subject) AS subject, trim(m.title) AS title,
+      trim(m.author) AS author, m.publication_year, trim(m.rubric) AS rubric,
+      SUM(cli.quantity_issued) AS quantityIssued
+    FROM class_loan_items cli
+    JOIN materials m ON m.id = cli.material_id
+    GROUP BY cli.class_loan_id, trim(m.subject), trim(m.title), trim(m.author),
+      m.publication_year, trim(m.rubric)
+  ), legacy_counts AS (
+    SELECT class_loan_id, COUNT(*) AS positionCount,
+      COALESCE(SUM(quantityIssued), 0) AS copyCount
+    FROM legacy_bibliography
+    GROUP BY class_loan_id
+  )
   SELECT cl.id AS classLoanId, cl.class_year_id AS classYearId,
     cy.class_name AS className, ay.label AS academicYearLabel,
     cl.issued_at AS issuedAt, cl.due_at AS dueAt, cl.status AS currentStatus,
     cl.issue_statement_schema_version AS schemaVersion, cl.issue_statement_origin AS origin,
-    COUNT(cli.id) AS positionCount, COALESCE(SUM(cli.quantity_issued), 0) AS copyCount
+    CASE WHEN COALESCE(statement_counts.positionCount, 0) > 0
+      THEN statement_counts.positionCount ELSE COALESCE(legacy_counts.positionCount, 0) END AS positionCount,
+    CASE WHEN COALESCE(statement_counts.positionCount, 0) > 0
+      THEN statement_counts.copyCount ELSE COALESCE(legacy_counts.copyCount, 0) END AS copyCount
   FROM class_loans cl
   JOIN class_years cy ON cy.id = cl.class_year_id
   JOIN academic_years ay ON ay.id = cy.academic_year_id
-  LEFT JOIN class_loan_items cli ON cli.class_loan_id = cl.id
-  WHERE (? = '' OR cl.class_year_id = ?)
-  GROUP BY cl.id, cl.class_year_id, cy.class_name, ay.label, cl.issued_at,
-    cl.due_at, cl.status, cl.issue_statement_schema_version, cl.issue_statement_origin,
-    cl.created_at
+  LEFT JOIN statement_counts ON statement_counts.class_loan_id = cl.id
+  LEFT JOIN legacy_counts ON legacy_counts.class_loan_id = cl.id
+  WHERE cl.merged_into_class_loan_id IS NULL
+    AND (? = '' OR cl.class_year_id = ?)
   ORDER BY cl.issued_at DESC, cl.created_at DESC, cl.id DESC
   LIMIT 500`;

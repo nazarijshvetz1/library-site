@@ -196,7 +196,8 @@ export async function getTeacherRegistryDetail(db: TeacherRegistryDatabase, teac
     db.prepare(`SELECT cl.id,cl.status,cl.issued_at,cl.due_at,cl.closed_at,cl.version,cy.class_name,
       COALESCE((SELECT SUM(cli.quantity_issued-cli.quantity_returned) FROM class_loan_items cli WHERE cli.class_loan_id=cl.id),0) AS outstanding_quantity
       FROM class_loans cl JOIN class_years cy ON cy.id=cl.class_year_id
-      WHERE cl.responsible_teacher_user_id=? ORDER BY cl.issued_at DESC,cl.id DESC LIMIT 100`)
+      WHERE cl.responsible_teacher_user_id=? AND cl.merged_into_class_loan_id IS NULL
+      ORDER BY cl.issued_at DESC,cl.id DESC LIMIT 100`)
       .bind(teacherId).all<Record<string, unknown>>(),
     db.prepare(`SELECT id,type,title,message,entity_type,entity_id,read_at,version,created_at
       FROM portal_notifications WHERE teacher_user_id=? ORDER BY created_at DESC,id DESC LIMIT 50`)
@@ -510,7 +511,8 @@ async function dependencySummary(
     (SELECT COUNT(*) FROM loans WHERE teacher_user_id=? AND status='open') AS open_loans,
     (SELECT COUNT(*) FROM class_years WHERE teacher_user_id=?) AS class_assignments,
     (SELECT COUNT(*) FROM class_years WHERE teacher_user_id=? AND status IN ('active','planned')) AS active_class_assignments,
-    (SELECT COUNT(*) FROM class_loans WHERE responsible_teacher_user_id=?) AS class_responsibilities,
+    (SELECT COUNT(*) FROM class_loans WHERE responsible_teacher_user_id=?
+      AND merged_into_class_loan_id IS NULL) AS class_responsibilities,
     (SELECT COUNT(*) FROM portal_notifications WHERE teacher_user_id=?) AS notifications,
     ((SELECT COUNT(*) FROM teacher_profiles WHERE teacher_user_id<>? AND
         (closed_by_user_id=? OR created_by_user_id=? OR updated_by_user_id=?))

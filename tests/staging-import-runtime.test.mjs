@@ -62,6 +62,7 @@ const migrationUrls = [
     "0031_textbook_catalog_lists.sql",
     "0032_fearless_alex_power.sql",
     "0033_burly_human_fly.sql",
+    "0034_worthless_big_bertha.sql",
   ].map((file) => new URL(`../drizzle/${file}`, import.meta.url));
 
 async function fixturePlan() {
@@ -415,6 +416,13 @@ test("staging reset atomically clears domain/import rows while preserving migrat
       -1, 1, 0, '2026-09-10T00:00:00.000Z')
   `).run(materialId, locationId);
   database.prepare(`
+    INSERT INTO class_loan_statement_lines (
+      id, class_loan_id, transaction_id, position, subject, title, author,
+      publication_year, rubric, quantity_issued, created_at
+    ) VALUES ('CLSL-RESET', 'CLOAN-RESET', 'CLTX-RESET', 1, 'Математика',
+      'Reset material', '', 2026, 'Підручники', 1, '2026-09-10T00:00:00.000Z')
+  `).run();
+  database.prepare(`
     INSERT INTO visit_teacher_credentials (
       teacher_user_id, login_id, code_hmac, status, version, failed_attempts,
       failure_window_started_at, locked_until, last_login_at, code_rotated_at,
@@ -503,6 +511,7 @@ test("staging reset atomically clears domain/import rows while preserving migrat
   );
   assert.equal(report.deletedByTable.migration_import_runs, 1);
   assert.equal(report.deletedByTable.mutation_commands, 1);
+  assert.equal(report.deletedByTable.class_loan_statement_lines, 1);
   assert.equal(report.deletedByTable.class_loan_transaction_lines, 1);
   assert.equal(report.deletedByTable.class_loan_transactions, 1);
   assert.equal(report.deletedByTable.class_loan_items, 1);
@@ -526,7 +535,12 @@ test("staging reset atomically clears domain/import rows while preserving migrat
   assert.equal(report.deletedByTable.textbook_assignments, 1);
   assert.equal(report.deletedByTable.manual_textbooks, 1);
   assert.equal(report.deletedByTable.material_metadata_enrichments, 1);
-  assert.ok(report.batchStatements <= 50, `reset used ${report.batchStatements} statements`);
+  assert.ok(report.batchStatements <= 55, `reset used ${report.batchStatements} statements`);
+  assert.equal(database.prepare("SELECT count(*) AS count FROM class_loan_statement_lines").get().count, 0);
+  assert.equal(database.prepare(`
+    SELECT count(*) AS count FROM sqlite_schema
+    WHERE type = 'trigger' AND name = 'class_loan_statement_lines_immutable_delete'
+  `).get().count, 1);
   assert.equal(database.prepare("SELECT count(*) AS count FROM librarian_drafts").get().count, 1);
   assert.equal(database.prepare("SELECT count(*) AS count FROM librarian_draft_events").get().count, 1);
   assert.deepEqual(database.prepare(`
@@ -563,6 +577,10 @@ test("a failing staging reset rolls back content rows, FTS and import history", 
     database.prepare("SELECT count(*) AS count FROM materials_fts WHERE materials_fts MATCH '9780306406157'").get().count,
     1,
   );
+  assert.equal(database.prepare(`
+    SELECT count(*) AS count FROM sqlite_schema
+    WHERE type = 'trigger' AND name = 'class_loan_statement_lines_immutable_delete'
+  `).get().count, 1);
 });
 
 test("single oversized tuples are rejected before a D1 statement is prepared", async () => {

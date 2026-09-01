@@ -31,6 +31,21 @@ const migrationFiles = [
   "0017_fresh_robbie_robertson.sql",
   "0018_yielding_skaar.sql",
   "0019_kindly_wolfsbane.sql",
+  "0020_pretty_squadron_sinister.sql",
+  "0021_optional_student_acquisition_metadata.sql",
+  "0022_teacher_curator_change_requests.sql",
+  "0023_guest_public_teacher_name_consent.sql",
+  "0024_watery_miss_america.sql",
+  "0025_lying_lucky_pierre.sql",
+  "0026_typical_scalphunter.sql",
+  "0027_naive_microbe.sql",
+  "0028_dusty_marten_broadcloak.sql",
+  "0029_swift_surge.sql",
+  "0030_bizarre_dust.sql",
+  "0031_textbook_catalog_lists.sql",
+  "0032_fearless_alex_power.sql",
+  "0033_burly_human_fly.sql",
+  "0034_worthless_big_bertha.sql",
 ];
 
 class PreparedStatement {

@@ -171,12 +171,28 @@ const CLASSES_SQL = `
   LIMIT ?`;
 
 const LINES_SQL = `
+  WITH item_issue_dates AS (
+    SELECT cli.id AS classLoanItemId,
+      COALESCE((
+        SELECT issue_transaction.occurred_at
+        FROM class_loan_transaction_lines issue_line
+        JOIN class_loan_transactions issue_transaction
+          ON issue_transaction.id = issue_line.transaction_id
+          AND issue_transaction.kind = 'issue'
+        WHERE issue_line.class_loan_item_id = cli.id
+        ORDER BY issue_transaction.occurred_at, issue_transaction.created_at, issue_transaction.id
+        LIMIT 1
+      ), cl.issued_at) AS issuedAt
+    FROM class_loan_items cli
+    JOIN class_loans cl ON cl.id = cli.class_loan_id
+  )
   SELECT cl.class_year_id AS classYearId, m.subject AS subject, m.title AS title,
     m.author AS author, m.publication_year AS publicationYear, m.rubric AS rubric,
-    m.publication_type AS publicationType, substr(cl.issued_at, 1, 10) AS issuedAt,
+    m.publication_type AS publicationType, substr(item_issue_dates.issuedAt, 1, 10) AS issuedAt,
     SUM(cli.quantity_issued - cli.quantity_returned) AS remainingQuantity
   FROM class_loans cl
   JOIN class_loan_items cli ON cli.class_loan_id = cl.id
+  JOIN item_issue_dates ON item_issue_dates.classLoanItemId = cli.id
   JOIN class_years cy ON cy.id = cl.class_year_id
   JOIN academic_years ay ON ay.id = cy.academic_year_id
   JOIN materials m ON m.id = cli.material_id
@@ -184,6 +200,6 @@ const LINES_SQL = `
     AND cli.quantity_issued > cli.quantity_returned
     AND (? = '' OR cl.class_year_id = ?)
   GROUP BY cl.class_year_id, m.subject, m.title, m.author, m.publication_year,
-    m.rubric, m.publication_type, substr(cl.issued_at, 1, 10), m.sort_title, m.id
-  ORDER BY cl.class_year_id, m.subject, m.sort_title, m.title, cl.issued_at, m.id
+    m.rubric, m.publication_type, substr(item_issue_dates.issuedAt, 1, 10), m.sort_title, m.id
+  ORDER BY cl.class_year_id, m.subject, m.sort_title, m.title, item_issue_dates.issuedAt, m.id
   LIMIT ?`;

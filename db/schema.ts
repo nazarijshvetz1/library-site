@@ -1161,6 +1161,8 @@ export const classLoans = sqliteTable(
     issueStatementOrigin: text("issue_statement_origin")
       .notNull()
       .default("legacy"),
+    /** Preserves old document URLs after duplicate open class loans are consolidated. */
+    mergedIntoClassLoanId: text("merged_into_class_loan_id"),
     issuedByUserId: text("issued_by_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
@@ -1184,6 +1186,10 @@ export const classLoans = sqliteTable(
       table.status,
       table.dueAt,
     ),
+    index("idx_class_loans_merged_into").on(table.mergedIntoClassLoanId),
+    uniqueIndex("idx_class_loans_one_open_per_class")
+      .on(table.classYearId)
+      .where(sql`${table.status} = 'open'`),
     check(
       "class_loans_status_valid",
       sql`${table.status} in ('open', 'closed', 'cancelled')`,
@@ -1277,6 +1283,49 @@ export const classLoanTransactions = sqliteTable(
     check(
       "class_loan_transactions_kind_valid",
       sql`${table.kind} in ('issue', 'return')`,
+    ),
+  ],
+);
+
+/**
+ * Append-only issue-time bibliographic snapshots used by the cumulative
+ * printable statement. Operational item rows may change as copies return,
+ * while these lines preserve exactly what was issued.
+ */
+export const classLoanStatementLines = sqliteTable(
+  "class_loan_statement_lines",
+  {
+    id: text("id").primaryKey(),
+    classLoanId: text("class_loan_id")
+      .notNull()
+      .references(() => classLoans.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    transactionId: text("transaction_id").references(() => classLoanTransactions.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    position: integer("position").notNull(),
+    subject: text("subject").notNull().default(""),
+    title: text("title").notNull(),
+    author: text("author").notNull().default(""),
+    publicationYear: integer("publication_year"),
+    rubric: text("rubric").notNull().default(""),
+    quantityIssued: integer("quantity_issued").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    index("idx_class_loan_statement_lines_loan_position").on(
+      table.classLoanId,
+      table.createdAt,
+      table.position,
+      table.id,
+    ),
+    index("idx_class_loan_statement_lines_transaction").on(table.transactionId),
+    check("class_loan_statement_lines_position_positive", sql`${table.position} > 0`),
+    check("class_loan_statement_lines_title_present", sql`length(trim(${table.title})) > 0`),
+    check("class_loan_statement_lines_quantity_positive", sql`${table.quantityIssued} > 0`),
+    check(
+      "class_loan_statement_lines_year_valid",
+      sql`${table.publicationYear} is null or ${table.publicationYear} between 1000 and 3000`,
     ),
   ],
 );

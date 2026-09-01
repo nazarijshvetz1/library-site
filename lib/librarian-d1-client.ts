@@ -28,10 +28,63 @@ export type PendingClassCirculationIntent<Payload extends Record<string, unknown
   payload: Payload;
 };
 
+export type ClassIssueDraftItem = {
+  key: string;
+  materialId: string;
+  materialTitle: string;
+  materialAuthor: string;
+  materialYear: number | null;
+  thumbnailUrl: string;
+  sourceLocationId: string;
+  sourceLocationName: string;
+  condition: "unspecified" | "good" | "worn" | "damaged";
+  quantity: number;
+  expectedAvailableQuantity: number;
+};
+
+export type ClassIssueDraft = {
+  schemaVersion: 1;
+  classYearId: string;
+  responsibleTeacherUserId: string;
+  issuedAt: string;
+  dueAt: string | null;
+  notes: string;
+  items: ClassIssueDraftItem[];
+};
+
 type ClassCirculationStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 const CLASS_CIRCULATION_STORAGE_PREFIX = "library.class-circulation.pending.v1";
+const CLASS_ISSUE_DRAFT_STORAGE_KEY = "library.class-issue.draft.v1";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const SAFE_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
+const MATERIAL_IDENTIFIER_PATTERN = /^CAT-\d{4,}$/u;
+const LOCATION_IDENTIFIER_PATTERN = /^LOC-\d{3,}$/u;
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
+const CLASS_ISSUE_CONDITIONS = new Set(["unspecified", "good", "worn", "damaged"]);
+
+export function readClassIssueDraft(storage: ClassCirculationStorage): ClassIssueDraft | null {
+  try {
+    const raw = storage.getItem(CLASS_ISSUE_DRAFT_STORAGE_KEY);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as unknown;
+    return isClassIssueDraft(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeClassIssueDraft(
+  storage: ClassCirculationStorage,
+  draft: ClassIssueDraft,
+): void {
+  if (!isClassIssueDraft(draft)) throw new TypeError("Invalid class issue draft.");
+  storage.setItem(CLASS_ISSUE_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+}
+
+export function clearClassIssueDraft(storage: ClassCirculationStorage): void {
+  storage.removeItem(CLASS_ISSUE_DRAFT_STORAGE_KEY);
+}
 
 export function readPendingClassCirculationIntent<Payload extends Record<string, unknown>>(
   storage: ClassCirculationStorage,
@@ -235,6 +288,67 @@ function optionalInteger(value: string): number | null {
 
 function classCirculationStorageKey(kind: ClassCirculationIntentKind): string {
   return `${CLASS_CIRCULATION_STORAGE_PREFIX}.${kind}`;
+}
+
+function isClassIssueDraft(value: unknown): value is ClassIssueDraft {
+  if (!isPlainObject(value)) return false;
+  if (
+    value.schemaVersion !== 1
+    || typeof value.classYearId !== "string"
+    || !SAFE_IDENTIFIER_PATTERN.test(value.classYearId)
+    || typeof value.responsibleTeacherUserId !== "string"
+    || !SAFE_IDENTIFIER_PATTERN.test(value.responsibleTeacherUserId)
+    || typeof value.issuedAt !== "string"
+    || !ISO_DATE_PATTERN.test(value.issuedAt)
+    || !(value.dueAt === null || typeof value.dueAt === "string" && ISO_DATE_PATTERN.test(value.dueAt))
+    || typeof value.notes !== "string"
+    || value.notes.length > 2_000
+    || !Array.isArray(value.items)
+    || value.items.length < 1
+    || value.items.length > 100
+  ) return false;
+  const keys = new Set<string>();
+  for (const item of value.items) {
+    if (!isPlainObject(item)) return false;
+    const condition = item.condition;
+    const expectedKey = typeof item.materialId === "string"
+      && typeof item.sourceLocationId === "string"
+      && typeof condition === "string"
+      ? `${item.materialId}\u001e${item.sourceLocationId}\u001e${condition}`
+      : "";
+    if (
+      typeof item.key !== "string"
+      || item.key !== expectedKey
+      || keys.has(item.key)
+      || typeof item.materialId !== "string"
+      || !MATERIAL_IDENTIFIER_PATTERN.test(item.materialId)
+      || typeof item.materialTitle !== "string"
+      || !item.materialTitle.trim()
+      || item.materialTitle.length > 500
+      || typeof item.materialAuthor !== "string"
+      || item.materialAuthor.length > 500
+      || !(item.materialYear === null || typeof item.materialYear === "number"
+        && Number.isInteger(item.materialYear) && item.materialYear >= 1000 && item.materialYear <= 2100)
+      || typeof item.thumbnailUrl !== "string"
+      || item.thumbnailUrl.length > 2_048
+      || typeof item.sourceLocationId !== "string"
+      || !LOCATION_IDENTIFIER_PATTERN.test(item.sourceLocationId)
+      || typeof item.sourceLocationName !== "string"
+      || !item.sourceLocationName.trim()
+      || item.sourceLocationName.length > 240
+      || typeof condition !== "string"
+      || !CLASS_ISSUE_CONDITIONS.has(condition)
+      || typeof item.quantity !== "number"
+      || !Number.isInteger(item.quantity)
+      || item.quantity < 1
+      || typeof item.expectedAvailableQuantity !== "number"
+      || !Number.isInteger(item.expectedAvailableQuantity)
+      || item.expectedAvailableQuantity < item.quantity
+      || item.expectedAvailableQuantity > 1_000_000
+    ) return false;
+    keys.add(item.key);
+  }
+  return true;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

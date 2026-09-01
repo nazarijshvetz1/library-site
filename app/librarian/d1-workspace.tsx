@@ -15,20 +15,24 @@ import {
 
 import {
   buildCatalogSearchUrl,
+  clearClassIssueDraft as clearStoredClassIssueDraft,
   clearPendingClassCirculationIntent as clearStoredClassCirculationIntent,
   editDraftToChanges,
   filterTeachersByFullName,
   gradeLabel,
   holdingKey,
   type CatalogSearchFilters,
+  type ClassIssueDraft,
   type ClassCirculationIntentKind,
   type MaterialEditDraft,
   type PendingClassCirculationIntent,
   materialToEditDraft,
+  readClassIssueDraft as readStoredClassIssueDraft,
   readPendingClassCirculationIntent as readStoredClassCirculationIntent,
   resolveLoanDueAtForSubmission,
   resolveLiveFormTextForSubmission,
   todayInKyiv,
+  writeClassIssueDraft as writeStoredClassIssueDraft,
   writePendingClassCirculationIntent as writeStoredClassCirculationIntent,
 } from "@/lib/librarian-d1-client";
 import {
@@ -395,6 +399,7 @@ type ClassLoanMutationResult = {
   classLoanId: string;
   status: "open" | "closed";
   version: number;
+  appended?: boolean;
 };
 
 type LibrarianWorkspaceProps = {
@@ -4491,7 +4496,9 @@ function ClassIssueWorkspace({
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"error" | "success" | "info">("info");
   const [lastIssuedClassLoanId, setLastIssuedClassLoanId] = useState("");
+  const [draftHydrated, setDraftHydrated] = useState(false);
   const issueInFlightRef = useRef(false);
+  const draftStorageErrorRef = useRef(false);
   const materialPickerRef = useRef<HTMLElement>(null);
   const lastFocusedMaterialIdRef = useRef("");
 
@@ -4549,6 +4556,70 @@ function ClassIssueWorkspace({
       .sort((left, right) => left.className.localeCompare(right.className, "uk"));
   }, [academicReference]);
 
+  useEffect(() => {
+    if (draftHydrated || academicState !== "ready" || referenceState !== "ready") return;
+    let cancelled = false;
+    window.queueMicrotask(() => {
+      if (cancelled) return;
+      const storedDraft = readStoredClassIssueDraft(window.sessionStorage);
+      if (!storedDraft) {
+        setDraftHydrated(true);
+        return;
+      }
+      const storedClassYear = activeClassYears.find((classYear) => classYear.id === storedDraft.classYearId);
+      if (!storedClassYear) {
+        try {
+          clearStoredClassIssueDraft(window.sessionStorage);
+        } catch {
+          // An unavailable stale draft must not block the live circulation form.
+        }
+        setMessageTone("info");
+        setMessage("Збережений кошик належав неактивному класу, тому його не відновлено.");
+        setDraftHydrated(true);
+        return;
+      }
+      const today = todayInKyiv();
+      const fallbackIssuedAt = today < storedClassYear.startDate
+        ? storedClassYear.startDate
+        : today > storedClassYear.endDate
+          ? storedClassYear.endDate
+          : today;
+      const restoredIssuedAt = storedDraft.issuedAt >= storedClassYear.startDate
+        && storedDraft.issuedAt <= storedClassYear.endDate
+        ? storedDraft.issuedAt
+        : fallbackIssuedAt;
+      const restoredDueAt = storedDraft.dueAt === null
+        ? ""
+        : storedDraft.dueAt >= restoredIssuedAt && storedDraft.dueAt <= storedClassYear.endDate
+          ? storedDraft.dueAt
+          : storedClassYear.endDate;
+      const restoredTeacherUserId = teachers.some(
+        (teacher) => teacher.id === storedDraft.responsibleTeacherUserId,
+      )
+        ? storedDraft.responsibleTeacherUserId
+        : storedClassYear.teacherUserId
+          && teachers.some((teacher) => teacher.id === storedClassYear.teacherUserId)
+          ? storedClassYear.teacherUserId
+          : "";
+      setClassYearId(storedClassYear.id);
+      setResponsibleTeacherUserId(restoredTeacherUserId);
+      setIssuedAt(restoredIssuedAt);
+      setDueAt(restoredDueAt);
+      setNotes(storedDraft.notes);
+      setCart(storedDraft.items);
+      setMessageTone("info");
+      setMessage(
+        restoredTeacherUserId
+          ? `Відновлено кошик: ${storedDraft.items.length} поз.`
+          : `Відновлено кошик: ${storedDraft.items.length} поз. Оберіть відповідального вчителя.`,
+      );
+      setDraftHydrated(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [academicState, activeClassYears, draftHydrated, referenceState, teachers]);
+
   const classYearSelectionIsCurrent = activeClassYears.some(
     (classYear) => classYear.id === classYearId,
   );
@@ -4575,7 +4646,51 @@ function ClassIssueWorkspace({
   const effectiveIssuedAt = classYearSelectionIsCurrent ? issuedAt : defaultIssuedAt;
   const effectiveDueAt = classYearSelectionIsCurrent ? dueAt : selectedClassYear?.endDate || dueAt;
 
+  useEffect(() => {
+    if (!draftHydrated || typeof window === "undefined") return;
+    if (!cart.length) {
+      try {
+        clearStoredClassIssueDraft(window.sessionStorage);
+      } catch {
+        // Clearing a local convenience draft must not block circulation.
+      }
+      return;
+    }
+    if (!selectedClassYear || !effectiveResponsibleTeacherUserId || !effectiveIssuedAt) return;
+    const draft: ClassIssueDraft = {
+      schemaVersion: 1,
+      classYearId: selectedClassYear.id,
+      responsibleTeacherUserId: effectiveResponsibleTeacherUserId,
+      issuedAt: effectiveIssuedAt,
+      dueAt: effectiveDueAt || null,
+      notes,
+      items: cart,
+    };
+    try {
+      writeStoredClassIssueDraft(window.sessionStorage, draft);
+      draftStorageErrorRef.current = false;
+    } catch {
+      if (draftStorageErrorRef.current) return;
+      draftStorageErrorRef.current = true;
+      setMessageTone("error");
+      setMessage("Не вдалося зберегти кошик у цьому браузері. Не закривайте сторінку до завершення видачі.");
+    }
+  }, [
+    cart,
+    draftHydrated,
+    effectiveDueAt,
+    effectiveIssuedAt,
+    effectiveResponsibleTeacherUserId,
+    notes,
+    selectedClassYear,
+  ]);
+
   function chooseClassYear(nextClassYearId: string) {
+    if (cart.length && nextClassYearId !== effectiveClassYearId) {
+      setMessageTone("info");
+      setMessage("Завершіть або очистьте поточний кошик перед вибором іншого класу.");
+      return;
+    }
     const nextClassYear = activeClassYears.find((classYear) => classYear.id === nextClassYearId) ?? null;
     setClassYearId(nextClassYearId);
     setResponsibleTeacherUserId(
@@ -4682,10 +4797,23 @@ function ClassIssueWorkspace({
       );
       clearPendingClassCirculationIntent("class-issue");
       setPendingIntent(null);
+      if (typeof window !== "undefined") {
+        try {
+          clearStoredClassIssueDraft(window.sessionStorage);
+        } catch {
+          // The confirmed server result remains authoritative.
+        }
+      }
       setCart([]);
       setLastIssuedClassLoanId(response.result.classLoanId);
       setMessageTone("success");
-      setMessage(response.result.status === "open" ? "Видачу на клас оформлено." : "Операцію збережено.");
+      setMessage(
+        response.result.appended
+          ? "Підручники додано до спільної видачі класу й тієї самої відомості."
+          : response.result.status === "open"
+            ? "Спільну видачу на клас оформлено."
+            : "Операцію збережено.",
+      );
       await onSaved();
     } catch (requestError) {
       if (isDefinitiveClassCirculationFailure(requestError)) {
@@ -4916,6 +5044,28 @@ function ClassIssueWorkspace({
               <h3 id="class-cart-title">Кошик видачі</h3>
               <p>{cart.length} поз. · {cartCopies} прим.</p>
             </div>
+            {cart.length ? (
+              <button
+                className={styles.secondaryButton}
+                type="button"
+                disabled={locked}
+                onClick={() => {
+                  setCart([]);
+                  setLastIssuedClassLoanId("");
+                  if (typeof window !== "undefined") {
+                    try {
+                      clearStoredClassIssueDraft(window.sessionStorage);
+                    } catch {
+                      // The in-memory cart is still cleared by the explicit user action.
+                    }
+                  }
+                  setMessageTone("info");
+                  setMessage("Кошик очищено.");
+                }}
+              >
+                Очистити кошик
+              </button>
+            ) : null}
           </div>
           {!cart.length ? (
             <InlineMessage tone="info">Додайте щонайменше один матеріал.</InlineMessage>
@@ -4960,6 +5110,7 @@ function ClassIssueWorkspace({
           <EditField label="Примітка" wide>
             <textarea
               rows={3}
+              maxLength={2000}
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
               placeholder="Наприклад, комплект підручників на навчальний рік"

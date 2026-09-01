@@ -409,7 +409,16 @@ const CLASS_LOANS_SQL = `
   SELECT cl.id AS classLoanId, cli.id AS itemId, cl.class_year_id AS classYearId,
     ay.label AS academicYear, cy.class_name AS className,
     u.full_name AS responsibleTeacher, cl.status AS status,
-    cl.issued_at AS issuedAt, COALESCE(cl.due_at, '') AS dueAt,
+    COALESCE((
+      SELECT issue_transaction.occurred_at
+      FROM class_loan_transaction_lines issue_line
+      JOIN class_loan_transactions issue_transaction
+        ON issue_transaction.id = issue_line.transaction_id
+        AND issue_transaction.kind = 'issue'
+      WHERE issue_line.class_loan_item_id = cli.id
+      ORDER BY issue_transaction.occurred_at, issue_transaction.created_at, issue_transaction.id
+      LIMIT 1
+    ), cl.issued_at) AS issuedAt, COALESCE(cl.due_at, '') AS dueAt,
     COALESCE(cl.closed_at, '') AS closedAt, cli.material_id AS materialId,
     m.title AS title, m.subject AS subject, loc.name AS sourceLocation,
     cli.condition AS condition, cli.quantity_issued AS quantityIssued,
@@ -423,7 +432,7 @@ const CLASS_LOANS_SQL = `
   JOIN users u ON u.id = cl.responsible_teacher_user_id
   JOIN materials m ON m.id = cli.material_id
   JOIN locations loc ON loc.id = cli.source_location_id
-  ORDER BY cl.issued_at DESC, cl.id, m.catalog_number, cli.id
+  ORDER BY issuedAt DESC, cl.id, m.catalog_number, cli.id
   LIMIT ?`;
 
 const MATERIAL_REQUESTS_SQL = `

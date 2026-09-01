@@ -4,17 +4,20 @@ import test from "node:test";
 
 import {
   buildCatalogSearchUrl,
+  clearClassIssueDraft,
   clearPendingClassCirculationIntent,
   editDraftToChanges,
   filterTeachersByFullName,
   gradeLabel,
   holdingKey,
   materialToEditDraft,
+  readClassIssueDraft,
   readPendingClassCirculationIntent,
   resolveLiveFormTextForSubmission,
   resolveLoanDueAtForSubmission,
   suggestNextAcademicYearStart,
   todayInKyiv,
+  writeClassIssueDraft,
   writePendingClassCirculationIntent,
 } from "../lib/librarian-d1-client.ts";
 import {
@@ -260,6 +263,45 @@ test("an uncertain class circulation request survives remount with its exact pay
     setItem() {},
     removeItem() {},
   }, "class-issue"), null);
+});
+
+test("a class issue cart draft survives remount and clears only explicitly", () => {
+  const values = new Map();
+  const storage = {
+    getItem(key) { return values.get(key) ?? null; },
+    setItem(key, value) { values.set(key, value); },
+    removeItem(key) { values.delete(key); },
+  };
+  const draft = {
+    schemaVersion: 1,
+    classYearId: "CY-2026-001",
+    responsibleTeacherUserId: "USR-TCH",
+    issuedAt: "2026-09-01",
+    dueAt: "2027-05-31",
+    notes: "Спільний список",
+    items: [{
+      key: "CAT-0001\u001eLOC-001\u001egood",
+      materialId: "CAT-0001",
+      materialTitle: "Українська мова",
+      materialAuthor: "Автор",
+      materialYear: 2024,
+      thumbnailUrl: "https://example.test/cover.jpg",
+      sourceLocationId: "LOC-001",
+      sourceLocationName: "Фонд",
+      condition: "good",
+      quantity: 20,
+      expectedAvailableQuantity: 25,
+    }],
+  };
+  writeClassIssueDraft(storage, draft);
+  assert.deepEqual(readClassIssueDraft(storage), draft);
+  writeClassIssueDraft(storage, { ...draft, dueAt: null });
+  assert.equal(readClassIssueDraft(storage)?.dueAt, null);
+  values.set("library.class-issue.draft.v1", JSON.stringify({ ...draft, schemaVersion: 2 }));
+  assert.equal(readClassIssueDraft(storage), null);
+  writeClassIssueDraft(storage, draft);
+  clearClassIssueDraft(storage);
+  assert.equal(readClassIssueDraft(storage), null);
 });
 
 test("catalog facet filters keep free-text search and add native subject and publication type suggestions", async () => {
