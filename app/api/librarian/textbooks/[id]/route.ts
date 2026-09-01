@@ -12,6 +12,7 @@ import {
   TextbookCatalogError,
   type TextbookDatabase,
 } from "@/lib/textbook-catalog-store";
+import { validateManualTextbookFields } from "@/lib/textbook-manual-validation";
 
 export const dynamic = "force-dynamic";
 
@@ -19,8 +20,9 @@ type RouteContext = { params: Promise<{ id: string }> };
 type UpdateValue = {
   requestId: string;
   expectedVersion: number;
-  action: "publish" | "archive" | "restore" | "reorder";
+  action: "publish" | "archive" | "restore" | "reorder" | "edit" | "delete";
   sortOrder?: number;
+  fields?: ReturnType<typeof validateManualTextbookFields>["fields"];
 };
 
 export async function PATCH(request: Request, context: RouteContext): Promise<Response> {
@@ -60,28 +62,37 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Re
 
 function updateInput(input: Record<string, unknown>): { ok: true; value: UpdateValue } | { ok: false; errors: Record<string, string> } {
   const errors: Record<string, string> = {};
-  exactKeys(input, ["requestId", "expectedVersion", "action", "sortOrder"], errors);
+  const action = input.action;
+  exactKeys(
+    input,
+    action === "edit"
+      ? ["requestId", "expectedVersion", "action", "grade", "title", "author", "subject", "publisher", "publicationYear", "isbn", "resourceUrl", "coverUrl", "sortOrder"]
+      : ["requestId", "expectedVersion", "action", "sortOrder"],
+    errors,
+  );
   const requestId = String(input.requestId ?? "").trim();
   const expectedVersion = typeof input.expectedVersion === "number" ? input.expectedVersion : Number.NaN;
-  const action = input.action;
   const sortOrder = typeof input.sortOrder === "number" ? input.sortOrder : undefined;
   if (!UUID_PATTERN.test(requestId)) errors.requestId = "Некоректний номер запиту.";
   if (!Number.isInteger(expectedVersion) || expectedVersion < 1) errors.expectedVersion = "Оновіть список і повторіть дію.";
-  if (action !== "publish" && action !== "archive" && action !== "restore" && action !== "reorder") {
+  if (action !== "publish" && action !== "archive" && action !== "restore" && action !== "reorder" && action !== "edit" && action !== "delete") {
     errors.action = "Некоректна дія.";
   }
   if (action === "reorder") {
     if (!Number.isInteger(sortOrder) || (sortOrder ?? -1) < 0 || (sortOrder ?? 0) > 999999) {
       errors.sortOrder = "Порядок має бути від 0 до 999999.";
     }
-  } else if (input.sortOrder !== undefined) {
+  } else if (action !== "edit" && input.sortOrder !== undefined) {
     errors.sortOrder = "Порядок можна змінити лише окремою дією.";
   }
+  const validatedFields = action === "edit" ? validateManualTextbookFields(input) : null;
+  if (validatedFields) Object.assign(errors, validatedFields.errors);
   const value: UpdateValue = {
     requestId,
     expectedVersion,
     action: action as UpdateValue["action"],
     ...(action === "reorder" ? { sortOrder } : {}),
+    ...(validatedFields ? { fields: validatedFields.fields } : {}),
   };
   return Object.keys(errors).length ? { ok: false, errors } : { ok: true, value };
 }
@@ -90,5 +101,5 @@ function exactKeys(input: Record<string, unknown>, allowed: string[], errors: Re
   for (const key of Object.keys(input)) if (!allowed.includes(key)) errors[key] = "Невідоме поле.";
 }
 
-const TEXTBOOK_ID_PATTERN = /^TXT-[A-Za-z0-9][A-Za-z0-9._:-]{0,155}$/u;
+const TEXTBOOK_ID_PATTERN = /^TX[TM]-[A-Za-z0-9][A-Za-z0-9._:-]{0,155}$/u;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;

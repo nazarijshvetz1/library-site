@@ -15,6 +15,8 @@ test("public e-textbook route exposes only the curated HTTPS projection", async 
   assert.match(route, /Cache-Control/u);
   assert.match(route, /no-store/u);
   assert.match(store, /FROM textbook_assignments ta/u);
+  assert.match(store, /FROM manual_textbooks/u);
+  assert.match(store, /manual_textbooks[\s\S]*?status = 'published'/u);
   assert.match(store, /ta\.status = 'published'/u);
   assert.doesNotMatch(store, /WHERE[\s\S]*?ta\.status = 'published'[\s\S]*?trim\(m\.publication_type\) = 'Підручник'/u);
   assert.match(store, /ml\.kind = 'ebook'/u);
@@ -27,11 +29,13 @@ test("public e-textbook route exposes only the curated HTTPS projection", async 
 });
 
 test("librarian textbook mutations use authorization, same-origin, bounded JSON, versions, commands, and audit", async () => {
-  const [collectionRoute, itemRoute, linkRoute, store] = await Promise.all([
+  const [collectionRoute, itemRoute, linkRoute, store, validation, migration] = await Promise.all([
     read("app/api/librarian/textbooks/route.ts"),
     read("app/api/librarian/textbooks/[id]/route.ts"),
     read("app/api/librarian/materials/[id]/ebook-links/route.ts"),
     read("lib/textbook-catalog-store.ts"),
+    read("lib/textbook-manual-validation.ts"),
+    read("drizzle/0033_burly_human_fly.sql"),
   ]);
   for (const source of [collectionRoute, itemRoute, linkRoute]) {
     assert.match(source, /authorizeLibrarianApi/u);
@@ -54,6 +58,15 @@ test("librarian textbook mutations use authorization, same-origin, bounded JSON,
   assert.match(linkRoute, /appendMaterialEbookLinkDirect/u);
   assert.match(store, /AS active_resource_count/u);
   assert.match(store, /filter\(\(candidate\) => candidate\.materialId\)/u);
+  assert.match(collectionRoute, /createManualTextbook/u);
+  assert.match(itemRoute, /action !== "edit"[\s\S]*?action !== "delete"/u);
+  assert.match(itemRoute, /validateManualTextbookFields/u);
+  assert.match(validation, /validIsbn/u);
+  assert.match(validation, /url\.protocol === "https:"/u);
+  assert.match(store, /status != 'deleted'/u);
+  assert.match(store, /textbook\.manual\.created/u);
+  assert.match(migration, /CREATE TABLE `manual_textbooks`/u);
+  assert.match(migration, /FOREIGN KEY \(`academic_year_id`\)/u);
 });
 
 test("student and librarian UIs provide class selection, sorting, safe external actions, and reversible hiding", async () => {
@@ -74,6 +87,8 @@ test("student and librarian UIs provide class selection, sorting, safe external 
   assert.match(publicUi, /Повернутися в каталог/u);
   assert.match(publicUi, /До кабінету вчителя/u);
   assert.match(publicUi, /aria-live="polite"/u);
+  assert.match(publicUi, /referrerPolicy="no-referrer"/u);
+  assert.match(publicUi, /onError=\{\(\) => setCoverFailed\(true\)\}/u);
   assert.match(publicUi, /<strong>Єдина бібліотека<\/strong><small>Міжнародний ліцей МАУП<\/small>/u);
   assert.match(publicCss, /@media \(max-width: 720px\)/u);
   assert.match(publicCss, /\.brand small \{ display: block; font-size: 9px; \}/u);
@@ -87,7 +102,7 @@ test("student and librarian UIs provide class selection, sorting, safe external 
   assert.match(adminUi, /У списку/u);
   assert.match(adminUi, /Чернетки/u);
   assert.match(adminUi, /Ручний порядок/u);
-  assert.match(adminUi, /не видаляє картку, примірники чи історію/u);
+  assert.match(adminUi, /не впливатиме на фізичний фонд, залишки, видачі чи звіти/u);
   assert.match(adminUi, /Керувати в картці/u);
   assert.match(adminUi, /function ManagedTextbookModal/u);
   assert.match(adminUi, /Місце у «Рекомендованому»/u);
@@ -95,6 +110,13 @@ test("student and librarian UIs provide class selection, sorting, safe external 
   assert.match(adminUi, /Додати до списку/u);
   assert.match(adminUi, /Зберегти й опублікувати/u);
   assert.match(adminUi, /Пошук охоплює весь активний фонд/u);
+  assert.match(adminUi, /Додати е-підручник вручну/u);
+  assert.match(adminUi, /Зберегти чернетку/u);
+  assert.match(adminUi, /Зберегти й опублікувати/u);
+  assert.match(adminUi, /HTTPS-покликання на обкладинку/u);
+  assert.match(adminUi, /Видалити ручний запис/u);
+  assert.match(adminUi, /if \(!item\.materialId \|\| item\.materialVersion === null\)/u);
+  assert.doesNotMatch(adminUi, /encodeURIComponent\(item\.materialId\)/u);
   assert.match(shell, /label: "Е-підручники"/u);
   assert.match(shell, /label: "Каталог"[\s\S]*?label: "Новий матеріал"[\s\S]*?label: "Е-підручники"/u);
   assert.match(home, /href="\/textbooks"/u);

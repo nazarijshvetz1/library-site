@@ -45,10 +45,11 @@ export type PublicTextbook = {
 
 export type ManagedTextbook = {
   id: string;
-  materialId: string;
-  materialVersion: number;
+  source: "fund" | "manual";
+  materialId: string | null;
+  materialVersion: number | null;
   grade: number;
-  status: "draft" | "published" | "archived";
+  status: "draft" | "published" | "archived" | "deleted";
   sortOrder: number;
   version: number;
   title: string;
@@ -56,6 +57,7 @@ export type ManagedTextbook = {
   publicationYear: number | null;
   subject: string;
   publisher: string;
+  isbn: string;
   coverUrl: string;
   activeResourceCount: number;
   brokenResourceCount: number;
@@ -64,6 +66,19 @@ export type ManagedTextbook = {
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ManualTextbookFields = {
+  grade: number;
+  title: string;
+  author: string;
+  subject: string;
+  publisher: string;
+  publicationYear: number | null;
+  isbn: string;
+  resourceUrl: string;
+  coverUrl: string;
+  sortOrder?: number;
 };
 
 export type TextbookCandidate = {
@@ -179,7 +194,47 @@ export async function listPublicTextbooks(
       sourceHost: url.hostname.replace(/^www\./u, ""),
     });
   }
-  return { academicYear, items: [...items.values()].filter((item) => item.resources.length > 0) };
+  const manualResponse = await db.prepare(`
+    SELECT id, grade, title, author, publication_year, subject, publisher,
+      resource_url, cover_url, sort_order, created_at
+    FROM manual_textbooks
+    WHERE academic_year_id = ? AND grade = ? AND status = 'published'
+      AND resource_url GLOB 'https://*'
+    ORDER BY sort_order ASC, title COLLATE NOCASE ASC, id ASC
+    LIMIT 1000
+  `).bind(academicYear.id, grade).all<Row>();
+  for (const row of manualResponse.results ?? []) {
+    const id = boundedText(row.id, 160);
+    const resourceUrl = safeHttpsUrl(row.resource_url);
+    if (!id || !resourceUrl) continue;
+    const url = new URL(resourceUrl);
+    items.set(id, {
+      id,
+      grade,
+      title: boundedText(row.title, 500),
+      author: boundedText(row.author, 500),
+      publicationYear: nullableYear(row.publication_year),
+      subject: boundedText(row.subject, 240),
+      publisher: boundedText(row.publisher, 240),
+      coverUrl: safeHttpsUrl(row.cover_url),
+      sortOrder: nonNegativeInteger(row.sort_order),
+      createdAt: boundedText(row.created_at, 40),
+      resources: [{
+        id: `manual-${id}`,
+        label: "Електронна версія",
+        url: resourceUrl,
+        directPdf: url.pathname.toLocaleLowerCase("uk-UA").endsWith(".pdf"),
+        sourceHost: url.hostname.replace(/^www\./u, ""),
+      }],
+    });
+  }
+  return {
+    academicYear,
+    items: [...items.values()]
+      .filter((item) => item.resources.length > 0)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title, "uk-UA") || a.id.localeCompare(b.id))
+      .slice(0, 1000),
+  };
 }
 
 export async function listManagedTextbooks(
@@ -209,6 +264,8 @@ export async function listManagedTextbooks(
       m.publication_year,
       m.subject,
       m.publisher,
+      NULL AS isbn,
+      'fund' AS source,
       (
         SELECT count(*) FROM material_links ml
         WHERE ml.material_id = m.id AND ml.kind = 'ebook'
@@ -239,7 +296,23 @@ export async function listManagedTextbooks(
     LIMIT 1000
   `).bind(academicYear.id, input.grade).all<Row>();
 
-  const items = (response.results ?? []).map((row) => toManagedTextbook(row));
+  const manualResponse = await db.prepare(`
+    SELECT
+      id, NULL AS material_id, grade, status, sort_order, version,
+      created_at, updated_at, published_at, archived_at,
+      NULL AS material_version, title, author, publication_year, subject,
+      publisher, isbn, resource_url AS primary_resource_url,
+      cover_url AS manual_cover_url, 1 AS active_resource_count,
+      0 AS broken_resource_count, 'manual' AS source
+    FROM manual_textbooks
+    WHERE academic_year_id = ? AND grade = ? AND status != 'deleted'
+    ORDER BY sort_order ASC, title COLLATE NOCASE ASC, id ASC
+    LIMIT 1000
+  `).bind(academicYear.id, input.grade).all<Row>();
+  const items = [...(response.results ?? []), ...(manualResponse.results ?? [])]
+    .map((row) => toManagedTextbook(row))
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title, "uk-UA") || a.id.localeCompare(b.id))
+    .slice(0, 1000);
   const candidates = input.q.length >= 2
     ? await listCandidates(db, academicYear.id, input.grade, input.q)
     : [];
@@ -275,17 +348,13 @@ export async function createTextbookAssignment(
     );
   }
 
-  const orderRow = await db.prepare(`
-    SELECT COALESCE(MAX(sort_order), -10) + 10 AS next_order
-    FROM textbook_assignments
-    WHERE academic_year_id = ? AND grade = ?
-  `).bind(academicYear.id, input.grade).first<{ next_order: number }>();
   const now = new Date().toISOString();
   const id = `TXT-${crypto.randomUUID()}`;
   const status = input.publish ? "published" : "draft";
-  const sortOrder = Math.max(0, nonNegativeInteger(orderRow?.next_order));
+  const sortOrder = await nextTextbookSortOrder(db, academicYear.id, input.grade);
   const result: ManagedTextbook = {
     id,
+    source: "fund",
     materialId: input.materialId,
     grade: input.grade,
     status,
@@ -297,6 +366,7 @@ export async function createTextbookAssignment(
     publicationYear: material.publicationYear,
     subject: material.subject,
     publisher: material.publisher,
+    isbn: "",
     coverUrl: material.coverUrl,
     activeResourceCount: material.activeResourceCount,
     brokenResourceCount: material.brokenResourceCount,
@@ -341,6 +411,97 @@ export async function createTextbookAssignment(
   }
 }
 
+export async function createManualTextbook(
+  db: TextbookDatabase,
+  user: ChatGPTUser,
+  input: { requestId: string; publish: boolean } & ManualTextbookFields,
+): Promise<ManagedTextbook> {
+  const requestHash = await mutationHash({ kind: "textbook.manual.create", ...input });
+  const replay = await replayCompletedCommand<ManagedTextbook>(db, input.requestId, requestHash);
+  if (replay) return replay;
+  const [actor, academicYear] = await Promise.all([
+    resolveActor(db, user),
+    requireSingleActiveAcademicYear(db),
+  ]);
+  const now = new Date().toISOString();
+  const id = `TXM-${crypto.randomUUID()}`;
+  const status = input.publish ? "published" : "draft";
+  const sortOrder = input.sortOrder ?? await nextTextbookSortOrder(db, academicYear.id, input.grade);
+  const duplicate = await db.prepare(`
+    SELECT id FROM manual_textbooks
+    WHERE academic_year_id = ? AND grade = ? AND resource_url = ? AND status != 'deleted'
+    LIMIT 1
+  `).bind(academicYear.id, input.grade, input.resourceUrl).first<{ id: string }>();
+  if (duplicate) {
+    throw new TextbookCatalogError("manual_textbook_exists", 409, "Е-підручник із цим покликанням уже є у списку обраного класу.");
+  }
+  const result: ManagedTextbook = {
+    id,
+    source: "manual",
+    materialId: null,
+    materialVersion: null,
+    grade: input.grade,
+    status,
+    sortOrder,
+    version: 1,
+    title: input.title,
+    author: input.author,
+    publicationYear: input.publicationYear,
+    subject: input.subject,
+    publisher: input.publisher,
+    isbn: input.isbn,
+    coverUrl: input.coverUrl,
+    activeResourceCount: 1,
+    brokenResourceCount: 0,
+    primaryResourceUrl: input.resourceUrl,
+    publishedAt: input.publish ? now : null,
+    archivedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const entityType = "manual_textbook";
+  const statements = [
+    insertCommandStatement(db, input.requestId, requestHash, actor.id, "textbook.manual.create", id, now, entityType),
+    db.prepare(`
+      INSERT INTO manual_textbooks (
+        id, academic_year_id, grade, title, author, subject, publisher,
+        publication_year, isbn, resource_url, cover_url, status, sort_order,
+        version, created_by_user_id, updated_by_user_id, published_at,
+        archived_at, deleted_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, NULL, NULL, ?, ?)
+    `).bind(
+      id,
+      academicYear.id,
+      input.grade,
+      input.title,
+      input.author,
+      input.subject,
+      input.publisher,
+      input.publicationYear,
+      input.isbn,
+      input.resourceUrl,
+      input.coverUrl,
+      status,
+      sortOrder,
+      actor.id,
+      actor.id,
+      input.publish ? now : null,
+      now,
+      now,
+    ),
+    auditStatement(db, actor, input.requestId, "textbook.manual.created", id, null, result, now, false, entityType),
+    completeCommandStatement(db, input.requestId, result, now),
+  ];
+  try {
+    await db.batch(statements);
+    return result;
+  } catch (error) {
+    const completed = await replayCompletedCommand<ManagedTextbook>(db, input.requestId, requestHash);
+    if (completed) return completed;
+    throw error;
+  }
+}
+
 export async function mutateTextbookAssignment(
   db: TextbookDatabase,
   user: ChatGPTUser,
@@ -348,11 +509,12 @@ export async function mutateTextbookAssignment(
   input: {
     requestId: string;
     expectedVersion: number;
-    action: "publish" | "archive" | "restore" | "reorder";
+    action: "publish" | "archive" | "restore" | "reorder" | "edit" | "delete";
     sortOrder?: number;
+    fields?: ManualTextbookFields;
   },
 ): Promise<ManagedTextbook> {
-  const requestHash = await mutationHash({ kind: "textbook.assignment.update", id, ...input });
+  const requestHash = await mutationHash({ kind: "textbook.entry.update", id, ...input });
   const replay = await replayCompletedCommand<ManagedTextbook>(db, input.requestId, requestHash);
   if (replay) return replay;
   const actor = await resolveActor(db, user);
@@ -366,31 +528,80 @@ export async function mutateTextbookAssignment(
   let publishedAt = before.publishedAt;
   let archivedAt = before.archivedAt;
   let sortOrder = before.sortOrder;
+  let result: ManagedTextbook = { ...before };
+  if (before.status === "deleted") {
+    throw new TextbookCatalogError("textbook_entry_deleted", 410, "Цей ручний запис уже видалено.");
+  }
   if (input.action === "archive") {
     if (before.status === "archived") throw new TextbookCatalogError("no_changes", 400, "Підручник уже вилучено зі списку.");
     status = "archived";
     archivedAt = now;
   } else if (input.action === "publish") {
     if (before.status === "published") throw new TextbookCatalogError("no_changes", 400, "Підручник уже опубліковано.");
-    await requireEligibleMaterial(db, before.materialId, before.grade, { requireResource: true });
+    if (before.source === "fund") {
+      if (!before.materialId) throw new TextbookCatalogError("material_not_found", 404, "Матеріал не знайдено.");
+      await requireEligibleMaterial(db, before.materialId, before.grade, { requireResource: true });
+    }
     status = "published";
     publishedAt = now;
     archivedAt = null;
   } else if (input.action === "restore") {
     if (before.status !== "archived") throw new TextbookCatalogError("no_changes", 400, "Підручник уже є у списку.");
-    await requireEligibleMaterial(db, before.materialId, before.grade, { requireResource: false });
+    if (before.source === "fund") {
+      if (!before.materialId) throw new TextbookCatalogError("material_not_found", 404, "Матеріал не знайдено.");
+      await requireEligibleMaterial(db, before.materialId, before.grade, { requireResource: false });
+    }
     status = "draft";
     publishedAt = null;
     archivedAt = null;
-  } else {
+  } else if (input.action === "reorder") {
     if (input.sortOrder === undefined || input.sortOrder === before.sortOrder) {
       throw new TextbookCatalogError("no_changes", 400, "Вкажіть новий порядок показу.");
     }
     sortOrder = input.sortOrder;
+  } else if (input.action === "edit") {
+    if (before.source !== "manual" || !input.fields) {
+      throw new TextbookCatalogError("manual_textbook_required", 400, "Редагувати бібліографічні дані можна лише у ручному записі.");
+    }
+    const academicYear = await requireSingleActiveAcademicYear(db);
+    const duplicate = await db.prepare(`
+      SELECT id FROM manual_textbooks
+      WHERE academic_year_id = ? AND grade = ? AND resource_url = ?
+        AND status != 'deleted' AND id != ?
+      LIMIT 1
+    `).bind(academicYear.id, input.fields.grade, input.fields.resourceUrl, id).first<{ id: string }>();
+    if (duplicate) {
+      throw new TextbookCatalogError("manual_textbook_exists", 409, "Е-підручник із цим покликанням уже є у списку обраного класу.");
+    }
+    sortOrder = input.fields.sortOrder ?? (
+      input.fields.grade === before.grade
+        ? before.sortOrder
+        : await nextTextbookSortOrder(db, academicYear.id, input.fields.grade)
+    );
+    result = {
+      ...before,
+      grade: input.fields.grade,
+      title: input.fields.title,
+      author: input.fields.author,
+      subject: input.fields.subject,
+      publisher: input.fields.publisher,
+      publicationYear: input.fields.publicationYear,
+      isbn: input.fields.isbn,
+      primaryResourceUrl: input.fields.resourceUrl,
+      coverUrl: input.fields.coverUrl,
+      sortOrder,
+    };
+  } else if (input.action === "delete") {
+    if (before.source !== "manual") {
+      throw new TextbookCatalogError("manual_textbook_required", 400, "Повністю видалити можна лише ручний запис е-підручника.");
+    }
+    status = "deleted";
+  } else {
+    throw new TextbookCatalogError("invalid_textbook_action", 400, "Некоректна дія з е-підручником.");
   }
 
-  const result: ManagedTextbook = {
-    ...before,
+  result = {
+    ...result,
     status,
     sortOrder,
     version: before.version + 1,
@@ -398,24 +609,59 @@ export async function mutateTextbookAssignment(
     archivedAt,
     updatedAt: now,
   };
-  const statements = [
-    insertCommandStatement(db, input.requestId, requestHash, actor.id, `textbook.assignment.${input.action}`, id, now),
-    db.prepare(`
+  const entityType = before.source === "manual" ? "manual_textbook" : "textbook_assignment";
+  const actionPrefix = before.source === "manual" ? "textbook.manual" : "textbook.assignment";
+  const update = before.source === "manual"
+    ? db.prepare(`
+      UPDATE manual_textbooks
+      SET grade = ?, title = ?, author = ?, subject = ?, publisher = ?,
+        publication_year = ?, isbn = ?, resource_url = ?, cover_url = ?,
+        status = ?, sort_order = ?, version = version + 1,
+        updated_by_user_id = ?, published_at = ?, archived_at = ?,
+        deleted_at = CASE WHEN ? = 'deleted' THEN ? ELSE NULL END,
+        updated_at = ?
+      WHERE id = ? AND version = ? AND status != 'deleted'
+    `).bind(
+      result.grade,
+      result.title,
+      result.author,
+      result.subject,
+      result.publisher,
+      result.publicationYear,
+      result.isbn,
+      result.primaryResourceUrl,
+      result.coverUrl,
+      status,
+      sortOrder,
+      actor.id,
+      publishedAt,
+      archivedAt,
+      status,
+      status === "deleted" ? now : null,
+      now,
+      id,
+      input.expectedVersion,
+    )
+    : db.prepare(`
       UPDATE textbook_assignments
       SET status = ?, sort_order = ?, version = version + 1,
         published_at = ?, archived_at = ?, updated_at = ?
       WHERE id = ? AND version = ?
-    `).bind(status, sortOrder, publishedAt, archivedAt, now, id, input.expectedVersion),
+    `).bind(status, sortOrder, publishedAt, archivedAt, now, id, input.expectedVersion);
+  const statements = [
+    insertCommandStatement(db, input.requestId, requestHash, actor.id, `${actionPrefix}.${input.action}`, id, now, entityType),
+    update,
     auditStatement(
       db,
       actor,
       input.requestId,
-      `textbook.assignment.${input.action}`,
+      `${actionPrefix}.${input.action}`,
       id,
       before,
       result,
       now,
       true,
+      entityType,
     ),
     completeCommandStatement(db, input.requestId, result, now),
   ];
@@ -530,6 +776,8 @@ async function requireManagedTextbook(db: TextbookDatabase, id: string): Promise
       m.publication_year,
       m.subject,
       m.publisher,
+      NULL AS isbn,
+      'fund' AS source,
       (
         SELECT count(*) FROM material_links ml
         WHERE ml.material_id = m.id AND ml.kind = 'ebook'
@@ -557,8 +805,20 @@ async function requireManagedTextbook(db: TextbookDatabase, id: string): Promise
     LEFT JOIN material_cover_assets c ON c.material_id = m.id AND c.status = 'ready'
     WHERE ta.id = ? LIMIT 1
   `).bind(id).first<Row>();
-  if (!row) throw new TextbookCatalogError("textbook_assignment_not_found", 404, "Запис е-підручника не знайдено.");
-  return toManagedTextbook(row);
+  if (row) return toManagedTextbook(row);
+  const manualRow = await db.prepare(`
+    SELECT
+      id, NULL AS material_id, grade, status, sort_order, version,
+      created_at, updated_at, published_at, archived_at,
+      NULL AS material_version, title, author, publication_year, subject,
+      publisher, isbn, resource_url AS primary_resource_url,
+      cover_url AS manual_cover_url, 1 AS active_resource_count,
+      0 AS broken_resource_count, 'manual' AS source
+    FROM manual_textbooks
+    WHERE id = ? LIMIT 1
+  `).bind(id).first<Row>();
+  if (!manualRow) throw new TextbookCatalogError("textbook_assignment_not_found", 404, "Запис е-підручника не знайдено.");
+  return toManagedTextbook(manualRow);
 }
 
 async function requireEligibleMaterial(
@@ -665,12 +925,14 @@ async function requireSingleActiveAcademicYear(db: TextbookDatabase): Promise<Te
 function toManagedTextbook(row: Row): ManagedTextbook {
   const materialId = boundedText(row.material_id, 64);
   const status = boundedText(row.status, 20);
+  const source = boundedText(row.source, 20) === "manual" ? "manual" : "fund";
   return {
     id: boundedText(row.id, 160),
-    materialId,
-    materialVersion: positiveInteger(row.material_version),
+    source,
+    materialId: source === "manual" ? null : materialId,
+    materialVersion: source === "manual" ? null : positiveInteger(row.material_version),
     grade: gradeInteger(row.grade),
-    status: status === "published" || status === "archived" ? status : "draft",
+    status: status === "published" || status === "archived" || status === "deleted" ? status : "draft",
     sortOrder: nonNegativeInteger(row.sort_order),
     version: positiveInteger(row.version),
     title: boundedText(row.title, 500),
@@ -678,7 +940,8 @@ function toManagedTextbook(row: Row): ManagedTextbook {
     publicationYear: nullableYear(row.publication_year),
     subject: boundedText(row.subject, 240),
     publisher: boundedText(row.publisher, 240),
-    coverUrl: coverUrl(row, materialId),
+    isbn: boundedText(row.isbn, 32),
+    coverUrl: source === "manual" ? safeHttpsUrl(row.manual_cover_url) : coverUrl(row, materialId),
     activeResourceCount: nonNegativeInteger(row.active_resource_count),
     brokenResourceCount: nonNegativeInteger(row.broken_resource_count),
     primaryResourceUrl: safeHttpsUrl(row.primary_resource_url),
@@ -687,6 +950,24 @@ function toManagedTextbook(row: Row): ManagedTextbook {
     createdAt: boundedText(row.created_at, 40),
     updatedAt: boundedText(row.updated_at, 40),
   };
+}
+
+async function nextTextbookSortOrder(
+  db: TextbookDatabase,
+  academicYearId: string,
+  grade: number,
+): Promise<number> {
+  const row = await db.prepare(`
+    SELECT COALESCE(MAX(sort_order), -10) + 10 AS next_order
+    FROM (
+      SELECT sort_order FROM textbook_assignments
+      WHERE academic_year_id = ? AND grade = ?
+      UNION ALL
+      SELECT sort_order FROM manual_textbooks
+      WHERE academic_year_id = ? AND grade = ? AND status != 'deleted'
+    )
+  `).bind(academicYearId, grade, academicYearId, grade).first<{ next_order: number }>();
+  return Math.max(0, nonNegativeInteger(row?.next_order));
 }
 
 async function resolveActor(db: TextbookDatabase, user: ChatGPTUser): Promise<Actor> {
@@ -718,14 +999,15 @@ function insertCommandStatement(
   kind: string,
   targetId: string,
   createdAt: string,
+  entityType = "textbook_assignment",
 ): D1Statement {
   return db.prepare(`
     INSERT INTO mutation_commands (
       id, draft_id, kind, actor_user_id, status, target_type, target_id,
       request_hash, result_json, error_code, error_message,
       created_at, updated_at, completed_at
-    ) VALUES (?, NULL, ?, ?, 'processing', 'textbook_assignment', ?, ?, NULL, NULL, NULL, ?, ?, NULL)
-  `).bind(requestId, kind, actorUserId, targetId, requestHash, createdAt, createdAt);
+    ) VALUES (?, NULL, ?, ?, 'processing', ?, ?, ?, NULL, NULL, NULL, ?, ?, NULL)
+  `).bind(requestId, kind, actorUserId, entityType, targetId, requestHash, createdAt, createdAt);
 }
 
 function completeCommandStatement(
@@ -751,18 +1033,20 @@ function auditStatement(
   after: unknown,
   createdAt: string,
   guardPreviousChange: boolean,
+  entityType = "textbook_assignment",
 ): D1Statement {
   const entityExpression = guardPreviousChange ? "CASE WHEN changes() = 1 THEN ? ELSE NULL END" : "?";
   return db.prepare(`
     INSERT INTO audit_events (
       id, actor_user_id, actor_email, action, entity_type, entity_id,
       request_id, before_json, after_json, metadata_json, created_at
-    ) VALUES (?, ?, ?, ?, 'textbook_assignment', ${entityExpression}, ?, ?, ?, NULL, ?)
+    ) VALUES (?, ?, ?, ?, ?, ${entityExpression}, ?, ?, ?, NULL, ?)
   `).bind(
     `AUD-${crypto.randomUUID()}`,
     actor.id,
     actor.email,
     action,
+    entityType,
     entityId,
     requestId,
     before === null ? null : JSON.stringify(before),

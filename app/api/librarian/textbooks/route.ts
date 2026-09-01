@@ -8,11 +8,14 @@ import {
   readDraftJsonBody,
 } from "@/lib/librarian-api";
 import {
+  createManualTextbook,
   createTextbookAssignment,
   listManagedTextbooks,
+  type ManualTextbookFields,
   TextbookCatalogError,
   type TextbookDatabase,
 } from "@/lib/textbook-catalog-store";
+import { validateManualTextbookFields } from "@/lib/textbook-manual-validation";
 
 export const dynamic = "force-dynamic";
 
@@ -65,22 +68,32 @@ export async function POST(request: Request): Promise<Response> {
     return librarianError(400, "validation_failed", "Перевірте дані е-підручника.", true, validated.errors);
   }
   try {
-    const textbook = await createTextbookAssignment(
-      env.DB as unknown as TextbookDatabase,
-      authorization.value.user,
-      validated.value,
-    );
+    const textbook = validated.value.kind === "manual"
+      ? await createManualTextbook(
+        env.DB as unknown as TextbookDatabase,
+        authorization.value.user,
+        validated.value,
+      )
+      : await createTextbookAssignment(
+        env.DB as unknown as TextbookDatabase,
+        authorization.value.user,
+        validated.value,
+      );
     return librarianJson({ schemaVersion: 1, success: true, textbook, writesEnabled: true }, { status: 201 });
   } catch (error) {
     return textbookError(error, true, "Не вдалося додати е-підручник.");
   }
 }
 
-type CreateValue = { requestId: string; materialId: string; grade: number; publish: boolean };
+type CreateValue =
+  | { kind: "fund"; requestId: string; materialId: string; grade: number; publish: boolean }
+  | ({ kind: "manual"; requestId: string; publish: boolean } & ManualTextbookFields);
 
 function createInput(input: Record<string, unknown>): { ok: true; value: CreateValue } | { ok: false; errors: Record<string, string> } {
+  if (input.kind === "manual") return manualCreateInput(input);
   const errors: Record<string, string> = {};
-  exactKeys(input, ["requestId", "materialId", "grade", "publish"], errors);
+  exactKeys(input, ["kind", "requestId", "materialId", "grade", "publish"], errors);
+  if (input.kind !== undefined && input.kind !== "fund") errors.kind = "Некоректний тип запису.";
   const requestId = String(input.requestId ?? "").trim();
   const materialId = String(input.materialId ?? "").trim().toUpperCase();
   const grade = typeof input.grade === "number" ? input.grade : Number.NaN;
@@ -90,7 +103,23 @@ function createInput(input: Record<string, unknown>): { ok: true; value: CreateV
   if (typeof input.publish !== "boolean") errors.publish = "Вкажіть, чи публікувати підручник.";
   return Object.keys(errors).length
     ? { ok: false, errors }
-    : { ok: true, value: { requestId, materialId, grade, publish: input.publish as boolean } };
+    : { ok: true, value: { kind: "fund", requestId, materialId, grade, publish: input.publish as boolean } };
+}
+
+function manualCreateInput(input: Record<string, unknown>): { ok: true; value: CreateValue } | { ok: false; errors: Record<string, string> } {
+  const errors: Record<string, string> = {};
+  exactKeys(input, [
+    "kind", "requestId", "grade", "publish", "title", "author", "subject",
+    "publisher", "publicationYear", "isbn", "resourceUrl", "coverUrl", "sortOrder",
+  ], errors);
+  const requestId = String(input.requestId ?? "").trim();
+  if (!UUID_PATTERN.test(requestId)) errors.requestId = "Некоректний номер запиту.";
+  if (typeof input.publish !== "boolean") errors.publish = "Вкажіть, чи публікувати підручник.";
+  const validatedFields = validateManualTextbookFields(input);
+  Object.assign(errors, validatedFields.errors);
+  return Object.keys(errors).length
+    ? { ok: false, errors }
+    : { ok: true, value: { kind: "manual", requestId, publish: input.publish as boolean, ...validatedFields.fields } };
 }
 
 function exactKeys(input: Record<string, unknown>, allowed: string[], errors: Record<string, string>): void {

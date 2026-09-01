@@ -61,6 +61,7 @@ const migrationUrls = [
     "0030_bizarre_dust.sql",
     "0031_textbook_catalog_lists.sql",
     "0032_fearless_alex_power.sql",
+    "0033_burly_human_fly.sql",
   ].map((file) => new URL(`../drizzle/${file}`, import.meta.url));
 
 async function fixturePlan() {
@@ -368,6 +369,14 @@ test("staging reset atomically clears domain/import rows while preserving migrat
   ) VALUES ('TXT-RESET',?,?,1,'draft',0,1,NULL,NULL,
     '2026-09-10T00:00:00.000Z','2026-09-10T00:00:00.000Z')`)
     .run(academicYearId, materialId);
+  database.prepare(`INSERT INTO manual_textbooks (
+    id,academic_year_id,grade,title,author,subject,publisher,isbn,resource_url,
+    cover_url,status,sort_order,version,created_by_user_id,updated_by_user_id,
+    published_at,archived_at,deleted_at,created_at,updated_at
+  ) VALUES ('TXM-RESET',?,1,'Ручний е-підручник','','Математика','','',
+    'https://example.test/manual.pdf','','draft',0,1,?,?,NULL,NULL,NULL,
+    '2026-09-10T00:00:00.000Z','2026-09-10T00:00:00.000Z')`)
+    .run(academicYearId, actorId, actorId);
   database.prepare(`INSERT INTO material_metadata_enrichments (
     id,batch_id,material_id,field,value,normalized_value,confidence,source_provider,
     source_url,source_title,reason_code,material_fingerprint,expected_title,
@@ -515,6 +524,7 @@ test("staging reset atomically clears domain/import rows while preserving migrat
   assert.equal(report.deletedByTable.portal_notifications, 1);
   assert.equal(report.deletedByTable.material_requests, 1);
   assert.equal(report.deletedByTable.textbook_assignments, 1);
+  assert.equal(report.deletedByTable.manual_textbooks, 1);
   assert.equal(report.deletedByTable.material_metadata_enrichments, 1);
   assert.ok(report.batchStatements <= 50, `reset used ${report.batchStatements} statements`);
   assert.equal(database.prepare("SELECT count(*) AS count FROM librarian_drafts").get().count, 1);

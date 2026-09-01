@@ -232,6 +232,13 @@
       "when": 1787993275581,
       "tag": "0032_fearless_alex_power",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1788237394477,
+      "tag": "0033_burly_human_fly",
+      "breakpoints": true
     }
   ]
 }

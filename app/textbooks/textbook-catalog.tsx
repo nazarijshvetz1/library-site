@@ -248,10 +248,11 @@ export default function TextbookCatalog() {
 }
 
 function TextbookCard({ item }: { item: Textbook }) {
+  const [coverFailed, setCoverFailed] = useState(false);
   return (
     <article className={styles.card}>
       <div className={styles.cover}>
-        {item.coverUrl ? <img src={item.coverUrl} alt="" loading="lazy" /> : <span>{item.title}</span>}
+        {item.coverUrl && !coverFailed ? <img src={item.coverUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setCoverFailed(true)} /> : <span>{item.title}</span>}
       </div>
       <div className={styles.cardBody}>
         <div className={styles.chips}><span>{item.grade} клас</span>{item.subject ? <span>{item.subject}</span> : null}</div>

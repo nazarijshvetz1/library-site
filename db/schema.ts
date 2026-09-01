@@ -132,6 +132,7 @@ const userRoles = ["admin", "librarian", "teacher"] as const;
 const holdingConditions = ["unspecified", "good", "worn", "damaged"] as const;
 const academicYearStatuses = ["draft", "active", "closed"] as const;
 const textbookAssignmentStatuses = ["draft", "published", "archived"] as const;
+const manualTextbookStatuses = ["draft", "published", "archived", "deleted"] as const;
 const cohortStatuses = ["active", "graduated", "closed"] as const;
 const classYearStatuses = ["planned", "active", "closed"] as const;
 const loanStatuses = ["open", "closed", "cancelled"] as const;
@@ -906,6 +907,96 @@ export const textbookAssignments = sqliteTable(
       ) or (
         ${table.status} = 'archived'
         and ${table.archivedAt} is not null
+      )`,
+    ),
+  ],
+);
+
+/**
+ * Librarian-authored electronic textbooks that intentionally do not create a
+ * physical-fund material or affect holdings, loans, revisions, or reports.
+ */
+export const manualTextbooks = sqliteTable(
+  "manual_textbooks",
+  {
+    id: text("id").primaryKey(),
+    academicYearId: text("academic_year_id")
+      .notNull()
+      .references(() => academicYears.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    grade: integer("grade").notNull(),
+    title: text("title").notNull(),
+    author: text("author").notNull().default(""),
+    subject: text("subject").notNull(),
+    publisher: text("publisher").notNull().default(""),
+    publicationYear: integer("publication_year"),
+    isbn: text("isbn").notNull().default(""),
+    resourceUrl: text("resource_url").notNull(),
+    coverUrl: text("cover_url").notNull().default(""),
+    status: text("status", { enum: manualTextbookStatuses })
+      .notNull()
+      .default("draft"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    version: integer("version").notNull().default(1),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    updatedByUserId: text("updated_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    publishedAt: text("published_at"),
+    archivedAt: text("archived_at"),
+    deletedAt: text("deleted_at"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("idx_manual_textbooks_public_listing").on(
+      table.academicYearId,
+      table.status,
+      table.grade,
+      table.sortOrder,
+      table.id,
+    ),
+    index("idx_manual_textbooks_management").on(
+      table.academicYearId,
+      table.grade,
+      table.status,
+      table.sortOrder,
+    ),
+    check("manual_textbooks_grade_valid", sql`${table.grade} between 1 and 11`),
+    check(
+      "manual_textbooks_status_valid",
+      sql`${table.status} in ('draft', 'published', 'archived', 'deleted')`,
+    ),
+    check("manual_textbooks_title_not_blank", sql`length(trim(${table.title})) between 1 and 500`),
+    check("manual_textbooks_subject_not_blank", sql`length(trim(${table.subject})) between 1 and 240`),
+    check("manual_textbooks_resource_https", sql`${table.resourceUrl} glob 'https://*'`),
+    check("manual_textbooks_cover_https", sql`${table.coverUrl} = '' or ${table.coverUrl} glob 'https://*'`),
+    check(
+      "manual_textbooks_year_valid",
+      sql`${table.publicationYear} is null or ${table.publicationYear} between 1000 and 3000`,
+    ),
+    check("manual_textbooks_sort_order_nonnegative", sql`${table.sortOrder} >= 0`),
+    check("manual_textbooks_version_positive", sql`${table.version} > 0`),
+    check(
+      "manual_textbooks_dates_consistent",
+      sql`(
+        ${table.status} = 'draft'
+        and ${table.publishedAt} is null
+        and ${table.archivedAt} is null
+        and ${table.deletedAt} is null
+      ) or (
+        ${table.status} = 'published'
+        and ${table.publishedAt} is not null
+        and ${table.archivedAt} is null
+        and ${table.deletedAt} is null
+      ) or (
+        ${table.status} = 'archived'
+        and ${table.archivedAt} is not null
+        and ${table.deletedAt} is null
+      ) or (
+        ${table.status} = 'deleted'
+        and ${table.deletedAt} is not null
       )`,
     ),
   ],

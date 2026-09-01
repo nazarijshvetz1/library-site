@@ -37,6 +37,7 @@ const migrationFiles = [
   "drizzle/0030_bizarre_dust.sql",
   "drizzle/0031_textbook_catalog_lists.sql",
   "drizzle/0032_fearless_alex_power.sql",
+  "drizzle/0033_burly_human_fly.sql",
 ];
 
 async function migratedDatabase() {
@@ -582,6 +583,7 @@ test("core migration extends the existing draft database without recreating it",
     "loan_items",
     "loans",
     "locations",
+    "manual_textbooks",
     "material_cover_assets",
     "material_links",
     "material_request_events",
@@ -858,6 +860,48 @@ test("0032 enriches only exact live snapshots, preserves drift and rebuilds cata
   );
   assert.equal(database.prepare("SELECT COUNT(*) count FROM materials_fts WHERE materials_fts MATCH '9789604430062'").get().count, 1);
   assert.equal(database.prepare("SELECT COUNT(*) count FROM materials_fts WHERE materials_fts MATCH 'cambridge'").get().count, 4);
+  assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+  database.close();
+});
+
+test("0033 stores manual e-textbooks without creating or changing physical-fund materials", async () => {
+  const database = await migratedDatabase();
+  const now = "2026-09-01T08:00:00.000Z";
+  database.exec(`
+    INSERT INTO users (id,full_name,sort_name,email,auth_user_id,role,status,created_at,updated_at)
+      VALUES ('USR-MANUAL','Бібліотекар Тестовий','бібліотекар тестовий','manual@example.test',NULL,'librarian','active','${now}','${now}');
+    INSERT INTO academic_years (id,label,start_date,end_date,status,notes,version,created_at,updated_at)
+      VALUES ('YR-MANUAL','2030/2031','2030-08-01','2031-06-30','draft','',1,'${now}','${now}');
+  `);
+  const materialCount = database.prepare("SELECT count(*) AS count FROM materials").get().count;
+  database.prepare(`
+    INSERT INTO manual_textbooks (
+      id,academic_year_id,grade,title,author,subject,publisher,publication_year,
+      isbn,resource_url,cover_url,status,sort_order,version,created_by_user_id,
+      updated_by_user_id,published_at,archived_at,deleted_at,created_at,updated_at
+    ) VALUES ('TXM-1','YR-MANUAL',4,'Математика 4 клас','Автор','Математика','Видавництво',2030,
+      '9789660000000','https://example.test/math.pdf','https://example.test/math.jpg','published',10,1,
+      'USR-MANUAL','USR-MANUAL',?,NULL,NULL,?,?)
+  `).run(now, now, now);
+  assert.equal(database.prepare("SELECT count(*) AS count FROM materials").get().count, materialCount);
+  assert.deepEqual(
+    { ...database.prepare("SELECT grade,title,status,sort_order,resource_url FROM manual_textbooks WHERE id='TXM-1'").get() },
+    { grade: 4, title: "Математика 4 клас", status: "published", sort_order: 10, resource_url: "https://example.test/math.pdf" },
+  );
+  assert.throws(
+    () => database.prepare(`
+      INSERT INTO manual_textbooks (id,academic_year_id,grade,title,author,subject,publisher,isbn,resource_url,cover_url,status,sort_order,version,created_by_user_id,updated_by_user_id,published_at,archived_at,deleted_at,created_at,updated_at)
+      VALUES ('TXM-HTTP','YR-MANUAL',4,'Назва','','Предмет','','','http://example.test/book.pdf','','draft',0,1,'USR-MANUAL','USR-MANUAL',NULL,NULL,NULL,?,?)
+    `).run(now, now),
+    /CHECK constraint/u,
+  );
+  assert.throws(
+    () => database.prepare(`
+      INSERT INTO manual_textbooks (id,academic_year_id,grade,title,author,subject,publisher,isbn,resource_url,cover_url,status,sort_order,version,created_by_user_id,updated_by_user_id,published_at,archived_at,deleted_at,created_at,updated_at)
+      VALUES ('TXM-GRADE','YR-MANUAL',12,'Назва','','Предмет','','','https://example.test/book.pdf','','draft',0,1,'USR-MANUAL','USR-MANUAL',NULL,NULL,NULL,?,?)
+    `).run(now, now),
+    /CHECK constraint/u,
+  );
   assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
   database.close();
 });
