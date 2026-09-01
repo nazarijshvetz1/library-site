@@ -339,6 +339,91 @@ test("0034 consolidates duplicate open class issues without losing their audit h
   database.close();
 });
 
+test("0035 upgrades referenced class-loan items inside one deployment transaction", async () => {
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON;");
+  for (const file of migrationFiles.slice(0, migrationFiles.indexOf("drizzle/0035_soft_warstar.sql"))) {
+    database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
+  }
+  const now = "2026-09-01T08:00:00.000Z";
+  database.exec(`
+    INSERT INTO users (id,full_name,sort_name,email,auth_user_id,role,status,created_at,updated_at) VALUES
+      ('USR-0035-LIB','Бібліотекар','бібліотекар',NULL,NULL,'librarian','active','${now}','${now}'),
+      ('USR-0035-TEACH','Учитель','учитель',NULL,NULL,'teacher','active','${now}','${now}');
+    INSERT INTO locations (id,name,type,status,is_public,sort_order,created_at,updated_at)
+      VALUES ('LOC-0035','Фонд','library','active',1,1,'${now}','${now}');
+    INSERT INTO materials (
+      id,catalog_number,title,sort_title,search_text,rubric,publication_type,subject,
+      author,publication_year,isbn,isbn_normalized,publisher,notes,status,version,
+      created_at,updated_at,archived_at
+    ) VALUES (
+      'CAT-0035',35,'Підручник','підручник','підручник','Підручники','Підручник','Математика',
+      'Автор',2026,'','','','', 'active',1,'${now}','${now}',NULL
+    );
+    INSERT INTO academic_years (id,label,start_date,end_date,status,notes,version,created_at,updated_at)
+      VALUES ('YR-0035','2026/2027','2026-09-01','2027-05-31','active','',1,'${now}','${now}');
+    INSERT INTO cohorts (id,status,notes,created_at,updated_at)
+      VALUES ('COH-0035','active','','${now}','${now}');
+    INSERT INTO class_years (
+      id,academic_year_id,cohort_id,class_name,grade,code,teacher_user_id,location_id,
+      start_date,end_date,status,actual_closed_date,notes,version,created_at,updated_at
+    ) VALUES (
+      'CY-0035','YR-0035','COH-0035','5-А',5,'А','USR-0035-TEACH',NULL,
+      '2026-09-01','2027-05-31','active',NULL,'',1,'${now}','${now}'
+    );
+    INSERT INTO class_loans (
+      id,class_year_id,responsible_teacher_user_id,status,issued_at,due_at,closed_at,notes,
+      issue_statement_schema_version,issue_statement_json,issue_statement_origin,
+      issued_by_user_id,closed_by_user_id,version,created_at,updated_at
+    ) VALUES (
+      'CLOAN-0035','CY-0035','USR-0035-TEACH','open','2026-09-01','2027-05-31',NULL,'',
+      0,'','legacy','USR-0035-LIB',NULL,1,'${now}','${now}'
+    );
+    INSERT INTO class_loan_items (
+      id,class_loan_id,material_id,source_location_id,condition,quantity_issued,
+      quantity_returned,notes,created_at,updated_at
+    ) VALUES (
+      'CLI-0035','CLOAN-0035','CAT-0035','LOC-0035','good',2,0,'','${now}','${now}'
+    );
+    INSERT INTO class_loan_transactions (
+      id,request_id,class_loan_id,kind,occurred_at,notes,actor_user_id,created_at
+    ) VALUES (
+      'CLTX-0035','REQ-0035','CLOAN-0035','issue','2026-09-01','','USR-0035-LIB','${now}'
+    );
+    INSERT INTO class_loan_transaction_lines (
+      id,transaction_id,class_loan_item_id,material_id,location_id,condition,
+      quantity_delta,quantity_before,quantity_after,created_at
+    ) VALUES (
+      'CLINE-0035','CLTX-0035','CLI-0035','CAT-0035','LOC-0035','good',-2,2,0,'${now}'
+    );
+  `);
+  database.exec("BEGIN IMMEDIATE;");
+  try {
+    database.exec(await readFile(new URL("../drizzle/0035_soft_warstar.sql", import.meta.url), "utf8"));
+    database.exec("COMMIT;");
+  } catch (error) {
+    database.exec("ROLLBACK;");
+    throw error;
+  }
+  assert.deepEqual(
+    { ...database.prepare(`
+      SELECT id,lifecycle_status,version,removed_at,removed_by_user_id,removal_reason
+      FROM class_loan_items WHERE id='CLI-0035'
+    `).get() },
+    {
+      id: "CLI-0035",
+      lifecycle_status: "active",
+      version: 1,
+      removed_at: null,
+      removed_by_user_id: null,
+      removal_reason: "",
+    },
+  );
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM class_loan_transaction_lines WHERE class_loan_item_id='CLI-0035'").get().count, 1);
+  assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+  database.close();
+});
+
 test("0021 keeps existing acquisition requests and child events while loosening only student metadata", async () => {
   const database = new DatabaseSync(":memory:");
   database.exec("PRAGMA foreign_keys = ON;");

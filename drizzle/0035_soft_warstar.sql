@@ -46,57 +46,55 @@ CREATE TABLE `class_loan_statement_item_links` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `idx_class_loan_statement_item_links_item` ON `class_loan_statement_item_links` (`class_loan_item_id`);--> statement-breakpoint
-PRAGMA foreign_keys=OFF;--> statement-breakpoint
-CREATE TABLE `__new_class_loan_items` (
-	`id` text PRIMARY KEY NOT NULL,
-	`class_loan_id` text NOT NULL,
-	`material_id` text NOT NULL,
-	`source_location_id` text NOT NULL,
-	`condition` text DEFAULT 'unspecified' NOT NULL,
-	`quantity_issued` integer NOT NULL,
-	`quantity_returned` integer DEFAULT 0 NOT NULL,
-	`lifecycle_status` text DEFAULT 'active' NOT NULL,
-	`version` integer DEFAULT 1 NOT NULL,
-	`removed_at` text,
-	`removed_by_user_id` text,
-	`removal_reason` text DEFAULT '' NOT NULL,
-	`notes` text DEFAULT '' NOT NULL,
-	`created_at` text NOT NULL,
-	`updated_at` text NOT NULL,
-	FOREIGN KEY (`class_loan_id`) REFERENCES `class_loans`(`id`) ON UPDATE cascade ON DELETE restrict,
-	FOREIGN KEY (`material_id`) REFERENCES `materials`(`id`) ON UPDATE cascade ON DELETE restrict,
-	FOREIGN KEY (`source_location_id`) REFERENCES `locations`(`id`) ON UPDATE cascade ON DELETE restrict,
-	FOREIGN KEY (`removed_by_user_id`) REFERENCES `users`(`id`) ON UPDATE cascade ON DELETE restrict,
-	CONSTRAINT "class_loan_items_condition_valid" CHECK("__new_class_loan_items"."condition" in ('unspecified', 'good', 'worn', 'damaged')),
-	CONSTRAINT "class_loan_items_quantity_issued_positive" CHECK("__new_class_loan_items"."quantity_issued" > 0),
-	CONSTRAINT "class_loan_items_quantity_returned_valid" CHECK("__new_class_loan_items"."quantity_returned" >= 0 and "__new_class_loan_items"."quantity_returned" <= "__new_class_loan_items"."quantity_issued"),
-	CONSTRAINT "class_loan_items_lifecycle_valid" CHECK("__new_class_loan_items"."lifecycle_status" in ('active', 'removed')),
-	CONSTRAINT "class_loan_items_version_positive" CHECK("__new_class_loan_items"."version" > 0),
-	CONSTRAINT "class_loan_items_removal_fields_consistent" CHECK(("__new_class_loan_items"."lifecycle_status" = 'active'
-          and "__new_class_loan_items"."removed_at" is null
-          and "__new_class_loan_items"."removed_by_user_id" is null
-          and "__new_class_loan_items"."removal_reason" = '')
-        or ("__new_class_loan_items"."lifecycle_status" = 'removed'
-          and "__new_class_loan_items"."removed_at" is not null
-          and "__new_class_loan_items"."removed_by_user_id" is not null
-          and length(trim("__new_class_loan_items"."removal_reason")) > 0))
-);
---> statement-breakpoint
-INSERT INTO `__new_class_loan_items`(
-	"id", "class_loan_id", "material_id", "source_location_id", "condition",
-	"quantity_issued", "quantity_returned", "lifecycle_status", "version",
-	"removed_at", "removed_by_user_id", "removal_reason", "notes", "created_at", "updated_at"
+-- Keep the existing table identity because immutable issue history already
+-- references class_loan_items. These additive columns are safe inside the
+-- deployment transaction and preserve every existing foreign key.
+ALTER TABLE `class_loan_items`
+  ADD COLUMN `lifecycle_status` text DEFAULT 'active' NOT NULL
+  CHECK (`lifecycle_status` in ('active', 'removed'));--> statement-breakpoint
+ALTER TABLE `class_loan_items`
+  ADD COLUMN `version` integer DEFAULT 1 NOT NULL
+  CHECK (`version` > 0);--> statement-breakpoint
+ALTER TABLE `class_loan_items`
+  ADD COLUMN `removed_at` text;--> statement-breakpoint
+ALTER TABLE `class_loan_items`
+  ADD COLUMN `removed_by_user_id` text
+  REFERENCES `users`(`id`) ON UPDATE cascade ON DELETE restrict;--> statement-breakpoint
+ALTER TABLE `class_loan_items`
+  ADD COLUMN `removal_reason` text DEFAULT '' NOT NULL;--> statement-breakpoint
+CREATE TRIGGER `class_loan_items_removal_fields_insert`
+BEFORE INSERT ON `class_loan_items`
+WHEN NOT (
+  (NEW.`lifecycle_status` = 'active'
+    AND NEW.`removed_at` IS NULL
+    AND NEW.`removed_by_user_id` IS NULL
+    AND NEW.`removal_reason` = '')
+  OR
+  (NEW.`lifecycle_status` = 'removed'
+    AND NEW.`removed_at` IS NOT NULL
+    AND NEW.`removed_by_user_id` IS NOT NULL
+    AND length(trim(NEW.`removal_reason`)) > 0)
 )
-SELECT
-	"id", "class_loan_id", "material_id", "source_location_id", "condition",
-	"quantity_issued", "quantity_returned", 'active', 1,
-	NULL, NULL, '', "notes", "created_at", "updated_at"
-FROM `class_loan_items`;--> statement-breakpoint
-DROP TABLE `class_loan_items`;--> statement-breakpoint
-ALTER TABLE `__new_class_loan_items` RENAME TO `class_loan_items`;--> statement-breakpoint
-PRAGMA foreign_keys=ON;--> statement-breakpoint
-CREATE INDEX `idx_class_loan_items_loan_material` ON `class_loan_items` (`class_loan_id`,`material_id`);--> statement-breakpoint
-CREATE INDEX `idx_class_loan_items_material_loan` ON `class_loan_items` (`material_id`,`class_loan_id`);--> statement-breakpoint
+BEGIN
+  SELECT RAISE(ABORT, 'class loan item removal fields are inconsistent');
+END;--> statement-breakpoint
+CREATE TRIGGER `class_loan_items_removal_fields_update`
+BEFORE UPDATE OF `lifecycle_status`, `removed_at`, `removed_by_user_id`, `removal_reason`
+ON `class_loan_items`
+WHEN NOT (
+  (NEW.`lifecycle_status` = 'active'
+    AND NEW.`removed_at` IS NULL
+    AND NEW.`removed_by_user_id` IS NULL
+    AND NEW.`removal_reason` = '')
+  OR
+  (NEW.`lifecycle_status` = 'removed'
+    AND NEW.`removed_at` IS NOT NULL
+    AND NEW.`removed_by_user_id` IS NOT NULL
+    AND length(trim(NEW.`removal_reason`)) > 0)
+)
+BEGIN
+  SELECT RAISE(ABORT, 'class loan item removal fields are inconsistent');
+END;--> statement-breakpoint
 CREATE INDEX `idx_class_loan_items_loan_lifecycle` ON `class_loan_items` (`class_loan_id`,`lifecycle_status`,`created_at`);--> statement-breakpoint
 
 -- Rows created for schema-0 loans and append backfills encode the item id.
