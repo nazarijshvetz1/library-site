@@ -396,6 +396,7 @@ test("personal PIN-reset QR permits same-teacher Telegram rebind but rejects a T
 });
 
 test("connected private chats receive role-aware menus and teacher Mini App buttons", async () => {
+  assert.equal(telegram.TELEGRAM_TEACHER_MENU_VERSION, 2);
   const teacher = await database();
   addTeacherCredential(teacher);
   teacher.sqlite.prepare(`INSERT INTO telegram_connections (
@@ -448,7 +449,7 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
     [
       "👤 Кабінет учителя",
       "📚 Каталог",
-      "🛒 Замовлення",
+      "🛒 Замовлення з фонду бібліотеки",
       "➕ Запропонувати придбання",
       "📅 Записатися / мої відвідування",
       "📖 Мої посібники",
@@ -654,7 +655,7 @@ test("connected menus preserve ordinary-link fallbacks when Telegram Mini App is
     assert.equal(teacherMenu[1][0].text, "📚 Каталог");
     assert.equal(teacherMenu[1][0].url, "https://nazarijshvetz1.github.io/library-site/");
     assert.equal(teacherMenu[1][0].web_app, undefined);
-    assert.equal(teacherMenu[2][0].text, "🛒 Замовлення");
+    assert.equal(teacherMenu[2][0].text, "🛒 Замовлення з фонду бібліотеки");
     assert.equal(teacherMenu[2][0].url, "https://library.example.test/teacher?tab=orders");
 
     librarian = await database();

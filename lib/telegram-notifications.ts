@@ -30,7 +30,7 @@ const TELEGRAM_DRAIN_LIMIT = 10;
 const TELEGRAM_API_TIMEOUT_MS = 6_000;
 const TELEGRAM_BOT_API = "https://api.telegram.org";
 const PUBLIC_CATALOG_URL = "https://nazarijshvetz1.github.io/library-site/";
-export const TELEGRAM_TEACHER_MENU_VERSION = 1;
+export const TELEGRAM_TEACHER_MENU_VERSION = 2;
 const TELEGRAM_TEACHER_MENU_OUTBOX_TYPE = "teacher_menu_refresh";
 const TELEGRAM_TEACHER_MENU_ENTITY = `menu-v${TELEGRAM_TEACHER_MENU_VERSION}`;
 
@@ -2703,7 +2703,7 @@ function telegramRoleKeyboard(
     const buttons = [
       ["👤 Кабінет учителя", "/teacher/telegram?tab=overview"],
       ["📚 Каталог", PUBLIC_CATALOG_URL],
-      ["🛒 Замовлення", "/teacher/telegram?tab=orders"],
+      ["🛒 Замовлення з фонду бібліотеки", "/teacher/telegram?tab=orders"],
       ["➕ Запропонувати придбання", "/teacher/telegram?tab=acquisition"],
       ["📅 Записатися / мої відвідування", "/teacher/telegram?tab=visits"],
       ["📖 Мої посібники", "/teacher/telegram?tab=loans"],
