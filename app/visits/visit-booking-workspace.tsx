@@ -108,7 +108,7 @@ type TeacherTabDefinition = {
 const TEACHER_TABS: TeacherTabDefinition[] = [
   { id: "overview", label: "Головна", shortLabel: "Головна", icon: "home", eyebrow: "Ваш простір", description: "Найважливіше про профіль, найближчий візит і бібліотечні справи — на одному екрані." },
   { id: "visits", label: "Відвідування", shortLabel: "Графік", icon: "visits", eyebrow: "Планування", description: "Оберіть вільний час, запишіть клас і керуйте своїми майбутніми відвідуваннями." },
-  { id: "orders", label: "Замовлення", shortLabel: "Замовити", icon: "orders", eyebrow: "Матеріали", description: "Знайдіть потрібні видання, сформуйте кошик і стежте за виконанням замовлення." },
+  { id: "orders", label: "Замовлення з фонду бібліотеки", shortLabel: "Замовити", icon: "orders", eyebrow: "Матеріали", description: "Знайдіть потрібні видання, сформуйте кошик і стежте за виконанням замовлення." },
   { id: "acquisition", label: "Запропонувати придбання", shortLabel: "Придбання", icon: "teacher-acquisition", eyebrow: "Комплектування", description: "Повідомте бібліотекарю, яких навчальних матеріалів або книжок бракує фонду." },
   { id: "loans", label: "Мої посібники", shortLabel: "Посібники", icon: "loans", eyebrow: "Облік", description: "Перегляньте матеріали, видані особисто вам і класам, за які ви відповідаєте." },
   { id: "notifications", label: "Повідомлення", shortLabel: "Новини", icon: "notifications", eyebrow: "Оновлення", description: "Усі рішення бібліотекаря, зміни статусів і важливі повідомлення зібрані тут." },

@@ -45,6 +45,7 @@ test("teacher cabinet is the primary route and legacy visits keeps bounded deep 
   assert.match(workspace, /initialEndTime=\{initialEndTime\}/u);
   assert.match(workspace, /initialOrderMaterialId=\{initialOrderMaterialId\}/u);
   assert.match(workspace, /initialOrderView=\{initialOrderView\}/u);
+  assert.match(workspace, /id: "orders", label: "Замовлення з фонду бібліотеки", shortLabel: "Замовити"/u);
 });
 
 test("teacher cabinet keeps a sans interface and Georgia display headings", async () => {
