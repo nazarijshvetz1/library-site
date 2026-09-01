@@ -323,6 +323,18 @@ test("class loan validation requires accountability, versions and bounded dates"
   assert.equal(invalid.ok, false);
   assert.ok(invalid.fieldErrors.expectedVersion);
   assert.ok(invalid.fieldErrors.items);
+
+  const legacyLink = validation.validateClassLoanManagementInput({
+    requestId: REQUEST_ID,
+    expectedVersion: 3,
+    action: "link_legacy_item",
+    classLoanItemId: "CLI-LEGACY-1",
+    expectedItemVersion: 1,
+    statementLineId: "CLSL-LEGACY-1",
+    reason: "Звірено з паперовою відомістю",
+  });
+  assert.equal(legacyLink.ok, true);
+  assert.equal(legacyLink.value.action, "link_legacy_item");
 });
 
 test("direct write routes remain authenticated, same-origin and fail closed", () => {
@@ -358,6 +370,10 @@ test("direct write routes remain authenticated, same-origin and fail closed", ()
     path.join(root, "app/api/librarian/class-loans/returns/route.ts"),
     "utf8",
   );
+  const classManagementRoute = fs.readFileSync(
+    path.join(root, "app/api/librarian/class-loans/[classLoanId]/route.ts"),
+    "utf8",
+  );
   const transferRoute = fs.readFileSync(
     path.join(root, "app/api/librarian/transfers/route.ts"),
     "utf8",
@@ -375,6 +391,7 @@ test("direct write routes remain authenticated, same-origin and fail closed", ()
     returnRoute,
     classLoanRoute,
     classReturnRoute,
+    classManagementRoute,
     transferRoute,
     writeoffRoute,
   ]) {

@@ -3014,7 +3014,8 @@ function rebuildStockTotalsBulkStatement(
         UNION ALL
         SELECT cli.material_id, cli.quantity_issued-cli.quantity_returned AS quantity
         FROM class_loan_items cli JOIN class_loans clo ON clo.id=cli.class_loan_id
-        WHERE clo.status!='cancelled' AND cli.quantity_issued>cli.quantity_returned
+        WHERE clo.status!='cancelled' AND cli.lifecycle_status='active'
+          AND cli.quantity_issued>cli.quantity_returned
       ) outstanding_rows GROUP BY material_id
     ) outstanding ON outstanding.material_id=m.id
     LEFT JOIN (

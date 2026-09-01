@@ -284,7 +284,8 @@ export async function listOpenClassLoans(
     JOIN class_years cy ON cy.id = cl.class_year_id
     JOIN academic_years ay ON ay.id = cy.academic_year_id
     JOIN users teacher ON teacher.id = cl.responsible_teacher_user_id
-    JOIN class_loan_items cli ON cli.class_loan_id = cl.id
+    JOIN class_loan_items cli
+      ON cli.class_loan_id = cl.id AND cli.lifecycle_status = 'active'
     JOIN materials m ON m.id = cli.material_id
     LEFT JOIN material_cover_assets cover
       ON cover.material_id = m.id AND cover.status = 'ready'

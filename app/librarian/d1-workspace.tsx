@@ -325,6 +325,7 @@ type ClassIssuePayload = {
   requestId: string;
   classYearId: string;
   expectedClassYearVersion: number;
+  expectedClassLoanId: string | null;
   responsibleTeacherUserId: string;
   issuedAt: string;
   dueAt: string | null;
@@ -4497,6 +4498,8 @@ function ClassIssueWorkspace({
   const [messageTone, setMessageTone] = useState<"error" | "success" | "info">("info");
   const [lastIssuedClassLoanId, setLastIssuedClassLoanId] = useState("");
   const [draftHydrated, setDraftHydrated] = useState(false);
+  const [targetClassLoanId, setTargetClassLoanId] = useState("");
+  const [targetReturnTo, setTargetReturnTo] = useState("");
   const issueInFlightRef = useRef(false);
   const draftStorageErrorRef = useRef(false);
   const materialPickerRef = useRef<HTMLElement>(null);
@@ -4562,9 +4565,69 @@ function ClassIssueWorkspace({
     window.queueMicrotask(() => {
       if (cancelled) return;
       const storedDraft = readStoredClassIssueDraft(window.sessionStorage);
+      const query = new URL(window.location.href).searchParams;
+      const requestedClassYearId = (query.get("classYearId") ?? "").trim();
+      const requestedClassYear = activeClassYears.find(
+        (classYear) => classYear.id === requestedClassYearId,
+      );
+      const requestedClassLoanId = safeWorkspaceIdentifier(query.get("classLoanId"));
+      const requestedReturnTo = requestedClassLoanId
+        ? `/librarian/class-loans/${encodeURIComponent(requestedClassLoanId)}/statement`
+        : "";
+      const explicitStatementTarget = Boolean(requestedClassYear && requestedClassLoanId);
+      const statementTargetBlockedByStoredDraft = Boolean(
+        explicitStatementTarget
+        && storedDraft
+        && storedDraft.classYearId !== requestedClassYear?.id,
+      );
       if (!storedDraft) {
+        if (requestedClassYear) {
+          const today = todayInKyiv();
+          const defaultIssuedAt = today < requestedClassYear.startDate
+            ? requestedClassYear.startDate
+            : today > requestedClassYear.endDate
+              ? requestedClassYear.endDate
+              : today;
+          const requestedIssuedAt = (query.get("issuedAt") ?? "").trim();
+          const nextIssuedAt = explicitStatementTarget
+            && requestedIssuedAt >= requestedClassYear.startDate
+            && requestedIssuedAt <= requestedClassYear.endDate
+            ? requestedIssuedAt
+            : defaultIssuedAt;
+          const requestedTeacherId = (query.get("teacherUserId") ?? "").trim();
+          const nextTeacherId = teachers.some((teacher) => teacher.id === requestedTeacherId)
+            ? requestedTeacherId
+            : requestedClassYear.teacherUserId
+              && teachers.some((teacher) => teacher.id === requestedClassYear.teacherUserId)
+              ? requestedClassYear.teacherUserId
+              : "";
+          const requestedDueAt = (query.get("dueAt") ?? "").trim();
+          const nextDueAt = explicitStatementTarget && query.has("dueAt") && !requestedDueAt
+            ? ""
+            : requestedDueAt >= nextIssuedAt && requestedDueAt <= requestedClassYear.endDate
+              ? requestedDueAt
+              : requestedClassYear.endDate;
+          setClassYearId(requestedClassYear.id);
+          setResponsibleTeacherUserId(nextTeacherId);
+          setIssuedAt(nextIssuedAt);
+          setDueAt(nextDueAt);
+          if (explicitStatementTarget) {
+            setTargetClassLoanId(requestedClassLoanId);
+            setTargetReturnTo(requestedReturnTo);
+          }
+          setMessageTone("info");
+          setMessage(
+            nextTeacherId
+              ? `Клас ${requestedClassYear.className} уже вибрано. Додайте підручники до спільної відомості.`
+              : `Клас ${requestedClassYear.className} уже вибрано. Оберіть відповідального вчителя.`,
+          );
+        }
         setDraftHydrated(true);
         return;
+      }
+      if (explicitStatementTarget && storedDraft.classYearId === requestedClassYear?.id) {
+        setTargetClassLoanId(requestedClassLoanId);
+        setTargetReturnTo(requestedReturnTo);
       }
       const storedClassYear = activeClassYears.find((classYear) => classYear.id === storedDraft.classYearId);
       if (!storedClassYear) {
@@ -4584,16 +4647,16 @@ function ClassIssueWorkspace({
         : today > storedClassYear.endDate
           ? storedClassYear.endDate
           : today;
-      const restoredIssuedAt = storedDraft.issuedAt >= storedClassYear.startDate
+      const storedIssuedAt = storedDraft.issuedAt >= storedClassYear.startDate
         && storedDraft.issuedAt <= storedClassYear.endDate
         ? storedDraft.issuedAt
         : fallbackIssuedAt;
-      const restoredDueAt = storedDraft.dueAt === null
+      const storedDueAt = storedDraft.dueAt === null
         ? ""
-        : storedDraft.dueAt >= restoredIssuedAt && storedDraft.dueAt <= storedClassYear.endDate
+        : storedDraft.dueAt >= storedIssuedAt && storedDraft.dueAt <= storedClassYear.endDate
           ? storedDraft.dueAt
           : storedClassYear.endDate;
-      const restoredTeacherUserId = teachers.some(
+      const storedTeacherUserId = teachers.some(
         (teacher) => teacher.id === storedDraft.responsibleTeacherUserId,
       )
         ? storedDraft.responsibleTeacherUserId
@@ -4601,6 +4664,28 @@ function ClassIssueWorkspace({
           && teachers.some((teacher) => teacher.id === storedClassYear.teacherUserId)
           ? storedClassYear.teacherUserId
           : "";
+      const sameClassStatementTarget = Boolean(
+        explicitStatementTarget && storedDraft.classYearId === requestedClassYear?.id,
+      );
+      const requestedIssuedAt = (query.get("issuedAt") ?? "").trim();
+      const restoredIssuedAt = sameClassStatementTarget
+        && requestedIssuedAt >= storedClassYear.startDate
+        && requestedIssuedAt <= storedClassYear.endDate
+        ? requestedIssuedAt
+        : storedIssuedAt;
+      const requestedDueAt = (query.get("dueAt") ?? "").trim();
+      const restoredDueAt = sameClassStatementTarget
+        ? query.has("dueAt") && !requestedDueAt
+          ? ""
+          : requestedDueAt >= restoredIssuedAt && requestedDueAt <= storedClassYear.endDate
+            ? requestedDueAt
+            : storedClassYear.endDate
+        : storedDueAt;
+      const requestedTeacherUserId = (query.get("teacherUserId") ?? "").trim();
+      const restoredTeacherUserId = sameClassStatementTarget
+        && teachers.some((teacher) => teacher.id === requestedTeacherUserId)
+        ? requestedTeacherUserId
+        : storedTeacherUserId;
       setClassYearId(storedClassYear.id);
       setResponsibleTeacherUserId(restoredTeacherUserId);
       setIssuedAt(restoredIssuedAt);
@@ -4609,7 +4694,11 @@ function ClassIssueWorkspace({
       setCart(storedDraft.items);
       setMessageTone("info");
       setMessage(
-        restoredTeacherUserId
+        statementTargetBlockedByStoredDraft
+          ? `Відновлено незавершений кошик іншого класу: ${storedDraft.items.length} поз. Завершіть або очистьте його, а потім знову відкрийте додавання з потрібної відомості.`
+          : sameClassStatementTarget
+          ? `Відновлено ${storedDraft.items.length} поз. кошика та актуальні дані спільної відомості.`
+          : restoredTeacherUserId
           ? `Відновлено кошик: ${storedDraft.items.length} поз.`
           : `Відновлено кошик: ${storedDraft.items.length} поз. Оберіть відповідального вчителя.`,
       );
@@ -4815,6 +4904,10 @@ function ClassIssueWorkspace({
             : "Операцію збережено.",
       );
       await onSaved();
+      if (targetReturnTo && typeof window !== "undefined") {
+        window.location.assign(targetReturnTo);
+        return;
+      }
     } catch (requestError) {
       if (isDefinitiveClassCirculationFailure(requestError)) {
         clearPendingClassCirculationIntent("class-issue");
@@ -4877,6 +4970,7 @@ function ClassIssueWorkspace({
       requestId,
       classYearId: selectedClassYear.id,
       expectedClassYearVersion: selectedClassYear.version,
+      expectedClassLoanId: targetClassLoanId || null,
       responsibleTeacherUserId: effectiveResponsibleTeacherUserId,
       issuedAt: submittedIssuedAt,
       dueAt: submittedDueAt,
@@ -4928,7 +5022,12 @@ function ClassIssueWorkspace({
         ) : (
           <div className={styles.formGrid}>
             <EditField label="Клас" required wide>
-              <select value={effectiveClassYearId} onChange={(event) => chooseClassYear(event.target.value)} required>
+              <select
+                value={effectiveClassYearId}
+                disabled={Boolean(targetClassLoanId)}
+                onChange={(event) => chooseClassYear(event.target.value)}
+                required
+              >
                 {activeClassYears.map((classYear) => (
                   <option key={classYear.id} value={classYear.id}>
                     {classYear.className} · {classYear.academicYearLabel}
@@ -7067,6 +7166,13 @@ function clearPendingClassCirculationIntent(kind: ClassCirculationIntentKind): v
   } catch {
     // A completed or terminal server response remains authoritative.
   }
+}
+
+function safeWorkspaceIdentifier(value: string | null): string {
+  const normalized = value?.trim() ?? "";
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(normalized)
+    ? normalized
+    : "";
 }
 
 const DEFINITIVE_INVENTORY_FAILURES = new Set([

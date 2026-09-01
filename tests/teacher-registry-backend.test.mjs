@@ -46,6 +46,7 @@ const migrationFiles = [
   "0032_fearless_alex_power.sql",
   "0033_burly_human_fly.sql",
   "0034_worthless_big_bertha.sql",
+  "0035_soft_warstar.sql",
 ];
 
 class PreparedStatement {

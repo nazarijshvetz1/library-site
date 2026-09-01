@@ -782,8 +782,12 @@ export async function closeClassYearDirect(
           version = version + 1, updated_at = ?
       WHERE id = ? AND version = ? AND status IN ('planned', 'active')
         AND NOT EXISTS (
-          SELECT 1 FROM class_loans
-          WHERE class_year_id = ? AND status = 'open'
+          SELECT 1
+          FROM class_loans cl
+          JOIN class_loan_items cli ON cli.class_loan_id = cl.id
+          WHERE cl.class_year_id = ? AND cl.status = 'open'
+            AND cli.lifecycle_status = 'active'
+            AND cli.quantity_issued > cli.quantity_returned
         )
     `).bind(
       input.actualClosedDate,
@@ -1614,8 +1618,12 @@ function bulkCloseSourceClassesStatement(
       AND cy.version = items.expected_version
       AND cy.status IN ('planned', 'active')
       AND NOT EXISTS (
-        SELECT 1 FROM class_loans
-        WHERE class_year_id = cy.id AND status = 'open'
+        SELECT 1
+        FROM class_loans cl
+        JOIN class_loan_items cli ON cli.class_loan_id = cl.id
+        WHERE cl.class_year_id = cy.id AND cl.status = 'open'
+          AND cli.lifecycle_status = 'active'
+          AND cli.quantity_issued > cli.quantity_returned
       )
   `).bind(JSON.stringify(rows), effectiveDate, updatedAt, sourceYearId);
 }
@@ -1864,7 +1872,10 @@ async function findOpenClassLoan(
     SELECT cl.class_year_id, cl.id AS class_loan_id
     FROM requested
     JOIN class_loans cl ON cl.class_year_id = requested.class_year_id
+    JOIN class_loan_items cli ON cli.class_loan_id = cl.id
     WHERE cl.status = 'open'
+      AND cli.lifecycle_status = 'active'
+      AND cli.quantity_issued > cli.quantity_returned
     ORDER BY cl.class_year_id, cl.id
     LIMIT 1
   `).bind(JSON.stringify(classYearIds)).first<{

@@ -86,6 +86,10 @@ function openDatabase() {
       if (statement.trim()) sqlite.exec(statement);
     }
   }
+  sqlite.exec(`
+    ALTER TABLE class_loan_items
+    ADD COLUMN lifecycle_status TEXT NOT NULL DEFAULT 'active'
+  `);
   sqlite.exec(`CREATE TABLE teacher_profiles (
     teacher_user_id TEXT PRIMARY KEY,
     closed_at TEXT
@@ -113,6 +117,11 @@ function seedDirectory(sqlite) {
       id, name, type, status, is_public, sort_order, created_at, updated_at
     ) VALUES ('LOC-002', 'Кабінет 2', 'classroom', 'active', 1, 2, ?, ?)
   `).run(now, now);
+  sqlite.prepare(`
+    INSERT INTO materials (
+      id, catalog_number, title, sort_title, created_at, updated_at
+    ) VALUES ('CAT-0001', 1, 'Тестовий підручник', 'тестовий підручник', ?, ?)
+  `).run(now, now);
 }
 
 function seedRollover(sqlite) {
@@ -138,7 +147,12 @@ function seedRollover(sqlite) {
   `);
 }
 
-function seedOpenClassLoan(sqlite, classYearId, id = "CLOAN-BLOCK") {
+function seedOpenClassLoan(
+  sqlite,
+  classYearId,
+  id = "CLOAN-BLOCK",
+  lifecycleStatus = "active",
+) {
   const now = "2026-09-10T08:00:00.000Z";
   sqlite.prepare(`
     INSERT INTO class_loans (
@@ -148,6 +162,13 @@ function seedOpenClassLoan(sqlite, classYearId, id = "CLOAN-BLOCK") {
     ) VALUES (?, ?, 'USR-TCH', 'open', '2026-09-10', NULL, NULL, '',
       'USR-LIB', NULL, 1, ?, ?)
   `).run(id, classYearId, now, now);
+  sqlite.prepare(`
+    INSERT INTO class_loan_items (
+      id, class_loan_id, material_id, source_location_id, condition,
+      quantity_issued, quantity_returned, notes, created_at, updated_at,
+      lifecycle_status
+    ) VALUES (?, ?, 'CAT-0001', 'LOC-002', 'unspecified', 1, 0, '', ?, ?, ?)
+  `).run(`CLI-${id}`, id, now, now, lifecycleStatus);
 }
 
 function seedLargeRollover(sqlite, count = 26) {
@@ -460,6 +481,25 @@ test("manual class close loses atomically to a concurrent open class loan", asyn
   assert.equal(sqlite.prepare("SELECT count(*) AS count FROM audit_events").get().count, 0);
 });
 
+test("a class can close when its open loan contains only removed items", async () => {
+  const { sqlite, d1 } = openDatabase();
+  seedRollover(sqlite);
+  seedOpenClassLoan(sqlite, "CY-2026-001", "CLOAN-REMOVED", "removed");
+
+  const closed = await academic.closeClassYearDirect(actor, "CY-2026-001", {
+    requestId: request(43),
+    expectedVersion: 1,
+    actualClosedDate: "2027-06-30",
+    reason: "manual",
+    closeCohort: false,
+    notes: "Усі помилково внесені позиції прибрано",
+  }, d1);
+
+  assert.equal(closed.status, "closed");
+  assert.equal(sqlite.prepare("SELECT status FROM class_years WHERE id = 'CY-2026-001'").get().status, "closed");
+  assert.equal(sqlite.prepare("SELECT status FROM class_loans WHERE id = 'CLOAN-REMOVED'").get().status, "open");
+});
+
 test("a mistakenly closed class and cohort can be reopened with history preserved", async () => {
   const { sqlite, d1 } = openDatabase();
   seedRollover(sqlite);
@@ -543,6 +583,7 @@ test("rollover loses atomically to a concurrent open class loan", async () => {
 test("rollover covers every class in one atomic replayable command", async () => {
   const { sqlite, d1 } = openDatabase();
   seedRollover(sqlite);
+  seedOpenClassLoan(sqlite, "CY-2026-001", "CLOAN-REMOVED-ROLLOVER", "removed");
   const input = {
     requestId: request(20),
     sourceYearId: "YR-2026-2027",
@@ -573,6 +614,10 @@ test("rollover covers every class in one atomic replayable command", async () =>
   const first = await academic.rolloverAcademicYearDirect(actor, input, d1);
   const replay = await academic.rolloverAcademicYearDirect(actor, input, d1);
   assert.deepEqual(replay, first);
+  assert.equal(
+    sqlite.prepare("SELECT status FROM class_loans WHERE id = 'CLOAN-REMOVED-ROLLOVER'").get().status,
+    "open",
+  );
   assert.equal(first.promoted.length, 1);
   assert.deepEqual(first.graduated, ["CY-2026-002"]);
   assert.deepEqual(

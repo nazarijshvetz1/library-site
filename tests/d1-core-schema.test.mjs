@@ -41,6 +41,7 @@ const migrationFiles = [
   "drizzle/0032_fearless_alex_power.sql",
   "drizzle/0033_burly_human_fly.sql",
   "drizzle/0034_worthless_big_bertha.sql",
+  "drizzle/0035_soft_warstar.sql",
 ];
 
 async function migratedDatabase() {

@@ -70,12 +70,26 @@ function seed(sqlite) {
     VALUES ('CLI-1','CLOAN-1','CAT-0001','LOC-LIB','good',10,2,'',?,?),
       ('CLI-2','CLOAN-1','CAT-0002','LOC-LIB','good',5,1,'',?,?),
       ('CLI-3','CLOAN-1','CAT-0003','LOC-LIB','good',2,0,'',?,?)`).run(now, now, now, now, now, now);
+  sqlite.prepare(`INSERT INTO class_loan_items (
+      id,class_loan_id,material_id,source_location_id,condition,quantity_issued,quantity_returned,
+      lifecycle_status,version,removed_at,removed_by_user_id,removal_reason,notes,created_at,updated_at)
+    VALUES ('CLI-REMOVED','CLOAN-1','CAT-0001','LOC-LIB','good',7,1,
+      'removed',2,?,'USR-LIB','Помилковий рядок','',?,?)`).run(now, now, now);
   sqlite.prepare(`INSERT INTO class_loan_transactions (id,request_id,class_loan_id,kind,occurred_at,notes,actor_user_id,created_at)
     VALUES ('CLTX-1','REQ-CLASS-ISSUE-1','CLOAN-1','issue','2026-09-01T08:00:00.000Z','','USR-LIB',?),
       ('CLTX-2','REQ-CLASS-ISSUE-2','CLOAN-1','issue','2026-09-05T08:00:00.000Z','','USR-LIB',?)`).run(now, now);
+  sqlite.prepare(`INSERT INTO class_loan_transactions (id,request_id,class_loan_id,kind,occurred_at,notes,actor_user_id,created_at)
+    VALUES ('CLTX-ADJUST','REQ-CLASS-ADJUST-TX','CLOAN-1','issue','2026-08-25T08:00:00.000Z','Уточнення кількості','USR-LIB',?)`).run(now);
   sqlite.prepare(`INSERT INTO class_loan_transaction_lines (id,transaction_id,class_loan_item_id,material_id,location_id,condition,quantity_delta,quantity_before,quantity_after,created_at)
     VALUES ('CLINE-1','CLTX-1','CLI-1','CAT-0001','LOC-LIB','good',-10,20,10,?),
       ('CLINE-3','CLTX-2','CLI-3','CAT-0003','LOC-LIB','good',-2,5,3,?)`).run(now, now);
+  sqlite.prepare(`INSERT INTO class_loan_transaction_lines (id,transaction_id,class_loan_item_id,material_id,location_id,condition,quantity_delta,quantity_before,quantity_after,created_at)
+    VALUES ('CLINE-ADJUST','CLTX-ADJUST','CLI-1','CAT-0001','LOC-LIB','good',-2,12,10,?)`).run(now);
+  sqlite.prepare(`INSERT INTO class_loan_item_adjustments (
+      id,request_id,class_loan_id,class_loan_item_id,statement_line_id,transaction_id,action,
+      quantity_before,quantity_after,quantity_returned_snapshot,stock_delta,location_id,condition,reason,actor_user_id,created_at)
+    VALUES ('CLADJ-1','REQ-CLASS-ADJUST','CLOAN-1','CLI-1',NULL,'CLTX-ADJUST','quantity_changed',
+      8,10,2,-2,'LOC-LIB','good','Уточнення кількості','USR-LIB',?)`).run(now);
 }
 
 test("class export reads active classes and only outstanding class-loan quantities", async () => {

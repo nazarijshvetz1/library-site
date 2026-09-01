@@ -84,7 +84,7 @@ const REPORT_DEFINITIONS: Record<LibrarianReportKind, { title: string; sections:
       },
       classes: {
         title: "Рух по класах",
-        columns: [C("Дата", 18, "datetime"), C("Операція", 15), C("Клас", 13), C("Назва", 40), C("Автор", 26), C("Предмет", 20), C("Місце", 22), C("Стан", 14), C("Зміна", 10, "number"), C("Було", 9, "number"), C("Стало", 9, "number"), C("Примітка", 30)],
+        columns: [C("Дата", 18, "datetime"), C("Операція", 24), C("Клас", 13), C("Назва", 40), C("Автор", 26), C("Предмет", 20), C("Місце", 22), C("Стан", 14), C("Зміна", 10, "number"), C("Було", 9, "number"), C("Стало", 9, "number"), C("Примітка", 38)],
         row: (r) => [datetime(r.occurredAt), classTransactionKind(r.kind), t(r.className), t(r.title), t(r.author), t(r.subject), t(r.locationName), condition(r.condition), n(r.quantityDelta), n(r.quantityBefore), n(r.quantityAfter), t(r.reason)],
       },
     },
@@ -154,6 +154,6 @@ function safeSheetName(value: string): string { return value.replace(/[\\/?*:[\]
 function safeFileName(value: string): string { return value.replace(/[\\/:*?"<>|]/gu, "-").replace(/\s+/gu, " ").trim().slice(0, 180); }
 function condition(value: unknown): string { return ({ good: "Добрий", worn: "Зношений", damaged: "Пошкоджений", unspecified: "Не вказано" } as Record<string, string>)[t(value)] ?? t(value); }
 function transactionKind(value: unknown): string { return ({ receipt: "Надходження", transfer: "Переміщення", writeoff: "Списання", stock_count: "Інвентаризація", loan_issue: "Видача вчителю", loan_return: "Повернення від учителя", reversal: "Сторнування", import: "Імпорт" } as Record<string, string>)[t(value)] ?? t(value); }
-function classTransactionKind(value: unknown): string { return t(value) === "return" ? "Повернення класу" : "Видача класу"; }
+function classTransactionKind(value: unknown): string { return ({ issue: "Видача класу", return: "Повернення класу", adjustment: "Коригування відомості", adjustment_quantity: "Уточнення кількості", adjustment_remove: "Вилучення позиції", adjustment_restore: "Відновлення позиції" } as Record<string, string>)[t(value)] ?? t(value); }
 function acquisitionCategory(category: unknown, literatureKind: unknown): string { if (t(category) === "educational") return "Навчальні матеріали"; return ({ fiction: "Художня література", science: "Наукова література", popular_science: "Науково-популярна", other: "Інша література" } as Record<string, string>)[t(literatureKind)] ?? "Література"; }
 function acquisitionStatus(value: unknown): string { return ({ submitted: "Подано", in_review: "На розгляді", clarification: "Потрібне уточнення", approved: "Погоджено", planned: "Заплановано", ordered: "Замовлено", partially_received: "Частково отримано", received: "Отримано", rejected: "Відхилено", cancelled: "Скасовано" } as Record<string, string>)[t(value)] ?? t(value); }

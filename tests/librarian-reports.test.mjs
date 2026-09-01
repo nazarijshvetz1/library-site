@@ -82,10 +82,24 @@ test("class reports date appended items by their issue transaction", async () =>
   sqlite.prepare(`INSERT INTO class_loan_items (id,class_loan_id,material_id,source_location_id,condition,quantity_issued,quantity_returned,notes,created_at,updated_at)
     VALUES ('CLI-REPORT-OLD','CLOAN-REPORT','CAT-9101','LOC-REPORT','good',2,0,'',?,?),
       ('CLI-REPORT-NEW','CLOAN-REPORT','CAT-9102','LOC-REPORT','good',3,0,'','2026-09-05T10:00:00.000Z','2026-09-05T10:00:00.000Z')`).run(createdAt, createdAt);
+  sqlite.prepare(`INSERT INTO class_loan_items (
+      id,class_loan_id,material_id,source_location_id,condition,quantity_issued,quantity_returned,
+      lifecycle_status,version,removed_at,removed_by_user_id,removal_reason,notes,created_at,updated_at)
+    VALUES ('CLI-REPORT-REMOVED','CLOAN-REPORT','CAT-9101','LOC-REPORT','good',10,0,
+      'removed',2,?,'USR-REPORT-LIB','Помилковий рядок','',?,?)`).run(createdAt, createdAt, createdAt);
   sqlite.prepare(`INSERT INTO class_loan_transactions (id,request_id,class_loan_id,kind,occurred_at,notes,actor_user_id,created_at)
     VALUES ('CLTX-REPORT-NEW','REQ-REPORT-NEW','CLOAN-REPORT','issue','2026-09-05T10:00:00.000Z','', 'USR-REPORT-LIB','2026-09-05T10:00:00.000Z')`).run();
+  sqlite.prepare(`INSERT INTO class_loan_transactions (id,request_id,class_loan_id,kind,occurred_at,notes,actor_user_id,created_at)
+    VALUES ('CLTX-REPORT-ADJUST','REQ-REPORT-ADJUST-TX','CLOAN-REPORT','issue','2026-09-10T10:00:00.000Z','Коригування відомості','USR-REPORT-LIB','2026-09-10T10:00:00.000Z')`).run();
   sqlite.prepare(`INSERT INTO class_loan_transaction_lines (id,transaction_id,class_loan_item_id,material_id,location_id,condition,quantity_delta,quantity_before,quantity_after,created_at)
-    VALUES ('CLTL-REPORT-NEW','CLTX-REPORT-NEW','CLI-REPORT-NEW','CAT-9102','LOC-REPORT','good',-3,3,0,'2026-09-05T10:00:00.000Z')`).run();
+    VALUES ('CLTL-REPORT-NEW','CLTX-REPORT-NEW','CLI-REPORT-NEW','CAT-9102','LOC-REPORT','good',-2,5,3,'2026-09-05T10:00:00.000Z')`).run();
+  sqlite.prepare(`INSERT INTO class_loan_transaction_lines (id,transaction_id,class_loan_item_id,material_id,location_id,condition,quantity_delta,quantity_before,quantity_after,created_at)
+    VALUES ('CLTL-REPORT-ADJUST','CLTX-REPORT-ADJUST','CLI-REPORT-NEW','CAT-9102','LOC-REPORT','good',-1,3,2,'2026-09-10T10:00:00.000Z')`).run();
+  sqlite.prepare(`INSERT INTO class_loan_item_adjustments (
+      id,request_id,class_loan_id,class_loan_item_id,statement_line_id,transaction_id,action,
+      quantity_before,quantity_after,quantity_returned_snapshot,stock_delta,location_id,condition,reason,actor_user_id,created_at)
+    VALUES ('CLADJ-REPORT','REQ-REPORT-ADJUST','CLOAN-REPORT','CLI-REPORT-NEW',NULL,'CLTX-REPORT-ADJUST','quantity_changed',
+      2,3,0,-1,'LOC-REPORT','good','Звірено з класним журналом','USR-REPORT-LIB','2026-09-10T10:00:00.000Z')`).run();
 
   const septemberReturns = await reportStore.readLibrarianReport(db, "returns", "2026-09-01", "2026-09-30");
   const classRows = septemberReturns.sections.find((section) => section.key === "classes").rows;
@@ -98,20 +112,51 @@ test("class reports date appended items by their issue transaction", async () =>
   ]);
   const septemberAnnual = await reportStore.readLibrarianReport(db, "annual", "2026-09-01", "2026-09-30");
   assert.equal(septemberAnnual.sections[0].rows[0].issuedToClasses, 3);
+  const septemberMovement = await reportStore.readLibrarianReport(db, "movement", "2026-09-01", "2026-09-30");
+  const classMovementRows = septemberMovement.sections.find((section) => section.key === "classes").rows;
+  assert.deepEqual(classMovementRows.map((row) => ({
+    kind: row.kind,
+    title: row.title,
+    quantityDelta: row.quantityDelta,
+    reason: row.reason,
+  })), [
+    {
+      kind: "adjustment_quantity",
+      title: "Доданий підручник",
+      quantityDelta: -1,
+      reason: "Звірено з класним журналом",
+    },
+    { kind: "issue", title: "Доданий підручник", quantityDelta: -2, reason: "" },
+  ]);
+  const movementXml = workbookXml(reportExcel.createLibrarianReportExcel(septemberMovement).bytes);
+  assert.match(movementXml, /Уточнення кількості/u);
+  assert.match(movementXml, /Звірено з класним журналом/u);
 
   const augustReturns = await reportStore.readLibrarianReport(db, "returns", "2026-08-01", "2026-08-31");
   const legacyRows = augustReturns.sections.find((section) => section.key === "classes").rows;
   assert.deepEqual(legacyRows.map((row) => ({ title: row.title, issuedAt: row.issuedAt })), [
     { title: "Старий підручник", issuedAt: "2026-08-20T09:00:00.000Z" },
   ]);
+  assert.equal(legacyRows[0].outstanding, 2);
   const augustAnnual = await reportStore.readLibrarianReport(db, "annual", "2026-08-01", "2026-08-31");
   assert.equal(augustAnnual.sections[0].rows[0].issuedToClasses, 2);
+
+  sqlite.prepare(`UPDATE class_loan_items
+    SET lifecycle_status='removed',version=version+1,removed_at=?,removed_by_user_id='USR-REPORT-LIB',
+      removal_reason='Помилкову видачу вилучено',updated_at=?
+    WHERE id='CLI-REPORT-NEW'`).run("2026-09-20T10:00:00.000Z", "2026-09-20T10:00:00.000Z");
+  const afterRemovalAnnual = await reportStore.readLibrarianReport(db, "annual", "2026-09-01", "2026-09-30");
+  assert.equal(afterRemovalAnnual.sections[0].rows[0].issuedToClasses, 0);
+  const afterRemovalProvision = await reportStore.readLibrarianReport(db, "provision", "2026-09-01", "2026-09-30");
+  assert.equal(afterRemovalProvision.sections[0].rows.length, 0);
   sqlite.close();
 });
 
 test("reports center exposes class statement history and protected report downloads", () => {
   const ui = fs.readFileSync(path.join(root, "app/librarian/reports/reports-workspace.tsx"), "utf8");
   const printPage = fs.readFileSync(path.join(root, "app/librarian/class-loans/[classLoanId]/statement/page.tsx"), "utf8");
+  const manager = fs.readFileSync(path.join(root, "app/librarian/class-loans/[classLoanId]/statement/statement-manager.tsx"), "utf8");
+  const workspace = fs.readFileSync(path.join(root, "app/librarian/d1-workspace.tsx"), "utf8");
   assert.match(ui, /Видані матеріали по класах/u);
   assert.match(ui, /aria-label="Найчастіші документи"/u);
   assert.match(ui, /Потреба на новий навчальний рік/u);
@@ -125,6 +170,14 @@ test("reports center exposes class statement history and protected report downlo
   assert.match(ui, /\/api\/librarian\/reports\/\$\{item\.kind\}/u);
   assert.match(printPage, /Акт-відомість видачі матеріалів класу/u);
   assert.doesNotMatch(printPage, /CAT-ID|catalogNumber|catalog_number|Номер документа|Фактичний відповідальний|Місце зберігання|Стан примірників/iu);
+  assert.match(manager, /role="tablist"/u);
+  assert.ok(manager.includes('aria-controls={`statement-manager-${id}`}'));
+  assert.match(manager, /historyLimit/u);
+  assert.match(manager, /sessionStorage\.setItem\(key, JSON\.stringify\(payload\)\)/u);
+  assert.match(manager, /link_legacy_item/u);
+  assert.match(manager, /Підтвердити зв’язок/u);
+  assert.match(workspace, /query\.get\("issuedAt"\)/u);
+  assert.match(workspace, /актуальні дані спільної відомості/u);
 });
 
 function workbookXml(bytes) {

@@ -334,7 +334,7 @@ export async function mutateProcurementPlan(db: ProcurementPlanningDatabase, use
       if (!detail.revisionConfirmedAt) throw new ProcurementPlanningError("revision_not_confirmed", 409, "Підтвердьте завершення ревізії перед фіналізацією плану.");
       const outstanding = await db.prepare(`SELECT
         COALESCE((SELECT SUM(li.quantity_issued-li.quantity_returned) FROM loan_items li JOIN loans l ON l.id=li.loan_id WHERE l.status='open' AND li.quantity_issued>li.quantity_returned),0)
-        + COALESCE((SELECT SUM(cli.quantity_issued-cli.quantity_returned) FROM class_loan_items cli JOIN class_loans cl ON cl.id=cli.class_loan_id WHERE cl.status='open' AND cli.quantity_issued>cli.quantity_returned),0) AS quantity`).first<{ quantity: number }>();
+        + COALESCE((SELECT SUM(cli.quantity_issued-cli.quantity_returned) FROM class_loan_items cli JOIN class_loans cl ON cl.id=cli.class_loan_id WHERE cl.status='open' AND cli.lifecycle_status='active' AND cli.quantity_issued>cli.quantity_returned),0) AS quantity`).first<{ quantity: number }>();
       if (nonNegative(outstanding?.quantity) > 0) throw new ProcurementPlanningError("open_loans", 409, "Перед завершенням плану потрібно оформити всі повернення.");
       const payload = JSON.stringify({
         schemaVersion: 1,

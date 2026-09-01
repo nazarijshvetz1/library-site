@@ -2,6 +2,9 @@ import type { ChatGPTUser } from "@/app/chatgpt-auth";
 import { normalizeIsbn as normalizeCheckedIsbn } from "./isbn.ts";
 import type {
   ClassLoanCreateInput,
+  ClassLoanItemAdjustmentInput,
+  ClassLoanLegacyLinkInput,
+  ClassLoanMetadataUpdateInput,
   ClassLoanReturnInput,
   MaterialEbookLinkCreateInput,
   LoanCreateInput,
@@ -212,6 +215,20 @@ export type ClassLoanMutationResult = {
     quantityIssued: number;
     quantityReturned: number;
   }>;
+};
+
+export type ClassLoanManagementMutationResult = {
+  classLoanId: string;
+  version: number;
+  action: ClassLoanItemAdjustmentInput["action"]
+    | ClassLoanMetadataUpdateInput["action"]
+    | ClassLoanLegacyLinkInput["action"];
+  classLoanItemId: string | null;
+  itemVersion: number | null;
+  quantityIssued: number | null;
+  lifecycleStatus: "active" | "removed" | null;
+  stockDelta: number;
+  transactionId: string | null;
 };
 
 export class LibraryMutationError extends Error {
@@ -1096,6 +1113,7 @@ export async function archiveMaterialDirect(
         FROM class_loan_items cli
         JOIN class_loans clo ON clo.id = cli.class_loan_id
         WHERE cli.material_id = ? AND clo.status != 'cancelled'
+          AND cli.lifecycle_status = 'active'
           AND cli.quantity_issued > cli.quantity_returned
       ), 0) AS total_quantity,
       COALESCE((
@@ -1109,6 +1127,7 @@ export async function archiveMaterialDirect(
         FROM class_loan_items cli
         JOIN class_loans clo ON clo.id = cli.class_loan_id
         WHERE cli.material_id = ? AND clo.status != 'cancelled'
+          AND cli.lifecycle_status = 'active'
           AND cli.quantity_issued > cli.quantity_returned
       ), 0) AS loaned_quantity,
       COALESCE((
@@ -1190,6 +1209,7 @@ export async function archiveMaterialDirect(
           FROM class_loan_items cli
           JOIN class_loans clo ON clo.id = cli.class_loan_id
           WHERE cli.material_id = ? AND clo.status != 'cancelled'
+            AND cli.lifecycle_status = 'active'
             AND cli.quantity_issued > cli.quantity_returned
         )
     `).bind(
@@ -2956,6 +2976,10 @@ export async function issueLoanToClass(
         SELECT MAX(tx.occurred_at)
         FROM class_loan_transactions tx
         WHERE tx.class_loan_id = cl.id
+          AND NOT EXISTS (
+            SELECT 1 FROM class_loan_item_adjustments adjustment
+            WHERE adjustment.transaction_id = tx.id
+          )
       ) AS last_transaction_at
     FROM class_loans cl
     LEFT JOIN users u ON u.id = cl.responsible_teacher_user_id
@@ -2972,6 +2996,20 @@ export async function issueLoanToClass(
     version: number;
     last_transaction_at: string | null;
   }>();
+  if (
+    input.expectedClassLoanId
+    && existingClassLoan?.id !== input.expectedClassLoanId
+  ) {
+    throw new LibraryMutationError(
+      "class_loan_target_conflict",
+      409,
+      "Цільова відомість уже не є відкритою видачею цього класу. Поверніться до відомості та відкрийте додавання знову.",
+      {
+        expectedClassLoanId: input.expectedClassLoanId,
+        currentClassLoanId: existingClassLoan?.id ?? null,
+      },
+    );
+  }
   if (
     existingClassLoan
     && existingClassLoan.responsible_teacher_user_id !== responsibleTeacher.id
@@ -3265,40 +3303,56 @@ export async function issueLoanToClass(
     ),
   );
   if (existingClassLoan) {
-    statements.push(db.prepare(`
-      INSERT INTO class_loan_statement_lines (
-        id, class_loan_id, transaction_id, position, subject, title,
-        author, publication_year, rubric, quantity_issued, created_at
-      )
-      SELECT
-        'CLSL-APPEND-BACKFILL-' || cli.id,
-        cli.class_loan_id,
-        (
-          SELECT issue_tx.id
-          FROM class_loan_transaction_lines issue_line
-          JOIN class_loan_transactions issue_tx
-            ON issue_tx.id = issue_line.transaction_id AND issue_tx.kind = 'issue'
-          WHERE issue_line.class_loan_item_id = cli.id
-          ORDER BY issue_tx.occurred_at, issue_tx.created_at, issue_tx.id
-          LIMIT 1
-        ),
-        ROW_NUMBER() OVER (ORDER BY cli.created_at, cli.id),
-        COALESCE(m.subject, ''),
-        COALESCE(NULLIF(trim(m.title), ''), 'Матеріал'),
-        COALESCE(m.author, ''),
-        CASE WHEN m.publication_year BETWEEN 1000 AND 3000 THEN m.publication_year ELSE NULL END,
-        COALESCE(m.rubric, ''),
-        cli.quantity_issued,
-        cli.created_at
-      FROM class_loan_items cli
-      JOIN materials m ON m.id = cli.material_id
-      WHERE cli.class_loan_id = ?
-        AND NOT EXISTS (
-          SELECT 1 FROM class_loan_statement_lines existing_line
-          WHERE existing_line.class_loan_id = cli.class_loan_id
+    statements.push(
+      db.prepare(`
+        INSERT INTO class_loan_statement_lines (
+          id, class_loan_id, transaction_id, position, subject, title,
+          author, publication_year, rubric, quantity_issued, created_at
         )
-      ORDER BY cli.created_at, cli.id
-    `).bind(classLoanId));
+        SELECT
+          'CLSL-APPEND-BACKFILL-' || cli.id,
+          cli.class_loan_id,
+          (
+            SELECT issue_tx.id
+            FROM class_loan_transaction_lines issue_line
+            JOIN class_loan_transactions issue_tx
+              ON issue_tx.id = issue_line.transaction_id AND issue_tx.kind = 'issue'
+            WHERE issue_line.class_loan_item_id = cli.id
+              AND NOT EXISTS (
+                SELECT 1 FROM class_loan_item_adjustments adjustment
+                WHERE adjustment.transaction_id = issue_tx.id
+              )
+            ORDER BY issue_tx.occurred_at, issue_tx.created_at, issue_tx.id
+            LIMIT 1
+          ),
+          ROW_NUMBER() OVER (ORDER BY cli.created_at, cli.id),
+          COALESCE(m.subject, ''),
+          COALESCE(NULLIF(trim(m.title), ''), 'Матеріал'),
+          COALESCE(m.author, ''),
+          CASE WHEN m.publication_year BETWEEN 1000 AND 3000 THEN m.publication_year ELSE NULL END,
+          COALESCE(m.rubric, ''),
+          cli.quantity_issued,
+          cli.created_at
+        FROM class_loan_items cli
+        JOIN materials m ON m.id = cli.material_id
+        WHERE cli.class_loan_id = ?
+          AND NOT EXISTS (
+            SELECT 1 FROM class_loan_statement_lines existing_line
+            WHERE existing_line.class_loan_id = cli.class_loan_id
+          )
+        ORDER BY cli.created_at, cli.id
+      `).bind(classLoanId),
+      db.prepare(`
+        INSERT OR IGNORE INTO class_loan_statement_item_links (
+          statement_line_id, class_loan_item_id, origin, created_at
+        )
+        SELECT sl.id, cli.id, 'legacy_exact', sl.created_at
+        FROM class_loan_statement_lines sl
+        JOIN class_loan_items cli
+          ON sl.id = 'CLSL-APPEND-BACKFILL-' || cli.id
+        WHERE sl.class_loan_id = ?
+      `).bind(classLoanId),
+    );
   }
 
   statements.push(
@@ -3353,6 +3407,20 @@ export async function issueLoanToClass(
         ?
       FROM requested
     `).bind(issueRowsJson, classLoanId, transactionId, createdAt),
+    db.prepare(`
+      WITH requested AS (
+        SELECT value FROM json_each(?)
+      )
+      INSERT INTO class_loan_statement_item_links (
+        statement_line_id, class_loan_item_id, origin, created_at
+      )
+      SELECT
+        json_extract(value, '$.statementLineId'),
+        json_extract(value, '$.classLoanItemId'),
+        'issued',
+        ?
+      FROM requested
+    `).bind(issueRowsJson, createdAt),
   );
   if (nonzeroHoldingCount > 0) {
     statements.push(
@@ -3559,6 +3627,10 @@ export async function returnClassLoanItems(
         SELECT MAX(tx.occurred_at)
         FROM class_loan_transactions tx
         WHERE tx.class_loan_id = cl.id AND tx.kind = 'return'
+          AND NOT EXISTS (
+            SELECT 1 FROM class_loan_item_adjustments adjustment
+            WHERE adjustment.transaction_id = tx.id
+          )
       ) AS last_returned_at
     FROM class_loans cl
     JOIN users teacher ON teacher.id = cl.responsible_teacher_user_id
@@ -3629,12 +3701,17 @@ export async function returnClassLoanItems(
       cli.material_id,
       cli.quantity_issued,
       cli.quantity_returned,
+      cli.version AS item_version,
       COALESCE((
         SELECT MIN(issue_tx.occurred_at)
         FROM class_loan_transaction_lines issue_line
         JOIN class_loan_transactions issue_tx
           ON issue_tx.id = issue_line.transaction_id AND issue_tx.kind = 'issue'
         WHERE issue_line.class_loan_item_id = cli.id
+          AND NOT EXISTS (
+            SELECT 1 FROM class_loan_item_adjustments adjustment
+            WHERE adjustment.transaction_id = issue_tx.id
+          )
       ), ?) AS item_issued_at,
       CASE WHEN loc.status = 'active' AND loc.type != 'service' THEN loc.id END
         AS active_location_id,
@@ -3642,7 +3719,9 @@ export async function returnClassLoanItems(
       h.version AS holding_version
     FROM requested
     LEFT JOIN class_loan_items cli
-      ON cli.id = requested.class_loan_item_id AND cli.class_loan_id = ?
+      ON cli.id = requested.class_loan_item_id
+      AND cli.class_loan_id = ?
+      AND cli.lifecycle_status = 'active'
     LEFT JOIN locations loc ON loc.id = requested.return_location_id
     LEFT JOIN holdings h
       ON h.material_id = cli.material_id
@@ -3655,6 +3734,7 @@ export async function returnClassLoanItems(
     material_id: string | null;
     quantity_issued: number | null;
     quantity_returned: number | null;
+    item_version: number | null;
     item_issued_at: string | null;
     active_location_id: string | null;
     holding_quantity: number | null;
@@ -3673,6 +3753,7 @@ export async function returnClassLoanItems(
     materialId: string;
     quantityIssued: number;
     quantityReturned: number;
+    itemVersion: number;
     holdingQuantity: number;
     holdingVersion: number;
   }> = stateRows.map((row, index) => {
@@ -3716,6 +3797,7 @@ export async function returnClassLoanItems(
       materialId: row.material_id,
       quantityIssued,
       quantityReturned,
+      itemVersion: Number(row.item_version ?? 0),
       holdingQuantity: Number(row.holding_quantity ?? 0),
       holdingVersion: Number(row.holding_version ?? 0),
     };
@@ -3723,7 +3805,8 @@ export async function returnClassLoanItems(
 
   const allItems = await db.prepare(`
     SELECT id, material_id, quantity_issued, quantity_returned
-    FROM class_loan_items WHERE class_loan_id = ?
+    FROM class_loan_items
+    WHERE class_loan_id = ? AND lifecycle_status = 'active'
   `).bind(input.classLoanId).all<{
     id: string;
     material_id: string;
@@ -3745,6 +3828,7 @@ export async function returnClassLoanItems(
     materialId: states[index].materialId,
     quantityReturnedBefore: states[index].quantityReturned,
     quantityReturnedAfter: states[index].quantityReturned + item.quantity,
+    itemVersionBefore: states[index].itemVersion,
     auditId: crypto.randomUUID(),
   }));
   const returnRowsJson = JSON.stringify(returnRows);
@@ -3858,7 +3942,9 @@ export async function returnClassLoanItems(
           CAST(json_extract(value, '$.quantityReturnedBefore') AS INTEGER)
             AS quantity_returned_before,
           CAST(json_extract(value, '$.quantityReturnedAfter') AS INTEGER)
-            AS quantity_returned_after
+            AS quantity_returned_after,
+          CAST(json_extract(value, '$.itemVersionBefore') AS INTEGER)
+            AS item_version_before
         FROM json_each(?)
       )
       UPDATE class_loan_items AS item
@@ -3867,13 +3953,15 @@ export async function returnClassLoanItems(
           SELECT quantity_returned_after FROM requested
           WHERE class_loan_item_id = item.id
         ),
+        version = version + 1,
         updated_at = ?
-      WHERE item.class_loan_id = ?
+      WHERE item.class_loan_id = ? AND item.lifecycle_status = 'active'
         AND EXISTS (
           SELECT 1 FROM requested
           WHERE class_loan_item_id = item.id
             AND quantity_returned_before = item.quantity_returned
             AND quantity_returned_after <= item.quantity_issued
+            AND item_version_before = item.version
         )
     `).bind(returnRowsJson, createdAt, input.classLoanId),
     db.prepare(`
@@ -4070,6 +4158,10 @@ export async function returnClassLoanItems(
           SELECT 1 FROM class_loan_transactions later
           WHERE later.class_loan_id = ? AND later.kind = 'return'
             AND later.occurred_at > ?
+            AND NOT EXISTS (
+              SELECT 1 FROM class_loan_item_adjustments adjustment
+              WHERE adjustment.transaction_id = later.id
+            )
         )
     `).bind(
       willClose ? "closed" : "open",
@@ -4132,6 +4224,939 @@ export async function returnClassLoanItems(
     },
   );
   return replayed ?? result;
+}
+
+export async function linkLegacyClassLoanItem(
+  user: ChatGPTUser,
+  requestedClassLoanId: string,
+  input: ClassLoanLegacyLinkInput,
+  providedDb?: LibraryD1Database,
+): Promise<ClassLoanManagementMutationResult> {
+  const db = database(providedDb);
+  const actor = await resolveMutationActor(db, user);
+  const loan = await resolveCanonicalClassLoan(db, requestedClassLoanId);
+  if (!loan) {
+    throw new LibraryMutationError("class_loan_not_found", 404, "Відомість на клас не знайдено.");
+  }
+  const requestHash = await mutationHash({
+    kind: "class-loan.link-legacy-item",
+    actorUserId: actor.id,
+    classLoanId: loan.id,
+    input,
+  });
+  const replay = await replayCompletedCommand<ClassLoanManagementMutationResult>(
+    db,
+    input.requestId,
+    requestHash,
+  );
+  if (replay) return replay;
+  if (loan.status !== "open") {
+    throw new LibraryMutationError(
+      "class_loan_read_only",
+      409,
+      "Закриту або скасовану відомість можна лише переглядати.",
+    );
+  }
+  if (loan.class_year_status !== "active") {
+    throw new LibraryMutationError(
+      "class_loan_class_closed",
+      409,
+      "Клас уже закрито. Відомість можна лише переглядати.",
+    );
+  }
+  if (loan.version !== input.expectedVersion) {
+    throw new LibraryMutationError(
+      "class_loan_version_conflict",
+      409,
+      "Відомість уже змінено в іншій вкладці. Оновіть сторінку.",
+      { currentVersion: loan.version, classLoanId: loan.id },
+    );
+  }
+  const candidate = await db.prepare(`
+    SELECT cli.id AS item_id, cli.version AS item_version,
+      existing_link.statement_line_id AS existing_statement_line_id,
+      line.id AS statement_line_id,
+      line_link.class_loan_item_id AS linked_item_id
+    FROM class_loan_items cli
+    JOIN class_loan_statement_lines line
+      ON line.id = ? AND line.class_loan_id = cli.class_loan_id
+    LEFT JOIN class_loan_statement_item_links existing_link
+      ON existing_link.class_loan_item_id = cli.id
+    LEFT JOIN class_loan_statement_item_links line_link
+      ON line_link.statement_line_id = line.id
+    WHERE cli.id = ? AND cli.class_loan_id = ?
+    LIMIT 1
+  `).bind(
+    input.statementLineId,
+    input.classLoanItemId,
+    loan.id,
+  ).first<{
+    item_id: string;
+    item_version: number;
+    existing_statement_line_id: string | null;
+    statement_line_id: string;
+    linked_item_id: string | null;
+  }>();
+  if (!candidate) {
+    throw new LibraryMutationError(
+      "class_loan_legacy_link_not_found",
+      404,
+      "Позицію або рядок старої відомості не знайдено.",
+    );
+  }
+  if (Number(candidate.item_version) !== input.expectedItemVersion) {
+    throw new LibraryMutationError(
+      "class_loan_item_version_conflict",
+      409,
+      "Цю позицію вже змінено. Оновіть відомість.",
+      { currentItemVersion: Number(candidate.item_version) },
+    );
+  }
+  if (candidate.existing_statement_line_id) {
+    throw new LibraryMutationError(
+      "class_loan_item_already_linked",
+      409,
+      "Цю позицію вже пов’язано з рядком відомості.",
+    );
+  }
+  if (candidate.linked_item_id) {
+    throw new LibraryMutationError(
+      "class_loan_statement_line_already_linked",
+      409,
+      "Обраний рядок старої відомості вже пов’язано з іншою позицією.",
+    );
+  }
+
+  const createdAt = new Date().toISOString();
+  const result: ClassLoanManagementMutationResult = {
+    classLoanId: loan.id,
+    version: loan.version + 1,
+    action: input.action,
+    classLoanItemId: candidate.item_id,
+    itemVersion: Number(candidate.item_version),
+    quantityIssued: null,
+    lifecycleStatus: null,
+    stockDelta: 0,
+    transactionId: null,
+  };
+  const statements: D1Statement[] = [
+    insertCommandStatement(
+      db,
+      input.requestId,
+      requestHash,
+      actor.id,
+      "class-loan.link-legacy-item",
+      "class_loan",
+      loan.id,
+      createdAt,
+    ),
+    db.prepare(`
+      UPDATE class_loans
+      SET version = version + 1, updated_at = ?
+      WHERE id = ? AND status = 'open' AND merged_into_class_loan_id IS NULL
+        AND version = ?
+        AND EXISTS (
+          SELECT 1 FROM class_years cy
+          WHERE cy.id = class_loans.class_year_id AND cy.status = 'active'
+        )
+        AND EXISTS (
+          SELECT 1 FROM class_loan_items item
+          WHERE item.id = ? AND item.class_loan_id = class_loans.id
+            AND item.version = ?
+            AND NOT EXISTS (
+              SELECT 1 FROM class_loan_statement_item_links link
+              WHERE link.class_loan_item_id = item.id
+            )
+        )
+        AND EXISTS (
+          SELECT 1 FROM class_loan_statement_lines line
+          WHERE line.id = ? AND line.class_loan_id = class_loans.id
+            AND NOT EXISTS (
+              SELECT 1 FROM class_loan_statement_item_links link
+              WHERE link.statement_line_id = line.id
+            )
+        )
+    `).bind(
+      createdAt,
+      loan.id,
+      loan.version,
+      candidate.item_id,
+      candidate.item_version,
+      candidate.statement_line_id,
+    ),
+    db.prepare(`
+      INSERT INTO class_loan_statement_item_links (
+        statement_line_id, class_loan_item_id, origin, created_at
+      )
+      SELECT ?, ?, 'legacy_reviewed', ?
+      WHERE changes() = 1
+    `).bind(candidate.statement_line_id, candidate.item_id, createdAt),
+    db.prepare(`
+      INSERT INTO audit_events (
+        id, actor_user_id, actor_email, action, entity_type, entity_id,
+        request_id, before_json, after_json, metadata_json, created_at
+      ) VALUES (?, ?, ?, 'class_loan.legacy_item_linked', 'class_loan', (
+        SELECT item.class_loan_id
+        FROM class_loan_statement_item_links link
+        JOIN class_loan_items item ON item.id = link.class_loan_item_id
+        WHERE link.statement_line_id = ? AND link.class_loan_item_id = ?
+          AND link.origin = 'legacy_reviewed' AND changes() = 1
+      ), ?, ?, ?, ?, ?)
+    `).bind(
+      crypto.randomUUID(),
+      actor.id,
+      actor.email,
+      candidate.statement_line_id,
+      candidate.item_id,
+      input.requestId,
+      JSON.stringify({ classLoanItemId: candidate.item_id, statementLineId: null }),
+      JSON.stringify({ classLoanItemId: candidate.item_id, statementLineId: candidate.statement_line_id }),
+      JSON.stringify({ reason: input.reason, origin: "legacy_reviewed" }),
+      createdAt,
+    ),
+    completeCommandStatement(db, input.requestId, result, createdAt),
+  ];
+  const replayed = await executeIdempotentBatch<ClassLoanManagementMutationResult>(
+    db,
+    statements,
+    input.requestId,
+    requestHash,
+    {
+      code: "class_loan_legacy_link_conflict",
+      message: "Позицію або рядок старої відомості вже змінили. Оновіть сторінку.",
+      classify: (error) => {
+        const message = error instanceof Error ? error.message : String(error ?? "");
+        return message.includes("class_loan_statement_item_links")
+          ? {
+              code: "class_loan_legacy_link_conflict",
+              message: "Позицію або рядок старої відомості вже пов’язано. Оновіть сторінку.",
+            }
+          : null;
+      },
+    },
+  );
+  return replayed ?? result;
+}
+
+export async function adjustClassLoanItem(
+  user: ChatGPTUser,
+  requestedClassLoanId: string,
+  input: ClassLoanItemAdjustmentInput,
+  providedDb?: LibraryD1Database,
+): Promise<ClassLoanManagementMutationResult> {
+  const db = database(providedDb);
+  const actor = await resolveMutationActor(db, user);
+  const loan = await resolveCanonicalClassLoan(db, requestedClassLoanId);
+  if (!loan) {
+    throw new LibraryMutationError(
+      "class_loan_not_found",
+      404,
+      "Відомість на клас не знайдено.",
+    );
+  }
+  const requestHash = await mutationHash({
+    kind: "class-loan.item-adjustment",
+    actorUserId: actor.id,
+    classLoanId: loan.id,
+    input,
+  });
+  const replay = await replayCompletedCommand<ClassLoanManagementMutationResult>(
+    db,
+    input.requestId,
+    requestHash,
+  );
+  if (replay) return replay;
+  if (loan.status !== "open") {
+    throw new LibraryMutationError(
+      "class_loan_read_only",
+      409,
+      "Закриту або скасовану відомість можна лише переглядати.",
+    );
+  }
+  if (loan.class_year_status !== "active") {
+    throw new LibraryMutationError(
+      "class_loan_class_closed",
+      409,
+      "Клас уже закрито. Відомість можна лише переглядати.",
+    );
+  }
+  if (loan.version !== input.expectedVersion) {
+    throw new LibraryMutationError(
+      "class_loan_version_conflict",
+      409,
+      "Відомість уже змінено в іншій вкладці. Оновіть сторінку.",
+      { currentVersion: loan.version, classLoanId: loan.id },
+    );
+  }
+
+  const item = await db.prepare(`
+    SELECT
+      cli.id, cli.class_loan_id, cli.material_id, cli.source_location_id,
+      cli.condition, cli.quantity_issued, cli.quantity_returned,
+      cli.lifecycle_status, cli.version,
+      link.statement_line_id,
+      m.status AS material_status, m.archived_at,
+      loc.status AS location_status, loc.type AS location_type,
+      h.quantity AS holding_quantity, h.version AS holding_version,
+      COALESCE((
+        SELECT SUM(reserved_quantity-issued_quantity-released_quantity)
+        FROM material_request_reservations reservation
+        WHERE reservation.material_id = cli.material_id
+          AND reservation.source_location_id = cli.source_location_id
+          AND reservation.condition = cli.condition
+          AND reservation.reserved_quantity
+            > reservation.issued_quantity + reservation.released_quantity
+      ), 0) AS reserved_quantity
+    FROM class_loan_items cli
+    JOIN materials m ON m.id = cli.material_id
+    JOIN locations loc ON loc.id = cli.source_location_id
+    LEFT JOIN class_loan_statement_item_links link ON link.class_loan_item_id = cli.id
+    LEFT JOIN holdings h
+      ON h.material_id = cli.material_id
+      AND h.location_id = cli.source_location_id
+      AND h.condition = cli.condition
+    WHERE cli.id = ? AND cli.class_loan_id = ?
+    LIMIT 1
+  `).bind(input.classLoanItemId, loan.id).first<{
+    id: string;
+    class_loan_id: string;
+    material_id: string;
+    source_location_id: string;
+    condition: string;
+    quantity_issued: number;
+    quantity_returned: number;
+    lifecycle_status: string;
+    version: number;
+    statement_line_id: string | null;
+    material_status: string;
+    archived_at: string | null;
+    location_status: string;
+    location_type: string;
+    holding_quantity: number | null;
+    holding_version: number | null;
+    reserved_quantity: number;
+  }>();
+  if (!item) {
+    throw new LibraryMutationError(
+      "class_loan_item_not_found",
+      404,
+      "Позицію підручника у цій відомості не знайдено.",
+    );
+  }
+  if (!item.statement_line_id) {
+    throw new LibraryMutationError(
+      "class_loan_item_needs_review",
+      409,
+      "Старий запис ще не має однозначного зв’язку з відомістю. Його можна переглядати, але не редагувати автоматично.",
+    );
+  }
+  if (Number(item.version) !== input.expectedItemVersion) {
+    throw new LibraryMutationError(
+      "class_loan_item_version_conflict",
+      409,
+      "Цю позицію вже змінено. Оновіть відомість.",
+      { currentItemVersion: Number(item.version) },
+    );
+  }
+  const lifecycleStatus = item.lifecycle_status === "removed" ? "removed" : "active";
+  if (input.action === "restore_item" && lifecycleStatus !== "removed") {
+    throw new LibraryMutationError(
+      "class_loan_item_already_active",
+      409,
+      "Позиція вже є у відомості.",
+    );
+  }
+  if (input.action !== "restore_item" && lifecycleStatus !== "active") {
+    throw new LibraryMutationError(
+      "class_loan_item_already_removed",
+      409,
+      "Позицію вже вилучено з відомості.",
+    );
+  }
+
+  const quantityBefore = Number(item.quantity_issued);
+  const quantityReturned = Number(item.quantity_returned);
+  const quantityAfter = input.action === "remove_item"
+    ? quantityBefore
+    : Number(input.quantity);
+  if (!Number.isSafeInteger(quantityAfter) || quantityAfter < 1) {
+    throw new LibraryMutationError(
+      "class_loan_quantity_invalid",
+      400,
+      "Кількість має бути цілим додатним числом.",
+    );
+  }
+  if (quantityAfter < quantityReturned) {
+    throw new LibraryMutationError(
+      "class_loan_quantity_below_returned",
+      409,
+      `Не можна встановити менше ${quantityReturned}: цю кількість уже повернено.`,
+      { quantityReturned },
+    );
+  }
+  if (input.action === "set_item_quantity" && quantityAfter === quantityBefore) {
+    throw new LibraryMutationError(
+      "no_changes",
+      400,
+      "Укажіть нову кількість, відмінну від поточної.",
+    );
+  }
+
+  const stockDelta = input.action === "remove_item"
+    ? quantityBefore - quantityReturned
+    : input.action === "restore_item"
+      ? -(quantityAfter - quantityReturned)
+      : quantityBefore - quantityAfter;
+  const holdingQuantityBefore = Number(item.holding_quantity ?? 0);
+  const holdingVersionBefore = Number(item.holding_version ?? 0);
+  const reservedQuantity = Math.max(0, Number(item.reserved_quantity ?? 0));
+  if (
+    item.material_status !== "active"
+    || item.archived_at !== null
+    || item.location_status !== "active"
+    || item.location_type === "service"
+  ) {
+    throw new LibraryMutationError(
+      "class_loan_item_source_inactive",
+      409,
+      "Матеріал або його початкове місце зберігання вже неактивні.",
+    );
+  }
+  if (stockDelta < 0 && holdingQuantityBefore - reservedQuantity < -stockDelta) {
+    throw new LibraryMutationError(
+      "insufficient_stock",
+      409,
+      "У початковому місці недостатньо вільних примірників.",
+      { availableQuantity: Math.max(0, holdingQuantityBefore - reservedQuantity) },
+    );
+  }
+  const holdingQuantityAfter = holdingQuantityBefore + stockDelta;
+  const createdAt = new Date().toISOString();
+  const nextVersion = loan.version + 1;
+  const nextItemVersion = Number(item.version) + 1;
+  const adjustmentAction = input.action === "set_item_quantity"
+    ? "quantity_changed"
+    : input.action === "remove_item"
+      ? "removed"
+      : "restored";
+  const transactionId = stockDelta === 0 ? null : `CLTX-${crypto.randomUUID()}`;
+  const result: ClassLoanManagementMutationResult = {
+    classLoanId: loan.id,
+    version: nextVersion,
+    action: input.action,
+    classLoanItemId: item.id,
+    itemVersion: nextItemVersion,
+    quantityIssued: quantityAfter,
+    lifecycleStatus: input.action === "remove_item" ? "removed" : "active",
+    stockDelta,
+    transactionId,
+  };
+  const statements: D1Statement[] = [
+    insertCommandStatement(
+      db,
+      input.requestId,
+      requestHash,
+      actor.id,
+      `class-loan.${input.action}`,
+      "class_loan",
+      loan.id,
+      createdAt,
+    ),
+    db.prepare(`
+      UPDATE class_loans
+      SET version = version + 1, updated_at = ?
+      WHERE id = ? AND status = 'open' AND merged_into_class_loan_id IS NULL
+        AND version = ?
+        AND EXISTS (
+          SELECT 1 FROM class_years cy
+          WHERE cy.id = class_loans.class_year_id AND cy.status = 'active'
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM class_loan_items cli
+          JOIN class_loan_statement_item_links link ON link.class_loan_item_id = cli.id
+          WHERE cli.id = ? AND cli.class_loan_id = class_loans.id
+            AND cli.version = ? AND cli.lifecycle_status = ?
+        )
+    `).bind(
+      createdAt,
+      loan.id,
+      loan.version,
+      item.id,
+      item.version,
+      lifecycleStatus,
+    ),
+  ];
+
+  if (stockDelta > 0) {
+    if (holdingVersionBefore > 0) {
+      statements.push(db.prepare(`
+        UPDATE holdings
+        SET quantity = ?, version = version + 1, updated_at = ?
+        WHERE material_id = ? AND location_id = ? AND condition = ?
+          AND quantity = ? AND version = ? AND changes() = 1
+      `).bind(
+        holdingQuantityAfter,
+        createdAt,
+        item.material_id,
+        item.source_location_id,
+        item.condition,
+        holdingQuantityBefore,
+        holdingVersionBefore,
+      ));
+    } else {
+      statements.push(db.prepare(`
+        INSERT INTO holdings (
+          material_id, location_id, condition, quantity, version, updated_at
+        )
+        SELECT ?, ?, ?, ?, 1, ?
+        WHERE changes() = 1
+          AND NOT EXISTS (
+            SELECT 1 FROM holdings
+            WHERE material_id = ? AND location_id = ? AND condition = ?
+          )
+      `).bind(
+        item.material_id,
+        item.source_location_id,
+        item.condition,
+        holdingQuantityAfter,
+        createdAt,
+        item.material_id,
+        item.source_location_id,
+        item.condition,
+      ));
+    }
+  } else if (stockDelta < 0) {
+    if (holdingQuantityAfter > 0) {
+      statements.push(db.prepare(`
+        UPDATE holdings
+        SET quantity = ?, version = version + 1, updated_at = ?
+        WHERE material_id = ? AND location_id = ? AND condition = ?
+          AND quantity = ? AND version = ? AND changes() = 1
+          AND quantity - ? >= COALESCE((
+            SELECT SUM(reserved_quantity-issued_quantity-released_quantity)
+            FROM material_request_reservations reservation
+            WHERE reservation.material_id = holdings.material_id
+              AND reservation.source_location_id = holdings.location_id
+              AND reservation.condition = holdings.condition
+              AND reservation.reserved_quantity
+                > reservation.issued_quantity + reservation.released_quantity
+          ), 0)
+      `).bind(
+        holdingQuantityAfter,
+        createdAt,
+        item.material_id,
+        item.source_location_id,
+        item.condition,
+        holdingQuantityBefore,
+        holdingVersionBefore,
+        -stockDelta,
+      ));
+    } else {
+      statements.push(db.prepare(`
+        DELETE FROM holdings
+        WHERE material_id = ? AND location_id = ? AND condition = ?
+          AND quantity = ? AND version = ? AND changes() = 1
+          AND 0 >= COALESCE((
+            SELECT SUM(reserved_quantity-issued_quantity-released_quantity)
+            FROM material_request_reservations reservation
+            WHERE reservation.material_id = holdings.material_id
+              AND reservation.source_location_id = holdings.location_id
+              AND reservation.condition = holdings.condition
+              AND reservation.reserved_quantity
+                > reservation.issued_quantity + reservation.released_quantity
+          ), 0)
+      `).bind(
+        item.material_id,
+        item.source_location_id,
+        item.condition,
+        holdingQuantityBefore,
+        holdingVersionBefore,
+      ));
+    }
+  }
+
+  statements.push(db.prepare(`
+    UPDATE class_loan_items
+    SET
+      quantity_issued = ?,
+      lifecycle_status = ?,
+      version = version + 1,
+      removed_at = ?,
+      removed_by_user_id = ?,
+      removal_reason = ?,
+      updated_at = ?
+    WHERE id = ? AND class_loan_id = ? AND version = ?
+      AND lifecycle_status = ? AND quantity_returned <= ?
+      AND changes() = 1
+  `).bind(
+    quantityAfter,
+    input.action === "remove_item" ? "removed" : "active",
+    input.action === "remove_item" ? createdAt : null,
+    input.action === "remove_item" ? actor.id : null,
+    input.action === "remove_item" ? input.reason : "",
+    createdAt,
+    item.id,
+    loan.id,
+    item.version,
+    lifecycleStatus,
+    quantityAfter,
+  ));
+
+  if (transactionId) {
+    const transactionKind = stockDelta > 0 ? "return" : "issue";
+    statements.push(
+      db.prepare(`
+        INSERT INTO class_loan_transactions (
+          id, request_id, class_loan_id, kind, occurred_at, notes,
+          actor_user_id, created_at
+        ) VALUES (?, ?, (
+          SELECT class_loan_id FROM class_loan_items
+          WHERE id = ? AND version = ? AND changes() = 1
+        ), ?, ?, ?, ?, ?)
+      `).bind(
+        transactionId,
+        input.requestId,
+        item.id,
+        nextItemVersion,
+        transactionKind,
+        createdAt.slice(0, 10),
+        `Коригування відомості: ${input.reason}`,
+        actor.id,
+        createdAt,
+      ),
+      db.prepare(`
+        INSERT INTO class_loan_transaction_lines (
+          id, transaction_id, class_loan_item_id, material_id, location_id,
+          condition, quantity_delta, quantity_before, quantity_after, created_at
+        ) VALUES (?, ?, ?, (
+          SELECT material_id FROM class_loan_items
+          WHERE id = ? AND version = ? AND changes() = 1
+        ), ?, ?, ?, ?, ?, ?)
+      `).bind(
+        `CLINE-${crypto.randomUUID()}`,
+        transactionId,
+        item.id,
+        item.id,
+        nextItemVersion,
+        item.source_location_id,
+        item.condition,
+        stockDelta,
+        holdingQuantityBefore,
+        holdingQuantityAfter,
+        createdAt,
+      ),
+    );
+  }
+
+  statements.push(
+    db.prepare(`
+      INSERT INTO class_loan_item_adjustments (
+        id, request_id, class_loan_id, class_loan_item_id,
+        statement_line_id, transaction_id, action,
+        quantity_before, quantity_after, quantity_returned_snapshot,
+        stock_delta, location_id, condition, reason, actor_user_id, created_at
+      )
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      WHERE changes() = 1
+    `).bind(
+      `CLADJ-${crypto.randomUUID()}`,
+      input.requestId,
+      loan.id,
+      item.id,
+      item.statement_line_id,
+      transactionId,
+      adjustmentAction,
+      quantityBefore,
+      quantityAfter,
+      quantityReturned,
+      stockDelta,
+      item.source_location_id,
+      item.condition,
+      input.reason,
+      actor.id,
+      createdAt,
+    ),
+    db.prepare(`
+      INSERT INTO audit_events (
+        id, actor_user_id, actor_email, action, entity_type, entity_id,
+        request_id, before_json, after_json, metadata_json, created_at
+      ) VALUES (?, ?, ?, ?, 'class_loan_item', (
+        SELECT class_loan_item_id FROM class_loan_item_adjustments
+        WHERE request_id = ? AND changes() = 1
+      ), ?, ?, ?, ?, ?)
+    `).bind(
+      crypto.randomUUID(),
+      actor.id,
+      actor.email,
+      `class_loan_item.${adjustmentAction}`,
+      input.requestId,
+      input.requestId,
+      JSON.stringify({
+        classLoanId: loan.id,
+        quantityIssued: quantityBefore,
+        quantityReturned,
+        lifecycleStatus,
+        itemVersion: Number(item.version),
+      }),
+      JSON.stringify({
+        classLoanId: loan.id,
+        quantityIssued: quantityAfter,
+        quantityReturned,
+        lifecycleStatus: result.lifecycleStatus,
+        itemVersion: nextItemVersion,
+      }),
+      JSON.stringify({
+        reason: input.reason,
+        stockDelta,
+        transactionId,
+        sourceLocationId: item.source_location_id,
+        condition: item.condition,
+      }),
+      createdAt,
+    ),
+    rebuildStockTotalsStatement(db, item.material_id, createdAt),
+    completeCommandStatement(db, input.requestId, result, createdAt),
+  );
+
+  const replayed = await executeIdempotentBatch<ClassLoanManagementMutationResult>(
+    db,
+    statements,
+    input.requestId,
+    requestHash,
+    {
+      code: "class_loan_adjustment_conflict",
+      message: "Відомість, позицію або залишок уже змінено. Оновіть сторінку.",
+    },
+  );
+  return replayed ?? result;
+}
+
+export async function updateClassLoanMetadata(
+  user: ChatGPTUser,
+  requestedClassLoanId: string,
+  input: ClassLoanMetadataUpdateInput,
+  providedDb?: LibraryD1Database,
+): Promise<ClassLoanManagementMutationResult> {
+  const db = database(providedDb);
+  const actor = await resolveMutationActor(db, user);
+  const loan = await resolveCanonicalClassLoan(db, requestedClassLoanId);
+  if (!loan) {
+    throw new LibraryMutationError("class_loan_not_found", 404, "Відомість на клас не знайдено.");
+  }
+  const requestHash = await mutationHash({
+    kind: "class-loan.update-metadata",
+    actorUserId: actor.id,
+    classLoanId: loan.id,
+    input,
+  });
+  const replay = await replayCompletedCommand<ClassLoanManagementMutationResult>(
+    db,
+    input.requestId,
+    requestHash,
+  );
+  if (replay) return replay;
+  if (loan.status !== "open") {
+    throw new LibraryMutationError(
+      "class_loan_read_only",
+      409,
+      "Закриту або скасовану відомість можна лише переглядати.",
+    );
+  }
+  if (loan.class_year_status !== "active") {
+    throw new LibraryMutationError(
+      "class_loan_class_closed",
+      409,
+      "Клас уже закрито. Відомість можна лише переглядати.",
+    );
+  }
+  if (loan.version !== input.expectedVersion) {
+    throw new LibraryMutationError(
+      "class_loan_version_conflict",
+      409,
+      "Відомість уже змінено в іншій вкладці. Оновіть сторінку.",
+      { currentVersion: loan.version, classLoanId: loan.id },
+    );
+  }
+  if (input.dueAt && (input.dueAt < loan.issued_at || input.dueAt > loan.academic_year_end)) {
+    throw new LibraryMutationError(
+      "class_loan_due_date_invalid",
+      400,
+      "Строк повернення має бути між датою видачі та завершенням навчального року.",
+    );
+  }
+  const teacher = await db.prepare(`
+    SELECT u.id, u.full_name
+    FROM users u
+    JOIN teacher_profiles tp ON tp.teacher_user_id = u.id AND tp.closed_at IS NULL
+    WHERE u.id = ? AND u.status = 'active'
+    LIMIT 1
+  `).bind(input.responsibleTeacherUserId).first<{ id: string; full_name: string }>();
+  if (!teacher) {
+    throw new LibraryMutationError(
+      "responsible_teacher_not_found",
+      404,
+      "Активного профілю відповідального вчителя не знайдено.",
+    );
+  }
+  const nextNotes = input.notes ?? "";
+  if (
+    loan.responsible_teacher_user_id === teacher.id
+    && loan.due_at === input.dueAt
+    && loan.notes === nextNotes
+  ) {
+    throw new LibraryMutationError("no_changes", 400, "Змініть хоча б одне поле.");
+  }
+  const createdAt = new Date().toISOString();
+  const result: ClassLoanManagementMutationResult = {
+    classLoanId: loan.id,
+    version: loan.version + 1,
+    action: input.action,
+    classLoanItemId: null,
+    itemVersion: null,
+    quantityIssued: null,
+    lifecycleStatus: null,
+    stockDelta: 0,
+    transactionId: null,
+  };
+  const before = {
+    responsibleTeacherUserId: loan.responsible_teacher_user_id,
+    responsibleTeacherName: loan.responsible_teacher_name,
+    dueAt: loan.due_at,
+    notes: loan.notes,
+    version: loan.version,
+  };
+  const after = {
+    responsibleTeacherUserId: teacher.id,
+    responsibleTeacherName: teacher.full_name,
+    dueAt: input.dueAt,
+    notes: nextNotes,
+    version: result.version,
+  };
+  const statements: D1Statement[] = [
+    insertCommandStatement(
+      db,
+      input.requestId,
+      requestHash,
+      actor.id,
+      "class-loan.update-metadata",
+      "class_loan",
+      loan.id,
+      createdAt,
+    ),
+    db.prepare(`
+      UPDATE class_loans
+      SET responsible_teacher_user_id = ?, due_at = ?, notes = ?,
+          version = version + 1, updated_at = ?
+      WHERE id = ? AND status = 'open' AND merged_into_class_loan_id IS NULL
+        AND version = ?
+        AND EXISTS (
+          SELECT 1 FROM class_years cy
+          WHERE cy.id = class_loans.class_year_id AND cy.status = 'active'
+        )
+        AND EXISTS (
+          SELECT 1 FROM users u
+          JOIN teacher_profiles tp ON tp.teacher_user_id = u.id AND tp.closed_at IS NULL
+          WHERE u.id = ? AND u.status = 'active'
+        )
+    `).bind(
+      teacher.id,
+      input.dueAt,
+      nextNotes,
+      createdAt,
+      loan.id,
+      loan.version,
+      teacher.id,
+    ),
+    db.prepare(`
+      INSERT INTO audit_events (
+        id, actor_user_id, actor_email, action, entity_type, entity_id,
+        request_id, before_json, after_json, metadata_json, created_at
+      ) VALUES (?, ?, ?, 'class_loan.metadata_updated', 'class_loan', (
+        SELECT id FROM class_loans
+        WHERE id = ? AND version = ? AND changes() = 1
+      ), ?, ?, ?, ?, ?)
+    `).bind(
+      crypto.randomUUID(),
+      actor.id,
+      actor.email,
+      loan.id,
+      result.version,
+      input.requestId,
+      JSON.stringify(before),
+      JSON.stringify(after),
+      JSON.stringify({ reason: input.reason }),
+      createdAt,
+    ),
+    completeCommandStatement(db, input.requestId, result, createdAt),
+  ];
+  const replayed = await executeIdempotentBatch<ClassLoanManagementMutationResult>(
+    db,
+    statements,
+    input.requestId,
+    requestHash,
+    {
+      code: "class_loan_metadata_conflict",
+      message: "Дані відомості вже змінилися. Оновіть сторінку.",
+    },
+  );
+  return replayed ?? result;
+}
+
+async function resolveCanonicalClassLoan(
+  db: D1Binding,
+  requestedClassLoanId: string,
+): Promise<{
+  id: string;
+  status: string;
+  version: number;
+  issued_at: string;
+  due_at: string | null;
+  notes: string;
+  responsible_teacher_user_id: string;
+  responsible_teacher_name: string;
+  academic_year_end: string;
+  class_year_status: string;
+} | null> {
+  const row = await db.prepare(`
+    WITH RECURSIVE loan_chain(id, merged_into_class_loan_id, depth) AS (
+      SELECT id, merged_into_class_loan_id, 0
+      FROM class_loans WHERE id = ?
+      UNION ALL
+      SELECT next.id, next.merged_into_class_loan_id, loan_chain.depth + 1
+      FROM class_loans next
+      JOIN loan_chain ON next.id = loan_chain.merged_into_class_loan_id
+      WHERE loan_chain.depth < 20
+    )
+    SELECT
+      cl.id, cl.status, cl.version, cl.issued_at, cl.due_at, cl.notes,
+      cl.responsible_teacher_user_id,
+      teacher.full_name AS responsible_teacher_name,
+      ay.end_date AS academic_year_end,
+      cy.status AS class_year_status
+    FROM loan_chain
+    JOIN class_loans cl ON cl.id = loan_chain.id
+    JOIN class_years cy ON cy.id = cl.class_year_id
+    JOIN academic_years ay ON ay.id = cy.academic_year_id
+    JOIN users teacher ON teacher.id = cl.responsible_teacher_user_id
+    WHERE cl.merged_into_class_loan_id IS NULL
+    ORDER BY loan_chain.depth DESC
+    LIMIT 1
+  `).bind(requestedClassLoanId).first<{
+    id: string;
+    status: string;
+    version: number;
+    issued_at: string;
+    due_at: string | null;
+    notes: string;
+    responsible_teacher_user_id: string;
+    responsible_teacher_name: string;
+    academic_year_end: string;
+    class_year_status: string;
+  }>();
+  return row
+    ? { ...row, version: Number(row.version) }
+    : null;
 }
 
 function database(value?: D1Binding): D1Binding {
@@ -4571,7 +5596,9 @@ function rebuildStockTotalsStatement(
           cli.quantity_issued - cli.quantity_returned AS quantity
         FROM class_loan_items cli
         JOIN class_loans clo ON clo.id = cli.class_loan_id
-        WHERE clo.status != 'cancelled' AND cli.quantity_issued > cli.quantity_returned
+        WHERE clo.status != 'cancelled'
+          AND cli.lifecycle_status = 'active'
+          AND cli.quantity_issued > cli.quantity_returned
       ) outstanding_rows
       GROUP BY material_id
     ) outstanding ON outstanding.material_id = m.id
@@ -4635,7 +5662,9 @@ function rebuildStockTotalsBulkStatement(
           cli.quantity_issued - cli.quantity_returned AS quantity
         FROM class_loan_items cli
         JOIN class_loans clo ON clo.id = cli.class_loan_id
-        WHERE clo.status != 'cancelled' AND cli.quantity_issued > cli.quantity_returned
+        WHERE clo.status != 'cancelled'
+          AND cli.lifecycle_status = 'active'
+          AND cli.quantity_issued > cli.quantity_returned
       ) outstanding_rows
       GROUP BY material_id
     ) outstanding ON outstanding.material_id = m.id

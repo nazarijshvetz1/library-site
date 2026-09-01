@@ -18,6 +18,9 @@ const directory = await import(
 const statements = await import(
   pathToFileURL(path.join(root, "lib/class-issue-statement-store.ts")).href
 );
+const management = await import(
+  pathToFileURL(path.join(root, "lib/class-loan-management-store.ts")).href
+);
 
 class PreparedStatement {
   constructor(database, sql, bindings = []) {
@@ -103,6 +106,7 @@ function openDatabase() {
     "0019_kindly_wolfsbane.sql",
     "0028_dusty_marten_broadcloak.sql",
     "0034_worthless_big_bertha.sql",
+    "0035_soft_warstar.sql",
   ]) {
     const sql = fs.readFileSync(path.join(root, "drizzle", file), "utf8");
     for (const statement of sql.split(/-->\s*statement-breakpoint/gu)) {
@@ -1187,6 +1191,475 @@ test("class issue and partial/full return are idempotent, chronological and bala
   );
 });
 
+test("class loan quantity edits, removal and restoration are idempotent and stock-balanced", async () => {
+  const { sqlite, d1 } = openDatabase();
+  seedActiveClassYear(sqlite);
+  const issued = await mutation.issueLoanToClass(actor, {
+    requestId: "24000000-0000-4000-8000-000000000001",
+    classYearId: "CY-2026-001",
+    expectedClassYearVersion: 1,
+    responsibleTeacherUserId: "USR-TCH",
+    issuedAt: "2026-09-10",
+    dueAt: "2027-06-30",
+    notes: "Комплект для коригування",
+    items: [{
+      materialId: "CAT-0001",
+      sourceLocationId: "LOC-001",
+      condition: "unspecified",
+      quantity: 2,
+      expectedAvailableQuantity: 5,
+    }],
+  }, d1);
+  const classLoanItemId = issued.items[0].classLoanItemId;
+  assert.equal(sqlite.prepare(`
+    SELECT COUNT(*) AS count FROM class_loan_statement_item_links
+    WHERE class_loan_item_id = ?
+  `).get(classLoanItemId).count, 1);
+
+  const quantityInput = {
+    requestId: "24000000-0000-4000-8000-000000000002",
+    expectedVersion: 1,
+    action: "set_item_quantity",
+    classLoanItemId,
+    expectedItemVersion: 1,
+    quantity: 4,
+    reason: "Уточнено кількість у класі",
+  };
+  const changed = await mutation.adjustClassLoanItem(
+    actor,
+    issued.classLoanId,
+    quantityInput,
+    d1,
+  );
+  assert.deepEqual(
+    await mutation.adjustClassLoanItem(actor, issued.classLoanId, quantityInput, d1),
+    changed,
+  );
+  assert.deepEqual(
+    {
+      version: changed.version,
+      itemVersion: changed.itemVersion,
+      quantityIssued: changed.quantityIssued,
+      lifecycleStatus: changed.lifecycleStatus,
+      stockDelta: changed.stockDelta,
+    },
+    {
+      version: 2,
+      itemVersion: 2,
+      quantityIssued: 4,
+      lifecycleStatus: "active",
+      stockDelta: -2,
+    },
+  );
+  assert.equal(sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 1);
+  assert.deepEqual(
+    plainRow(sqlite.prepare(`
+      SELECT total_quantity, library_quantity, loaned_quantity
+      FROM material_stock_totals WHERE material_id = 'CAT-0001'
+    `).get()),
+    { total_quantity: 5, library_quantity: 1, loaned_quantity: 4 },
+  );
+  assert.equal((await statements.readClassIssueStatement(d1, issued.classLoanId)).lines[0].quantityIssued, 4);
+  await assert.rejects(
+    mutation.adjustClassLoanItem(actor, issued.classLoanId, {
+      ...quantityInput,
+      expectedVersion: 2,
+      expectedItemVersion: 2,
+      quantity: 5,
+    }, d1),
+    (error) => error?.code === "request_id_conflict" && error?.status === 409,
+  );
+
+  const removeInput = {
+    requestId: "24000000-0000-4000-8000-000000000003",
+    expectedVersion: 2,
+    action: "remove_item",
+    classLoanItemId,
+    expectedItemVersion: 2,
+    quantity: null,
+    reason: "Позицію внесено помилково",
+  };
+  const removed = await mutation.adjustClassLoanItem(
+    actor,
+    issued.classLoanId,
+    removeInput,
+    d1,
+  );
+  assert.deepEqual(
+    await mutation.adjustClassLoanItem(actor, issued.classLoanId, removeInput, d1),
+    removed,
+  );
+  assert.equal(removed.version, 3);
+  assert.equal(removed.itemVersion, 3);
+  assert.equal(removed.lifecycleStatus, "removed");
+  assert.equal(removed.stockDelta, 4);
+  assert.deepEqual(
+    plainRow(sqlite.prepare(`
+      SELECT lifecycle_status, quantity_issued, version, removal_reason,
+        removed_by_user_id, removed_at IS NOT NULL AS has_removed_at
+      FROM class_loan_items WHERE id = ?
+    `).get(classLoanItemId)),
+    {
+      lifecycle_status: "removed",
+      quantity_issued: 4,
+      version: 3,
+      removal_reason: "Позицію внесено помилково",
+      removed_by_user_id: "USR-LIB",
+      has_removed_at: 1,
+    },
+  );
+  assert.equal((await directory.listOpenClassLoans(d1)).length, 0);
+  assert.equal((await statements.readClassIssueStatement(d1, issued.classLoanId)).lines.length, 0);
+  assert.deepEqual(
+    plainRow(sqlite.prepare(`
+      SELECT total_quantity, library_quantity, loaned_quantity
+      FROM material_stock_totals WHERE material_id = 'CAT-0001'
+    `).get()),
+    { total_quantity: 5, library_quantity: 5, loaned_quantity: 0 },
+  );
+
+  const restoreInput = {
+    requestId: "24000000-0000-4000-8000-000000000004",
+    expectedVersion: 3,
+    action: "restore_item",
+    classLoanItemId,
+    expectedItemVersion: 3,
+    quantity: 4,
+    reason: "Позицію перевірено та повернуто",
+  };
+  const restored = await mutation.adjustClassLoanItem(
+    actor,
+    issued.classLoanId,
+    restoreInput,
+    d1,
+  );
+  assert.deepEqual(
+    await mutation.adjustClassLoanItem(actor, issued.classLoanId, restoreInput, d1),
+    restored,
+  );
+  assert.equal(restored.version, 4);
+  assert.equal(restored.itemVersion, 4);
+  assert.equal(restored.lifecycleStatus, "active");
+  assert.equal(restored.stockDelta, -4);
+  assert.deepEqual(
+    plainRow(sqlite.prepare(`
+      SELECT lifecycle_status, quantity_issued, version, removal_reason,
+        removed_by_user_id, removed_at
+      FROM class_loan_items WHERE id = ?
+    `).get(classLoanItemId)),
+    {
+      lifecycle_status: "active",
+      quantity_issued: 4,
+      version: 4,
+      removal_reason: "",
+      removed_by_user_id: null,
+      removed_at: null,
+    },
+  );
+  assert.equal((await directory.listOpenClassLoans(d1))[0].items[0].quantityOutstanding, 4);
+  assert.equal((await statements.readClassIssueStatement(d1, issued.classLoanId)).lines[0].quantityIssued, 4);
+  assert.deepEqual(
+    sqlite.prepare(`
+      SELECT action, quantity_before, quantity_after, stock_delta
+      FROM class_loan_item_adjustments
+      WHERE class_loan_item_id = ?
+      ORDER BY created_at, rowid
+    `).all(classLoanItemId).map(plainRow),
+    [
+      { action: "quantity_changed", quantity_before: 2, quantity_after: 4, stock_delta: -2 },
+      { action: "removed", quantity_before: 4, quantity_after: 4, stock_delta: 4 },
+      { action: "restored", quantity_before: 4, quantity_after: 4, stock_delta: -4 },
+    ],
+  );
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM class_loan_transactions").get().count, 4);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM class_loan_item_adjustments").get().count, 3);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM mutation_commands").get().count, 4);
+  assert.deepEqual(
+    plainRow(sqlite.prepare(`
+      SELECT total_quantity, library_quantity, loaned_quantity
+      FROM material_stock_totals WHERE material_id = 'CAT-0001'
+    `).get()),
+    { total_quantity: 5, library_quantity: 1, loaned_quantity: 4 },
+  );
+});
+
+test("a stale class-loan item adjustment aborts atomically", async () => {
+  const { sqlite, d1 } = openDatabase();
+  seedActiveClassYear(sqlite);
+  const issued = await mutation.issueLoanToClass(actor, {
+    requestId: "25000000-0000-4000-8000-000000000001",
+    classYearId: "CY-2026-001",
+    expectedClassYearVersion: 1,
+    responsibleTeacherUserId: "USR-TCH",
+    issuedAt: "2026-09-10",
+    dueAt: null,
+    notes: null,
+    items: [{
+      materialId: "CAT-0001",
+      sourceLocationId: "LOC-001",
+      condition: "unspecified",
+      quantity: 2,
+      expectedAvailableQuantity: 5,
+    }],
+  }, d1);
+  const classLoanItemId = issued.items[0].classLoanItemId;
+  d1.beforeBatch = () => {
+    sqlite.prepare(`
+      UPDATE class_loan_items SET version = version + 1 WHERE id = ?
+    `).run(classLoanItemId);
+  };
+  await assert.rejects(
+    mutation.adjustClassLoanItem(actor, issued.classLoanId, {
+      requestId: "25000000-0000-4000-8000-000000000002",
+      expectedVersion: 1,
+      action: "set_item_quantity",
+      classLoanItemId,
+      expectedItemVersion: 1,
+      quantity: 3,
+      reason: "Конкурентне уточнення",
+    }, d1),
+    (error) => error?.code === "class_loan_adjustment_conflict" && error?.status === 409,
+  );
+  assert.deepEqual(
+    plainRow(sqlite.prepare(`
+      SELECT quantity_issued, lifecycle_status, version FROM class_loan_items WHERE id = ?
+    `).get(classLoanItemId)),
+    { quantity_issued: 2, lifecycle_status: "active", version: 2 },
+  );
+  assert.deepEqual(
+    plainRow(sqlite.prepare("SELECT version, status FROM class_loans").get()),
+    { version: 1, status: "open" },
+  );
+  assert.equal(sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 3);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM class_loan_item_adjustments").get().count, 0);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM mutation_commands").get().count, 1);
+});
+
+test("a removed item cannot be restored after or concurrently with class closure", async () => {
+  for (const [index, scenario] of ["already-closed", "closure-race"].entries()) {
+    const { sqlite, d1 } = openDatabase();
+    seedActiveClassYear(sqlite);
+    const issued = await mutation.issueLoanToClass(actor, {
+      requestId: `25500000-0000-4000-8000-00000000000${index * 3 + 1}`,
+      classYearId: "CY-2026-001",
+      expectedClassYearVersion: 1,
+      expectedClassLoanId: null,
+      responsibleTeacherUserId: "USR-TCH",
+      issuedAt: "2026-09-10",
+      dueAt: null,
+      notes: null,
+      items: [{
+        materialId: "CAT-0001",
+        sourceLocationId: "LOC-001",
+        condition: "unspecified",
+        quantity: 2,
+        expectedAvailableQuantity: 5,
+      }],
+    }, d1);
+    const classLoanItemId = issued.items[0].classLoanItemId;
+    const removed = await mutation.adjustClassLoanItem(actor, issued.classLoanId, {
+      requestId: `25500000-0000-4000-8000-00000000000${index * 3 + 2}`,
+      expectedVersion: 1,
+      action: "remove_item",
+      classLoanItemId,
+      expectedItemVersion: 1,
+      quantity: null,
+      reason: "Позицію додано помилково",
+    }, d1);
+    if (scenario === "already-closed") {
+      sqlite.exec(`
+        UPDATE class_years
+        SET status = 'closed', actual_closed_date = '2027-06-30'
+        WHERE id = 'CY-2026-001'
+      `);
+    } else {
+      d1.beforeBatch = () => {
+        sqlite.exec(`
+          UPDATE class_years
+          SET status = 'closed', actual_closed_date = '2027-06-30'
+          WHERE id = 'CY-2026-001'
+        `);
+      };
+    }
+
+    await assert.rejects(
+      mutation.adjustClassLoanItem(actor, issued.classLoanId, {
+        requestId: `25500000-0000-4000-8000-00000000000${index * 3 + 3}`,
+        expectedVersion: removed.version,
+        action: "restore_item",
+        classLoanItemId,
+        expectedItemVersion: removed.itemVersion,
+        quantity: 2,
+        reason: "Спроба відновлення після закриття класу",
+      }, d1),
+      (error) => error?.code === (
+        scenario === "already-closed"
+          ? "class_loan_class_closed"
+          : "class_loan_adjustment_conflict"
+      ) && error?.status === 409,
+    );
+    assert.deepEqual(
+      plainRow(sqlite.prepare(`
+        SELECT lifecycle_status, quantity_issued, version
+        FROM class_loan_items WHERE id = ?
+      `).get(classLoanItemId)),
+      { lifecycle_status: "removed", quantity_issued: 2, version: 2 },
+    );
+    assert.equal(sqlite.prepare("SELECT quantity FROM holdings WHERE material_id = 'CAT-0001'").get().quantity, 5);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM class_loan_item_adjustments").get().count, 1);
+  }
+});
+
+test("a legacy item keeps its original issue date after a quantity correction", async () => {
+  const { sqlite, d1 } = openDatabase();
+  seedActiveClassYear(sqlite);
+  const issuedAt = "2026-09-01";
+  const adjustedAt = "2026-09-10T10:00:00.000Z";
+  sqlite.prepare(`
+    INSERT INTO class_loans (
+      id,class_year_id,responsible_teacher_user_id,status,issued_at,due_at,closed_at,notes,
+      issue_statement_schema_version,issue_statement_json,issue_statement_origin,
+      issued_by_user_id,closed_by_user_id,version,created_at,updated_at
+    ) VALUES (
+      'CLOAN-MANAGEMENT-DATE','CY-2026-001','USR-TCH','open',?,'2027-06-30',NULL,'',
+      0,'','legacy','USR-LIB',NULL,2,?,?
+    )
+  `).run(issuedAt, issuedAt, adjustedAt);
+  sqlite.prepare(`
+    INSERT INTO class_loan_items (
+      id,class_loan_id,material_id,source_location_id,condition,quantity_issued,
+      quantity_returned,lifecycle_status,version,notes,created_at,updated_at
+    ) VALUES (
+      'CLI-MANAGEMENT-DATE','CLOAN-MANAGEMENT-DATE','CAT-0001','LOC-001',
+      'unspecified',3,0,'active',2,'',?,?
+    )
+  `).run(issuedAt, adjustedAt);
+  sqlite.prepare(`
+    INSERT INTO class_loan_statement_lines (
+      id,class_loan_id,transaction_id,position,subject,title,author,
+      publication_year,rubric,quantity_issued,created_at
+    ) VALUES (
+      'CLSL-MANAGEMENT-DATE','CLOAN-MANAGEMENT-DATE',NULL,1,'Математика',
+      'Стара назва','Автор',2020,'Підручники',2,?
+    )
+  `).run(issuedAt);
+  sqlite.prepare(`
+    INSERT INTO class_loan_statement_item_links (
+      statement_line_id,class_loan_item_id,origin,created_at
+    ) VALUES (
+      'CLSL-MANAGEMENT-DATE','CLI-MANAGEMENT-DATE','legacy_exact',?
+    )
+  `).run(issuedAt);
+  sqlite.prepare(`
+    INSERT INTO class_loan_transactions (
+      id,request_id,class_loan_id,kind,occurred_at,notes,actor_user_id,created_at
+    ) VALUES (
+      'CLTX-MANAGEMENT-ADJUST','REQ-MANAGEMENT-ADJUST-TX','CLOAN-MANAGEMENT-DATE',
+      'issue','2026-09-10','Коригування відомості','USR-LIB',?
+    )
+  `).run(adjustedAt);
+  sqlite.prepare(`
+    INSERT INTO class_loan_transaction_lines (
+      id,transaction_id,class_loan_item_id,material_id,location_id,condition,
+      quantity_delta,quantity_before,quantity_after,created_at
+    ) VALUES (
+      'CLINE-MANAGEMENT-ADJUST','CLTX-MANAGEMENT-ADJUST','CLI-MANAGEMENT-DATE',
+      'CAT-0001','LOC-001','unspecified',-1,4,3,?
+    )
+  `).run(adjustedAt);
+  sqlite.prepare(`
+    INSERT INTO class_loan_item_adjustments (
+      id,request_id,class_loan_id,class_loan_item_id,statement_line_id,transaction_id,
+      action,quantity_before,quantity_after,quantity_returned_snapshot,stock_delta,
+      location_id,condition,reason,actor_user_id,created_at
+    ) VALUES (
+      'CLADJ-MANAGEMENT-DATE','REQ-MANAGEMENT-ADJUST','CLOAN-MANAGEMENT-DATE',
+      'CLI-MANAGEMENT-DATE','CLSL-MANAGEMENT-DATE','CLTX-MANAGEMENT-ADJUST',
+      'quantity_changed',2,3,0,-1,'LOC-001','unspecified',
+      'Звірено з класним журналом','USR-LIB',?
+    )
+  `).run(adjustedAt);
+
+  const detail = await management.readClassLoanManagement(d1, "CLOAN-MANAGEMENT-DATE");
+  assert.equal(detail.items[0].itemIssuedAt, issuedAt);
+  assert.deepEqual(detail.history.map((event) => event.kind), ["adjustment"]);
+});
+
+test("a librarian can review and link an ambiguous legacy item before editing it", async () => {
+  const { sqlite, d1 } = openDatabase();
+  seedActiveClassYear(sqlite);
+  const createdAt = "2026-09-01T08:00:00.000Z";
+  sqlite.prepare(`
+    INSERT INTO class_loans (
+      id,class_year_id,responsible_teacher_user_id,status,issued_at,due_at,closed_at,notes,
+      issue_statement_schema_version,issue_statement_json,issue_statement_origin,
+      issued_by_user_id,closed_by_user_id,version,created_at,updated_at
+    ) VALUES (
+      'CLOAN-LEGACY-REVIEW','CY-2026-001','USR-TCH','open','2026-09-01','2027-06-30',NULL,'',
+      0,'','legacy','USR-LIB',NULL,1,?,?
+    )
+  `).run(createdAt, createdAt);
+  sqlite.prepare(`
+    INSERT INTO class_loan_items (
+      id,class_loan_id,material_id,source_location_id,condition,quantity_issued,
+      quantity_returned,lifecycle_status,version,notes,created_at,updated_at
+    ) VALUES (
+      'CLI-LEGACY-REVIEW','CLOAN-LEGACY-REVIEW','CAT-0001','LOC-001',
+      'unspecified',2,0,'active',1,'',?,?
+    )
+  `).run(createdAt, createdAt);
+  sqlite.prepare(`
+    INSERT INTO class_loan_statement_lines (
+      id,class_loan_id,transaction_id,position,subject,title,author,
+      publication_year,rubric,quantity_issued,created_at
+    ) VALUES (
+      'CLSL-LEGACY-REVIEW','CLOAN-LEGACY-REVIEW',NULL,1,'Математика',
+      'Стара назва підручника','Автор',2020,'Підручники',2,?
+    )
+  `).run(createdAt);
+
+  const before = await management.readClassLoanManagement(d1, "CLOAN-LEGACY-REVIEW");
+  assert.equal(before.items[0].editable, false);
+  assert.equal(before.items[0].editBlockedReason, "statement_item_link_missing");
+  assert.equal(before.legacyStatementCandidates[0].statementLineId, "CLSL-LEGACY-REVIEW");
+
+  const input = {
+    requestId: "25800000-0000-4000-8000-000000000001",
+    expectedVersion: 1,
+    action: "link_legacy_item",
+    classLoanItemId: "CLI-LEGACY-REVIEW",
+    expectedItemVersion: 1,
+    statementLineId: "CLSL-LEGACY-REVIEW",
+    reason: "Зіставлено бібліотекарем із паперовою відомістю",
+  };
+  const linked = await mutation.linkLegacyClassLoanItem(
+    actor,
+    "CLOAN-LEGACY-REVIEW",
+    input,
+    d1,
+  );
+  assert.deepEqual(
+    await mutation.linkLegacyClassLoanItem(actor, "CLOAN-LEGACY-REVIEW", input, d1),
+    linked,
+  );
+  assert.equal(linked.version, 2);
+  assert.deepEqual(
+    plainRow(sqlite.prepare(`
+      SELECT statement_line_id, class_loan_item_id, origin
+      FROM class_loan_statement_item_links
+    `).get()),
+    {
+      statement_line_id: "CLSL-LEGACY-REVIEW",
+      class_loan_item_id: "CLI-LEGACY-REVIEW",
+      origin: "legacy_reviewed",
+    },
+  );
+  const after = await management.readClassLoanManagement(d1, "CLOAN-LEGACY-REVIEW");
+  assert.equal(after.items[0].editable, true);
+  assert.equal(after.legacyStatementCandidates.length, 0);
+  assert.equal(after.history[0].action, "class_loan.legacy_item_linked");
+});
+
 test("later class issues append to one cumulative loan and statement", async () => {
   const { sqlite, d1 } = openDatabase();
   seedActiveClassYear(sqlite);
@@ -1299,6 +1772,109 @@ test("later class issues append to one cumulative loan and statement", async () 
       && error?.details?.issuedAt === "2026-09-02",
   );
   assert.equal(sqlite.prepare("SELECT version FROM class_loans").get().version, 3);
+});
+
+test("append targets the same loan and ignores later technical correction dates", async () => {
+  const { sqlite, d1 } = openDatabase();
+  seedActiveClassYear(sqlite);
+  const now = "2026-08-11T08:00:00.000Z";
+  sqlite.prepare(`
+    INSERT INTO materials (
+      id, catalog_number, title, sort_title, search_text, rubric,
+      publication_type, subject, author, publication_year, isbn,
+      isbn_normalized, publisher, notes, status, version,
+      created_at, updated_at, archived_at
+    ) VALUES (
+      'CAT-0002', 2, 'Другий підручник', 'другий підручник',
+      'другий підручник', 'Підручники', 'Підручник', 'Математика',
+      'Другий автор', 2025, '', '', '', '', 'active', 1, ?, ?, NULL
+    )
+  `).run(now, now);
+  sqlite.prepare(`
+    INSERT INTO holdings (material_id, location_id, condition, quantity, version, updated_at)
+    VALUES ('CAT-0002', 'LOC-001', 'unspecified', 3, 1, ?)
+  `).run(now);
+
+  const first = await mutation.issueLoanToClass(actor, {
+    requestId: "21500000-0000-4000-8000-000000000001",
+    classYearId: "CY-2026-001",
+    expectedClassYearVersion: 1,
+    expectedClassLoanId: null,
+    responsibleTeacherUserId: "USR-TCH",
+    issuedAt: "2026-09-01",
+    dueAt: "2027-06-30",
+    notes: null,
+    items: [{
+      materialId: "CAT-0001",
+      sourceLocationId: "LOC-001",
+      condition: "unspecified",
+      quantity: 1,
+      expectedAvailableQuantity: 5,
+    }],
+  }, d1);
+  const firstItemId = first.items[0].classLoanItemId;
+  const correctionCreatedAt = "2026-09-20T08:00:00.000Z";
+  sqlite.prepare(`
+    INSERT INTO class_loan_transactions (
+      id, request_id, class_loan_id, kind, occurred_at, notes,
+      actor_user_id, created_at
+    ) VALUES (
+      'CLTX-LATER-CORRECTION', 'REQ-LATER-CORRECTION', ?, 'issue',
+      '2026-09-20', 'Технічне коригування', 'USR-LIB', ?
+    )
+  `).run(first.classLoanId, correctionCreatedAt);
+  sqlite.prepare(`
+    INSERT INTO class_loan_transaction_lines (
+      id, transaction_id, class_loan_item_id, material_id, location_id,
+      condition, quantity_delta, quantity_before, quantity_after, created_at
+    ) VALUES (
+      'CLINE-LATER-CORRECTION', 'CLTX-LATER-CORRECTION', ?, 'CAT-0001',
+      'LOC-001', 'unspecified', -1, 4, 3, ?
+    )
+  `).run(firstItemId, correctionCreatedAt);
+  sqlite.prepare(`
+    INSERT INTO class_loan_item_adjustments (
+      id, request_id, class_loan_id, class_loan_item_id, statement_line_id,
+      transaction_id, action, quantity_before, quantity_after,
+      quantity_returned_snapshot, stock_delta, location_id, condition,
+      reason, actor_user_id, created_at
+    ) VALUES (
+      'CLADJ-LATER-CORRECTION', 'REQ-LATER-CORRECTION', ?, ?, NULL,
+      'CLTX-LATER-CORRECTION', 'quantity_changed', 1, 2, 0, -1,
+      'LOC-001', 'unspecified', 'Уточнена кількість', 'USR-LIB', ?
+    )
+  `).run(first.classLoanId, firstItemId, correctionCreatedAt);
+
+  const appendInput = {
+    requestId: "21500000-0000-4000-8000-000000000002",
+    classYearId: "CY-2026-001",
+    expectedClassYearVersion: 1,
+    expectedClassLoanId: first.classLoanId,
+    responsibleTeacherUserId: "USR-TCH",
+    issuedAt: "2026-09-02",
+    dueAt: "2027-06-30",
+    notes: "Додано до чинної відомості",
+    items: [{
+      materialId: "CAT-0002",
+      sourceLocationId: "LOC-001",
+      condition: "unspecified",
+      quantity: 1,
+      expectedAvailableQuantity: 3,
+    }],
+  };
+  await assert.rejects(
+    mutation.issueLoanToClass(actor, {
+      ...appendInput,
+      requestId: "21500000-0000-4000-8000-000000000003",
+      expectedClassLoanId: "CLOAN-OTHER",
+    }, d1),
+    (error) => error?.code === "class_loan_target_conflict" && error?.status === 409,
+  );
+
+  const appended = await mutation.issueLoanToClass(actor, appendInput, d1);
+  assert.equal(appended.classLoanId, first.classLoanId);
+  assert.equal(appended.appended, true);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM class_loans").get().count, 1);
 });
 
 test("a concurrent append cannot use the version written by another class issue", async () => {
@@ -1518,6 +2094,48 @@ test("class issue enforces class-year dates and outstanding class stock blocks a
       && error.details.loanedQuantity === 1,
   );
   assert.equal(sqlite.prepare("SELECT status FROM class_loans WHERE id = ?").get(issued.classLoanId).status, "open");
+});
+
+test("removed class-loan history does not block a zero-stock material archive", async () => {
+  const { sqlite, d1 } = openDatabase();
+  seedActiveClassYear(sqlite);
+  const now = "2026-09-10T08:00:00.000Z";
+  sqlite.exec("DELETE FROM holdings WHERE material_id = 'CAT-0001'");
+  sqlite.exec(`
+    UPDATE material_stock_totals
+    SET total_quantity = 0, library_quantity = 0,
+        other_location_quantity = 0, loaned_quantity = 0
+    WHERE material_id = 'CAT-0001'
+  `);
+  sqlite.prepare(`
+    INSERT INTO class_loans (
+      id, class_year_id, responsible_teacher_user_id, status,
+      issued_at, due_at, closed_at, notes, issued_by_user_id,
+      closed_by_user_id, version, created_at, updated_at
+    ) VALUES (
+      'CLOAN-ARCHIVE-REMOVED', 'CY-2026-001', 'USR-TCH', 'open',
+      '2026-09-10', NULL, NULL, '', 'USR-LIB', NULL, 1, ?, ?
+    )
+  `).run(now, now);
+  sqlite.prepare(`
+    INSERT INTO class_loan_items (
+      id, class_loan_id, material_id, source_location_id, condition,
+      quantity_issued, quantity_returned, lifecycle_status, version,
+      removed_at, removed_by_user_id, removal_reason, notes, created_at, updated_at
+    ) VALUES (
+      'CLI-ARCHIVE-REMOVED', 'CLOAN-ARCHIVE-REMOVED', 'CAT-0001', 'LOC-001',
+      'unspecified', 1, 0, 'removed', 2, ?, 'USR-LIB', 'Помилкова позиція', '', ?, ?
+    )
+  `).run(now, now, now);
+
+  const archived = await mutation.archiveMaterialDirect(actor, "CAT-0001", {
+    requestId: "20000000-0000-4000-8000-000000000026",
+    expectedVersion: 1,
+  }, d1);
+
+  assert.equal(archived.version, 2);
+  assert.equal(sqlite.prepare("SELECT status FROM materials WHERE id = 'CAT-0001'").get().status, "archived");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM class_loan_items WHERE id = 'CLI-ARCHIVE-REMOVED'").get().count, 1);
 });
 
 test("class issue loses atomically when its source material or location is deactivated", async () => {

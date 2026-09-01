@@ -163,7 +163,8 @@ const CLASSES_SQL = `
   LEFT JOIN users teacher ON teacher.id = cy.teacher_user_id
   LEFT JOIN locations location ON location.id = cy.location_id
   LEFT JOIN class_loans cl ON cl.class_year_id = cy.id
-  LEFT JOIN class_loan_items cli ON cli.class_loan_id = cl.id
+  LEFT JOIN class_loan_items cli
+    ON cli.class_loan_id = cl.id AND cli.lifecycle_status = 'active'
   WHERE cy.status = 'active' AND ay.status = 'active'
     AND (? = '' OR cy.id = ?)
   GROUP BY cy.id, ay.label, cy.class_name, teacher.full_name, location.name, cy.grade, cy.code
@@ -180,6 +181,11 @@ const LINES_SQL = `
           ON issue_transaction.id = issue_line.transaction_id
           AND issue_transaction.kind = 'issue'
         WHERE issue_line.class_loan_item_id = cli.id
+          AND NOT EXISTS (
+            SELECT 1
+            FROM class_loan_item_adjustments adjustment
+            WHERE adjustment.transaction_id = issue_transaction.id
+          )
         ORDER BY issue_transaction.occurred_at, issue_transaction.created_at, issue_transaction.id
         LIMIT 1
       ), cl.issued_at) AS issuedAt
@@ -191,7 +197,8 @@ const LINES_SQL = `
     m.publication_type AS publicationType, substr(item_issue_dates.issuedAt, 1, 10) AS issuedAt,
     SUM(cli.quantity_issued - cli.quantity_returned) AS remainingQuantity
   FROM class_loans cl
-  JOIN class_loan_items cli ON cli.class_loan_id = cl.id
+  JOIN class_loan_items cli
+    ON cli.class_loan_id = cl.id AND cli.lifecycle_status = 'active'
   JOIN item_issue_dates ON item_issue_dates.classLoanItemId = cli.id
   JOIN class_years cy ON cy.id = cl.class_year_id
   JOIN academic_years ay ON ay.id = cy.academic_year_id

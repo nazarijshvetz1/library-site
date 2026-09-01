@@ -111,6 +111,10 @@ const REPORT_QUERIES: Record<LibrarianReportKind, QueryDefinition[]> = {
         FROM class_loan_transaction_lines cltl
         JOIN class_loan_transactions clt ON clt.id = cltl.transaction_id
         WHERE clt.kind = 'issue' AND cltl.quantity_delta < 0
+          AND NOT EXISTS (
+            SELECT 1 FROM class_loan_item_adjustments adjustment
+            WHERE adjustment.transaction_id = clt.id
+          )
         GROUP BY cltl.class_loan_item_id
       )
       SELECT cy.class_name AS borrower, ay.label AS academicYear,
@@ -122,7 +126,8 @@ const REPORT_QUERIES: Record<LibrarianReportKind, QueryDefinition[]> = {
       FROM class_loans cl
       JOIN class_years cy ON cy.id = cl.class_year_id
       JOIN academic_years ay ON ay.id = cy.academic_year_id
-      JOIN class_loan_items cli ON cli.class_loan_id = cl.id
+      JOIN class_loan_items cli
+        ON cli.class_loan_id = cl.id AND cli.lifecycle_status = 'active'
       LEFT JOIN item_issue_dates ON item_issue_dates.classLoanItemId = cli.id
       JOIN materials m ON m.id = cli.material_id
       WHERE cl.status = 'open' AND cli.quantity_issued > cli.quantity_returned
@@ -139,6 +144,10 @@ const REPORT_QUERIES: Record<LibrarianReportKind, QueryDefinition[]> = {
       FROM class_loan_transaction_lines cltl
       JOIN class_loan_transactions clt ON clt.id = cltl.transaction_id
       WHERE clt.kind = 'issue' AND cltl.quantity_delta < 0
+        AND NOT EXISTS (
+          SELECT 1 FROM class_loan_item_adjustments adjustment
+          WHERE adjustment.transaction_id = clt.id
+        )
       GROUP BY cltl.class_loan_item_id
     )
     SELECT ay.label AS academicYear, cy.class_name AS className,
@@ -153,7 +162,8 @@ const REPORT_QUERIES: Record<LibrarianReportKind, QueryDefinition[]> = {
     JOIN class_years cy ON cy.id = cl.class_year_id
     JOIN academic_years ay ON ay.id = cy.academic_year_id
     LEFT JOIN users curator ON curator.id = cy.teacher_user_id
-    JOIN class_loan_items cli ON cli.class_loan_id = cl.id
+    JOIN class_loan_items cli
+      ON cli.class_loan_id = cl.id AND cli.lifecycle_status = 'active'
     LEFT JOIN item_issue_dates ON item_issue_dates.classLoanItemId = cli.id
     JOIN materials m ON m.id = cli.material_id
     LEFT JOIN material_stock_totals mst ON mst.material_id = m.id
@@ -184,20 +194,30 @@ const REPORT_QUERIES: Record<LibrarianReportKind, QueryDefinition[]> = {
     {
       key: "classes",
       bind: period,
-      sql: `SELECT clt.occurred_at AS occurredAt, clt.kind AS kind,
+      sql: `SELECT clt.occurred_at AS occurredAt,
+        CASE
+          WHEN adjustment.id IS NULL THEN clt.kind
+          WHEN adjustment.action = 'quantity_changed' THEN 'adjustment_quantity'
+          WHEN adjustment.action = 'removed' THEN 'adjustment_remove'
+          WHEN adjustment.action = 'restored' THEN 'adjustment_restore'
+          ELSE 'adjustment'
+        END AS kind,
         cy.class_name AS className, m.title AS title, m.author AS author,
         m.subject AS subject, location.name AS locationName,
         cltl.condition AS condition, cltl.quantity_delta AS quantityDelta,
         cltl.quantity_before AS quantityBefore, cltl.quantity_after AS quantityAfter,
-        clt.notes AS reason
+        CASE WHEN adjustment.id IS NULL THEN clt.notes ELSE adjustment.reason END AS reason
       FROM class_loan_transactions clt
       JOIN class_loans cl ON cl.id = clt.class_loan_id
       JOIN class_years cy ON cy.id = cl.class_year_id
       JOIN class_loan_transaction_lines cltl ON cltl.transaction_id = clt.id
       JOIN materials m ON m.id = cltl.material_id
       JOIN locations location ON location.id = cltl.location_id
+      LEFT JOIN class_loan_item_adjustments adjustment
+        ON adjustment.transaction_id = clt.id
       WHERE substr(clt.occurred_at, 1, 10) BETWEEN ? AND ?
-      ORDER BY clt.occurred_at DESC, cy.grade, cy.code, m.sort_title
+      ORDER BY clt.occurred_at DESC, clt.created_at DESC, clt.id DESC,
+        cy.grade, cy.code, m.sort_title, cltl.id
       LIMIT 20001`,
     },
   ],
@@ -262,7 +282,19 @@ const REPORT_QUERIES: Record<LibrarianReportKind, QueryDefinition[]> = {
   annual: [{
     key: "annual",
     bind: period,
-    sql: `WITH period(fromDate, toDate) AS (SELECT ?, ?)
+    sql: `WITH period(fromDate, toDate) AS (SELECT ?, ?),
+    item_issue_dates AS (
+      SELECT cltl.class_loan_item_id AS classLoanItemId,
+        MIN(clt.occurred_at) AS issuedAt
+      FROM class_loan_transaction_lines cltl
+      JOIN class_loan_transactions clt ON clt.id = cltl.transaction_id
+      WHERE clt.kind = 'issue' AND cltl.quantity_delta < 0
+        AND NOT EXISTS (
+          SELECT 1 FROM class_loan_item_adjustments adjustment
+          WHERE adjustment.transaction_id = clt.id
+        )
+      GROUP BY cltl.class_loan_item_id
+    )
     SELECT
       (SELECT COUNT(*) FROM materials WHERE status = 'active') AS activeMaterials,
       (SELECT COALESCE(SUM(total_quantity), 0) FROM material_stock_totals) AS totalCopies,
@@ -274,23 +306,16 @@ const REPORT_QUERIES: Record<LibrarianReportKind, QueryDefinition[]> = {
        WHERE it.kind = 'writeoff' AND substr(it.occurred_at, 1, 10) BETWEEN p.fromDate AND p.toDate) AS writtenOffCopies,
       (SELECT COALESCE(SUM(li.quantity_issued), 0) FROM loans l JOIN loan_items li ON li.loan_id = l.id, period p
        WHERE substr(l.issued_at, 1, 10) BETWEEN p.fromDate AND p.toDate) AS issuedToTeachers,
-      ((SELECT COALESCE(SUM(CASE WHEN cltl.quantity_delta < 0 THEN -cltl.quantity_delta ELSE 0 END), 0)
-        FROM class_loan_transactions clt
-        JOIN class_loan_transaction_lines cltl ON cltl.transaction_id = clt.id, period p
-        WHERE clt.kind = 'issue' AND substr(clt.occurred_at, 1, 10) BETWEEN p.fromDate AND p.toDate)
-       +
-       (SELECT COALESCE(SUM(cli.quantity_issued), 0)
-        FROM class_loans cl
-        JOIN class_loan_items cli ON cli.class_loan_id = cl.id, period p
-        WHERE substr(cl.issued_at, 1, 10) BETWEEN p.fromDate AND p.toDate
-          AND NOT EXISTS (
-            SELECT 1
-            FROM class_loan_transaction_lines legacy_check
-            JOIN class_loan_transactions legacy_tx ON legacy_tx.id = legacy_check.transaction_id
-            WHERE legacy_check.class_loan_item_id = cli.id
-              AND legacy_tx.kind = 'issue'
-              AND legacy_check.quantity_delta < 0
-          ))) AS issuedToClasses,
+      (SELECT COALESCE(SUM(cli.quantity_issued), 0)
+       FROM class_loans cl
+       JOIN class_loan_items cli
+         ON cli.class_loan_id = cl.id AND cli.lifecycle_status = 'active'
+       LEFT JOIN item_issue_dates
+         ON item_issue_dates.classLoanItemId = cli.id
+       CROSS JOIN period p
+       WHERE cl.status != 'cancelled'
+         AND substr(COALESCE(item_issue_dates.issuedAt, cl.issued_at), 1, 10)
+           BETWEEN p.fromDate AND p.toDate) AS issuedToClasses,
       (SELECT COUNT(*) FROM visit_bookings vb, period p
        WHERE vb.visit_date BETWEEN p.fromDate AND p.toDate AND vb.status = 'active') AS activeVisitBookings,
       (SELECT COUNT(*) FROM visit_bookings vb, period p

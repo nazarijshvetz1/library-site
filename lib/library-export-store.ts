@@ -121,6 +121,29 @@ export type ExportClassLoan = {
   remainingQuantity: number;
   loanNotes: string;
   itemNotes: string;
+  lifecycleStatus: "active" | "removed";
+  removedAt: string;
+  removedBy: string;
+  removalReason: string;
+};
+
+export type ExportClassLoanAdjustment = {
+  adjustmentId: string;
+  requestId: string;
+  classLoanId: string;
+  itemId: string;
+  transactionId: string;
+  action: string;
+  createdAt: string;
+  actorName: string;
+  title: string;
+  locationName: string;
+  condition: string;
+  quantityBefore: number;
+  quantityAfter: number;
+  quantityReturned: number;
+  stockDelta: number;
+  reason: string;
 };
 
 export type ExportMaterialRequest = {
@@ -155,6 +178,7 @@ export type LibraryExportSnapshot = {
   classes: ExportClass[];
   teacherLoans: ExportTeacherLoan[];
   classLoans: ExportClassLoan[];
+  classLoanAdjustments: ExportClassLoanAdjustment[];
   materialRequests: ExportMaterialRequest[];
 };
 
@@ -185,6 +209,7 @@ export async function readLibraryExportSnapshot(
     db.prepare(CLASSES_SQL).bind(MAX_ROWS_PER_BLOCK + 1),
     db.prepare(TEACHER_LOANS_SQL).bind(MAX_ROWS_PER_BLOCK + 1),
     db.prepare(CLASS_LOANS_SQL).bind(MAX_ROWS_PER_BLOCK + 1),
+    db.prepare(CLASS_LOAN_ADJUSTMENTS_SQL).bind(MAX_ROWS_PER_BLOCK + 1),
     db.prepare(MATERIAL_REQUESTS_SQL).bind(MAX_ROWS_PER_BLOCK + 1),
   ];
 
@@ -227,7 +252,8 @@ export async function readLibraryExportSnapshot(
     classes: blocks[3].map(classRow),
     teacherLoans: blocks[4].map(teacherLoanRow),
     classLoans: blocks[5].map(classLoanRow),
-    materialRequests: blocks[6].map(materialRequestRow),
+    classLoanAdjustments: blocks[6].map(classLoanAdjustmentRow),
+    materialRequests: blocks[7].map(materialRequestRow),
   };
 }
 
@@ -292,6 +318,22 @@ function classLoanRow(row: Record<string, unknown>): ExportClassLoan {
     condition: text(row.condition), quantityIssued: integer(row.quantityIssued),
     quantityReturned: integer(row.quantityReturned), remainingQuantity: integer(row.remainingQuantity),
     loanNotes: text(row.loanNotes), itemNotes: text(row.itemNotes),
+    lifecycleStatus: row.lifecycleStatus === "removed" ? "removed" : "active",
+    removedAt: text(row.removedAt), removedBy: text(row.removedBy),
+    removalReason: text(row.removalReason),
+  };
+}
+
+function classLoanAdjustmentRow(row: Record<string, unknown>): ExportClassLoanAdjustment {
+  return {
+    adjustmentId: text(row.adjustmentId), requestId: text(row.requestId),
+    classLoanId: text(row.classLoanId), itemId: text(row.itemId),
+    transactionId: text(row.transactionId), action: text(row.action),
+    createdAt: text(row.createdAt), actorName: text(row.actorName),
+    title: text(row.title), locationName: text(row.locationName),
+    condition: text(row.condition), quantityBefore: integer(row.quantityBefore),
+    quantityAfter: integer(row.quantityAfter), quantityReturned: integer(row.quantityReturned),
+    stockDelta: integer(row.stockDelta), reason: text(row.reason),
   };
 }
 
@@ -416,6 +458,11 @@ const CLASS_LOANS_SQL = `
         ON issue_transaction.id = issue_line.transaction_id
         AND issue_transaction.kind = 'issue'
       WHERE issue_line.class_loan_item_id = cli.id
+        AND NOT EXISTS (
+          SELECT 1
+          FROM class_loan_item_adjustments adjustment
+          WHERE adjustment.transaction_id = issue_transaction.id
+        )
       ORDER BY issue_transaction.occurred_at, issue_transaction.created_at, issue_transaction.id
       LIMIT 1
     ), cl.issued_at) AS issuedAt, COALESCE(cl.due_at, '') AS dueAt,
@@ -423,16 +470,45 @@ const CLASS_LOANS_SQL = `
     m.title AS title, m.subject AS subject, loc.name AS sourceLocation,
     cli.condition AS condition, cli.quantity_issued AS quantityIssued,
     cli.quantity_returned AS quantityReturned,
-    cli.quantity_issued - cli.quantity_returned AS remainingQuantity,
-    cl.notes AS loanNotes, cli.notes AS itemNotes
+    CASE WHEN cli.lifecycle_status = 'active'
+      THEN cli.quantity_issued - cli.quantity_returned ELSE 0 END AS remainingQuantity,
+    cl.notes AS loanNotes, cli.notes AS itemNotes,
+    cli.lifecycle_status AS lifecycleStatus,
+    COALESCE(cli.removed_at, '') AS removedAt,
+    COALESCE(removed_by.full_name, '') AS removedBy,
+    cli.removal_reason AS removalReason
   FROM class_loans cl
   JOIN class_loan_items cli ON cli.class_loan_id = cl.id
   JOIN class_years cy ON cy.id = cl.class_year_id
   JOIN academic_years ay ON ay.id = cy.academic_year_id
   JOIN users u ON u.id = cl.responsible_teacher_user_id
+  LEFT JOIN users removed_by ON removed_by.id = cli.removed_by_user_id
   JOIN materials m ON m.id = cli.material_id
   JOIN locations loc ON loc.id = cli.source_location_id
   ORDER BY issuedAt DESC, cl.id, m.catalog_number, cli.id
+  LIMIT ?`;
+
+const CLASS_LOAN_ADJUSTMENTS_SQL = `
+  SELECT adjustment.id AS adjustmentId, adjustment.request_id AS requestId,
+    adjustment.class_loan_id AS classLoanId,
+    adjustment.class_loan_item_id AS itemId,
+    COALESCE(adjustment.transaction_id, '') AS transactionId,
+    adjustment.action AS action, adjustment.created_at AS createdAt,
+    COALESCE(actor.full_name, '') AS actorName,
+    COALESCE(material.title, '') AS title,
+    COALESCE(location.name, '') AS locationName,
+    adjustment.condition AS condition,
+    adjustment.quantity_before AS quantityBefore,
+    adjustment.quantity_after AS quantityAfter,
+    adjustment.quantity_returned_snapshot AS quantityReturned,
+    adjustment.stock_delta AS stockDelta,
+    adjustment.reason AS reason
+  FROM class_loan_item_adjustments adjustment
+  JOIN class_loan_items item ON item.id = adjustment.class_loan_item_id
+  LEFT JOIN materials material ON material.id = item.material_id
+  LEFT JOIN locations location ON location.id = adjustment.location_id
+  LEFT JOIN users actor ON actor.id = adjustment.actor_user_id
+  ORDER BY adjustment.created_at DESC, adjustment.id DESC
   LIMIT ?`;
 
 const MATERIAL_REQUESTS_SQL = `

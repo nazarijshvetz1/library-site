@@ -194,7 +194,7 @@ export async function getTeacherRegistryDetail(db: TeacherRegistryDatabase, teac
         ORDER BY issued_at DESC,id DESC LIMIT 100)
       ORDER BY li.loan_id,li.created_at,li.id LIMIT 500`).bind(teacherId).all<Record<string, unknown>>(),
     db.prepare(`SELECT cl.id,cl.status,cl.issued_at,cl.due_at,cl.closed_at,cl.version,cy.class_name,
-      COALESCE((SELECT SUM(cli.quantity_issued-cli.quantity_returned) FROM class_loan_items cli WHERE cli.class_loan_id=cl.id),0) AS outstanding_quantity
+      COALESCE((SELECT SUM(cli.quantity_issued-cli.quantity_returned) FROM class_loan_items cli WHERE cli.class_loan_id=cl.id AND cli.lifecycle_status='active'),0) AS outstanding_quantity
       FROM class_loans cl JOIN class_years cy ON cy.id=cl.class_year_id
       WHERE cl.responsible_teacher_user_id=? AND cl.merged_into_class_loan_id IS NULL
       ORDER BY cl.issued_at DESC,cl.id DESC LIMIT 100`)

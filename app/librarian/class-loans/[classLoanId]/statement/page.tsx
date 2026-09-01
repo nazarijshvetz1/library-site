@@ -44,7 +44,10 @@ export default async function ClassIssueStatementPage({ params }: Props) {
   return (
     <main className={styles.page}>
       <StatementActions
+        classLoanId={statement.classLoanId}
         excelHref={`/api/librarian/class-issue-statements/${encodeURIComponent(classLoanId)}/excel`}
+        initialStatus={statement.currentStatus}
+        writesEnabled={access.writesEnabled}
       />
       <article className={styles.document}>
         <header className={styles.header}>

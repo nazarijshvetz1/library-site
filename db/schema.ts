@@ -137,6 +137,17 @@ const cohortStatuses = ["active", "graduated", "closed"] as const;
 const classYearStatuses = ["planned", "active", "closed"] as const;
 const loanStatuses = ["open", "closed", "cancelled"] as const;
 const classLoanTransactionKinds = ["issue", "return"] as const;
+const classLoanItemLifecycleStatuses = ["active", "removed"] as const;
+const classLoanStatementItemLinkOrigins = [
+  "issued",
+  "legacy_exact",
+  "legacy_reviewed",
+] as const;
+const classLoanItemAdjustmentActions = [
+  "quantity_changed",
+  "removed",
+  "restored",
+] as const;
 const inventoryTransactionKinds = [
   "receipt",
   "transfer",
@@ -1234,6 +1245,18 @@ export const classLoanItems = sqliteTable(
       .default("unspecified"),
     quantityIssued: integer("quantity_issued").notNull(),
     quantityReturned: integer("quantity_returned").notNull().default(0),
+    lifecycleStatus: text("lifecycle_status", {
+      enum: classLoanItemLifecycleStatuses,
+    })
+      .notNull()
+      .default("active"),
+    version: integer("version").notNull().default(1),
+    removedAt: text("removed_at"),
+    removedByUserId: text("removed_by_user_id").references(() => users.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    removalReason: text("removal_reason").notNull().default(""),
     notes: text("notes").notNull().default(""),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
@@ -1241,6 +1264,11 @@ export const classLoanItems = sqliteTable(
   (table) => [
     index("idx_class_loan_items_loan_material").on(table.classLoanId, table.materialId),
     index("idx_class_loan_items_material_loan").on(table.materialId, table.classLoanId),
+    index("idx_class_loan_items_loan_lifecycle").on(
+      table.classLoanId,
+      table.lifecycleStatus,
+      table.createdAt,
+    ),
     check(
       "class_loan_items_condition_valid",
       sql`${table.condition} in ('unspecified', 'good', 'worn', 'damaged')`,
@@ -1249,6 +1277,22 @@ export const classLoanItems = sqliteTable(
     check(
       "class_loan_items_quantity_returned_valid",
       sql`${table.quantityReturned} >= 0 and ${table.quantityReturned} <= ${table.quantityIssued}`,
+    ),
+    check(
+      "class_loan_items_lifecycle_valid",
+      sql`${table.lifecycleStatus} in ('active', 'removed')`,
+    ),
+    check("class_loan_items_version_positive", sql`${table.version} > 0`),
+    check(
+      "class_loan_items_removal_fields_consistent",
+      sql`(${table.lifecycleStatus} = 'active'
+          and ${table.removedAt} is null
+          and ${table.removedByUserId} is null
+          and ${table.removalReason} = '')
+        or (${table.lifecycleStatus} = 'removed'
+          and ${table.removedAt} is not null
+          and ${table.removedByUserId} is not null
+          and length(trim(${table.removalReason})) > 0)`,
     ),
   ],
 );
@@ -1330,6 +1374,37 @@ export const classLoanStatementLines = sqliteTable(
   ],
 );
 
+/**
+ * Immutable identity link between a printed statement snapshot and the
+ * operational class-loan item that may later be corrected.
+ */
+export const classLoanStatementItemLinks = sqliteTable(
+  "class_loan_statement_item_links",
+  {
+    statementLineId: text("statement_line_id")
+      .primaryKey()
+      .references(() => classLoanStatementLines.id, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    classLoanItemId: text("class_loan_item_id")
+      .notNull()
+      .references(() => classLoanItems.id, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    origin: text("origin", { enum: classLoanStatementItemLinkOrigins }).notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_class_loan_statement_item_links_item").on(table.classLoanItemId),
+    check(
+      "class_loan_statement_item_links_origin_valid",
+      sql`${table.origin} in ('issued', 'legacy_exact', 'legacy_reviewed')`,
+    ),
+  ],
+);
+
 export const classLoanTransactionLines = sqliteTable(
   "class_loan_transaction_lines",
   {
@@ -1377,6 +1452,77 @@ export const classLoanTransactionLines = sqliteTable(
       sql`${table.quantityAfter} = ${table.quantityBefore} + ${table.quantityDelta}`,
     ),
     check("class_loan_lines_delta_nonzero", sql`${table.quantityDelta} != 0`),
+  ],
+);
+
+/** Append-only audit trail for quantity corrections and soft removal/restoration. */
+export const classLoanItemAdjustments = sqliteTable(
+  "class_loan_item_adjustments",
+  {
+    id: text("id").primaryKey(),
+    requestId: text("request_id").notNull(),
+    classLoanId: text("class_loan_id")
+      .notNull()
+      .references(() => classLoans.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    classLoanItemId: text("class_loan_item_id")
+      .notNull()
+      .references(() => classLoanItems.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    statementLineId: text("statement_line_id").references(
+      () => classLoanStatementLines.id,
+      { onDelete: "restrict", onUpdate: "cascade" },
+    ),
+    transactionId: text("transaction_id").references(() => classLoanTransactions.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    action: text("action", { enum: classLoanItemAdjustmentActions }).notNull(),
+    quantityBefore: integer("quantity_before").notNull(),
+    quantityAfter: integer("quantity_after").notNull(),
+    quantityReturnedSnapshot: integer("quantity_returned_snapshot").notNull(),
+    stockDelta: integer("stock_delta").notNull(),
+    locationId: text("location_id")
+      .notNull()
+      .references(() => locations.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    condition: text("condition", { enum: holdingConditions }).notNull(),
+    reason: text("reason").notNull(),
+    actorUserId: text("actor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_class_loan_item_adjustments_request").on(table.requestId),
+    uniqueIndex("idx_class_loan_item_adjustments_transaction").on(table.transactionId),
+    index("idx_class_loan_item_adjustments_loan_created").on(
+      table.classLoanId,
+      table.createdAt,
+      table.id,
+    ),
+    index("idx_class_loan_item_adjustments_item_created").on(
+      table.classLoanItemId,
+      table.createdAt,
+      table.id,
+    ),
+    check(
+      "class_loan_item_adjustments_action_valid",
+      sql`${table.action} in ('quantity_changed', 'removed', 'restored')`,
+    ),
+    check(
+      "class_loan_item_adjustments_quantities_valid",
+      sql`${table.quantityBefore} > 0
+        and ${table.quantityAfter} > 0
+        and ${table.quantityReturnedSnapshot} >= 0
+        and ${table.quantityReturnedSnapshot} <= ${table.quantityBefore}
+        and ${table.quantityReturnedSnapshot} <= ${table.quantityAfter}`,
+    ),
+    check(
+      "class_loan_item_adjustments_condition_valid",
+      sql`${table.condition} in ('unspecified', 'good', 'worn', 'damaged')`,
+    ),
+    check(
+      "class_loan_item_adjustments_reason_present",
+      sql`length(trim(${table.reason})) between 2 and 500`,
+    ),
   ],
 );
 

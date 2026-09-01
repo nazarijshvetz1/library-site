@@ -46,6 +46,8 @@ export const STAGING_IMPORT_RESET_TABLES = Object.freeze([
   "visit_mutation_commands",
   "visit_schedule_closures",
   "visit_schedule_hours",
+  "class_loan_item_adjustments",
+  "class_loan_statement_item_links",
   "class_loan_statement_lines",
   "class_loan_transaction_lines",
   "class_loan_transactions",
@@ -238,6 +240,32 @@ BEFORE DELETE ON \`class_loan_statement_lines\`
 BEGIN
 \tSELECT RAISE(ABORT, 'class issue statement line is immutable');
 END`;
+const CLASS_LOAN_STATEMENT_LINK_DELETE_TRIGGER = "class_loan_statement_item_links_immutable_delete";
+const CLASS_LOAN_STATEMENT_LINK_DELETE_TRIGGER_SQL = `CREATE TRIGGER \`${CLASS_LOAN_STATEMENT_LINK_DELETE_TRIGGER}\`
+BEFORE DELETE ON \`class_loan_statement_item_links\`
+BEGIN
+\tSELECT RAISE(ABORT, 'class issue statement item link is immutable');
+END`;
+const CLASS_LOAN_ADJUSTMENT_DELETE_TRIGGER = "class_loan_item_adjustments_immutable_delete";
+const CLASS_LOAN_ADJUSTMENT_DELETE_TRIGGER_SQL = `CREATE TRIGGER \`${CLASS_LOAN_ADJUSTMENT_DELETE_TRIGGER}\`
+BEFORE DELETE ON \`class_loan_item_adjustments\`
+BEGIN
+\tSELECT RAISE(ABORT, 'class loan item adjustment is immutable');
+END`;
+const STAGING_RESET_IMMUTABLE_DELETE_TRIGGERS = Object.freeze([
+  {
+    name: CLASS_LOAN_STATEMENT_DELETE_TRIGGER,
+    sql: CLASS_LOAN_STATEMENT_DELETE_TRIGGER_SQL,
+  },
+  {
+    name: CLASS_LOAN_STATEMENT_LINK_DELETE_TRIGGER,
+    sql: CLASS_LOAN_STATEMENT_LINK_DELETE_TRIGGER_SQL,
+  },
+  {
+    name: CLASS_LOAN_ADJUSTMENT_DELETE_TRIGGER,
+    sql: CLASS_LOAN_ADJUSTMENT_DELETE_TRIGGER_SQL,
+  },
+]);
 
 export type HostedImportCommitProof = {
   runId: string;
@@ -289,15 +317,17 @@ export function bindHostedImportCommitGuard(
 export async function resetStagingImportTarget(
   db: D1DatabaseLike,
 ): Promise<StagingImportResetResult> {
-  const deleteStatementOffset = 3;
+  const deleteStatementOffset = 2 + STAGING_RESET_IMMUTABLE_DELETE_TRIGGERS.length;
   const statements = [
     db.prepare("INSERT INTO materials_fts(materials_fts) VALUES('delete-all')"),
     // The schema requires `kind='reversal'` and `reversal_of_id` together, so
     // both disposable fields must be neutralized in the same UPDATE.
     db.prepare("UPDATE inventory_transactions SET kind = 'import', reversal_of_id = NULL WHERE reversal_of_id IS NOT NULL"),
-    db.prepare(`DROP TRIGGER ${CLASS_LOAN_STATEMENT_DELETE_TRIGGER}`),
+    ...STAGING_RESET_IMMUTABLE_DELETE_TRIGGERS.map((trigger) =>
+      db.prepare(`DROP TRIGGER ${trigger.name}`)
+    ),
     ...STAGING_IMPORT_RESET_TABLES.map((table) => db.prepare(`DELETE FROM "${table}"`)),
-    db.prepare(CLASS_LOAN_STATEMENT_DELETE_TRIGGER_SQL),
+    ...STAGING_RESET_IMMUTABLE_DELETE_TRIGGERS.map((trigger) => db.prepare(trigger.sql)),
   ];
   let results: Array<{ meta?: { changes?: number } }>;
   try {

@@ -40,7 +40,7 @@ const MAX_SUBJECT_SHEETS = 100;
 const EXCEL_CELL_TEXT_LIMIT = 32_767;
 const CORE_SHEET_NAMES = new Set([
   "Зведення", "Каталог", "Залишки", "За класами", "Вчителі", "Класи",
-  "Видачі вчителям", "Видачі класам", "Заявки вчителів", "Предмети",
+  "Видачі вчителям", "Видачі класам", "Коригування класів", "Заявки вчителів", "Предмети",
   "Довідники", "Контроль",
 ].map((value) => value.toLocaleLowerCase("uk-UA")));
 
@@ -125,6 +125,12 @@ function buildSheets(snapshot: LibraryExportSnapshot): Sheet[] {
   const teacherLoanRows = snapshot.teacherLoans.map((row, index) => teacherLoanRow(row, index + 2));
   const classLoanColumns = classLoanSheetColumns();
   const classLoanRows = snapshot.classLoans.map((row, index) => classLoanRow(row, index + 2));
+  const classLoanAdjustmentRows = snapshot.classLoanAdjustments.map((row) => [
+    datetime(row.createdAt), classLoanAdjustmentLabel(row.action), row.classLoanId,
+    row.itemId, row.title, row.actorName, row.locationName, conditionLabel(row.condition),
+    row.quantityBefore, row.quantityAfter, row.quantityReturned, row.stockDelta,
+    row.reason, row.requestId, row.transactionId,
+  ]);
   const requestRows = snapshot.materialRequests.map((row) => [
     row.requestId, row.itemId, row.teacherUserId, row.teacherName, requestStatusLabel(row.status), row.status,
     datetime(row.submittedAt), datetime(row.readyAt), datetime(row.completedAt), datetime(row.dueAt),
@@ -187,6 +193,20 @@ function buildSheets(snapshot: LibraryExportSnapshot): Sheet[] {
     },
     { name: "Видачі вчителям", columns: teacherLoanColumns, rows: teacherLoanRows },
     { name: "Видачі класам", columns: classLoanColumns, rows: classLoanRows },
+    {
+      name: "Коригування класів",
+      columns: [
+        { header: "Змінено", width: 21, kind: "datetime" }, { header: "Операція", width: 24 },
+        { header: "CLOAN-ID", width: 39 }, { header: "ITEM-ID", width: 39, hidden: true },
+        { header: "Назва", width: 46 }, { header: "Бібліотекар", width: 30 },
+        { header: "Місце", width: 28 }, { header: "Стан", width: 18 },
+        { header: "Було", width: 12, kind: "number" }, { header: "Стало", width: 12, kind: "number" },
+        { header: "Було повернено", width: 18, kind: "number" }, { header: "Зміна залишку", width: 18, kind: "number" },
+        { header: "Причина", width: 44 }, { header: "REQUEST-ID", width: 39, hidden: true },
+        { header: "TRANSACTION-ID", width: 39, hidden: true },
+      ],
+      rows: classLoanAdjustmentRows,
+    },
     {
       name: "Заявки вчителів",
       columns: [
@@ -325,6 +345,8 @@ function classLoanSheetColumns(): Column[] {
     { header: "Видано", width: 13, kind: "number" }, { header: "Повернено", width: 15, kind: "number" },
     { header: "Залишилося у класу", width: 22, kind: "number" },
     { header: "Примітка до видачі", width: 38 }, { header: "Примітка до позиції", width: 38 },
+    { header: "Позиція", width: 18 }, { header: "Прибрано", width: 21, kind: "datetime" },
+    { header: "Хто прибрав", width: 30 }, { header: "Причина вилучення", width: 42 },
   ];
 }
 
@@ -334,7 +356,11 @@ function classLoanRow(row: ExportClassLoan, excelRow: number): Cell[] {
     row.responsibleTeacher, loanStatusLabel(row.status), datetime(row.issuedAt), datetime(row.dueAt),
     datetime(row.closedAt), row.title, row.subject, row.sourceLocation,
     conditionLabel(row.condition), row.quantityIssued, row.quantityReturned,
-    formula(`O${excelRow}-P${excelRow}`, row.remainingQuantity), row.loanNotes, row.itemNotes,
+    row.lifecycleStatus === "active"
+      ? formula(`O${excelRow}-P${excelRow}`, row.remainingQuantity)
+      : 0,
+    row.loanNotes, row.itemNotes, classLoanLifecycleLabel(row.lifecycleStatus),
+    datetime(row.removedAt), row.removedBy, row.removalReason,
   ];
 }
 
@@ -427,6 +453,8 @@ function requestStatusLabel(value: string) {
   return ({ submitted: "Нова", in_review: "На розгляді", ready: "Підготовлено", partially_ready: "Підготовлено частково", completed: "Видано", rejected: "Відхилено", cancelled: "Скасовано" } as Record<string, string>)[value] ?? value;
 }
 function conditionLabel(value: string) { return ({ good: "Добрий стан", worn: "Зношений", damaged: "Пошкоджений", unspecified: "Не вказано" } as Record<string, string>)[value] ?? value; }
+function classLoanLifecycleLabel(value: string) { return value === "removed" ? "Прибрано з актуальної відомості" : "Активна"; }
+function classLoanAdjustmentLabel(value: string) { return ({ quantity_changed: "Змінено кількість", removed: "Прибрано позицію", restored: "Відновлено позицію" } as Record<string, string>)[value] ?? value; }
 
 function workbookEntries(
   sheets: Sheet[],

@@ -79,11 +79,25 @@ function seed(sqlite) {
   sqlite.prepare(`INSERT INTO class_loans (id,class_year_id,responsible_teacher_user_id,status,issued_at,due_at,notes,issued_by_user_id,version,created_at,updated_at)
     VALUES ('CLOAN-1','CY-2026-001','USR-TEACH','open',?,'2027-06-01','', 'USR-LIB',1,?,?)`).run(now, now, now);
   sqlite.prepare(`INSERT INTO class_loan_items (id,class_loan_id,material_id,source_location_id,condition,quantity_issued,quantity_returned,notes,created_at,updated_at)
-    VALUES ('CLI-1','CLOAN-1','CAT-0001','LOC-001','good',1,0,'',?,?)`).run(now, now);
+    VALUES ('CLI-1','CLOAN-1','CAT-0001','LOC-001','good',2,0,'',?,?)`).run(now, now);
+  sqlite.prepare(`INSERT INTO class_loan_items (
+      id,class_loan_id,material_id,source_location_id,condition,quantity_issued,quantity_returned,
+      lifecycle_status,version,removed_at,removed_by_user_id,removal_reason,notes,created_at,updated_at)
+    VALUES ('CLI-REMOVED','CLOAN-1','CAT-0001','LOC-001','good',4,0,
+      'removed',2,?,'USR-LIB','Помилковий рядок','',?,?)`).run(now, now, now);
   sqlite.prepare(`INSERT INTO class_loan_transactions (id,request_id,class_loan_id,kind,occurred_at,notes,actor_user_id,created_at)
     VALUES ('CLTX-1','REQ-CLASS-ISSUE-1','CLOAN-1','issue','2026-09-05T08:30:00.000Z','','USR-LIB',?)`).run(now);
+  sqlite.prepare(`INSERT INTO class_loan_transactions (id,request_id,class_loan_id,kind,occurred_at,notes,actor_user_id,created_at)
+    VALUES ('CLTX-ADJUST','REQ-CLASS-ADJUST-TX','CLOAN-1','issue','2026-09-01T08:30:00.000Z','Уточнення кількості','USR-LIB',?)`).run(now);
   sqlite.prepare(`INSERT INTO class_loan_transaction_lines (id,transaction_id,class_loan_item_id,material_id,location_id,condition,quantity_delta,quantity_before,quantity_after,created_at)
-    VALUES ('CLINE-1','CLTX-1','CLI-1','CAT-0001','LOC-001','good',-1,4,3,?)`).run(now);
+    VALUES ('CLINE-1','CLTX-1','CLI-1','CAT-0001','LOC-001','good',-2,4,2,?)`).run(now);
+  sqlite.prepare(`INSERT INTO class_loan_transaction_lines (id,transaction_id,class_loan_item_id,material_id,location_id,condition,quantity_delta,quantity_before,quantity_after,created_at)
+    VALUES ('CLINE-ADJUST','CLTX-ADJUST','CLI-1','CAT-0001','LOC-001','good',-1,3,2,?)`).run(now);
+  sqlite.prepare(`INSERT INTO class_loan_item_adjustments (
+      id,request_id,class_loan_id,class_loan_item_id,statement_line_id,transaction_id,action,
+      quantity_before,quantity_after,quantity_returned_snapshot,stock_delta,location_id,condition,reason,actor_user_id,created_at)
+    VALUES ('CLADJ-1','REQ-CLASS-ADJUST','CLOAN-1','CLI-1',NULL,'CLTX-ADJUST','quantity_changed',
+      1,2,0,-1,'LOC-001','good','Уточнення кількості','USR-LIB',?)`).run(now);
   sqlite.prepare(`INSERT INTO material_requests (id,teacher_user_id,status,teacher_notes,librarian_note,rejection_reason,pickup_location_id,due_at,reviewed_by_user_id,version,submitted_at,ready_at,created_at,updated_at)
     VALUES ('REQ-1','USR-TEACH','ready','Для уроку','Готово','','LOC-001','2027-06-01','USR-LIB',1,?,?,?,?)`).run(now, now, now, now);
   sqlite.prepare(`INSERT INTO material_request_items (id,request_id,material_id,title_snapshot,author_snapshot,requested_quantity,approved_quantity,fulfilled_quantity,sort_order,created_at,updated_at)
@@ -95,14 +109,21 @@ function seed(sqlite) {
 test("export reads all requested blocks in one bounded batch and excludes authentication secrets", async () => {
   const { sqlite, db } = openDatabase();
   const snapshot = await store.readLibraryExportSnapshot(db, "2026-08-21T12:34:00.000Z");
-  assert.equal(db.queryCount, 7);
-  assert.deepEqual(db.batchCounts, [7]);
+  assert.equal(db.queryCount, 8);
+  assert.deepEqual(db.batchCounts, [8]);
   assert.equal(snapshot.materials.length, 1);
   assert.equal(snapshot.holdings[0].reservedQuantity, 1);
   assert.equal(snapshot.holdings[0].availableQuantity, 3);
   assert.equal(snapshot.teacherLoans[0].remainingQuantity, 1);
-  assert.equal(snapshot.classLoans[0].remainingQuantity, 1);
-  assert.equal(snapshot.classLoans[0].issuedAt, "2026-09-05T08:30:00.000Z");
+  assert.equal(snapshot.classLoans.length, 2);
+  const activeClassLoan = snapshot.classLoans.find((row) => row.lifecycleStatus === "active");
+  const removedClassLoan = snapshot.classLoans.find((row) => row.lifecycleStatus === "removed");
+  assert.equal(activeClassLoan.remainingQuantity, 2);
+  assert.equal(activeClassLoan.issuedAt, "2026-09-05T08:30:00.000Z");
+  assert.equal(removedClassLoan.remainingQuantity, 0);
+  assert.equal(removedClassLoan.removalReason, "Помилковий рядок");
+  assert.equal(snapshot.classLoanAdjustments.length, 1);
+  assert.equal(snapshot.classLoanAdjustments[0].reason, "Уточнення кількості");
   assert.equal(snapshot.materialRequests[0].activeReservedQuantity, 1);
   assert.equal(Object.hasOwn(snapshot.teachers[0], "email"), false);
   assert.equal(JSON.stringify(snapshot).includes("teacher@example.test"), false);
@@ -121,7 +142,7 @@ test("generated XLSX has the full workbook structure, subject sheets and safe in
   const catalog = decode("xl/worksheets/sheet2.xml");
   assert.equal(workbook.bytes[0], 0x50);
   assert.equal(workbook.bytes[1], 0x4b);
-  for (const sheet of ["Зведення", "Каталог", "Залишки", "За класами", "Видачі вчителям", "Видачі класам", "Заявки вчителів", "Математика"]) {
+  for (const sheet of ["Зведення", "Каталог", "Залишки", "За класами", "Видачі вчителям", "Видачі класам", "Коригування класів", "Заявки вчителів", "Математика"]) {
     assert.match(workbookXml, new RegExp(`name="${sheet}"`, "u"));
   }
   assert.match(styles, /<name val="Times New Roman"\/>/u);

@@ -2,7 +2,7 @@
 .page :global(.statement-actions) { width: min(1050px, 100%); margin: 0 auto 12px; display: flex; flex-wrap: wrap; gap: 8px; }
 .page :global(.statement-actions) a,
 .page :global(.statement-actions) button { min-height: 42px; padding: 0 16px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #bdd0c0; border-radius: 10px; background: #fff; color: #174a31; font: 750 13px/1 Inter, "Segoe UI", sans-serif; cursor: pointer; text-decoration: none; }
-.page :global(.statement-actions) button { background: #185634; color: #fff; border-color: #185634; }
+.page :global(.statement-actions) button:first-child { background: #185634; color: #fff; border-color: #185634; }
 .document { width: min(1050px, 100%); margin: 0 auto; padding: 34px; border: 1px solid #d7ded5; border-radius: 16px; background: #fff; box-shadow: 0 15px 42px rgba(17, 55, 35, .09); }
 .header { display: flex; align-items: center; gap: 14px; padding-bottom: 16px; border-bottom: 2px solid #1a5636; }
 .header img { border-radius: 50%; }
@@ -24,19 +24,159 @@
 .totals { margin-top: 14px; display: flex; justify-content: flex-end; gap: 22px; font-size: 12px; }
 .signatures { margin-top: 44px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; color: #273d32; font-size: 12px; }
 
+.managerBackdrop { position: fixed; z-index: 1200; inset: 0; display: flex; justify-content: flex-end; background: rgba(10, 29, 20, .42); backdrop-filter: blur(3px); }
+.managerPanel { width: min(560px, 100%); height: 100%; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; overflow: hidden; border-left: 1px solid #d7e0d5; border-radius: 22px 0 0 22px; background: #f7f9f5; box-shadow: -24px 0 64px rgba(14, 45, 28, .2); color: #173e2d; font-family: Inter, "Segoe UI", sans-serif; }
+.managerHeader { min-width: 0; padding: 17px 18px 13px; display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; border-bottom: 1px solid #dce5db; background: #fff; }
+.managerHeader div { min-width: 0; }
+.managerHeader small { color: #39724e; font-size: 9px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+.managerHeader h2 { margin: 4px 0 2px; overflow-wrap: anywhere; font: 700 25px/1.1 Georgia, serif; }
+.managerHeader span { color: #6a786f; font-size: 11px; font-weight: 650; }
+.managerHeader button { flex: 0 0 auto; width: 40px; height: 40px; border: 1px solid #cbd7ca; border-radius: 10px; background: #fff; color: #173e2d; font: 400 25px/1 Inter, sans-serif; cursor: pointer; }
+.managerHeader button:disabled { opacity: .5; cursor: wait; }
+.managerTabs { padding: 8px 10px; display: grid; grid-template-columns: 1.15fr 1fr .85fr; gap: 5px; border-bottom: 1px solid #dce5db; background: #fff; }
+.managerTabs button { min-width: 0; min-height: 38px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #627168; font: 800 11px/1.15 Inter, "Segoe UI", sans-serif; cursor: pointer; }
+.managerTabs button span { min-width: 20px; height: 20px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; background: #edf2eb; font-size: 9px; }
+.managerTabs .managerTabActive { border-color: #bfd0bc; background: #e8f1e5; color: #194b30; }
+.managerBody { min-height: 0; padding: 12px; overflow-y: auto; overscroll-behavior: contain; }
+.managerSummary { margin-bottom: 9px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.managerSummary > span { min-height: 25px; padding: 0 9px; display: inline-flex; align-items: center; border-radius: 999px; font-size: 9px; font-weight: 850; letter-spacing: .04em; text-transform: uppercase; }
+.managerSummary > strong { font-size: 11px; }
+.statusOpen { background: #dff0d9; color: #23613b; }
+.statusClosed { background: #e7ebe7; color: #657168; }
+.managerNotice { margin: 0 0 10px; padding: 9px 10px; border: 1px solid #ead9aa; border-radius: 9px; background: #fff7df; color: #745c20; font-size: 10px; line-height: 1.45; }
+.reasonField { margin-bottom: 11px; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 9px; }
+.reasonField span, .metadataForm > label > span { color: #607068; font-size: 9px; font-weight: 800; }
+.reasonField input, .metadataForm input, .metadataForm select, .metadataForm textarea { width: 100%; min-width: 0; border: 1px solid #c9d5c7; border-radius: 9px; background: #fff; color: #193c2b; font: 650 12px/1.25 Inter, "Segoe UI", sans-serif; }
+.reasonField input, .metadataForm input, .metadataForm select { height: 39px; padding: 0 10px; }
+.metadataForm textarea { padding: 10px; resize: vertical; }
+.reasonField input:focus-visible, .metadataForm :is(input, select, textarea):focus-visible, .quantityEditor input:focus-visible, .removedItems input:focus-visible { border-color: #32704b; outline: 3px solid rgba(65, 125, 86, .18); }
+.itemsTab { display: grid; gap: 10px; }
+.itemsToolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.itemsToolbar > div { min-width: 0; display: grid; gap: 2px; }
+.itemsToolbar strong { font-size: 13px; }
+.itemsToolbar small { color: #6b776f; font-size: 9px; line-height: 1.35; }
+.itemsToolbar a { flex: 0 0 auto; min-height: 36px; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; border-radius: 9px; background: #1c5937; color: #fff; font-size: 10px; font-weight: 850; text-decoration: none; }
+.managedItems { display: grid; gap: 7px; }
+.managedItem { min-width: 0; padding: 11px; display: grid; gap: 10px; border: 1px solid #d7e1d5; border-radius: 12px; background: #fff; box-shadow: 0 4px 16px rgba(28, 71, 44, .04); }
+.managedItemIdentity { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+.managedItemIdentity > div { min-width: 0; display: grid; gap: 3px; }
+.managedItemIdentity > div > span { color: #4b7a59; font-size: 8px; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
+.managedItemIdentity > div > strong { overflow-wrap: anywhere; font: 700 15px/1.2 Georgia, serif; }
+.managedItemIdentity > div > small { color: #6a776f; font-size: 9px; line-height: 1.3; }
+.managedItemIdentity dl { margin: 0; display: grid; grid-template-columns: repeat(3, 48px); align-self: start; border: 1px solid #e0e7df; border-radius: 9px; overflow: hidden; }
+.managedItemIdentity dl div { padding: 6px 4px; display: grid; justify-items: center; border-right: 1px solid #e0e7df; }
+.managedItemIdentity dl div:last-child { border-right: 0; }
+.managedItemIdentity dt { color: #758078; font-size: 7px; font-weight: 750; }
+.managedItemIdentity dd { margin: 2px 0 0; font: 700 16px/1 Georgia, serif; }
+.quantityEditor { min-width: 0; display: grid; grid-template-columns: 38px minmax(84px, 1fr) 38px auto; align-items: end; gap: 5px; }
+.quantityEditor > button { height: 39px; border: 1px solid #c9d5c7; border-radius: 9px; background: #f4f7f2; color: #18462d; font-size: 20px; font-weight: 700; cursor: pointer; }
+.quantityEditor > button:disabled { opacity: .42; cursor: not-allowed; }
+.quantityEditor label { min-width: 0; display: grid; gap: 3px; }
+.quantityEditor label span { color: #6a766f; font-size: 8px; font-weight: 800; }
+.quantityEditor input, .removedItems input { width: 100%; height: 39px; padding: 0 8px; border: 1px solid #c9d5c7; border-radius: 9px; background: #fff; color: #173e2d; font: 750 13px/1 Inter, sans-serif; text-align: center; }
+.quantityEditor .saveItemButton { min-width: 82px; padding: 0 10px; background: #1e5a39; color: #fff; font-size: 10px; }
+.itemDangerRow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 8px; border-top: 1px solid #edf1ec; }
+.itemDangerRow span { color: #748078; font-size: 8px; }
+.itemDangerRow button { min-height: 31px; padding: 0 9px; border: 1px solid #e3c9c3; border-radius: 8px; background: #fff8f6; color: #8d4538; font-size: 9px; font-weight: 800; cursor: pointer; }
+.itemDangerRow button:disabled { opacity: .45; cursor: not-allowed; }
+.itemBlockedReason { margin: 0; padding: 7px 8px; border-radius: 8px; background: #fff4d8; color: #71591f; font-size: 9px; line-height: 1.4; }
+.legacyLinkEditor { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 7px; padding: 8px; border: 1px solid #d7e1d5; border-radius: 9px; background: #f5f8f3; }
+.legacyLinkEditor label { min-width: 0; display: grid; gap: 4px; }
+.legacyLinkEditor label span { color: #607068; font-size: 8px; font-weight: 800; }
+.legacyLinkEditor select { width: 100%; min-width: 0; height: 39px; padding: 0 30px 0 9px; border: 1px solid #c9d5c7; border-radius: 8px; background: #fff; color: #193c2b; font: 650 11px/1.25 Inter, "Segoe UI", sans-serif; }
+.legacyLinkEditor button { min-height: 39px; padding: 0 12px; border: 1px solid #b8cbb7; border-radius: 8px; background: #e8f1e5; color: #17462d; font: 800 10px/1.2 Inter, "Segoe UI", sans-serif; cursor: pointer; }
+.legacyLinkEditor button:disabled { opacity: .45; cursor: not-allowed; }
+.removedItems { border: 1px solid #d8e0d6; border-radius: 11px; background: #fff; overflow: hidden; }
+.removedItems summary { min-height: 40px; padding: 0 11px; display: flex; align-items: center; justify-content: space-between; color: #55665b; font-size: 10px; font-weight: 800; cursor: pointer; list-style: none; }
+.removedItems summary::-webkit-details-marker { display: none; }
+.removedItems summary span { min-width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; background: #edf1eb; }
+.removedItems > div { padding: 0 8px 8px; display: grid; gap: 6px; }
+.removedItems article { padding: 8px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 9px; border: 1px solid #e2e8e0; border-radius: 9px; background: #f8faf7; }
+.removedItems article > div:first-child { min-width: 0; display: grid; gap: 3px; }
+.removedItems article strong { overflow-wrap: anywhere; font-size: 10px; }
+.removedItems article small { color: #748078; font-size: 8px; }
+.removedItems article > div:last-child { display: grid; grid-template-columns: 70px auto; gap: 5px; }
+.removedItems article button { min-height: 39px; padding: 0 9px; border: 0; border-radius: 9px; background: #dfeedd; color: #245b39; font-size: 9px; font-weight: 850; cursor: pointer; }
+.metadataForm { display: grid; gap: 11px; }
+.metadataForm > label { display: grid; gap: 4px; }
+.readOnlyMeta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.readOnlyMeta div { min-width: 0; padding: 8px; display: grid; gap: 3px; border: 1px solid #dce4da; border-radius: 9px; background: #fff; }
+.readOnlyMeta span { color: #788078; font-size: 7px; font-weight: 800; text-transform: uppercase; }
+.readOnlyMeta strong { overflow-wrap: anywhere; font-size: 10px; }
+.managerPrimaryButton { min-height: 42px; border: 0; border-radius: 9px; background: #1b5836; color: #fff; font: 850 11px/1 Inter, sans-serif; cursor: pointer; }
+.managerPrimaryButton:disabled { opacity: .5; cursor: not-allowed; }
+.historyList { margin: 0; padding: 2px 0 2px 5px; list-style: none; }
+.historyList li { position: relative; min-width: 0; padding: 0 0 15px 23px; }
+.historyList li::before { content: ""; position: absolute; left: 5px; top: 11px; bottom: -3px; width: 1px; background: #cbd8c9; }
+.historyList li:last-child::before { display: none; }
+.historyList li > span { position: absolute; left: 0; top: 4px; width: 11px; height: 11px; border: 3px solid #e6efe3; border-radius: 50%; background: #2f744b; box-sizing: content-box; }
+.historyList li > div { min-width: 0; padding: 9px 10px; display: grid; gap: 3px; border: 1px solid #dce4da; border-radius: 10px; background: #fff; }
+.historyList strong { overflow-wrap: anywhere; font-size: 11px; }
+.historyList small { color: #6e7b72; font-size: 8px; }
+.historyList p { margin: 3px 0 0; color: #405647; font-size: 9px; line-height: 1.4; }
+.historyPanel { display: grid; gap: 9px; }
+.historyPanel > p { margin: 0; color: #69766d; font-size: 9px; }
+.historyPanel > button { min-height: 40px; border: 1px solid #c7d5c5; border-radius: 9px; background: #fff; color: #1c5636; font-size: 10px; font-weight: 850; cursor: pointer; }
+.historyPanel > button:disabled { opacity: .5; cursor: wait; }
+.emptyState { margin: 0; padding: 24px 12px; border: 1px dashed #cbd8c9; border-radius: 11px; background: #fff; color: #6c786f; font-size: 10px; text-align: center; }
+.managerState { min-height: 220px; display: grid; place-content: center; justify-items: center; gap: 12px; color: #65736a; text-align: center; }
+.managerState strong { max-width: 320px; font-size: 12px; line-height: 1.45; }
+.managerState button { min-height: 38px; padding: 0 12px; border: 1px solid #c7d4c5; border-radius: 9px; background: #fff; color: #1b5033; font-weight: 800; cursor: pointer; }
+.managerFooter { min-height: 52px; padding: 8px 12px max(8px, env(safe-area-inset-bottom)); display: flex; align-items: center; justify-content: space-between; gap: 9px; border-top: 1px solid #d8e1d6; background: #fff; }
+.managerFooter > div { min-width: 0; display: grid; gap: 2px; }
+.managerFooter span, .managerFooter strong { overflow-wrap: anywhere; font-size: 9px; line-height: 1.35; }
+.managerError { color: #9d3d32; }
+.managerFooter button { flex: 0 0 auto; min-height: 35px; padding: 0 10px; border: 1px solid #c7d5c5; border-radius: 8px; background: #eff5ed; color: #1c5636; font-size: 9px; font-weight: 850; cursor: pointer; }
+
 @media (max-width: 720px) {
   .page { padding: 8px; }
+  .page :global(.statement-actions) { display: grid; grid-template-columns: 1fr 1fr; }
+  .page :global(.statement-actions) a,
+  .page :global(.statement-actions) button { min-width: 0; min-height: 44px; padding: 0 9px; text-align: center; }
+  .page :global(.statement-actions) button:first-child { grid-column: 1 / -1; }
   .document { padding: 18px; border-radius: 10px; }
   .document h1 { margin-top: 20px; font-size: 24px; }
   .meta { grid-template-columns: 1fr 1fr; }
   .tableWrap table { min-width: 720px; }
   .signatures { grid-template-columns: 1fr; gap: 28px; }
+  .managerBackdrop { align-items: stretch; background: #f7f9f5; backdrop-filter: none; }
+  .managerPanel { width: 100%; height: 100dvh; border: 0; border-radius: 0; box-shadow: none; }
+  .managerHeader { padding: max(12px, env(safe-area-inset-top)) 13px 11px; }
+  .managerHeader h2 { font-size: 21px; }
+  .managerTabs { padding: 7px 8px; }
+  .managerTabs button { min-height: 42px; padding: 0 4px; font-size: 10px; }
+  .managerBody { padding: 10px; }
+  .reasonField { grid-template-columns: 1fr; gap: 4px; }
+  .reasonField input, .metadataForm input, .metadataForm select, .metadataForm textarea,
+  .quantityEditor input, .removedItems input { font-size: 16px; }
+  .itemsToolbar { align-items: stretch; flex-direction: column; }
+  .itemsToolbar a { width: 100%; min-height: 42px; }
+  .managedItem { padding: 10px; }
+  .managedItemIdentity { grid-template-columns: 1fr; }
+  .managedItemIdentity dl { grid-template-columns: repeat(3, 1fr); }
+  .quantityEditor { grid-template-columns: 42px minmax(72px, 1fr) 42px; }
+  .quantityEditor > button { height: 44px; }
+  .quantityEditor label input { height: 44px; }
+  .quantityEditor .saveItemButton { grid-column: 1 / -1; width: 100%; min-height: 42px; }
+  .legacyLinkEditor { grid-template-columns: 1fr; }
+  .legacyLinkEditor select { height: 44px; font-size: 16px; }
+  .legacyLinkEditor button { min-height: 42px; }
+  .itemDangerRow { align-items: stretch; flex-direction: column; }
+  .itemDangerRow button { min-height: 40px; }
+  .removedItems article { grid-template-columns: 1fr; }
+  .removedItems article > div:last-child { grid-template-columns: minmax(70px, 1fr) 1.5fr; }
+  .removedItems article input, .removedItems article button { min-height: 44px; }
+  .readOnlyMeta { grid-template-columns: 1fr; }
+  .managerPrimaryButton { min-height: 46px; }
+  .managerFooter { min-height: 48px; align-items: stretch; flex-direction: column; }
+  .managerFooter button { width: 100%; min-height: 42px; }
 }
 
 @page { size: A4 landscape; margin: 12mm; }
 @media print {
   .page { padding: 0; background: #fff; }
   .page :global(.statement-actions) { display: none !important; }
+  .managerBackdrop { display: none !important; }
   .document { width: auto; margin: 0; padding: 0; border: 0; border-radius: 0; box-shadow: none; }
   .legacyNote { background: transparent; border: 1px solid #bbb; }
   .tableWrap { overflow: visible; }

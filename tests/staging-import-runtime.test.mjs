@@ -63,6 +63,7 @@ const migrationUrls = [
     "0032_fearless_alex_power.sql",
     "0033_burly_human_fly.sql",
     "0034_worthless_big_bertha.sql",
+    "0035_soft_warstar.sql",
   ].map((file) => new URL(`../drizzle/${file}`, import.meta.url));
 
 async function fixturePlan() {
@@ -423,6 +424,23 @@ test("staging reset atomically clears domain/import rows while preserving migrat
       'Reset material', '', 2026, 'Підручники', 1, '2026-09-10T00:00:00.000Z')
   `).run();
   database.prepare(`
+    INSERT INTO class_loan_statement_item_links (
+      statement_line_id, class_loan_item_id, origin, created_at
+    ) VALUES ('CLSL-RESET', 'CLI-RESET', 'issued', '2026-09-10T00:00:00.000Z')
+  `).run();
+  database.prepare(`
+    INSERT INTO class_loan_item_adjustments (
+      id, request_id, class_loan_id, class_loan_item_id, statement_line_id,
+      transaction_id, action, quantity_before, quantity_after,
+      quantity_returned_snapshot, stock_delta, location_id, condition, reason,
+      actor_user_id, created_at
+    ) VALUES (
+      'CLADJ-RESET', '77777777-7777-4777-8777-777777777777', 'CLOAN-RESET',
+      'CLI-RESET', 'CLSL-RESET', 'CLTX-RESET', 'quantity_changed', 1, 1,
+      0, 0, ?, 'unspecified', 'Reset fixture', ?, '2026-09-10T00:00:00.000Z'
+    )
+  `).run(locationId, actorId);
+  database.prepare(`
     INSERT INTO visit_teacher_credentials (
       teacher_user_id, login_id, code_hmac, status, version, failed_attempts,
       failure_window_started_at, locked_until, last_login_at, code_rotated_at,
@@ -511,6 +529,8 @@ test("staging reset atomically clears domain/import rows while preserving migrat
   );
   assert.equal(report.deletedByTable.migration_import_runs, 1);
   assert.equal(report.deletedByTable.mutation_commands, 1);
+  assert.equal(report.deletedByTable.class_loan_item_adjustments, 1);
+  assert.equal(report.deletedByTable.class_loan_statement_item_links, 1);
   assert.equal(report.deletedByTable.class_loan_statement_lines, 1);
   assert.equal(report.deletedByTable.class_loan_transaction_lines, 1);
   assert.equal(report.deletedByTable.class_loan_transactions, 1);
@@ -535,12 +555,18 @@ test("staging reset atomically clears domain/import rows while preserving migrat
   assert.equal(report.deletedByTable.textbook_assignments, 1);
   assert.equal(report.deletedByTable.manual_textbooks, 1);
   assert.equal(report.deletedByTable.material_metadata_enrichments, 1);
-  assert.ok(report.batchStatements <= 55, `reset used ${report.batchStatements} statements`);
+  assert.ok(report.batchStatements <= 60, `reset used ${report.batchStatements} statements`);
+  assert.equal(database.prepare("SELECT count(*) AS count FROM class_loan_item_adjustments").get().count, 0);
+  assert.equal(database.prepare("SELECT count(*) AS count FROM class_loan_statement_item_links").get().count, 0);
   assert.equal(database.prepare("SELECT count(*) AS count FROM class_loan_statement_lines").get().count, 0);
   assert.equal(database.prepare(`
     SELECT count(*) AS count FROM sqlite_schema
-    WHERE type = 'trigger' AND name = 'class_loan_statement_lines_immutable_delete'
-  `).get().count, 1);
+    WHERE type = 'trigger' AND name IN (
+      'class_loan_statement_lines_immutable_delete',
+      'class_loan_statement_item_links_immutable_delete',
+      'class_loan_item_adjustments_immutable_delete'
+    )
+  `).get().count, 3);
   assert.equal(database.prepare("SELECT count(*) AS count FROM librarian_drafts").get().count, 1);
   assert.equal(database.prepare("SELECT count(*) AS count FROM librarian_draft_events").get().count, 1);
   assert.deepEqual(database.prepare(`
@@ -579,8 +605,12 @@ test("a failing staging reset rolls back content rows, FTS and import history", 
   );
   assert.equal(database.prepare(`
     SELECT count(*) AS count FROM sqlite_schema
-    WHERE type = 'trigger' AND name = 'class_loan_statement_lines_immutable_delete'
-  `).get().count, 1);
+    WHERE type = 'trigger' AND name IN (
+      'class_loan_statement_lines_immutable_delete',
+      'class_loan_statement_item_links_immutable_delete',
+      'class_loan_item_adjustments_immutable_delete'
+    )
+  `).get().count, 3);
 });
 
 test("single oversized tuples are rejected before a D1 statement is prepared", async () => {

@@ -164,6 +164,7 @@ export type ClassLoanCreateInput = {
   requestId: string;
   classYearId: string;
   expectedClassYearVersion: number;
+  expectedClassLoanId: string | null;
   responsibleTeacherUserId: string;
   issuedAt: string;
   dueAt: string | null;
@@ -184,6 +185,41 @@ export type ClassLoanReturnInput = {
     condition: "unspecified" | "good" | "worn" | "damaged";
   }>;
 };
+
+export type ClassLoanItemAdjustmentInput = {
+  requestId: string;
+  expectedVersion: number;
+  action: "set_item_quantity" | "remove_item" | "restore_item";
+  classLoanItemId: string;
+  expectedItemVersion: number;
+  quantity: number | null;
+  reason: string;
+};
+
+export type ClassLoanMetadataUpdateInput = {
+  requestId: string;
+  expectedVersion: number;
+  action: "update_metadata";
+  responsibleTeacherUserId: string;
+  dueAt: string | null;
+  notes: string | null;
+  reason: string;
+};
+
+export type ClassLoanLegacyLinkInput = {
+  requestId: string;
+  expectedVersion: number;
+  action: "link_legacy_item";
+  classLoanItemId: string;
+  expectedItemVersion: number;
+  statementLineId: string;
+  reason: string;
+};
+
+export type ClassLoanManagementInput =
+  | ClassLoanItemAdjustmentInput
+  | ClassLoanMetadataUpdateInput
+  | ClassLoanLegacyLinkInput;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const CAT_ID_RE = /^CAT-\d{4,}$/u;
@@ -818,6 +854,7 @@ export function validateClassLoanCreateInput(
       "requestId",
       "classYearId",
       "expectedClassYearVersion",
+      "expectedClassLoanId",
       "responsibleTeacherUserId",
       "issuedAt",
       "dueAt",
@@ -841,6 +878,16 @@ export function validateClassLoanCreateInput(
     1,
     Number.MAX_SAFE_INTEGER,
   );
+  const expectedClassLoanId = input.expectedClassLoanId === undefined
+    || input.expectedClassLoanId === null
+    ? null
+    : readPatternText(
+      input.expectedClassLoanId,
+      SAFE_ID_RE,
+      "expectedClassLoanId",
+      "Некоректна цільова відомість.",
+      errors,
+    );
   const responsibleTeacherUserId = readPatternText(
     input.responsibleTeacherUserId,
     SAFE_ID_RE,
@@ -861,6 +908,7 @@ export function validateClassLoanCreateInput(
     requestId,
     classYearId,
     expectedClassYearVersion,
+    expectedClassLoanId,
     responsibleTeacherUserId,
     issuedAt,
     dueAt,
@@ -951,6 +999,163 @@ export function validateClassLoanReturnInput(
     returnedAt,
     notes,
     items,
+  });
+}
+
+export function validateClassLoanManagementInput(
+  input: unknown,
+): ValidationResult<ClassLoanManagementInput> {
+  const errors: Record<string, string> = {};
+  if (!isRecord(input)) return invalid("body", "Очікуються дані зміни відомості.");
+  const action = readEnum(
+    input.action,
+    ["set_item_quantity", "remove_item", "restore_item", "update_metadata", "link_legacy_item"] as const,
+    "action",
+    errors,
+  );
+  const requestId = readUuid(input.requestId, "requestId", errors);
+  const expectedVersion = readBoundedInteger(
+    input.expectedVersion,
+    "expectedVersion",
+    errors,
+    1,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const reason = readRequiredText(input.reason, "reason", errors, 500);
+  if (reason.length > 0 && reason.length < 2) {
+    errors.reason = "Опишіть причину щонайменше двома символами.";
+  }
+
+  if (action === "update_metadata") {
+    assertExactKeys(
+      input,
+      [
+        "requestId",
+        "expectedVersion",
+        "action",
+        "responsibleTeacherUserId",
+        "dueAt",
+        "notes",
+        "reason",
+      ],
+      errors,
+    );
+    const responsibleTeacherUserId = readPatternText(
+      input.responsibleTeacherUserId,
+      SAFE_ID_RE,
+      "responsibleTeacherUserId",
+      "Оберіть відповідального вчителя.",
+      errors,
+    );
+    const dueAt = input.dueAt === null
+      ? null
+      : readIsoDate(input.dueAt, "dueAt", errors);
+    const notes = readOptionalText(input.notes, "notes", errors, 2000);
+    return finish(errors, {
+      requestId,
+      expectedVersion,
+      action,
+      responsibleTeacherUserId,
+      dueAt,
+      notes,
+      reason,
+    });
+  }
+
+  if (action === "link_legacy_item") {
+    assertExactKeys(
+      input,
+      [
+        "requestId",
+        "expectedVersion",
+        "action",
+        "classLoanItemId",
+        "expectedItemVersion",
+        "statementLineId",
+        "reason",
+      ],
+      errors,
+    );
+    return finish(errors, {
+      requestId,
+      expectedVersion,
+      action,
+      classLoanItemId: readPatternText(
+        input.classLoanItemId,
+        SAFE_ID_RE,
+        "classLoanItemId",
+        "Некоректний номер позиції.",
+        errors,
+      ),
+      expectedItemVersion: readBoundedInteger(
+        input.expectedItemVersion,
+        "expectedItemVersion",
+        errors,
+        1,
+        Number.MAX_SAFE_INTEGER,
+      ),
+      statementLineId: readPatternText(
+        input.statementLineId,
+        SAFE_ID_RE,
+        "statementLineId",
+        "Некоректний рядок старої відомості.",
+        errors,
+      ),
+      reason,
+    });
+  }
+
+  const itemAction: ClassLoanItemAdjustmentInput["action"] =
+    action === "set_item_quantity" || action === "restore_item" || action === "remove_item"
+      ? action
+      : "remove_item";
+  assertExactKeys(
+    input,
+    itemAction === "set_item_quantity" || itemAction === "restore_item"
+      ? [
+        "requestId",
+        "expectedVersion",
+        "action",
+        "classLoanItemId",
+        "expectedItemVersion",
+        "quantity",
+        "reason",
+      ]
+      : [
+        "requestId",
+        "expectedVersion",
+        "action",
+        "classLoanItemId",
+        "expectedItemVersion",
+        "reason",
+      ],
+    errors,
+  );
+  const classLoanItemId = readPatternText(
+    input.classLoanItemId,
+    SAFE_ID_RE,
+    "classLoanItemId",
+    "Некоректний номер позиції.",
+    errors,
+  );
+  const expectedItemVersion = readBoundedInteger(
+    input.expectedItemVersion,
+    "expectedItemVersion",
+    errors,
+    1,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const quantity = itemAction === "set_item_quantity" || itemAction === "restore_item"
+    ? readBoundedInteger(input.quantity, "quantity", errors, 1, 1_000_000)
+    : null;
+  return finish(errors, {
+    requestId,
+    expectedVersion,
+    action: itemAction,
+    classLoanItemId,
+    expectedItemVersion,
+    quantity,
+    reason,
   });
 }
 
