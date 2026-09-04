@@ -260,6 +260,13 @@
       "when": 1788383573960,
       "tag": "0036_eager_champions",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1788558637385,
+      "tag": "0037_keen_carlie_cooper",
+      "breakpoints": true
     }
   ]
 }

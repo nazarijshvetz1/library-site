@@ -2408,6 +2408,7 @@ function TeacherOrdersPanel({
   const catalogDialogReturnFocus = useRef<HTMLElement | null>(null);
   const historyLoadRef = useRef(0);
   const catalogLoadRef = useRef(0);
+  const detailLoadRef = useRef(0);
   const storageKey = `library.teacher.orders.pending.v1:${pendingScope}`;
   const cartStorageKey = `library.teacher.orders.cart.v1:${pendingScope}`;
   const catalogStorageKey = teacherCatalogFiltersKey(pendingScope);
@@ -2665,6 +2666,7 @@ function TeacherOrdersPanel({
   }
 
   async function openCatalogDetail(item: TeacherCatalogItem) {
+    const loadId = ++detailLoadRef.current;
     catalogDialogReturnFocus.current = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
@@ -2673,12 +2675,14 @@ function TeacherOrdersPanel({
       const response = await visitApi<TeacherCatalogDetailEnvelope>(
         `/api/catalog-v2/${encodeURIComponent(item.id)}`,
       );
+      if (loadId !== detailLoadRef.current) return;
       setSelectedDetail(response.material);
     } catch {
+      if (loadId !== detailLoadRef.current) return;
       setNotice("Не вдалося відкрити деталі матеріалу.");
       setNoticeTone("error");
     } finally {
-      setDetailLoading(false);
+      if (loadId === detailLoadRef.current) setDetailLoading(false);
     }
   }
 
@@ -2952,9 +2956,11 @@ function TeacherOrdersPanel({
           const cartQuantity = cart[item.id]?.quantity ?? 0;
           const maximumInCart = cartQuantity >= item.availableQuantity;
           return <article key={item.id}>
-            <div className={styles.catalogCardBadges}><span>{catalogGradeLabel(item)}</span><span>{item.subject || item.rubric || "Матеріал"}</span><b data-available={item.availableQuantity > 0 ? "true" : "false"}>{item.availableQuantity > 0 ? "У наявності" : "Немає вільних"}</b></div>
-            <div className={styles.catalogCardBody}><TeacherCover item={item} /><div><strong>{item.title}</strong><span>{[item.author || "Автор не вказаний", item.year || "Рік не вказано"].join(" · ")}</span><small>{item.id}{item.publisher ? ` · ${item.publisher}` : ""}</small></div></div>
-            <div className={styles.catalogStock}><span><strong>{item.totalQuantity}</strong><small>примірників</small></span><span><strong>{item.availableQuantity}</strong><small>доступно</small></span></div>
+            <button type="button" className={styles.catalogCardOpen} aria-label={`Відкрити інформацію та замовлення: ${item.title}`} aria-haspopup="dialog" onClick={() => void openCatalogDetail(item)}>
+              <span className={styles.catalogCardBadges}><span>{catalogGradeLabel(item)}</span><span>{item.subject || item.rubric || "Матеріал"}</span><b data-available={item.availableQuantity > 0 ? "true" : "false"}>{item.availableQuantity > 0 ? "У наявності" : "Немає вільних"}</b></span>
+              <span className={styles.catalogCardBody}><TeacherCover item={item} /><span><strong>{item.title}</strong><span>{[item.author || "Автор не вказаний", item.year || "Рік не вказано"].join(" · ")}</span><small>{item.id}{item.publisher ? ` · ${item.publisher}` : ""}</small></span></span>
+              <span className={styles.catalogStock}><span><strong>{item.totalQuantity}</strong><small>примірників</small></span><span><strong>{item.availableQuantity}</strong><small>доступно</small></span></span>
+            </button>
             <div className={styles.catalogCardActions}>
               <button type="button" className={styles.catalogDetailsButton} aria-label={`Переглянути деталі: ${item.title}`} onClick={() => void openCatalogDetail(item)} disabled={detailLoading}><SiteIcon name="info" size={16} /> Детальніше</button>
               <button type="button" aria-label={`${cartQuantity > 0 ? "Додати ще" : "Додати до кошика"}: ${item.title}`} onClick={() => add(item)} disabled={submitting || Boolean(pending) || item.availableQuantity < 1 || maximumInCart || cartRows.length >= 10 && !cart[item.id]}>

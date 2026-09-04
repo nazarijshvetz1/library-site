@@ -7,6 +7,7 @@ import {
   BellOff,
   BookCopy,
   BookDown,
+  BookOpen,
   BookOpenCheck,
   BookPlus,
   BookUp,
@@ -70,6 +71,7 @@ import {
 const SITE_ICONS = {
   home: House,
   fund: LibraryBig,
+  textbooks: BookOpen,
   circulation: BookOpenCheck,
   requests: ClipboardList,
   visits: CalendarClock,

@@ -508,13 +508,14 @@ test("scheduled pickup queues exact five-minute Telegram reminders and issue can
     { ...context.sqlite.prepare("SELECT scheduled_issue_at FROM material_requests WHERE id=?").get(request.id) },
     { scheduled_issue_at: scheduledIssueAt },
   );
-  const reminders = context.sqlite.prepare(`SELECT recipient_user_id,type,message,next_attempt_at,status
+  const reminders = context.sqlite.prepare(`SELECT recipient_user_id,type,message,next_attempt_at,expires_at,status
     FROM telegram_delivery_outbox
     WHERE entity_id=? AND type IN ('material_request_pickup_reminder','material_request_prepare_reminder')
     ORDER BY recipient_user_id`).all(request.id).map((row) => ({ ...row }));
   assert.equal(reminders.length, 2);
   assert.deepEqual(reminders.map((row) => row.recipient_user_id), ["USR-LIB", "USR-T1"]);
   assert.equal(reminders.every((row) => row.next_attempt_at === "2099-01-01T09:55:00.000Z"), true);
+  assert.equal(reminders.every((row) => row.expires_at === scheduledIssueAt), true);
   assert.equal(reminders.every((row) => row.status === "pending"), true);
   assert.equal(reminders.every((row) => row.message.includes("Кабінет 205")), true);
 
@@ -531,6 +532,25 @@ test("scheduled pickup queues exact five-minute Telegram reminders and issue can
     { status: "dead", last_error_code: "request_issued" },
     { status: "dead", last_error_code: "request_issued" },
   ]);
+});
+
+test("a current-minute pickup succeeds without queuing an already expired reminder", async () => {
+  const context = openDatabase();
+  const request = await createRequest(context, 1);
+  const scheduledIssueAt = new Date(Date.now() - 30_000).toISOString();
+  const ready = await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
+    requestId: commandId(), expectedVersion: request.version, action: "ready",
+    pickupLocationId: "LOC-205", scheduledIssueAt, dueAt: null,
+    items: [{
+      itemId: request.items[0].id, approvedQuantity: 1,
+      sourceLocationId: "LOC-LIB", condition: "good", expectedAvailableQuantity: 5,
+    }],
+  });
+  assert.equal(ready.scheduledIssueAt, scheduledIssueAt);
+  assert.equal(context.sqlite.prepare(`SELECT COUNT(*) AS n FROM telegram_delivery_outbox
+    WHERE entity_id=? AND type IN ('material_request_pickup_reminder','material_request_prepare_reminder')`
+  ).get(request.id).n, 0);
+  context.sqlite.close();
 });
 
 test("teacher notification deletion is a hidden, idempotent soft-delete", async () => {

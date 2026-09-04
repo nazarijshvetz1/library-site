@@ -51,6 +51,13 @@ export function librarianToolHref(tool: string, telegramMiniApp = false): string
     : `/librarian?${params.toString()}`;
 }
 
+/** Auth-preserving e-textbook management destination for web and Telegram Mini App. */
+export function librarianTextbooksHref(telegramMiniApp = false): string {
+  return telegramMiniApp
+    ? "/librarian/telegram/cabinet?target=textbooks"
+    : "/librarian/textbooks";
+}
+
 /** Full-page destinations used by both the website and Telegram Mini App shells. */
 export function librarianSectionHref(
   section: LibrarianSection,

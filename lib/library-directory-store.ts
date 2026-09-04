@@ -1,9 +1,11 @@
 import type { CatalogD1Database } from "@/lib/catalog-d1";
+import { teacherPhotoUrl } from "./teacher-profile-store.ts";
 
 export type LibraryTeacher = {
   id: string;
   fullName: string;
   subjectPosition: string;
+  photoUrl: string | null;
   primaryLocation: { id: string; name: string } | null;
 };
 
@@ -87,6 +89,9 @@ export async function readLibraryReferenceData(
         u.id,
         u.full_name,
         tp.subject_position,
+        tp.photo_storage_key,
+        tp.photo_version,
+        tp.photo_updated_at,
         primary_location.id AS primary_location_id,
         primary_location.name AS primary_location_name
       FROM users u
@@ -113,6 +118,14 @@ export async function readLibraryReferenceData(
         id: boundedText(source.id, 64),
         fullName: boundedText(source.full_name, 300),
         subjectPosition: boundedText(source.subject_position, 160),
+        photoUrl: source.photo_storage_key
+          ? teacherPhotoUrl(
+              "librarian",
+              boundedText(source.id, 64),
+              nonNegativeInteger(source.photo_version),
+              boundedText(source.photo_updated_at, 40) || null,
+            )
+          : null,
         primaryLocation: primaryLocationId && primaryLocationName
           ? { id: primaryLocationId, name: primaryLocationName }
           : null,

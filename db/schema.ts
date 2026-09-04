@@ -2885,6 +2885,7 @@ export const telegramDeliveryOutbox = sqliteTable(
     status: text("status", { enum: telegramDeliveryStatuses }).notNull().default("pending"),
     attempts: integer("attempts").notNull().default(0),
     nextAttemptAt: text("next_attempt_at").notNull(),
+    expiresAt: text("expires_at"),
     leaseToken: text("lease_token"),
     leaseExpiresAt: text("lease_expires_at"),
     telegramMessageId: text("telegram_message_id"),

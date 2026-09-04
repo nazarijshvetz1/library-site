@@ -181,6 +181,7 @@ type LibraryTeacher = {
   id: string;
   fullName: string;
   subjectPosition: string;
+  photoUrl: string | null;
   primaryLocation: { id: string; name: string } | null;
 };
 
@@ -5419,7 +5420,7 @@ function LoanReturnWorkspace({
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => selectTeacher(teacher)}
               >
-                <span aria-hidden="true">{teacherInitials(teacher.fullName)}</span>
+                <ReturnTeacherAvatar teacher={teacher} />
                 <strong>{teacher.fullName}</strong>
               </button>
             )) : <p>Збігів у довіднику немає.</p>}
@@ -5596,7 +5597,7 @@ function LoanReturnForm({
   return (
     <form className={styles.returnForm} aria-busy={saving} onSubmit={submit}>
       <div className={styles.returnTeacherSummary}>
-        <span aria-hidden="true">{teacherInitials(teacher.fullName)}</span>
+        <ReturnTeacherAvatar teacher={teacher} />
         <div>
           <small>Повна картка видач</small>
           <strong>{teacher.fullName}</strong>
@@ -7166,6 +7167,17 @@ function clearPendingClassCirculationIntent(kind: ClassCirculationIntentKind): v
   } catch {
     // A completed or terminal server response remains authoritative.
   }
+}
+
+function ReturnTeacherAvatar({ teacher }: { teacher: LibraryTeacher }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <span className={styles.returnTeacherAvatar} aria-hidden="true">
+      {teacher.photoUrl && !failed
+        ? <img src={teacher.photoUrl} alt="" onError={() => setFailed(true)} />
+        : <span>{teacherInitials(teacher.fullName)}</span>}
+    </span>
+  );
 }
 
 function safeWorkspaceIdentifier(value: string | null): string {

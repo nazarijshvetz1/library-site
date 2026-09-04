@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import SiteIcon from "@/app/_components/site-icon";
 import LibrarianShell from "../_components/librarian-shell";
+import { librarianToolHref } from "../_components/librarian-routes";
 import styles from "./textbook-management.module.css";
 
 type ManagedTextbook = {
@@ -69,11 +70,13 @@ export default function TextbookManagementWorkspace({
   role,
   writesEnabled,
   signOutHref,
+  telegramMiniApp = false,
 }: {
   displayName: string;
   role: string;
   writesEnabled: boolean;
   signOutHref: string;
+  telegramMiniApp?: boolean;
 }) {
   const [grade, setGrade] = useState(1);
   const [query, setQuery] = useState("");
@@ -91,6 +94,7 @@ export default function TextbookManagementWorkspace({
   const [linkDrafts, setLinkDrafts] = useState<Record<string, string>>({});
   const [selectedItemId, setSelectedItemId] = useState("");
   const [manualCreateOpen, setManualCreateOpen] = useState(false);
+  const loadRequestRef = useRef(0);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => setDebouncedQuery(query.trim()), 250);
@@ -99,32 +103,42 @@ export default function TextbookManagementWorkspace({
 
   useEffect(() => {
     const controller = new AbortController();
+    const requestId = ++loadRequestRef.current;
     setLoading(true);
-    fetch(`/api/librarian/textbooks?grade=${grade}&q=${encodeURIComponent(debouncedQuery)}`, {
-      cache: "no-store",
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        const body = await response.json() as {
+    setItems([]);
+    setCandidates([]);
+    setAcademicYear("");
+    setSelectedItemId("");
+    setMessage((current) => current?.tone === "error" ? null : current);
+    void (async () => {
+      try {
+        const response = await fetch(`/api/librarian/textbooks?grade=${grade}&q=${encodeURIComponent(debouncedQuery)}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const body = await responseBody<{
           success?: boolean;
           error?: string;
           academicYear?: { label?: string };
           items?: ManagedTextbook[];
           candidates?: Candidate[];
-        };
+        }>(response, "Не вдалося завантажити список е-підручників.");
         if (!response.ok || body.success !== true) throw new Error(body.error || "Не вдалося завантажити список.");
+        if (controller.signal.aborted || requestId !== loadRequestRef.current) return;
         const nextItems = Array.isArray(body.items) ? body.items : [];
         setItems(nextItems);
         setCandidates(Array.isArray(body.candidates) ? body.candidates : []);
         setAcademicYear(body.academicYear?.label || "");
         setOrderDrafts(Object.fromEntries(nextItems.map((item) => [item.id, String(item.sortOrder)])));
-      })
-      .catch((reason: unknown) => {
-        if (!controller.signal.aborted) setMessage({ tone: "error", text: errorMessage(reason) });
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
+        setMessage((current) => current?.tone === "error" ? null : current);
+      } catch (reason) {
+        if (!controller.signal.aborted && requestId === loadRequestRef.current) {
+          setMessage({ tone: "error", text: errorMessage(reason) });
+        }
+      } finally {
+        if (!controller.signal.aborted && requestId === loadRequestRef.current) setLoading(false);
+      }
+    })();
     return () => controller.abort();
   }, [grade, debouncedQuery, refreshKey]);
 
@@ -317,19 +331,20 @@ export default function TextbookManagementWorkspace({
       roleLabel={role === "admin" ? "Адміністратор" : "Бібліотекар"}
       writesEnabled={writesEnabled}
       signOutHref={signOutHref}
+      telegramMiniApp={telegramMiniApp}
     >
       <main className={styles.workspace}>
         <header className={styles.titleRow}>
           <div><p>Фонд · цифрова полиця</p><h1>Каталог е-підручників</h1><span>Додавайте підручники з фонду або створюйте цифрові записи вручну. Ручні записи не змінюють примірники, залишки, видачі та звіти.</span></div>
           <nav className={styles.titleActions} aria-label="Переходи каталогу е-підручників">
-            <a href="/librarian?tool=catalog"><SiteIcon name="previous" size={17} /> До фонду</a>
+            <a href={librarianToolHref("catalog", telegramMiniApp)}><SiteIcon name="previous" size={17} /> До фонду</a>
             <a href="/textbooks" target="_blank" rel="noopener noreferrer">Відкрити для учнів <SiteIcon name="external" size={17} /></a>
           </nav>
         </header>
 
         <section className={styles.toolbar} aria-label="Параметри списку">
           <label><span>Навчальний рік</span><strong>{academicYear || "Завантаження…"}</strong></label>
-          <label><span>Клас</span><select value={grade} onChange={(event) => { setGrade(Number(event.target.value)); setQuery(""); }} aria-label="Клас">{Array.from({ length: 11 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1} клас</option>)}</select></label>
+          <label><span>Клас</span><select value={grade} onChange={(event) => { setGrade(Number(event.target.value)); setQuery(""); setDebouncedQuery(""); }} aria-label="Клас">{Array.from({ length: 11 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1} клас</option>)}</select></label>
           <label><span>Стан</span><select value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)} aria-label="Стан"><option value="list">У списку</option><option value="published">Опубліковані</option><option value="draft">Чернетки</option><option value="archived">Вилучені</option><option value="all">Усі записи</option></select></label>
           <label><span>Сортування</span><select value={sort} onChange={(event) => setSort(event.target.value as SortMode)} aria-label="Сортування"><option value="manual">Ручний порядок</option><option value="title">За назвою</option><option value="subject">За предметом</option><option value="newest">За роком</option></select></label>
           <button type="button" onClick={() => setRefreshKey((value) => value + 1)} disabled={loading}><SiteIcon name={loading ? "loading" : "refresh"} size={17} /> Оновити</button>
@@ -643,9 +658,20 @@ function manualPayload(draft: ManualDraft) {
 
 async function apiJson<T>(url: string, init: RequestInit): Promise<T> {
   const response = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...(init.headers ?? {}) } });
-  const body = await response.json() as T & { success?: boolean; error?: string };
+  const body = await responseBody<T & { success?: boolean; error?: string }>(response, "Не вдалося зберегти зміну.");
   if (!response.ok || body.success === false) throw new Error(body.error || "Не вдалося зберегти зміну.");
   return body;
+}
+
+async function responseBody<T>(response: Response, fallback: string): Promise<T> {
+  const text = await response.text();
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!parsed || typeof parsed !== "object") throw new Error(fallback);
+    return parsed as T;
+  } catch {
+    throw new Error(response.ok ? fallback : "Сервіс е-підручників тимчасово недоступний. Оновіть сторінку й спробуйте ще раз.");
+  }
 }
 
 function compare(a: string, b: string): number { return a.localeCompare(b, "uk-UA", { sensitivity: "base" }); }

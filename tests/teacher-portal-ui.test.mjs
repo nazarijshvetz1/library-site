@@ -352,7 +352,13 @@ test("teacher orders and notifications page with the frozen opaque cursor", asyn
   assert.match(orders, /catalogFound !== null && catalogFound !== undefined/u);
   assert.match(orders, /Кількість матеріалів невідома/u);
   assert.match(orders, />Повторити</u);
-  assert.match(orders, /aria-label=\{`Переглянути деталі: \$\{item\.title\}`\}/u);
+  assert.match(orders, /className=\{styles\.catalogCardOpen\}/u);
+  assert.match(orders, /aria-label=\{`Відкрити інформацію та замовлення: \$\{item\.title\}`\}/u);
+  assert.match(orders, /aria-haspopup="dialog"/u);
+  assert.match(orders, /const detailLoadRef = useRef\(0\)/u);
+  assert.match(orders, /loadId !== detailLoadRef\.current/u);
+  assert.match(css, /\.catalogCardOpen \{[\s\S]*?cursor: pointer;[\s\S]*?text-align: left;/u);
+  assert.match(css, /caret-color: #173f2b/u);
   assert.match(orders, /Сортування/u);
   assert.match(orders, /<label>Клас/u);
   assert.match(orders, /<label>Рубрика/u);

@@ -1806,6 +1806,9 @@ async function readyMaterialRequest(
     nowDate.getTime(),
     new Date(scheduledIssueAt).getTime() - reminderLeadMs,
   )).toISOString() : null;
+  const reminderDeadlineInFuture = scheduledIssueAt
+    ? new Date(scheduledIssueAt).getTime() > nowDate.getTime()
+    : false;
   const scheduledLabel = scheduledIssueAt ? formatKyivDateTime(scheduledIssueAt) : "без визначеного часу";
   const reservationRows = states.map((state) => ({
     id: `MRR-${crypto.randomUUID()}`,
@@ -2003,7 +2006,7 @@ async function readyMaterialRequest(
     { status, version: current.version + 1, updatedAt: now },
     now,
   ));
-  if (reminderAt && scheduledIssueAt) {
+  if (reminderAt && scheduledIssueAt && reminderDeadlineInFuture) {
     const approvedReminderItems = itemApprovals.filter((item) => item.approvedQuantity > 0);
     const reminderItems = approvedReminderItems.slice(0, 3)
       .map((item) => `${currentByItem.get(item.itemId)?.title ?? "Матеріал"} — ${item.approvedQuantity} прим.`)
@@ -2024,6 +2027,7 @@ async function readyMaterialRequest(
         entityId: current.id,
         createdAt: now,
         deliverAt: reminderAt,
+        expiresAt: scheduledIssueAt,
       }),
       queueTelegramForLibrariansStatement(db, {
         dedupeKey: `material-request:${current.id}:prepare-reminder`,
@@ -2037,6 +2041,7 @@ async function readyMaterialRequest(
         entityId: current.id,
         createdAt: now,
         deliverAt: reminderAt,
+        expiresAt: scheduledIssueAt,
       }),
     );
   } else {
@@ -2855,6 +2860,7 @@ async function releaseMaterialRequest(
           entityId: current.id,
           createdAt: now,
           deliverAt: refreshedReminderAt,
+          expiresAt: current.scheduledIssueAt,
         })]
         : []),
     completeCommandStatement(db, input.requestId, result, now),

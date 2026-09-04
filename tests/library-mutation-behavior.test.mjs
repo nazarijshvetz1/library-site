@@ -894,11 +894,15 @@ test("actual count, teacher issue and partial/full returns keep one balanced sto
     sqlite.prepare("SELECT due_at FROM loans WHERE id = ?").get(loan.loanId).due_at,
     "2026-09-01",
   );
+  sqlite.prepare(`UPDATE teacher_profiles
+    SET photo_storage_key='teacher-photos/USR-TCH/profile.jpg',photo_version=2,photo_updated_at=?
+    WHERE teacher_user_id='USR-TCH'`).run("2026-08-11T08:00:00.000Z");
   const reference = await directory.readLibraryReferenceData(d1);
   assert.deepEqual(reference.teachers, [{
     id: "USR-TCH",
     fullName: "Ірина Вчитель",
     subjectPosition: "Учитель математики",
+    photoUrl: "/api/librarian/teachers/USR-TCH/photo?v=2-1786435200000",
     primaryLocation: { id: "LOC-001", name: "Бібліотека" },
   }]);
   assert.deepEqual(reference.locations, [{

@@ -23,7 +23,7 @@ export default function TelegramLibrarianLaunch({
   enabled,
   botUsername,
 }: {
-  target: "home" | "visits" | "teachers" | "acquisitions";
+  target: "home" | "visits" | "teachers" | "acquisitions" | "textbooks";
   teacherTab: "overview" | "teachers" | "orders" | "visits" | "telegram";
   enabled: boolean;
   botUsername: string | null;

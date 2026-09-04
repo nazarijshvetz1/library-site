@@ -464,6 +464,7 @@ function ReadyRequestForm({
       {notice ? <div className={styles.error} role="alert">{notice}</div> : null}
       {loading ? <p className={styles.empty}>Перевіряємо фактичні залишки…</p> : <>
         <div className={styles.fields}><label>Місце отримання *<select required value={pickupLocationId} onChange={(event) => setPickupLocationId(event.currentTarget.value)}><option value="">Оберіть активне публічне місце</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label><label>Дата й точний час видачі *<input required type="datetime-local" step="60" value={scheduledIssueAt} onChange={(event) => setScheduledIssueAt(event.currentTarget.value)} /></label><label>Повернути до<input type="date" min={todayInKyiv()} value={dueAt} onChange={(event) => setDueAt(event.currentTarget.value)} /></label></div>
+        <p className={styles.authHelp}>Telegram-нагадування буде поставлено на 5 хвилин раніше за вибраний час. Прострочене нагадування після часу видачі не надсилатиметься.</p>
         <div className={styles.readyRows}>{request.items.map((item) => {
           const options = holdings[item.id] ?? [];
           const row = rows[item.id] ?? { approvedQuantity: 0, sourceKey: "" };

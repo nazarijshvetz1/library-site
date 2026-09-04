@@ -43,6 +43,7 @@ const migrationFiles = [
   "drizzle/0034_worthless_big_bertha.sql",
   "drizzle/0035_soft_warstar.sql",
   "drizzle/0036_eager_champions.sql",
+  "drizzle/0037_keen_carlie_cooper.sql",
 ];
 
 async function migratedDatabase() {
@@ -62,6 +63,42 @@ function asD1(database) {
   });
   return { prepare: (sql) => statement(sql) };
 }
+
+test("0037 adds a delivery deadline and backfills already queued pickup reminders", async () => {
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON;");
+  for (const file of migrationFiles.slice(0, -1)) {
+    database.exec(await readFile(new URL(`../${file}`, import.meta.url), "utf8"));
+  }
+  const now = "2026-09-05T08:00:00.000Z";
+  const scheduledIssueAt = "2026-09-05T09:00:00.000Z";
+  database.prepare(`INSERT INTO users
+    (id,full_name,sort_name,email,auth_user_id,role,status,created_at,updated_at)
+    VALUES ('USR-T37','Учитель','Учитель','teacher-37@example.test','auth-t37','teacher','active',?,?)`
+  ).run(now, now);
+  database.prepare(`INSERT INTO material_requests
+    (id,teacher_user_id,scheduled_issue_at,submitted_at,created_at,updated_at)
+    VALUES ('MRQ-T37','USR-T37',?,?,?,?)`
+  ).run(scheduledIssueAt, now, now, now);
+  database.prepare(`INSERT INTO telegram_delivery_outbox
+    (id,recipient_user_id,dedupe_key,category,type,title,message,target_path,
+      entity_type,entity_id,next_attempt_at,created_at,updated_at)
+    VALUES ('TGO-T37','USR-T37','reminder-t37','orders','material_request_pickup_reminder',
+      'Нагадування','Повідомлення','/teacher','material_request','MRQ-T37',?,?,?)`
+  ).run(now, now, now);
+  database.exec(await readFile(new URL("../drizzle/0037_keen_carlie_cooper.sql", import.meta.url), "utf8"));
+  const column = database.prepare("PRAGMA table_info('telegram_delivery_outbox')").all()
+    .find((row) => row.name === "expires_at");
+  assert.ok(column);
+  assert.equal(column.notnull, 0);
+  assert.equal(column.dflt_value, null);
+  assert.equal(
+    database.prepare("SELECT expires_at FROM telegram_delivery_outbox WHERE id='TGO-T37'").get().expires_at,
+    scheduledIssueAt,
+  );
+  assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+  database.close();
+});
 
 test("0036 adds an optional exact issue time without changing existing requests", async () => {
   const database = await migratedDatabase();

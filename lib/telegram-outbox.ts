@@ -19,6 +19,7 @@ export type TelegramQueueEvent = {
   entityId: string;
   createdAt: string;
   deliverAt?: string;
+  expiresAt?: string;
 };
 
 export function queueTelegramForLibrariansStatement(
@@ -29,11 +30,11 @@ export function queueTelegramForLibrariansStatement(
   return db.prepare(`
     INSERT INTO telegram_delivery_outbox (
       id,recipient_user_id,dedupe_key,category,type,title,message,target_path,
-      entity_type,entity_id,status,attempts,next_attempt_at,lease_token,lease_expires_at,
+      entity_type,entity_id,status,attempts,next_attempt_at,expires_at,lease_token,lease_expires_at,
       telegram_message_id,last_error_code,last_error_message,sent_at,created_at,updated_at
     )
     SELECT 'TGO-' || lower(hex(randomblob(16))),u.id,? || ':' || u.id,?,?,?,?,?,?,?,
-           'pending',0,?,NULL,NULL,NULL,NULL,NULL,NULL,?,?
+           'pending',0,?,?,NULL,NULL,NULL,NULL,NULL,NULL,?,?
     FROM users u JOIN telegram_connections c ON c.user_id=u.id
     WHERE u.status='active' AND u.role IN ('admin','librarian') AND c.status='active'
       AND ((?='orders' AND c.notify_orders=1)
@@ -46,7 +47,7 @@ export function queueTelegramForLibrariansStatement(
     ON CONFLICT(dedupe_key) DO UPDATE SET
       category=excluded.category,type=excluded.type,title=excluded.title,message=excluded.message,
       target_path=excluded.target_path,status='pending',attempts=0,
-      next_attempt_at=excluded.next_attempt_at,lease_token=NULL,lease_expires_at=NULL,
+      next_attempt_at=excluded.next_attempt_at,expires_at=excluded.expires_at,lease_token=NULL,lease_expires_at=NULL,
       telegram_message_id=NULL,last_error_code=NULL,last_error_message=NULL,sent_at=NULL,
       updated_at=excluded.updated_at
     WHERE telegram_delivery_outbox.status!='processing' AND (
@@ -56,6 +57,7 @@ export function queueTelegramForLibrariansStatement(
       OR telegram_delivery_outbox.message!=excluded.message
       OR telegram_delivery_outbox.target_path!=excluded.target_path
       OR telegram_delivery_outbox.next_attempt_at!=excluded.next_attempt_at
+      OR NOT (telegram_delivery_outbox.expires_at IS excluded.expires_at)
     )
   `).bind(
     value.dedupeKey,
@@ -67,6 +69,7 @@ export function queueTelegramForLibrariansStatement(
     value.entityType,
     value.entityId,
     value.deliverAt ?? value.createdAt,
+    value.expiresAt ?? null,
     value.createdAt,
     value.createdAt,
     value.category,
@@ -89,11 +92,11 @@ export function queueTelegramForUserStatement(
   return db.prepare(`
     INSERT INTO telegram_delivery_outbox (
       id,recipient_user_id,dedupe_key,category,type,title,message,target_path,
-      entity_type,entity_id,status,attempts,next_attempt_at,lease_token,lease_expires_at,
+      entity_type,entity_id,status,attempts,next_attempt_at,expires_at,lease_token,lease_expires_at,
       telegram_message_id,last_error_code,last_error_message,sent_at,created_at,updated_at
     )
     SELECT 'TGO-' || lower(hex(randomblob(16))),u.id,? || ':' || u.id,?,?,?,?,?,?,?,
-           'pending',0,?,NULL,NULL,NULL,NULL,NULL,NULL,?,?
+           'pending',0,?,?,NULL,NULL,NULL,NULL,NULL,NULL,?,?
     FROM users u
     JOIN teacher_profiles profile ON profile.teacher_user_id=u.id AND profile.closed_at IS NULL
     JOIN telegram_connections c ON c.user_id=u.id
@@ -108,7 +111,7 @@ export function queueTelegramForUserStatement(
     ON CONFLICT(dedupe_key) DO UPDATE SET
       category=excluded.category,type=excluded.type,title=excluded.title,message=excluded.message,
       target_path=excluded.target_path,status='pending',attempts=0,
-      next_attempt_at=excluded.next_attempt_at,lease_token=NULL,lease_expires_at=NULL,
+      next_attempt_at=excluded.next_attempt_at,expires_at=excluded.expires_at,lease_token=NULL,lease_expires_at=NULL,
       telegram_message_id=NULL,last_error_code=NULL,last_error_message=NULL,sent_at=NULL,
       updated_at=excluded.updated_at
     WHERE telegram_delivery_outbox.status!='processing' AND (
@@ -118,6 +121,7 @@ export function queueTelegramForUserStatement(
       OR telegram_delivery_outbox.message!=excluded.message
       OR telegram_delivery_outbox.target_path!=excluded.target_path
       OR telegram_delivery_outbox.next_attempt_at!=excluded.next_attempt_at
+      OR NOT (telegram_delivery_outbox.expires_at IS excluded.expires_at)
     )
   `).bind(
     value.dedupeKey,
@@ -129,6 +133,7 @@ export function queueTelegramForUserStatement(
     value.entityType,
     value.entityId,
     value.deliverAt ?? value.createdAt,
+    value.expiresAt ?? null,
     value.createdAt,
     value.createdAt,
     userId,
@@ -193,9 +198,11 @@ function normalizedQueueEvent(event: TelegramQueueEvent): TelegramQueueEvent {
     entityType: safeText(event.entityType, 100),
     entityId: safeText(event.entityId, 160),
     deliverAt: event.deliverAt ?? event.createdAt,
+    expiresAt: event.expiresAt,
   };
   if (!value.dedupeKey || !value.auditRequestId || !value.type || !value.title
-    || !value.entityType || !value.entityId || !validIso(value.createdAt) || !validIso(value.deliverAt)) {
+    || !value.entityType || !value.entityId || !validIso(value.createdAt) || !validIso(value.deliverAt)
+    || value.expiresAt && (!validIso(value.expiresAt) || Date.parse(value.expiresAt) <= Date.parse(value.deliverAt))) {
     throw new Error("Invalid Telegram outbox event.");
   }
   return value;

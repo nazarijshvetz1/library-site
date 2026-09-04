@@ -87,6 +87,8 @@ const migrations = [
   "0018_yielding_skaar.sql",
   "0019_kindly_wolfsbane.sql",
   "0027_naive_microbe.sql",
+  "0036_eager_champions.sql",
+  "0037_keen_carlie_cooper.sql",
 ];
 
 async function database() {
@@ -1597,6 +1599,37 @@ test("429 is retried and 403 blocks the connection without losing the event", as
   assert.equal(blocked.sqlite.prepare("SELECT status FROM telegram_delivery_outbox").get().status, "dead");
   assert.equal(blocked.sqlite.prepare("SELECT status FROM telegram_connections").get().status, "blocked");
   blocked.sqlite.close();
+});
+
+test("a pickup reminder is never retried after its scheduled issue time", async () => {
+  const context = await queuedLibrarianContext();
+  context.sqlite.prepare(`UPDATE telegram_delivery_outbox
+    SET type='material_request_prepare_reminder',expires_at='2026-08-22T10:05:00.000Z'
+    WHERE recipient_user_id='USR-LIB'`).run();
+  let fetches = 0;
+  const first = await telegram.drainTelegramOutbox(context.db, {
+    siteOrigin: "https://library.example.test",
+    now: new Date(context.now),
+    fetcher: async () => {
+      fetches += 1;
+      return new Response(JSON.stringify({ ok: false, description: "Too Many Requests", parameters: { retry_after: 600 } }), {
+        status: 429,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
+  assert.deepEqual(first, { attempted: 1, sent: 0, failed: 1 });
+  assert.deepEqual(
+    { ...context.sqlite.prepare("SELECT status,last_error_code FROM telegram_delivery_outbox").get() },
+    { status: "dead", last_error_code: "reminder_expired" },
+  );
+  assert.deepEqual(await telegram.drainTelegramOutbox(context.db, {
+    siteOrigin: "https://library.example.test",
+    now: new Date("2026-08-22T10:10:00.000Z"),
+    fetcher: async () => { fetches += 1; return telegramOk(); },
+  }), { attempted: 0, sent: 0, failed: 0 });
+  assert.equal(fetches, 1);
+  context.sqlite.close();
 });
 
 test("disabled delivery fails closed without a Telegram request", async () => {

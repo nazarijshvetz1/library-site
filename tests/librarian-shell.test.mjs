@@ -6,6 +6,7 @@ import {
   LIBRARIAN_SECTIONS,
   LIBRARY_EMBLEM_URL,
   librarianSectionHref,
+  librarianTextbooksHref,
   librarianToolHref,
   librarianUtilityHref,
 } from "../app/librarian/_components/librarian-routes.ts";
@@ -50,6 +51,8 @@ test("shared librarian route helper freezes web and Telegram Mini App destinatio
   assert.equal(librarianUtilityHref("telegram", true), "/librarian/telegram/cabinet?target=teachers&tab=telegram");
   assert.equal(librarianToolHref("catalog", false), "/librarian?tool=catalog");
   assert.equal(librarianToolHref("catalog", true), "/librarian/telegram/cabinet?target=home&tool=catalog");
+  assert.equal(librarianTextbooksHref(false), "/librarian/textbooks");
+  assert.equal(librarianTextbooksHref(true), "/librarian/telegram/cabinet?target=textbooks");
 });
 
 test("LibrarianShell keeps the official emblem, full-page navigation, and accessible mobile drawer", async () => {
@@ -79,6 +82,8 @@ test("LibrarianShell keeps the official emblem, full-page navigation, and access
   assert.match(source, /onSubsectionNavigate\?: \(id: string\) => void/u);
   assert.match(source, /function standardLibrarianSubsections\(telegramMiniApp: boolean\)/u);
   assert.match(source, /label: "Каталог"[\s\S]*?label: "Новий матеріал"[\s\S]*?label: "Е-підручники"/u);
+  assert.match(source, /label: "Е-підручники"[\s\S]*?librarianTextbooksHref\(telegramMiniApp\)/u);
+  assert.doesNotMatch(source, /telegramMiniApp \? \[\] : \[[\s\S]*?Е-підручники/u);
   assert.match(source, /function mergeSubsections/u);
   assert.match(source, /function SectionControl/u);
   assert.match(source, /if \(onToggle\) \{[\s\S]*?<button/u);

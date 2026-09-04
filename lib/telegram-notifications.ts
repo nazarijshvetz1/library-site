@@ -108,6 +108,7 @@ type OutboxRow = {
   target_path: string;
   attempts: number;
   created_at: string;
+  expires_at: string | null;
 };
 
 export type TelegramTeacherMenuRollout = {
@@ -959,6 +960,12 @@ export async function drainTelegramOutbox(
       SET status='retry',lease_token=NULL,lease_expires_at=NULL,next_attempt_at=?,updated_at=?
       WHERE status='processing' AND lease_expires_at<=?
     `).bind(now, now, now),
+    db.prepare(`
+      UPDATE telegram_delivery_outbox
+      SET status='dead',lease_token=NULL,lease_expires_at=NULL,next_attempt_at=?,
+          last_error_code='reminder_expired',last_error_message='Час нагадування минув.',updated_at=?
+      WHERE status IN ('pending','retry') AND expires_at IS NOT NULL AND expires_at<=?
+    `).bind(now, now, now),
   ]);
   const due = await db.prepare(`
     SELECT o.id,o.recipient_user_id,c.chat_id,c.version AS connection_version,
@@ -967,11 +974,12 @@ export async function drainTelegramOutbox(
         JOIN visit_teacher_credentials credential
           ON credential.teacher_user_id=teacher_profile.teacher_user_id AND credential.status='active'
         WHERE teacher_profile.teacher_user_id=u.id AND teacher_profile.closed_at IS NULL) AS teacher_capability,
-      o.title,o.message,o.target_path,o.attempts,o.created_at
+      o.title,o.message,o.target_path,o.attempts,o.created_at,o.expires_at
     FROM telegram_delivery_outbox o
     JOIN telegram_connections c ON c.user_id=o.recipient_user_id AND c.status='active'
     JOIN users u ON u.id=o.recipient_user_id AND u.status='active'
     WHERE o.status IN ('pending','retry') AND o.next_attempt_at<=?
+      AND (o.expires_at IS NULL OR o.expires_at>?)
       AND ((o.type=? AND ?=1) OR (?=1 AND (c.notify_orders=1 OR c.notify_visits=1)))
       AND ((o.target_path GLOB '/librarian*' AND u.role IN ('admin','librarian'))
         OR (o.target_path NOT GLOB '/librarian*' AND EXISTS (
@@ -981,7 +989,7 @@ export async function drainTelegramOutbox(
         SELECT 1 FROM visit_teacher_credentials credential
         WHERE credential.teacher_user_id=u.id AND credential.status='active'
       ))
-      AND NOT EXISTS (
+      AND (o.type IN ('material_request_pickup_reminder','material_request_prepare_reminder') OR NOT EXISTS (
         SELECT 1 FROM telegram_delivery_outbox earlier
         WHERE earlier.recipient_user_id=o.recipient_user_id
           AND earlier.status IN ('pending','processing','retry')
@@ -992,9 +1000,11 @@ export async function drainTelegramOutbox(
               earlier.created_at<o.created_at OR (earlier.created_at=o.created_at AND earlier.id<o.id)
             )
           ))
-      )
-    ORDER BY o.next_attempt_at,o.created_at,o.id LIMIT ?
+      ))
+    ORDER BY CASE WHEN o.type IN ('material_request_pickup_reminder','material_request_prepare_reminder') THEN 0 ELSE 1 END,
+      o.next_attempt_at,o.created_at,o.id LIMIT ?
   `).bind(
+    now,
     now,
     TELEGRAM_TEACHER_MENU_OUTBOX_TYPE,
     configuration.linkingEnabled ? 1 : 0,
@@ -1017,6 +1027,7 @@ export async function drainTelegramOutbox(
         UPDATE telegram_delivery_outbox
         SET status='processing',attempts=attempts+1,lease_token=?,lease_expires_at=?,updated_at=?
         WHERE id=? AND status IN ('pending','retry') AND next_attempt_at<=?
+          AND (expires_at IS NULL OR expires_at>?)
           AND EXISTS (SELECT 1 FROM telegram_connections c
             WHERE c.user_id=telegram_delivery_outbox.recipient_user_id AND c.status='active'
               AND c.chat_id=? AND c.version=?
@@ -1027,6 +1038,7 @@ export async function drainTelegramOutbox(
         leaseExpiresAt,
         now,
         row.id,
+        now,
         now,
         row.chat_id,
         row.connection_version,
@@ -1128,6 +1140,9 @@ export async function drainTelegramOutbox(
       const dead = failure.permanent || attempts >= TELEGRAM_MAX_ATTEMPTS;
       const retryAfter = failure.retryAfterSeconds ?? exponentialRetrySeconds(attempts);
       const nextAttemptAt = new Date(nowDate.getTime() + retryAfter * 1000).toISOString();
+      const reminderExpired = Boolean(row.expires_at && nextAttemptAt >= row.expires_at);
+      const finalFailureCode = reminderExpired ? "reminder_expired" : failure.code;
+      const finalFailureMessage = reminderExpired ? "Наступна спроба була б уже після часу видачі." : sanitizedError(failure.message);
       const statements = [
         ...(menuDelivery ? [db.prepare(`UPDATE telegram_connections
           SET menu_claim_version=NULL,menu_claimed_at=NULL,updated_at=?
@@ -1146,10 +1161,10 @@ export async function drainTelegramOutbox(
               last_error_code=?,last_error_message=?,updated_at=?
           WHERE id=? AND status='processing' AND lease_token=?
         `).bind(
-          dead ? "dead" : "retry",
-          dead ? now : nextAttemptAt,
-          failure.code,
-          sanitizedError(failure.message),
+          dead || reminderExpired ? "dead" : "retry",
+          dead || reminderExpired ? now : nextAttemptAt,
+          finalFailureCode,
+          finalFailureMessage,
           now,
           row.id,
           leaseToken,

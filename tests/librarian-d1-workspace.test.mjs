@@ -567,6 +567,9 @@ test("new librarian route renders D1 workspace inside the shared branded shell",
   assert.match(workspace, /tokens\.every\(\(token\) => normalizedName\.includes\(token\)\)/u);
   assert.match(workspace, /loans\.flatMap\(\(loan\) => loan\.items\.map/u);
   assert.match(workspace, /right\.issuedAt\.localeCompare\(left\.issuedAt\)/u);
+  assert.match(workspace, /function ReturnTeacherAvatar/u);
+  assert.match(workspace, /teacher\.photoUrl && !failed/u);
+  assert.match(workspace, /onError=\{\(\) => setFailed\(true\)\}/u);
   assert.match(workspace, /item\.coverUrl \? <img/u);
   assert.match(workspace, /function ReturnItemModal/u);
   assert.match(workspace, /materialQuickViewBackdrop/u);

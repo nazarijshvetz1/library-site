@@ -106,12 +106,14 @@ test("librarian fund candidate search matches every token and keeps existing ass
 });
 
 test("student and librarian UIs provide class selection, sorting, safe external actions, and reversible hiding", async () => {
-  const [publicUi, publicCss, adminUi, shell, home] = await Promise.all([
+  const [publicUi, publicCss, adminUi, shell, home, telegramCabinet, telegramLaunch] = await Promise.all([
     read("app/textbooks/textbook-catalog.tsx"),
     read("app/textbooks/textbooks.module.css"),
     read("app/librarian/textbooks/textbook-management-workspace.tsx"),
     read("app/librarian/_components/librarian-shell.tsx"),
     read("app/page.tsx"),
+    read("app/librarian/telegram/cabinet/page.tsx"),
+    read("app/librarian/telegram/page.tsx"),
   ]);
   for (const label of ["Оберіть клас", "Усі предмети", "Рекомендоване", "Назва А–Я", "За автором", "Спочатку новіші"]) {
     assert.match(publicUi, new RegExp(label, "u"));
@@ -153,7 +155,15 @@ test("student and librarian UIs provide class selection, sorting, safe external 
   assert.match(adminUi, /Видалити ручний запис/u);
   assert.match(adminUi, /if \(!item\.materialId \|\| item\.materialVersion === null\)/u);
   assert.doesNotMatch(adminUi, /encodeURIComponent\(item\.materialId\)/u);
+  assert.match(adminUi, /const loadRequestRef = useRef\(0\)/u);
+  assert.match(adminUi, /requestId !== loadRequestRef\.current/u);
+  assert.match(adminUi, /setItems\(\[\]\)/u);
+  assert.match(adminUi, /responseBody/u);
+  assert.match(adminUi, /Сервіс е-підручників тимчасово недоступний/u);
+  assert.match(adminUi, /telegramMiniApp=\{telegramMiniApp\}/u);
   assert.match(shell, /label: "Е-підручники"/u);
   assert.match(shell, /label: "Каталог"[\s\S]*?label: "Новий матеріал"[\s\S]*?label: "Е-підручники"/u);
+  assert.match(telegramCabinet, /target === "textbooks"[\s\S]*?<TextbookManagementWorkspace[\s\S]*?telegramMiniApp/u);
+  assert.match(telegramLaunch, /value === "textbooks"/u);
   assert.match(home, /href="\/textbooks"/u);
 });
