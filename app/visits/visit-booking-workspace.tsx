@@ -953,9 +953,18 @@ function VisitBookingPanel({
     initialOrderMaterialId ? "catalog" : initialOrderView,
   );
   const [pendingOrderMaterialId, setPendingOrderMaterialId] = useState(initialOrderMaterialId);
+  const [orderCartSummary, setOrderCartSummary] = useState({ positions: 0, copies: 0 });
+  const [deferredNavigation, setDeferredNavigation] = useState<
+    | { type: "tab"; tab: TeacherTab; historyMode: "push" | "replace"; historyTraversal?: boolean }
+    | { type: "order"; view: TeacherOrderView; historyMode: "push" | "replace"; historyTraversal?: boolean }
+    | null
+  >(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const mobileMenuRef = useRef<HTMLElement | null>(null);
   const mobileMenuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const cartLeaveDialogRef = useRef<HTMLElement | null>(null);
+  const lastTeacherHrefRef = useRef("");
+  const allowHistoryTraversalRef = useRef(false);
   const [securityOpen, setSecurityOpen] = useState(false);
   const [data, setData] = useState<TeacherVisitsEnvelope | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1014,23 +1023,58 @@ function VisitBookingPanel({
     return () => window.clearTimeout(timer);
   }, [load, loadProfile, storageKey]);
 
-  const selectTeacherTab = useCallback((tab: TeacherTab, historyMode: "push" | "replace" = "push") => {
+  const commitTeacherTab = useCallback((tab: TeacherTab, historyMode: "push" | "replace" = "push") => {
     setActiveTab(tab);
     setActiveOrderView(null);
     setMobileMenuOpen(false);
     const href = teacherPortalHref(tab, telegramMiniApp, new URL(window.location.href));
     window.history[historyMode === "replace" ? "replaceState" : "pushState"]({}, "", href);
+    lastTeacherHrefRef.current = href;
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [telegramMiniApp]);
 
-  const selectTeacherOrderView = useCallback((view: TeacherOrderView, historyMode: "push" | "replace" = "push") => {
+  const commitTeacherOrderView = useCallback((view: TeacherOrderView, historyMode: "push" | "replace" = "push") => {
     setActiveTab("orders");
     setActiveOrderView(view);
     setMobileMenuOpen(false);
     const href = teacherOrderPortalHref(view, telegramMiniApp, new URL(window.location.href));
     window.history[historyMode === "replace" ? "replaceState" : "pushState"]({}, "", href);
+    lastTeacherHrefRef.current = href;
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [telegramMiniApp]);
+
+  const selectTeacherTab = useCallback((tab: TeacherTab, historyMode: "push" | "replace" = "push") => {
+    const leavesOrderCart = orderCartSummary.positions > 0
+      && activeTab === "orders"
+      && (tab !== "orders" || activeOrderView === "catalog");
+    if (leavesOrderCart) {
+      setMobileMenuOpen(false);
+      setDeferredNavigation({ type: "tab", tab, historyMode });
+      return;
+    }
+    commitTeacherTab(tab, historyMode);
+  }, [activeOrderView, activeTab, commitTeacherTab, orderCartSummary.positions]);
+
+  const selectTeacherOrderView = useCallback((view: TeacherOrderView, historyMode: "push" | "replace" = "push") => {
+    if (orderCartSummary.positions > 0 && activeTab === "orders" && activeOrderView === "catalog" && view !== "catalog") {
+      setDeferredNavigation({ type: "order", view, historyMode });
+      return;
+    }
+    commitTeacherOrderView(view, historyMode);
+  }, [activeOrderView, activeTab, commitTeacherOrderView, orderCartSummary.positions]);
+
+  function continueDeferredNavigation() {
+    const target = deferredNavigation;
+    setDeferredNavigation(null);
+    if (!target) return;
+    if (target.historyTraversal) {
+      allowHistoryTraversalRef.current = true;
+      window.history.back();
+      return;
+    }
+    if (target.type === "tab") commitTeacherTab(target.tab, target.historyMode);
+    else commitTeacherOrderView(target.view, target.historyMode);
+  }
 
   const consumeInitialOrderMaterial = useCallback(() => {
     setPendingOrderMaterialId("");
@@ -1039,20 +1083,83 @@ function VisitBookingPanel({
     url.searchParams.set("tab", "orders");
     url.searchParams.set("view", "catalog");
     url.searchParams.delete("material");
-    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    const href = `${url.pathname}${url.search}${url.hash}`;
+    window.history.replaceState({}, "", href);
+    lastTeacherHrefRef.current = href;
   }, []);
 
   useEffect(() => {
     function syncTabFromHistory() {
       const url = new URL(window.location.href);
       const tab = boundedTeacherTab(url.searchParams.get("tab"));
+      const orderView = tab === "orders" ? boundedTeacherOrderView(url.searchParams.get("view")) : null;
+      const targetHref = `${url.pathname}${url.search}${url.hash}`;
+
+      if (allowHistoryTraversalRef.current) {
+        allowHistoryTraversalRef.current = false;
+      } else {
+        const leavesOrderCart = orderCartSummary.positions > 0
+          && activeTab === "orders"
+          && activeOrderView === "catalog"
+          && (tab !== "orders" || orderView !== "catalog");
+        if (leavesOrderCart) {
+          const returnHref = lastTeacherHrefRef.current;
+          if (returnHref) window.history.pushState({}, "", returnHref);
+          setDeferredNavigation(orderView
+            ? { type: "order", view: orderView, historyMode: "replace", historyTraversal: true }
+            : { type: "tab", tab, historyMode: "replace", historyTraversal: true });
+          setMobileMenuOpen(false);
+          return;
+        }
+      }
+
       setActiveTab(tab);
-      setActiveOrderView(tab === "orders" ? boundedTeacherOrderView(url.searchParams.get("view")) : null);
+      setActiveOrderView(orderView);
       setMobileMenuOpen(false);
+      lastTeacherHrefRef.current = targetHref;
+    }
+    if (!lastTeacherHrefRef.current) {
+      lastTeacherHrefRef.current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     }
     window.addEventListener("popstate", syncTabFromHistory);
     return () => window.removeEventListener("popstate", syncTabFromHistory);
-  }, []);
+  }, [activeOrderView, activeTab, orderCartSummary.positions]);
+
+  useEffect(() => {
+    if (!deferredNavigation) return;
+    const dialog = cartLeaveDialogRef.current;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    const focusableSelector = "button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+    const focusable = dialog ? Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector)) : [];
+    document.body.style.overflow = "hidden";
+    focusable[0]?.focus();
+
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setDeferredNavigation(null);
+        return;
+      }
+      if (event.key !== "Tab" || focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [deferredNavigation]);
 
   useEffect(() => {
     const desktopLayout = window.matchMedia("(min-width: 901px)");
@@ -1458,7 +1565,7 @@ function VisitBookingPanel({
             </CollapsibleListSection>
             </> : null}
 
-            {activeTab === "orders" ? <TeacherOrdersPanel key={pendingScope} pendingScope={pendingScope} view={activeOrderView} onViewChange={selectTeacherOrderView} onChoose={() => selectTeacherTab("orders")} initialMaterialId={pendingOrderMaterialId} onInitialMaterialConsumed={consumeInitialOrderMaterial} /> : null}
+            {activeTab === "orders" ? <TeacherOrdersPanel key={pendingScope} pendingScope={pendingScope} view={activeOrderView} onViewChange={selectTeacherOrderView} onChoose={() => selectTeacherTab("orders")} onCartStateChange={setOrderCartSummary} initialMaterialId={pendingOrderMaterialId} onInitialMaterialConsumed={consumeInitialOrderMaterial} /> : null}
             {activeTab === "acquisition" ? <TeacherAcquisitionPanel /> : null}
             {activeTab === "loans" ? <TeacherLoansPanel /> : null}
             {activeTab === "notifications" ? <TeacherNotificationsPanel pendingScope={pendingScope} /> : null}
@@ -1493,6 +1600,19 @@ function VisitBookingPanel({
             </section>
           </div>
         ) : null}
+        {deferredNavigation ? (
+          <div className={styles.cartLeaveBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDeferredNavigation(null); }}>
+            <section ref={cartLeaveDialogRef} className={styles.cartLeaveReminder} role="dialog" aria-modal="true" aria-labelledby="cart-leave-title">
+              <span>Неоформлений кошик</span>
+              <h2 id="cart-leave-title">У кошику залишилися матеріали</h2>
+              <p>{orderCartSummary.positions} поз. · {orderCartSummary.copies} прим. Кошик збережено, тож ви зможете повернутися до нього без втрати вибору.</p>
+              <div>
+                <button className={styles.primary} type="button" onClick={() => setDeferredNavigation(null)}>Продовжити замовлення</button>
+                <button className={styles.quiet} type="button" onClick={continueDeferredNavigation}>Перейти, кошик збережеться</button>
+              </div>
+            </section>
+          </div>
+        ) : null}
         {securityOpen ? <TeacherSecurityPanel pendingScope={pendingScope} onClose={() => setSecurityOpen(false)} onSessionRotated={onSessionRotated} /> : null}
       </section>
     </VisitShell>
@@ -1517,6 +1637,59 @@ type TeacherCatalogItem = {
   loanedQuantity: number;
   reservedQuantity: number;
 };
+
+type TeacherOrderCartRow = { item: TeacherCatalogItem; quantity: number };
+
+type TeacherOrderCartDraft = {
+  version: 1;
+  savedAt: string;
+  notes: string;
+  rows: TeacherOrderCartRow[];
+};
+
+function readTeacherOrderCartDraft(storage: Storage, key: string): TeacherOrderCartDraft | null {
+  try {
+    const raw = storage.getItem(key);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const candidate = parsed as Partial<TeacherOrderCartDraft>;
+    if (candidate.version !== 1 || typeof candidate.notes !== "string" || !Array.isArray(candidate.rows)) return null;
+    const rows = candidate.rows.slice(0, 10).filter((row): row is TeacherOrderCartRow => {
+      if (!row || typeof row !== "object") return false;
+      const value = row as Partial<TeacherOrderCartRow>;
+      const item = value.item as Partial<TeacherCatalogItem> | undefined;
+      return Boolean(
+        item
+        && typeof item.id === "string"
+        && /^CAT-\d{4,}$/u.test(item.id)
+        && typeof item.title === "string"
+        && typeof item.availableQuantity === "number"
+        && Number.isSafeInteger(value.quantity)
+        && Number(value.quantity) > 0
+        && Number(value.quantity) <= Math.max(0, item.availableQuantity),
+      );
+    });
+    if (!rows.length) return null;
+    return {
+      version: 1,
+      savedAt: typeof candidate.savedAt === "string" ? candidate.savedAt : new Date(0).toISOString(),
+      notes: candidate.notes.slice(0, 300),
+      rows,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeTeacherOrderCartDraft(storage: Storage, key: string, draft: TeacherOrderCartDraft | null): void {
+  try {
+    if (!draft?.rows.length) storage.removeItem(key);
+    else storage.setItem(key, JSON.stringify(draft));
+  } catch {
+    // The cart remains available in memory when private browsing blocks storage.
+  }
+}
 
 type TeacherCatalogEnvelope = {
   success: true;
@@ -1552,6 +1725,7 @@ type MaterialRequest = {
   librarianNote: string | null;
   rejectionReason: string | null;
   pickupLocation: { id: string; name: string } | null;
+  scheduledIssueAt: string | null;
   resultingLoanId: string | null;
   version: number;
   createdAt: string;
@@ -2177,6 +2351,7 @@ function TeacherOrdersPanel({
   view,
   onViewChange,
   onChoose,
+  onCartStateChange,
   initialMaterialId,
   onInitialMaterialConsumed,
 }: {
@@ -2184,6 +2359,7 @@ function TeacherOrdersPanel({
   view: TeacherOrderView | null;
   onViewChange: (view: TeacherOrderView, historyMode?: "push" | "replace") => void;
   onChoose: () => void;
+  onCartStateChange: (summary: { positions: number; copies: number }) => void;
   initialMaterialId: string;
   onInitialMaterialConsumed: () => void;
 }) {
@@ -2209,10 +2385,12 @@ function TeacherOrdersPanel({
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"success" | "error" | "info">("info");
-  const [cart, setCart] = useState<Record<string, { item: TeacherCatalogItem; quantity: number }>>({});
+  const [cart, setCart] = useState<Record<string, TeacherOrderCartRow>>({});
   const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState("");
   const [cartOpen, setCartOpen] = useState(false);
+  const [cartRestored, setCartRestored] = useState(false);
+  const [cartToast, setCartToast] = useState("");
   const [requests, setRequests] = useState<MaterialRequest[]>([]);
   const [requestPage, setRequestPage] = useState<MaterialRequestsEnvelope["page"] | null>(null);
   const [historyQuery, setHistoryQuery] = useState("");
@@ -2231,7 +2409,38 @@ function TeacherOrdersPanel({
   const historyLoadRef = useRef(0);
   const catalogLoadRef = useRef(0);
   const storageKey = `library.teacher.orders.pending.v1:${pendingScope}`;
+  const cartStorageKey = `library.teacher.orders.cart.v1:${pendingScope}`;
   const catalogStorageKey = teacherCatalogFiltersKey(pendingScope);
+
+  useEffect(() => {
+    const restoreTimer = window.setTimeout(() => {
+      const restored = readTeacherOrderCartDraft(window.sessionStorage, cartStorageKey);
+      if (restored) {
+        setCart(Object.fromEntries(restored.rows.map((row) => [row.item.id, row])));
+        setNotes(restored.notes);
+      }
+      setCartRestored(true);
+    }, 0);
+
+    return () => window.clearTimeout(restoreTimer);
+  }, [cartStorageKey]);
+
+  useEffect(() => {
+    if (!cartRestored) return;
+    const rows = Object.values(cart);
+    writeTeacherOrderCartDraft(window.sessionStorage, cartStorageKey, rows.length ? {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      notes,
+      rows,
+    } : null);
+  }, [cart, cartRestored, cartStorageKey, notes]);
+
+  useEffect(() => {
+    if (!cartToast) return;
+    const timer = window.setTimeout(() => setCartToast(""), 2400);
+    return () => window.clearTimeout(timer);
+  }, [cartToast]);
 
   const loadRequests = useCallback(async (afterMutation = false, cursor: string | null = null) => {
     const loadId = ++historyLoadRef.current;
@@ -2370,7 +2579,7 @@ function TeacherOrdersPanel({
   }, [catalogReady, catalogRefreshVersion, loadCatalog, view]);
 
   useEffect(() => {
-    if (view !== "catalog" || !catalogReady || !initialMaterialId || initialMaterialApplied.current) return;
+    if (!cartRestored || view !== "catalog" || !catalogReady || !initialMaterialId || initialMaterialApplied.current) return;
     initialMaterialApplied.current = true;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
@@ -2388,9 +2597,8 @@ function TeacherOrdersPanel({
         setCart((current) => current[selected.id]
           ? current
           : { ...current, [selected.id]: { item: selected, quantity: 1 } });
-        setCartOpen(true);
-        setNotice(`«${selected.title}» додано до кошика. Перевірте кількість і надішліть замовлення.`);
-        setNoticeTone("success");
+        setCartToast("Додано до кошика");
+        setNotice("");
       } catch {
         if (!controller.signal.aborted) {
           setNotice("Цей матеріал не вдалося додати автоматично. Знайдіть його в каталозі нижче.");
@@ -2404,7 +2612,7 @@ function TeacherOrdersPanel({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [catalogReady, initialMaterialId, onInitialMaterialConsumed, view]);
+  }, [cartRestored, catalogReady, initialMaterialId, onInitialMaterialConsumed, view]);
 
   useEffect(() => {
     if (!selectedDetail) return;
@@ -2498,6 +2706,7 @@ function TeacherOrdersPanel({
         setQuantityDrafts({});
         setNotes("");
         setCartOpen(false);
+        writeTeacherOrderCartDraft(window.sessionStorage, cartStorageKey, null);
         setCatalogRefreshVersion((current) => current + 1);
       }
       await loadRequests(true);
@@ -2575,12 +2784,8 @@ function TeacherOrdersPanel({
       const quantity = Math.min(item.availableQuantity, (existing?.quantity ?? 0) + 1);
       return { ...current, [item.id]: { item, quantity } };
     });
-    setCartOpen(true);
-    const nextQuantity = currentQuantity + 1;
-    setNotice(currentQuantity
-      ? `Кількість «${item.title}» у кошику збільшено до ${nextQuantity}.`
-      : `«${item.title}» додано до кошика.`);
-    setNoticeTone("success");
+    setCartToast("Додано до кошика");
+    setNotice("");
   }
 
   function updateQuantity(id: string, quantity: number) {
@@ -2622,6 +2827,19 @@ function TeacherOrdersPanel({
 
   const cartRows = Object.values(cart);
   const cartQuantity = cartRows.reduce((sum, row) => sum + row.quantity, 0);
+
+  useEffect(() => {
+    onCartStateChange({ positions: cartRows.length, copies: cartQuantity });
+  }, [cartQuantity, cartRows.length, onCartStateChange]);
+
+  useEffect(() => {
+    if (!cartRows.length || submitting) return;
+    function remindBeforeUnload(event: BeforeUnloadEvent) {
+      event.preventDefault();
+    }
+    window.addEventListener("beforeunload", remindBeforeUnload);
+    return () => window.removeEventListener("beforeunload", remindBeforeUnload);
+  }, [cartRows.length, submitting]);
   const activeCatalogFilterCount = [
     catalogFilters.grade,
     catalogFilters.rubric,
@@ -2658,6 +2876,7 @@ function TeacherOrdersPanel({
   }
   return (
     <section aria-label="Замовлення матеріалів">
+      {cartToast ? <div className={styles.cartToast} role="status" aria-live="polite"><SiteIcon name="success" size={18} /> {cartToast}</div> : null}
       {pending ? <div className={styles.pending} role="status"><span>Результат попередньої дії із замовленням не підтверджено.</span><button type="button" onClick={() => void sendOrderIntent(pending)} disabled={submitting}>Перевірити результат</button></div> : null}
       {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
       <nav className={styles.orderSubnav} aria-label="Підрозділи замовлень">
@@ -2748,7 +2967,7 @@ function TeacherOrdersPanel({
       </div>
       {cartOpen ? <button className={styles.cartBackdrop} type="button" aria-label="Закрити кошик" onClick={() => setCartOpen(false)} /> : null}
       <aside className={`${styles.card} ${styles.orderCart} ${cartOpen ? styles.orderCartOpen : ""}`} aria-labelledby="cart-title">
-        <div className={styles.cardHeading}><div><span>Крок 2 · до 10 позицій</span><h2 id="cart-title">Кошик</h2></div><div className={styles.cartHeadingActions}><strong>{cartRows.length}/10</strong><button className={styles.cartClose} type="button" onClick={() => setCartOpen(false)} aria-label="Закрити кошик">×</button></div></div>
+        <div className={styles.cardHeading}><div><span>Фінальний крок · перевірка</span><h2 id="cart-title">Кошик</h2></div><div className={styles.cartHeadingActions}><strong>{cartRows.length} поз. · {cartQuantity} прим.</strong><button className={styles.cartClose} type="button" onClick={() => setCartOpen(false)} aria-label="Закрити кошик">×</button></div></div>
         {cartRows.length ? <ul className={styles.cartList}>{cartRows.map(({ item, quantity }) => (
           <li key={item.id}>
             <span><strong>{item.title}</strong><small>{item.id}</small></span>
@@ -2759,7 +2978,7 @@ function TeacherOrdersPanel({
         <label className={styles.portalSearch}>Примітка бібліотекарю
           <textarea maxLength={300} value={notes} onChange={(event) => setNotes(event.currentTarget.value)} placeholder="Необов’язково: для якого уроку або класу" disabled={submitting || Boolean(pending)} />
         </label>
-        <button className={styles.primary} type="button" onClick={submitOrder} disabled={!cartRows.length || submitting || Boolean(pending)}>{submitting ? "Надсилаємо…" : "Надіслати замовлення"}</button>
+        <button className={styles.primary} type="button" onClick={submitOrder} disabled={!cartRows.length || submitting || Boolean(pending)}>{submitting ? "Оформлюємо…" : "Оформити замовлення"}</button>
         <p className={styles.authHelp}>Фактичний залишок бібліотекар перевірить під час підготовки замовлення.</p>
       </aside>
       </div>
@@ -2783,7 +3002,7 @@ function TeacherOrdersPanel({
         </section>
       </> : null}
       <button className={styles.mobileCartBar} type="button" onClick={() => setCartOpen(true)} disabled={!cartRows.length} aria-expanded={cartOpen}>
-        <span><SiteIcon name="orders" size={18} /><strong>Кошик</strong><small>{cartRows.length} поз. · {cartQuantity} прим.</small></span><b>Відкрити</b>
+        <span><SiteIcon name="orders" size={18} /><strong>Кошик · {cartRows.length}</strong><small>{cartQuantity} примірників</small></span><b>Продовжити замовлення</b>
       </button>
       </> : null}
       {view === "history" ? (
@@ -2819,7 +3038,7 @@ function TeacherOrdersPanel({
           <article key={request.id} data-hidden={request.teacherHiddenAt ? "true" : "false"}>
             <header><div className={styles.requestHeaderBadges}><span className={styles.requestStatus} data-status={request.status}>{materialRequestStatusLabel(request.status)}</span>{request.teacherHiddenAt ? <span className={styles.hiddenRecordBadge}>Приховано</span> : null}</div><time dateTime={request.createdAt}>{formatPortalDate(request.createdAt)}</time></header>
             <ul>{request.items.map((item) => <li key={item.id}><span><strong>{item.material.title}</strong><small>{[item.material.author, item.material.year].filter(Boolean).join(" · ")}</small></span><span>{item.approvedQuantity ? `${item.approvedQuantity} із ${item.requestedQuantity}` : `${item.requestedQuantity} запитано`}</span></li>)}</ul>
-            {request.pickupLocation ? <p>Отримання: <strong>{request.pickupLocation.name}</strong></p> : null}
+            {request.pickupLocation ? <p>Отримання: <strong>{request.pickupLocation.name}</strong>{request.scheduledIssueAt ? ` · ${formatPortalDate(request.scheduledIssueAt)}` : ""}</p> : null}
             {request.rejectionReason ? <p className={styles.requestReason}>{request.rejectionReason}</p> : null}
             <div className={styles.requestHistoryActions}>
               {request.status === "submitted" ? <button className={styles.danger} type="button" onClick={() => cancelOrder(request)} disabled={submitting || Boolean(pending) || Boolean(historyActionId)}>Скасувати замовлення</button> : null}

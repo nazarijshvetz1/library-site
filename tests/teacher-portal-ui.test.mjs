@@ -322,7 +322,12 @@ test("opaque cursor pages append without duplicate portal records", () => {
 });
 
 test("teacher orders and notifications page with the frozen opaque cursor", async () => {
-  const workspace = await read("app/visits/visit-booking-workspace.tsx");
+  const [workspace, css] = await Promise.all([
+    read("app/visits/visit-booking-workspace.tsx"),
+    read("app/visits/visits.module.css"),
+  ]);
+  const teacherPanel = workspace.slice(workspace.indexOf("function VisitBookingPanel"), workspace.indexOf("type TeacherCatalogItem"));
+  const cartDraftHelpers = workspace.slice(workspace.indexOf("type TeacherOrderCartRow"), workspace.indexOf("type TeacherCatalogEnvelope"));
   const orders = workspace.slice(workspace.indexOf("function TeacherOrdersPanel"), workspace.indexOf("function TeacherCover"));
   const notifications = workspace.slice(workspace.indexOf("function TeacherNotificationsPanel"), workspace.indexOf("type CodeRotationEnvelope"));
   assert.match(orders, /params\.set\("cursor", cursor\)/u);
@@ -341,7 +346,6 @@ test("teacher orders and notifications page with the frozen opaque cursor", asyn
   assert.match(orders, /mergePortalPageById\(current, response\.items\)/u);
   assert.match(orders, /catalogPage\?\.hasMore && catalogPage\.nextCursor/u);
   assert.match(orders, /\[selected\.id\]: \{ item: selected, quantity: 1 \}/u);
-  assert.match(orders, /setCartOpen\(true\)/u);
   assert.match(orders, /styles\.orderCartOpen/u);
   assert.match(orders, /Дані оновлюються автоматично/u);
   assert.match(orders, /Фільтри/u);
@@ -361,7 +365,9 @@ test("teacher orders and notifications page with the frozen opaque cursor", asyn
   assert.match(orders, /Детальніше/u);
   assert.match(orders, /currentQuantity >= item\.availableQuantity/u);
   assert.match(orders, /maximumInCart \? "У кошику" : cartQuantity > 0 \? "Додати ще" : "Додати"/u);
-  assert.match(orders, /Кількість «\$\{item\.title\}» у кошику збільшено до \$\{nextQuantity\}/u);
+  assert.match(orders, /setCartToast\("Додано до кошика"\)/u);
+  assert.doesNotMatch(orders, /setNotice\("Додано до кошика\./u);
+  assert.match(orders, /role="status" aria-live="polite"/u);
   assert.match(orders, /updateCatalogFilter\("grade", event\.currentTarget\.value \? Number\(event\.currentTarget\.value\) : null\)/u);
   assert.match(orders, /quantityDrafts\[item\.id\] \?\? String\(quantity\)/u);
   assert.match(orders, /onBlur=\{\(\) => finishQuantityEdit\(item\.id\)\}/u);
@@ -382,9 +388,35 @@ test("teacher orders and notifications page with the frozen opaque cursor", asyn
   assert.match(orders, /className=\{styles\.orderChooserGrid\}/u);
   assert.match(orders, /className=\{styles\.orderSubnav\}/u);
   const addFunction = orders.slice(orders.indexOf("function add("), orders.indexOf("function removeFromCart"));
+  const initialMaterialAdd = orders.slice(
+    orders.indexOf('if (!cartRestored || view !== "catalog"'),
+    orders.indexOf("if (!selectedDetail) return;"),
+  );
   const successfulCreate = orders.slice(orders.indexOf('if (intent.kind === "order-create")'), orders.indexOf("await loadRequests(true)"));
+  assert.doesNotMatch(addFunction, /setCartOpen\(true\)/u);
+  assert.doesNotMatch(initialMaterialAdd, /setCartOpen\(true\)/u);
+  assert.match(addFunction, /setCartToast\("Додано до кошика"\)/u);
+  assert.match(initialMaterialAdd, /setCartToast\("Додано до кошика"\)/u);
   assert.doesNotMatch(addFunction, /setCatalogFilters|resetCatalogFilters|clearTeacherCatalogFilters/u);
   assert.doesNotMatch(successfulCreate, /setCatalogFilters|resetCatalogFilters|clearTeacherCatalogFilters/u);
+  assert.match(cartDraftHelpers, /function readTeacherOrderCartDraft/u);
+  assert.match(cartDraftHelpers, /candidate\.rows\.slice\(0, 10\)/u);
+  assert.match(cartDraftHelpers, /function writeTeacherOrderCartDraft/u);
+  assert.match(orders, /readTeacherOrderCartDraft\(window\.sessionStorage, cartStorageKey\)/u);
+  assert.match(orders, /writeTeacherOrderCartDraft\(window\.sessionStorage, cartStorageKey/u);
+  assert.match(successfulCreate, /writeTeacherOrderCartDraft\(window\.sessionStorage, cartStorageKey, null\)/u);
+  assert.match(orders, /window\.addEventListener\("beforeunload", remindBeforeUnload\)/u);
+  assert.match(orders, /onCartStateChange\(\{ positions: cartRows\.length, copies: cartQuantity \}\)/u);
+  assert.match(teacherPanel, /setDeferredNavigation\(\{ type: "tab", tab, historyMode \}\)/u);
+  assert.match(teacherPanel, /setDeferredNavigation\(\{ type: "order", view, historyMode \}\)/u);
+  assert.match(teacherPanel, /className=\{styles\.cartLeaveReminder\} role="dialog" aria-modal="true"/u);
+  assert.match(teacherPanel, /Перейти, кошик збережеться/u);
+  assert.match(orders, /Фінальний крок · перевірка/u);
+  assert.match(orders, /\{cartRows\.length\} поз\. · \{cartQuantity\} прим\./u);
+  assert.match(orders, /submitting \? "Оформлюємо…" : "Оформити замовлення"/u);
+  assert.match(orders, /<b>Продовжити замовлення<\/b>/u);
+  assert.match(css, /\.cartToast\s*\{[\s\S]*?position: fixed;/u);
+  assert.match(css, /\.cartLeaveReminder\s*\{[\s\S]*?width: min\(440px,100%\);/u);
   assert.match(notifications, /params\.set\("cursor", cursor\)/u);
   assert.match(notifications, /mergePortalPageById\(current\.notifications, response\.notifications\)/u);
   assert.match(notifications, /data\.page\.nextCursor/u);
@@ -444,14 +476,17 @@ test("teacher cabinet shows personal and responsible-class loans from the signed
   assert.doesNotMatch(route, /searchParams|get\("teacherUserId"\)/u);
 });
 
-test("librarian request inbox uses frozen ready fields and public active pickup locations", async () => {
+test("librarian request inbox uses frozen ready fields, exact issue time and public active pickup locations", async () => {
   const [workspace, inbox] = await Promise.all([
     read("app/librarian/teachers/teacher-management-workspace.tsx"),
     read("app/librarian/visits/material-request-inbox.tsx"),
   ]);
   assert.match(workspace, /<MaterialRequestInbox pendingScope=\{pendingScope\} writesEnabled=\{writesEnabled\} \/>/u);
   assert.match(inbox, /\/api\/librarian\/material-requests\/locations/u);
-  assert.match(inbox, /action: "ready", pickupLocationId, dueAt: dueAt \|\| null, items/u);
+  assert.match(inbox, /action: "ready", pickupLocationId, scheduledIssueAt, dueAt: dueAt \|\| null, items/u);
+  assert.match(inbox, /type="datetime-local" step="60"/u);
+  assert.match(inbox, /defaultScheduledIssueLocal\(\)/u);
+  assert.match(inbox, /kyivDateTimeLocal\(request\.scheduledIssueAt\)/u);
   assert.match(inbox, /itemId: item\.id/u);
   assert.match(inbox, /sourceLocationId: holding\.locationId/u);
   assert.match(inbox, /expectedAvailableQuantity: holdingAvailable\(holding\)/u);

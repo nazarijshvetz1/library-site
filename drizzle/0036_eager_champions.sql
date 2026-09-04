@@ -1,0 +1,1 @@
+ALTER TABLE `material_requests` ADD `scheduled_issue_at` text;

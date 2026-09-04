@@ -69,6 +69,42 @@ test("librarian textbook mutations use authorization, same-origin, bounded JSON,
   assert.match(migration, /FOREIGN KEY \(`academic_year_id`\)/u);
 });
 
+test("librarian fund candidate search matches every token and keeps existing assignments actionable", async () => {
+  const [store, adminUi] = await Promise.all([
+    read("lib/textbook-catalog-store.ts"),
+    read("app/librarian/textbooks/textbook-management-workspace.tsx"),
+  ]);
+  const candidateSearchStart = store.indexOf("async function listCandidates(");
+  const candidateSearchEnd = store.indexOf("async function requireManagedTextbook(", candidateSearchStart);
+  assert.ok(candidateSearchStart >= 0 && candidateSearchEnd > candidateSearchStart);
+  const candidateSearch = store.slice(candidateSearchStart, candidateSearchEnd);
+  assert.match(candidateSearch, /const tokens = normalized\.split\(" "\)\.filter\(Boolean\)\.slice\(0, 12\)/u);
+  assert.ok(candidateSearch.includes('(instr(lower(m.search_text), ?) > 0 OR instr(lower(m.id), ?) > 0)'));
+  assert.ok(candidateSearch.includes('.join(" AND ")'));
+  assert.match(candidateSearch, /const tokenBindings = tokens\.flatMap\(\(token\) => \[token, token\]\)/u);
+  assert.match(candidateSearch, /\.bind\(\.\.\.tokenBindings, grade\)/u);
+  assert.doesNotMatch(candidateSearch, /LIMIT 1000/u);
+  assert.doesNotMatch(candidateSearch, /NOT EXISTS/u);
+  assert.doesNotMatch(candidateSearch, /FROM textbook_assignments/u);
+
+  const searchable = "cat 0610 історія україни 9 клас власов в";
+  const tokens = "історія україни власов".split(" ");
+  assert.equal(tokens.every((token) => searchable.includes(token)), true);
+  assert.equal(searchable.includes(tokens.join(" ")), false);
+
+  const candidateUiStart = adminUi.indexOf("candidates.map((candidate) => {");
+  const candidateUiEnd = adminUi.indexOf("</aside>", candidateUiStart);
+  assert.ok(candidateUiStart >= 0 && candidateUiEnd > candidateUiStart);
+  const candidateUi = adminUi.slice(candidateUiStart, candidateUiEnd);
+  assert.match(candidateUi, /const existingItem = items\.find\(\(item\) => item\.source === "fund" && item\.materialId === candidate\.materialId\)/u);
+  assert.match(candidateUi, /existingItem\?\.status === "archived"[\s\S]*?changeItem\(existingItem, "restore"\)[\s\S]*?Повернути до списку/u);
+  assert.match(candidateUi, /existingItem && existingItem\.status !== "archived"[\s\S]*?setSelectedItemId\(existingItem\.id\)[\s\S]*?Відкрити картку/u);
+  assert.match(candidateUi, /!existingItem && candidate\.resourceUrl/u);
+  assert.match(candidateUi, /!existingItem && !candidate\.resourceUrl/u);
+  assert.match(adminUi, /Матеріалів фонду з таким запитом не знайдено/u);
+  assert.doesNotMatch(adminUi, /Вільних карток фонду з таким запитом не знайдено/u);
+});
+
 test("student and librarian UIs provide class selection, sorting, safe external actions, and reversible hiding", async () => {
   const [publicUi, publicCss, adminUi, shell, home] = await Promise.all([
     read("app/textbooks/textbook-catalog.tsx"),

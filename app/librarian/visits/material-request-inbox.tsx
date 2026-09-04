@@ -48,6 +48,7 @@ type LibrarianRequest = {
   pickupLocation: { id: string; name: string } | null;
   resultingLoanId: string | null;
   dueAt: string | null;
+  scheduledIssueAt: string | null;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -98,6 +99,7 @@ type RequestActionIntent = {
     expectedVersion: number;
     action: RequestAction;
     pickupLocationId?: string;
+    scheduledIssueAt?: string | null;
     dueAt?: string | null;
     issuedAt?: string;
     reason?: string;
@@ -307,7 +309,7 @@ export default function MaterialRequestInbox({
           <header><div><span className={styles.requestStatus} data-status={request.status}>{statusLabel(request.status)}</span>{request.librarianHiddenAt ? <span className={styles.hiddenRecordBadge}>Приховано</span> : null}<h3>{request.teacher.fullName}</h3><time dateTime={request.createdAt}>{formatDate(request.createdAt)}</time></div><strong>{request.items.length} поз.</strong></header>
           {request.teacherNotes ? <p>{request.teacherNotes}</p> : null}
           <ul>{request.items.map((item) => <li key={item.id}><span><strong>{item.material.title}</strong><small>{[item.material.author, item.material.year, item.material.id].filter(Boolean).join(" · ")}</small></span><span>{item.requestedQuantity} запитано{item.reservedQuantity ? ` · ${item.reservedQuantity} у резерві` : ""}{item.fulfilledQuantity ? ` · ${item.fulfilledQuantity} видано` : ""}</span></li>)}</ul>
-          {request.pickupLocation ? <p>Місце отримання: <strong>{request.pickupLocation.name}</strong></p> : null}
+          {request.pickupLocation ? <p>Місце отримання: <strong>{request.pickupLocation.name}</strong>{request.scheduledIssueAt ? ` · ${formatDate(request.scheduledIssueAt)}` : ""}</p> : null}
           <div className={styles.inboxActions}>
             {request.status === "submitted" ? <button className={styles.quiet} type="button" onClick={() => startReview(request)} disabled={!writesEnabled || !data?.writesEnabled || submitting || Boolean(pending)}>Взяти в роботу</button> : null}
             {request.status === "submitted" || request.status === "in_review" || request.status === "partially_ready" ? <ReadyRequestForm key={`${request.id}:${request.version}`} request={request} locations={locations} disabled={!writesEnabled || !data?.writesEnabled || submitting || Boolean(pending)} onSubmit={sendAction} /> : null}
@@ -359,8 +361,6 @@ function ReservationActionForm({
       setNotice("Вкажіть причину звільнення резерву — її буде збережено в історії.");
       return;
     }
-    const totalQuantity = items.reduce((total, item) => total + item.quantity, 0);
-    if (action === "issue" && !window.confirm(`Підтвердити фактичну видачу для ${request.teacher.fullName}: ${totalQuantity} прим.? Залишок зменшиться, буде створено позику.`)) return;
     if (action === "release" && !window.confirm("Звільнити вибрані примірники як не забрані? Вони знову стануть доступними для інших замовлень.")) return;
     const requestId = crypto.randomUUID();
     void onSubmit({
@@ -377,7 +377,7 @@ function ReservationActionForm({
   return (
     <form className={styles.readyForm} onSubmit={submit}>
       <div className={styles.cardHeading}><div><span>{action === "issue" ? "Фактична видача" : "Звільнення резерву"}</span><h4>{action === "issue" ? "Передати примірники вчителю" : "Позначити як не забране"}</h4></div><button className={styles.quiet} type="button" onClick={() => { setAction(null); setNotice(""); }} disabled={disabled} aria-label="Закрити"><SiteIcon name="close" size={18} /></button></div>
-      <p>{action === "issue" ? "Позика та рух залишків будуть створені лише після цієї дії." : "Фізичного руху примірників не буде: вони просто повернуться до доступного фонду."}</p>
+      <p>{action === "issue" ? `Позика та рух залишків будуть створені лише після цієї дії.${request.scheduledIssueAt ? ` Заплановано: ${formatDate(request.scheduledIssueAt)}.` : ""}` : "Фізичного руху примірників не буде: вони просто повернуться до доступного фонду."}</p>
       {notice ? <div className={styles.error} role="alert">{notice}</div> : null}
       {action === "issue" ? <div className={styles.fields}><label>Дата видачі *<input required type="date" max={todayInKyiv()} value={issuedAt} onChange={(event) => setIssuedAt(event.currentTarget.value)} /></label><label>Повернути до<input type="date" min={issuedAt} value={dueAt} onChange={(event) => setDueAt(event.currentTarget.value)} /></label></div> : <div className={styles.fields}><label>Причина *<textarea required maxLength={500} value={reason} onChange={(event) => setReason(event.currentTarget.value)} placeholder="Наприклад, учитель не забрав замовлення" /></label></div>}
       <div className={styles.readyRows}>{reservations.map((reservation) => <fieldset key={reservation.id} disabled={disabled}><legend>{reservation.title}</legend><p>{reservation.sourceLocationName} · {conditionLabel(reservation.condition)} · у резерві {reservation.remainingQuantity}</p><label>{action === "issue" ? "Видати" : "Звільнити"}<input type="number" min="0" max={reservation.remainingQuantity} value={quantities[reservation.id] ?? 0} onChange={(event) => setQuantities((current) => ({ ...current, [reservation.id]: Number(event.currentTarget.value) }))} /></label></fieldset>)}</div>
@@ -398,8 +398,11 @@ function ReadyRequestForm({
   onSubmit: (intent: RequestActionIntent) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
-  const [pickupLocationId, setPickupLocationId] = useState("");
-  const [dueAt, setDueAt] = useState("");
+  const [pickupLocationId, setPickupLocationId] = useState(request.pickupLocation?.id ?? "");
+  const [dueAt, setDueAt] = useState(request.dueAt ?? "");
+  const [scheduledIssueAt, setScheduledIssueAt] = useState(() => request.scheduledIssueAt
+    ? kyivDateTimeLocal(request.scheduledIssueAt)
+    : defaultScheduledIssueLocal());
   const [holdings, setHoldings] = useState<Record<string, Holding[]>>({});
   const [rows, setRows] = useState<Record<string, ReadyRow>>({});
   const [loading, setLoading] = useState(false);
@@ -421,7 +424,7 @@ function ReadyRequestForm({
       });
       setHoldings(nextHoldings);
       setRows(nextRows);
-      setPickupLocationId(locations[0]?.id || "");
+      setPickupLocationId((current) => current || locations[0]?.id || "");
     } catch (error) {
       setNotice(errorMessage(error));
     } finally {
@@ -446,12 +449,12 @@ function ReadyRequestForm({
         expectedAvailableQuantity: holdingAvailable(holding),
       } : null;
     }).filter((item): item is NonNullable<typeof item> => Boolean(item));
-    if (!pickupLocationId || !items.length) {
-      setNotice("Оберіть місце отримання та схваліть щонайменше одну позицію.");
+    if (!pickupLocationId || !scheduledIssueAt || !items.length) {
+      setNotice("Оберіть місце, точний час отримання та схваліть щонайменше одну позицію.");
       return;
     }
     const requestId = crypto.randomUUID();
-    void onSubmit({ kind: "librarian-request-action", requestId, resourceId: request.id, payload: { requestId, expectedVersion: request.version, action: "ready", pickupLocationId, dueAt: dueAt || null, items } });
+    void onSubmit({ kind: "librarian-request-action", requestId, resourceId: request.id, payload: { requestId, expectedVersion: request.version, action: "ready", pickupLocationId, scheduledIssueAt, dueAt: dueAt || null, items } });
   }
 
   if (!open) return <button className={styles.quiet} type="button" onClick={() => void prepare()} disabled={disabled}>{request.status === "partially_ready" ? "Додати до резерву" : "Підготувати резерв"}</button>;
@@ -460,7 +463,7 @@ function ReadyRequestForm({
       <div className={styles.cardHeading}><div><span>Резерв без видачі</span><h4>Підготувати замовлення</h4></div><button className={styles.quiet} type="button" onClick={() => setOpen(false)} disabled={disabled} aria-label="Закрити"><SiteIcon name="close" size={18} /></button></div>
       {notice ? <div className={styles.error} role="alert">{notice}</div> : null}
       {loading ? <p className={styles.empty}>Перевіряємо фактичні залишки…</p> : <>
-        <div className={styles.fields}><label>Місце отримання *<select required value={pickupLocationId} onChange={(event) => setPickupLocationId(event.currentTarget.value)}><option value="">Оберіть активне публічне місце</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label><label>Повернути до<input type="date" min={todayInKyiv()} value={dueAt} onChange={(event) => setDueAt(event.currentTarget.value)} /></label></div>
+        <div className={styles.fields}><label>Місце отримання *<select required value={pickupLocationId} onChange={(event) => setPickupLocationId(event.currentTarget.value)}><option value="">Оберіть активне публічне місце</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label><label>Дата й точний час видачі *<input required type="datetime-local" step="60" value={scheduledIssueAt} onChange={(event) => setScheduledIssueAt(event.currentTarget.value)} /></label><label>Повернути до<input type="date" min={todayInKyiv()} value={dueAt} onChange={(event) => setDueAt(event.currentTarget.value)} /></label></div>
         <div className={styles.readyRows}>{request.items.map((item) => {
           const options = holdings[item.id] ?? [];
           const row = rows[item.id] ?? { approvedQuantity: 0, sourceKey: "" };
@@ -505,6 +508,27 @@ function formatDate(value: string): string {
 
 function todayInKyiv(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Kyiv", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+}
+
+function kyivDateTimeLocal(value: string | Date): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Kyiv",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+
+function defaultScheduledIssueLocal(): string {
+  const interval = 5 * 60_000;
+  const rounded = new Date(Math.ceil((Date.now() + 10 * 60_000) / interval) * interval);
+  return kyivDateTimeLocal(rounded);
 }
 
 function errorMessage(error: unknown): string {

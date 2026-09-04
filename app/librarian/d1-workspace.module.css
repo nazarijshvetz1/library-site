@@ -3802,4 +3802,27 @@ button.stockLocationRow:focus-visible,
   }
   .coverEditorRotate { grid-template-columns: 1fr; }
   .coverEditor > footer { padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+  .loanCard,
+  .classCirculationCard { padding-bottom: 6px; }
+  .loanCard :is(.formGrid,.loanSummary),
+  .classCirculationCard :is(.formGrid,.classCartRows,.classMaterialResults) { gap: 7px; }
+  .classMaterialPicker,
+  .classCart { margin-top: 12px; padding-top: 10px; }
+  .loanCard .formActions,
+  .classCirculationCard .formActions {
+    position: sticky;
+    z-index: 14;
+    bottom: calc(70px + env(safe-area-inset-bottom));
+    margin: 10px -4px -2px;
+    padding: 7px;
+    flex-direction: row;
+    align-items: center;
+    border: 1px solid var(--system-line);
+    border-radius: var(--system-radius-md);
+    background: rgba(255,254,249,.96);
+    box-shadow: 0 12px 30px rgba(7,31,24,.16);
+    backdrop-filter: blur(10px);
+  }
+  .loanCard .formActions > button,
+  .classCirculationCard .formActions > button { min-width: 0; flex: 1 1 auto; }
 }

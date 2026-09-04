@@ -67,6 +67,7 @@ export type MaterialRequestReadyItem = {
 export type MaterialRequestReadyInput = CommonActionInput & {
   action: "ready";
   pickupLocationId: string;
+  scheduledIssueAt: string | null;
   dueAt: string | null;
   items: MaterialRequestReadyItem[];
 };
@@ -201,8 +202,15 @@ export function validateMaterialRequestActionInput(
     input,
     ["requestId", "expectedVersion", "action", "pickupLocationId", "dueAt", "items"],
     errors,
+    "",
+    ["scheduledIssueAt"],
   );
   const pickupLocationId = readResourceId(input.pickupLocationId, "pickupLocationId", errors);
+  const scheduledIssueAt = Object.prototype.hasOwnProperty.call(input, "scheduledIssueAt")
+    ? input.scheduledIssueAt === null
+      ? null
+      : readKyivLocalMinute(input.scheduledIssueAt, "scheduledIssueAt", errors)
+    : null;
   const dueAt = readNullableDate(input.dueAt, "dueAt", errors);
   const items: MaterialRequestReadyItem[] = [];
   if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > MATERIAL_REQUEST_MAX_ITEMS) {
@@ -257,6 +265,7 @@ export function validateMaterialRequestActionInput(
     ...common,
     action: "ready",
     pickupLocationId,
+    scheduledIssueAt,
     dueAt,
     items,
   });
@@ -290,8 +299,9 @@ function exactKeys(
   expected: string[],
   errors: Record<string, string>,
   prefix = "",
+  optional: string[] = [],
 ): void {
-  const allowed = new Set(expected);
+  const allowed = new Set([...expected, ...optional]);
   for (const key of Object.keys(input)) {
     if (!allowed.has(key)) errors[`${prefix}${key}`] = "Непідтримуване поле.";
   }
@@ -384,6 +394,45 @@ function readRequiredDate(value: unknown, field: string, errors: Record<string, 
   const date = readNullableDate(value, field, errors);
   if (!date) errors[field] = "Вкажіть коректну дату.";
   return date ?? "";
+}
+
+function readKyivLocalMinute(value: unknown, field: string, errors: Record<string, string>): string {
+  const text = typeof value === "string" ? value.trim() : "";
+  const match = /^(\d{4}-\d{2}-\d{2})T([0-2]\d):([0-5]\d)$/u.exec(text);
+  if (!match || !isCalendarDate(match[1]) || Number(match[2]) > 23) {
+    errors[field] = "Вкажіть коректну дату й точний час видачі.";
+    return "";
+  }
+  const [year, month, day] = match[1].split("-").map(Number);
+  const hour = Number(match[2]);
+  const minute = Number(match[3]);
+  const desiredUtc = Date.UTC(year, month - 1, day, hour, minute);
+  let candidate = desiredUtc;
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Kyiv",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const parts = Object.fromEntries(formatter.formatToParts(new Date(candidate))
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, Number(part.value)]));
+    const observedUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
+    candidate += desiredUtc - observedUtc;
+  }
+  const verified = Object.fromEntries(formatter.formatToParts(new Date(candidate))
+    .filter((part) => part.type !== "literal")
+    .map((part) => [part.type, Number(part.value)]));
+  if (verified.year !== year || verified.month !== month || verified.day !== day
+    || verified.hour !== hour || verified.minute !== minute) {
+    errors[field] = "Цей час недоступний через перехід на літній або зимовий час.";
+    return "";
+  }
+  return new Date(candidate).toISOString();
 }
 
 function readReservationQuantities(

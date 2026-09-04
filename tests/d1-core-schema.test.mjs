@@ -42,6 +42,7 @@ const migrationFiles = [
   "drizzle/0033_burly_human_fly.sql",
   "drizzle/0034_worthless_big_bertha.sql",
   "drizzle/0035_soft_warstar.sql",
+  "drizzle/0036_eager_champions.sql",
 ];
 
 async function migratedDatabase() {
@@ -61,6 +62,17 @@ function asD1(database) {
   });
   return { prepare: (sql) => statement(sql) };
 }
+
+test("0036 adds an optional exact issue time without changing existing requests", async () => {
+  const database = await migratedDatabase();
+  const column = database.prepare("PRAGMA table_info('material_requests')").all()
+    .find((row) => row.name === "scheduled_issue_at");
+  assert.ok(column);
+  assert.equal(column.notnull, 0);
+  assert.equal(column.dflt_value, null);
+  assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+  database.close();
+});
 
 test("0026 adds reversible teacher history visibility without changing existing requests", async () => {
   const database = new DatabaseSync(":memory:");

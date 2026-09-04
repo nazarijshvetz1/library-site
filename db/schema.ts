@@ -2149,6 +2149,7 @@ export const materialRequests = sqliteTable(
       onUpdate: "cascade",
     }),
     dueAt: text("due_at"),
+    scheduledIssueAt: text("scheduled_issue_at"),
     reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, {
       onDelete: "restrict",
       onUpdate: "cascade",

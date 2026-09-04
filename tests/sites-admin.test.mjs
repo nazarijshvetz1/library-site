@@ -43,6 +43,19 @@ test("tooling keeps the public catalog and private Sites builds separate", async
   await assert.rejects(access(new URL("tests/rendered-html.test.mjs", root)));
 });
 
+test("the hosted worker drains scheduled Telegram reminders every minute", async () => {
+  const [viteConfig, worker, runtime] = await Promise.all([
+    read("vite.config.ts"),
+    read("worker/index.ts"),
+    read("lib/telegram-delivery-runtime.ts"),
+  ]);
+  assert.match(viteConfig, /triggers:\s*\{\s*crons:\s*\["\* \* \* \* \*"\]\s*\}/u);
+  assert.match(worker, /async scheduled\(_controller: unknown, env: Env, ctx: ExecutionContext\)/u);
+  assert.match(worker, /ctx\.waitUntil\(drainTelegramOutboxUntilIdle\(env\.DB/u);
+  assert.match(worker, /siteOrigin:\s*"https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site"/u);
+  assert.match(runtime, /export async function drainTelegramOutboxUntilIdle/u);
+});
+
 test("GitHub Pages artifact contains only the public catalog", async () => {
   const files = (await filesBelow("dist-pages")).sort();
   assert.deepEqual(files, [

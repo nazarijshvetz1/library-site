@@ -985,16 +985,22 @@ export async function drainTelegramOutbox(
         SELECT 1 FROM telegram_delivery_outbox earlier
         WHERE earlier.recipient_user_id=o.recipient_user_id
           AND earlier.status IN ('pending','processing','retry')
+          AND earlier.next_attempt_at<=?
           AND (earlier.type=? OR ?=1)
-          AND (earlier.created_at<o.created_at OR (earlier.created_at=o.created_at AND earlier.id<o.id))
+          AND (earlier.next_attempt_at<o.next_attempt_at OR (
+            earlier.next_attempt_at=o.next_attempt_at AND (
+              earlier.created_at<o.created_at OR (earlier.created_at=o.created_at AND earlier.id<o.id)
+            )
+          ))
       )
-    ORDER BY o.created_at,o.id LIMIT ?
+    ORDER BY o.next_attempt_at,o.created_at,o.id LIMIT ?
   `).bind(
     now,
     TELEGRAM_TEACHER_MENU_OUTBOX_TYPE,
     configuration.linkingEnabled ? 1 : 0,
     configuration.notificationsEnabled ? 1 : 0,
     TELEGRAM_TEACHER_MENU_OUTBOX_TYPE,
+    now,
     TELEGRAM_TEACHER_MENU_OUTBOX_TYPE,
     configuration.notificationsEnabled ? 1 : 0,
     limit,

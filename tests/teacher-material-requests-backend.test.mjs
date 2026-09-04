@@ -196,14 +196,42 @@ test("frozen request, ready and notification payloads validate with exact keys",
     reason: "Не забрано",
     items: [{ reservationId: "MRR-one", quantity: 1 }],
   }).ok, true);
-  assert.equal(validation.validateMaterialRequestActionInput({
+  const legacyReady = validation.validateMaterialRequestActionInput({
     requestId: commandId(), expectedVersion: 1, action: "ready",
     pickupLocationId: "LOC-205", dueAt: null,
     items: [{
       itemId: "MRI-one", approvedQuantity: 1, sourceLocationId: "LOC-LIB",
       condition: "good", expectedAvailableQuantity: 5,
     }],
-  }).ok, true);
+  });
+  assert.equal(legacyReady.ok, true);
+  assert.equal(legacyReady.value.scheduledIssueAt, null);
+  const kyivReady = validation.validateMaterialRequestActionInput({
+    requestId: commandId(), expectedVersion: 1, action: "ready",
+    pickupLocationId: "LOC-205", scheduledIssueAt: "2026-08-13T12:45", dueAt: null,
+    items: [{
+      itemId: "MRI-one", approvedQuantity: 1, sourceLocationId: "LOC-LIB",
+      condition: "good", expectedAvailableQuantity: 5,
+    }],
+  });
+  assert.equal(kyivReady.ok, true);
+  assert.equal(kyivReady.value.scheduledIssueAt, "2026-08-13T09:45:00.000Z");
+  assert.equal(validation.validateMaterialRequestActionInput({
+    requestId: commandId(), expectedVersion: 1, action: "ready",
+    pickupLocationId: "LOC-205", scheduledIssueAt: "2026-03-29T03:30", dueAt: null,
+    items: [{
+      itemId: "MRI-one", approvedQuantity: 1, sourceLocationId: "LOC-LIB",
+      condition: "good", expectedAvailableQuantity: 5,
+    }],
+  }).ok, false);
+  assert.equal(validation.validateMaterialRequestActionInput({
+    requestId: commandId(), expectedVersion: 1, action: "ready",
+    pickupLocationId: "LOC-205", scheduledIssueAt: "2026-08-13T09:45:00.000Z", dueAt: null,
+    items: [{
+      itemId: "MRI-one", approvedQuantity: 1, sourceLocationId: "LOC-LIB",
+      condition: "good", expectedAvailableQuantity: 5,
+    }],
+  }).ok, false);
   assert.equal(validation.validateNotificationReadInput({
     requestId: commandId(), expectedVersion: 1, read: true,
   }).ok, true);
@@ -450,6 +478,61 @@ test("ready reserves without a loan, then physical issue creates the loan atomic
   );
 });
 
+test("scheduled pickup queues exact five-minute Telegram reminders and issue cancels them", async () => {
+  const context = openDatabase();
+  const linkedAt = "2026-08-13T08:00:00.000Z";
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,status,notify_orders,notify_visits,version,
+    menu_delivered_version,linked_at,created_at,updated_at
+  ) VALUES (?,?,?,'active',1,1,1,0,?,?,?)`).run(
+    "USR-T1", "TG-TEACHER", "CHAT-TEACHER", linkedAt, linkedAt, linkedAt,
+  );
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,status,notify_orders,notify_visits,version,
+    menu_delivered_version,linked_at,created_at,updated_at
+  ) VALUES (?,?,?,'active',1,1,1,0,?,?,?)`).run(
+    "USR-LIB", "TG-LIBRARIAN", "CHAT-LIBRARIAN", linkedAt, linkedAt, linkedAt,
+  );
+  const request = await createRequest(context, 2);
+  const scheduledIssueAt = "2099-01-01T10:00:00.000Z";
+  const ready = await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
+    requestId: commandId(), expectedVersion: request.version, action: "ready",
+    pickupLocationId: "LOC-205", scheduledIssueAt, dueAt: null,
+    items: [{
+      itemId: request.items[0].id, approvedQuantity: 2,
+      sourceLocationId: "LOC-LIB", condition: "good", expectedAvailableQuantity: 5,
+    }],
+  });
+  assert.equal(ready.scheduledIssueAt, scheduledIssueAt);
+  assert.deepEqual(
+    { ...context.sqlite.prepare("SELECT scheduled_issue_at FROM material_requests WHERE id=?").get(request.id) },
+    { scheduled_issue_at: scheduledIssueAt },
+  );
+  const reminders = context.sqlite.prepare(`SELECT recipient_user_id,type,message,next_attempt_at,status
+    FROM telegram_delivery_outbox
+    WHERE entity_id=? AND type IN ('material_request_pickup_reminder','material_request_prepare_reminder')
+    ORDER BY recipient_user_id`).all(request.id).map((row) => ({ ...row }));
+  assert.equal(reminders.length, 2);
+  assert.deepEqual(reminders.map((row) => row.recipient_user_id), ["USR-LIB", "USR-T1"]);
+  assert.equal(reminders.every((row) => row.next_attempt_at === "2099-01-01T09:55:00.000Z"), true);
+  assert.equal(reminders.every((row) => row.status === "pending"), true);
+  assert.equal(reminders.every((row) => row.message.includes("Кабінет 205")), true);
+
+  await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
+    requestId: commandId(), expectedVersion: ready.version, action: "issue",
+    issuedAt: "2026-09-04", dueAt: null,
+    items: [{ reservationId: ready.reserved[0].reservationId, quantity: 2 }],
+  });
+  const cancelled = context.sqlite.prepare(`SELECT status,last_error_code
+    FROM telegram_delivery_outbox
+    WHERE entity_id=? AND type IN ('material_request_pickup_reminder','material_request_prepare_reminder')
+    ORDER BY recipient_user_id`).all(request.id).map((row) => ({ ...row }));
+  assert.deepEqual(cancelled, [
+    { status: "dead", last_error_code: "request_issued" },
+    { status: "dead", last_error_code: "request_issued" },
+  ]);
+});
+
 test("teacher notification deletion is a hidden, idempotent soft-delete", async () => {
   const context = openDatabase();
   const request = await createRequest(context, 1);
@@ -549,10 +632,17 @@ test("ready stock race rolls back reservation, request, command and notification
 
 test("not-collected release frees stock without a loan and supports partial release", async () => {
   const context = openDatabase();
+  const linkedAt = "2026-08-13T08:00:00.000Z";
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,status,notify_orders,notify_visits,version,
+    menu_delivered_version,linked_at,created_at,updated_at
+  ) VALUES (?,?,?,'active',1,1,1,0,?,?,?)`).run(
+    "USR-LIB", "TG-LIBRARIAN", "CHAT-LIBRARIAN", linkedAt, linkedAt, linkedAt,
+  );
   const request = await createRequest(context, 3);
   await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
     requestId: commandId(), expectedVersion: request.version, action: "ready",
-    pickupLocationId: "LOC-205", dueAt: "2026-09-30",
+    pickupLocationId: "LOC-205", scheduledIssueAt: "2099-01-01T10:00:00.000Z", dueAt: "2026-09-30",
     items: [{
       itemId: request.items[0].id, approvedQuantity: 3,
       sourceLocationId: "LOC-LIB", condition: "good", expectedAvailableQuantity: 5,
@@ -569,6 +659,12 @@ test("not-collected release frees stock without a loan and supports partial rele
   assert.equal(context.sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 5);
   assert.equal(context.sqlite.prepare("SELECT reserved_quantity FROM material_stock_totals").get().reserved_quantity, 2);
   assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM loans").get().n, 0);
+  const refreshedReminder = context.sqlite.prepare(`
+    SELECT status,message FROM telegram_delivery_outbox
+    WHERE type='material_request_prepare_reminder'
+  `).get();
+  assert.equal(refreshedReminder.status, "pending");
+  assert.match(refreshedReminder.message, /Алгебра[^—]*— 2 прим\./u);
 
   prepared = await store.getMaterialRequest(context.db, request.id);
   const released = await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
@@ -579,6 +675,45 @@ test("not-collected release frees stock without a loan and supports partial rele
   assert.equal(released.status, "cancelled");
   assert.equal(context.sqlite.prepare("SELECT reserved_quantity FROM material_stock_totals").get().reserved_quantity, 0);
   assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM inventory_transactions").get().n, 0);
+});
+
+test("partial release reminder counts only copies that still need preparation", async () => {
+  const context = openDatabase();
+  const linkedAt = "2026-08-13T08:00:00.000Z";
+  context.sqlite.prepare(`INSERT INTO telegram_connections (
+    user_id,telegram_user_id,chat_id,status,notify_orders,notify_visits,version,
+    menu_delivered_version,linked_at,created_at,updated_at
+  ) VALUES (?,?,?,'active',1,1,1,0,?,?,?)`).run(
+    "USR-LIB", "TG-LIBRARIAN", "CHAT-LIBRARIAN", linkedAt, linkedAt, linkedAt,
+  );
+  const request = await createRequest(context, 3);
+  await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
+    requestId: commandId(), expectedVersion: request.version, action: "ready",
+    pickupLocationId: "LOC-205", scheduledIssueAt: "2099-01-01T10:00:00.000Z", dueAt: null,
+    items: [{
+      itemId: request.items[0].id, approvedQuantity: 3,
+      sourceLocationId: "LOC-LIB", condition: "good", expectedAvailableQuantity: 5,
+    }],
+  });
+  let prepared = await store.getMaterialRequest(context.db, request.id);
+  const reservationId = prepared.items[0].reservations[0].id;
+  await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
+    requestId: commandId(), expectedVersion: prepared.version, action: "issue",
+    issuedAt: "2026-09-04", dueAt: null,
+    items: [{ reservationId, quantity: 1 }],
+  });
+  prepared = await store.getMaterialRequest(context.db, request.id);
+  await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
+    requestId: commandId(), expectedVersion: prepared.version, action: "release",
+    reason: "Частину не забрали",
+    items: [{ reservationId, quantity: 1 }],
+  });
+  const reminder = context.sqlite.prepare(`
+    SELECT status,message FROM telegram_delivery_outbox
+    WHERE type='material_request_prepare_reminder'
+  `).get();
+  assert.equal(reminder.status, "pending");
+  assert.match(reminder.message, /Алгебра[^—]*— 1 прим\./u);
 });
 
 test("physical issue loses atomically when its reserved source is deactivated", async () => {

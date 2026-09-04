@@ -4,6 +4,7 @@ import { kyivToday } from "./visit-schedule-validation.ts";
 import {
   queueTelegramForLibrariansStatement,
   queueTelegramFromPortalNotificationStatement,
+  queueTelegramForUserStatement,
 } from "./telegram-outbox.ts";
 import type {
   MaterialRequestActionInput,
@@ -106,6 +107,7 @@ export type MaterialRequestProjection = {
   pickupLocation: { id: string; name: string } | null;
   resultingLoanId: string | null;
   dueAt: string | null;
+  scheduledIssueAt: string | null;
   version: number;
   submittedAt: string;
   readyAt: string | null;
@@ -166,6 +168,7 @@ type RequestRow = {
   pickup_location_name: string | null;
   resulting_loan_id: string | null;
   due_at: string | null;
+  scheduled_issue_at: string | null;
   version: number;
   submitted_at: string;
   ready_at: string | null;
@@ -416,6 +419,7 @@ export async function createTeacherMaterialRequest(
     pickupLocation: null,
     resultingLoanId: null,
     dueAt: null,
+    scheduledIssueAt: null,
     version: 1,
     submittedAt: createdAt,
     readyAt: null,
@@ -459,11 +463,11 @@ export async function createTeacherMaterialRequest(
     db.prepare(`
       INSERT INTO material_requests (
         id, teacher_user_id, status, teacher_notes, librarian_note,
-        rejection_reason, pickup_location_id, resulting_loan_id,
+        rejection_reason, pickup_location_id, resulting_loan_id, scheduled_issue_at,
         reviewed_by_user_id, cancelled_by_user_id, version, submitted_at,
         ready_at, completed_at, rejected_at, cancelled_at, created_at, updated_at
       )
-      SELECT ?, u.id, 'submitted', ?, '', '', NULL, NULL, NULL, NULL, 1,
+      SELECT ?, u.id, 'submitted', ?, '', '', NULL, NULL, NULL, NULL, NULL, 1,
              ?, NULL, NULL, NULL, NULL, ?, ?
       FROM users u
       JOIN teacher_profiles profile ON profile.teacher_user_id=u.id AND profile.closed_at IS NULL
@@ -1608,6 +1612,9 @@ async function transitionMaterialRequest(
       { status: toStatus, version: current.version + 1, updatedAt: now },
       now,
     ),
+    ...(input.action === "complete"
+      ? [cancelScheduledRequestRemindersStatement(db, current.id, now, "request_completed")]
+      : []),
     completeCommandStatement(db, input.requestId, result, now),
   ];
   const replayed = await executeIdempotentBatch<typeof result>(
@@ -1629,6 +1636,7 @@ async function readyMaterialRequest(
   input: MaterialRequestReadyInput,
   requestHash: string,
 ): Promise<Record<string, unknown>> {
+  const scheduledIssueAt = input.scheduledIssueAt ?? null;
   if (!["submitted", "in_review", "ready", "partially_ready"].includes(current.status)) {
     throw new TeacherMaterialRequestError(
       "invalid_request_transition",
@@ -1670,9 +1678,18 @@ async function readyMaterialRequest(
       "Дата повернення не може бути в минулому.",
     );
   }
+  const nowDate = new Date();
+  if (scheduledIssueAt && new Date(scheduledIssueAt).getTime() < nowDate.getTime() - 60_000) {
+    throw new TeacherMaterialRequestError(
+      "invalid_scheduled_issue_time",
+      400,
+      "Запланований час видачі не може бути в минулому.",
+    );
+  }
   const deltas = targets.filter((item) => item.deltaQuantity > 0);
   const settingsChanged = input.pickupLocationId !== current.pickupLocationId
-    || input.dueAt !== current.dueAt;
+    || input.dueAt !== current.dueAt
+    || scheduledIssueAt !== current.scheduledIssueAt;
   if (!deltas.length && !settingsChanged) {
     throw new TeacherMaterialRequestError(
       "nothing_to_reserve",
@@ -1780,7 +1797,16 @@ async function readyMaterialRequest(
     }
   }
 
-  const now = new Date().toISOString();
+  const now = nowDate.toISOString();
+  const reminderLeadMs = 5 * 60_000;
+  const reminderIsImmediate = scheduledIssueAt
+    ? new Date(scheduledIssueAt).getTime() - nowDate.getTime() < reminderLeadMs
+    : false;
+  const reminderAt = scheduledIssueAt ? new Date(Math.max(
+    nowDate.getTime(),
+    new Date(scheduledIssueAt).getTime() - reminderLeadMs,
+  )).toISOString() : null;
+  const scheduledLabel = scheduledIssueAt ? formatKyivDateTime(scheduledIssueAt) : "без визначеного часу";
   const reservationRows = states.map((state) => ({
     id: `MRR-${crypto.randomUUID()}`,
     itemId: state.item_id,
@@ -1805,6 +1831,7 @@ async function readyMaterialRequest(
     updatedAt: now,
     readyAt: current.readyAt ?? now,
     dueAt: input.dueAt,
+    scheduledIssueAt,
     pickupLocationId: pickup.id,
     pickupLocationName: pickup.name,
     reserved: reservationRows.map((row) => ({
@@ -1882,8 +1909,8 @@ async function readyMaterialRequest(
     `).bind(JSON.stringify(itemApprovals), now, current.id),
     db.prepare(`
       UPDATE material_requests
-      SET status=?, librarian_note='', rejection_reason='', pickup_location_id=?,
-          due_at=?, reviewed_by_user_id=?, ready_at=COALESCE(ready_at, ?),
+       SET status=?, librarian_note='', rejection_reason='', pickup_location_id=?,
+          due_at=?, scheduled_issue_at=?, reviewed_by_user_id=?, ready_at=COALESCE(ready_at, ?),
           version=version+1, updated_at=?
       WHERE id=? AND version=?
         AND status IN ('submitted','in_review','ready','partially_ready')
@@ -1894,6 +1921,7 @@ async function readyMaterialRequest(
       status,
       input.pickupLocationId,
       input.dueAt,
+      scheduledIssueAt,
       actor.id,
       now,
       now,
@@ -1924,6 +1952,7 @@ async function readyMaterialRequest(
       JSON.stringify({
         pickupLocationId: input.pickupLocationId,
         dueAt: input.dueAt,
+        scheduledIssueAt,
         reservations: result.reserved,
       }),
       now,
@@ -1943,7 +1972,7 @@ async function readyMaterialRequest(
     `).bind(
       notificationId,
       `material-request:${current.id}:ready:${input.requestId}`,
-      `Замовлення зарезервовано. Місце отримання: ${pickup.name}.`,
+      `Замовлення зарезервовано на ${scheduledLabel}. Місце отримання: ${pickup.name}.`,
       now,
       now,
       current.id,
@@ -1964,17 +1993,56 @@ async function readyMaterialRequest(
       now,
     ));
   }
+  statements.push(requestAuditStatement(
+    db,
+    actor,
+    input.requestId,
+    current,
+    result,
+    eventId,
+    { status, version: current.version + 1, updatedAt: now },
+    now,
+  ));
+  if (reminderAt && scheduledIssueAt) {
+    const approvedReminderItems = itemApprovals.filter((item) => item.approvedQuantity > 0);
+    const reminderItems = approvedReminderItems.slice(0, 3)
+      .map((item) => `${currentByItem.get(item.itemId)?.title ?? "Матеріал"} — ${item.approvedQuantity} прим.`)
+      .join("; ");
+    const reminderItemsSuffix = approvedReminderItems.length > 3
+      ? `; ще ${approvedReminderItems.length - 3} поз.`
+      : "";
+    statements.push(
+      queueTelegramForUserStatement(db, current.teacherUserId, {
+        dedupeKey: `material-request:${current.id}:pickup-reminder`,
+        auditRequestId: input.requestId,
+        category: "orders",
+        type: "material_request_pickup_reminder",
+        title: reminderIsImmediate ? "Незабаром — отримання матеріалів" : "За 5 хвилин — отримання матеріалів",
+        message: `Чекаємо вас ${scheduledLabel}. Місце отримання: ${pickup.name}.`,
+        targetPath: "/teacher?tab=orders&view=history",
+        entityType: "material_request",
+        entityId: current.id,
+        createdAt: now,
+        deliverAt: reminderAt,
+      }),
+      queueTelegramForLibrariansStatement(db, {
+        dedupeKey: `material-request:${current.id}:prepare-reminder`,
+        auditRequestId: input.requestId,
+        category: "orders",
+        type: "material_request_prepare_reminder",
+        title: reminderIsImmediate ? "Підготуйте видачу зараз" : "Підготуйте видачу за 5 хвилин",
+        message: `${current.teacherName} · ${scheduledLabel} · ${pickup.name}. ${reminderItems}${reminderItemsSuffix}`,
+        targetPath: "/librarian/orders",
+        entityType: "material_request",
+        entityId: current.id,
+        createdAt: now,
+        deliverAt: reminderAt,
+      }),
+    );
+  } else {
+    statements.push(cancelScheduledRequestRemindersStatement(db, current.id, now, "schedule_cleared"));
+  }
   statements.push(
-    requestAuditStatement(
-      db,
-      actor,
-      input.requestId,
-      current,
-      result,
-      eventId,
-      { status, version: current.version + 1, updatedAt: now },
-      now,
-    ),
     completeCommandStatement(db, input.requestId, result, now),
   );
   if (statements.length > 50) {
@@ -2514,6 +2582,7 @@ async function issueMaterialRequest(
       JSON.stringify({ transactionId, materialRequestId: current.id }),
       now,
     ),
+    cancelScheduledRequestRemindersStatement(db, current.id, now, "request_issued"),
     completeCommandStatement(db, input.requestId, result, now),
   );
   if (statements.length > 50) {
@@ -2620,6 +2689,21 @@ async function releaseMaterialRequest(
     releaseReason: input.reason,
     items: input.items,
   };
+  const scheduledIssueMs = current.scheduledIssueAt ? new Date(current.scheduledIssueAt).getTime() : Number.NaN;
+  const refreshedReminderAt = Number.isFinite(scheduledIssueMs)
+    && scheduledIssueMs - 5 * 60_000 > new Date(now).getTime()
+    ? new Date(scheduledIssueMs - 5 * 60_000).toISOString()
+    : null;
+  const remainingReminderItems = current.items.map((item) => ({
+    title: item.title,
+    quantity: item.approvedQuantity - item.fulfilledQuantity - (releasedByItem.get(item.id) ?? 0),
+  })).filter((item) => item.quantity > 0);
+  const remainingReminderSummary = remainingReminderItems.slice(0, 3)
+    .map((item) => `${item.title} — ${item.quantity} прим.`)
+    .join("; ");
+  const remainingReminderSuffix = remainingReminderItems.length > 3
+    ? `; ще ${remainingReminderItems.length - 3} поз.`
+    : "";
   const eventId = `MRE-${crypto.randomUUID()}`;
   const notificationId = `NTF-${crypto.randomUUID()}`;
   const statements: D1Statement[] = [
@@ -2756,6 +2840,23 @@ async function releaseMaterialRequest(
       },
       now,
     ),
+    ...(status === "completed" || status === "cancelled"
+      ? [cancelScheduledRequestRemindersStatement(db, current.id, now, "request_closed")]
+      : refreshedReminderAt && current.scheduledIssueAt
+        ? [queueTelegramForLibrariansStatement(db, {
+          dedupeKey: `material-request:${current.id}:prepare-reminder`,
+          auditRequestId: input.requestId,
+          category: "orders",
+          type: "material_request_prepare_reminder",
+          title: "Підготуйте видачу за 5 хвилин",
+          message: `${current.teacherName} · ${formatKyivDateTime(current.scheduledIssueAt)} · ${current.pickupLocationName ?? "місце отримання не вказано"}. ${remainingReminderSummary}${remainingReminderSuffix}`,
+          targetPath: "/librarian/orders",
+          entityType: "material_request",
+          entityId: current.id,
+          createdAt: now,
+          deliverAt: refreshedReminderAt,
+        })]
+        : []),
     completeCommandStatement(db, input.requestId, result, now),
   ];
   const replayed = await executeIdempotentBatch<typeof result>(
@@ -2816,7 +2917,7 @@ function requestProjectionSql(): string {
       mr.id, mr.teacher_user_id, teacher.full_name AS teacher_name,
       mr.status, mr.teacher_notes, mr.librarian_note, mr.rejection_reason,
       mr.pickup_location_id, pickup.name AS pickup_location_name,
-      mr.resulting_loan_id, mr.due_at, mr.version, mr.submitted_at, mr.ready_at,
+       mr.resulting_loan_id, mr.due_at, mr.scheduled_issue_at, mr.version, mr.submitted_at, mr.ready_at,
       mr.completed_at, mr.rejected_at, mr.cancelled_at,
       mr.created_at, mr.updated_at, mr.teacher_hidden_at, mr.librarian_hidden_at,
       mri.id AS item_id, mri.material_id, mri.title_snapshot,
@@ -2873,6 +2974,7 @@ function mapRequestRows(rows: RequestRow[], includeLibrarianVisibility = false):
           : null,
         resultingLoanId: row.resulting_loan_id,
         dueAt: row.due_at,
+        scheduledIssueAt: row.scheduled_issue_at,
         version: Number(row.version),
         submittedAt: row.submitted_at,
         readyAt: row.ready_at,
@@ -3118,6 +3220,35 @@ function completeCommandStatement(
           AND entity_id=mutation_commands.target_id
       )
   `).bind(JSON.stringify(result), completedAt, completedAt, id);
+}
+
+function cancelScheduledRequestRemindersStatement(
+  db: TeacherMaterialRequestDatabase,
+  materialRequestId: string,
+  updatedAt: string,
+  reason: string,
+): D1Statement {
+  return db.prepare(`
+    UPDATE telegram_delivery_outbox
+    SET status='dead',last_error_code=?,last_error_message='Заплановане нагадування скасовано.',
+        lease_token=NULL,lease_expires_at=NULL,updated_at=?
+    WHERE entity_type='material_request' AND entity_id=?
+      AND type IN ('material_request_pickup_reminder','material_request_prepare_reminder')
+      AND status IN ('pending','retry')
+  `).bind(reason, updatedAt, materialRequestId);
+}
+
+function formatKyivDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("uk-UA", {
+    timeZone: "Europe/Kyiv",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
 async function executeIdempotentBatch<T>(

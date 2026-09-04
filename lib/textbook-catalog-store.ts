@@ -314,7 +314,7 @@ export async function listManagedTextbooks(
     .sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title, "uk-UA") || a.id.localeCompare(b.id))
     .slice(0, 1000);
   const candidates = input.q.length >= 2
-    ? await listCandidates(db, academicYear.id, input.grade, input.q)
+    ? await listCandidates(db, input.grade, input.q)
     : [];
   return { academicYear, items, candidates };
 }
@@ -681,13 +681,16 @@ export async function mutateTextbookAssignment(
 
 async function listCandidates(
   db: TextbookDatabase,
-  academicYearId: string,
   grade: number,
   q: string,
 ): Promise<TextbookCandidate[]> {
   const normalized = normalizeSearch(q);
   if (!normalized) return [];
-  const like = `%${normalized.replace(/[%_]/gu, "")}%`;
+  const tokens = normalized.split(" ").filter(Boolean).slice(0, 12);
+  const tokenPredicates = tokens
+    .map(() => "(instr(lower(m.search_text), ?) > 0 OR instr(lower(m.id), ?) > 0)")
+    .join(" AND ");
+  const tokenBindings = tokens.flatMap((token) => [token, token]);
   const response = await db.prepare(`
     SELECT
       m.id AS material_id,
@@ -721,11 +724,7 @@ async function listCandidates(
     LEFT JOIN material_cover_assets c ON c.material_id = m.id AND c.status = 'ready'
     WHERE m.status = 'active'
       AND m.archived_at IS NULL
-      AND (m.search_text LIKE ? OR lower(m.id) LIKE ?)
-      AND NOT EXISTS (
-        SELECT 1 FROM textbook_assignments ta
-        WHERE ta.academic_year_id = ? AND ta.grade = ? AND ta.material_id = m.id
-      )
+      AND ${tokenPredicates}
     ORDER BY
       CASE
         WHEN m.class_from IS NOT NULL AND m.class_to IS NOT NULL
@@ -735,8 +734,7 @@ async function listCandidates(
       END,
       m.sort_title ASC,
       m.id ASC
-    LIMIT 30
-  `).bind(like, `%${normalized.toLocaleLowerCase("uk-UA")}%`, academicYearId, grade, grade).all<Row>();
+  `).bind(...tokenBindings, grade).all<Row>();
   return (response.results ?? []).map((row) => {
     const materialId = boundedText(row.material_id, 64);
     return {

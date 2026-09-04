@@ -167,7 +167,12 @@ test("selected teacher exposes profile, material history, visits and an embedded
 });
 
 test("material request inbox separates reservation, physical issue and uncollected release", async () => {
-  const inbox = await read("app/librarian/visits/material-request-inbox.tsx");
+  const [inbox, css] = await Promise.all([
+    read("app/librarian/visits/material-request-inbox.tsx"),
+    read("app/visits/visits.module.css"),
+  ]);
+  const reservationForm = inbox.slice(inbox.indexOf("function ReservationActionForm"), inbox.indexOf("function ReadyRequestForm"));
+  const readyForm = inbox.slice(inbox.indexOf("function ReadyRequestForm"), inbox.indexOf("function holdingKey"));
   assert.match(inbox, /useState<"issue" \| "release" \| null>/u);
   assert.match(inbox, /action === "release"/u);
   assert.match(inbox, /reservationId: reservation\.id/u);
@@ -176,7 +181,13 @@ test("material request inbox separates reservation, physical issue and uncollect
   assert.match(inbox, /Фізичного руху примірників не буде/u);
   assert.match(inbox, /approvedQuantity: row\.approvedQuantity/u);
   assert.match(inbox, /expectedAvailableQuantity: holdingAvailable\(holding\)/u);
-  assert.match(inbox, /Підтвердити фактичну видачу для \$\{request\.teacher\.fullName\}: \$\{totalQuantity\} прим\.\? Залишок зменшиться, буде створено позику\./u);
+  assert.doesNotMatch(reservationForm, /action === "issue" && !window\.confirm/u);
+  assert.match(reservationForm, /action === "release" && !window\.confirm/u);
+  assert.match(readyForm, /type="datetime-local" step="60"/u);
+  assert.match(readyForm, /scheduledIssueAt/u);
+  assert.match(readyForm, /action: "ready", pickupLocationId, scheduledIssueAt, dueAt: dueAt \|\| null, items/u);
+  assert.match(inbox, /request\.scheduledIssueAt \? ` · \$\{formatDate\(request\.scheduledIssueAt\)\}` : ""/u);
+  assert.match(css, /@media \(max-width: 720px\)[\s\S]*?\.readyForm > button\[type="submit"\][\s\S]*?position: sticky;[\s\S]*?env\(safe-area-inset-bottom\)/u);
   assert.match(inbox, /onClick=\{\(\) => void sendAction\(pending\)\}/u);
   assert.match(inbox, /completeLegacyRequest/u);
   assert.match(inbox, /request\.resultingLoanId/u);

@@ -253,6 +253,13 @@
       "when": 1788251898254,
       "tag": "0035_soft_warstar",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1788383573960,
+      "tag": "0036_eager_champions",
+      "breakpoints": true
     }
   ]
 }

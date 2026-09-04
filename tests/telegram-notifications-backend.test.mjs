@@ -1426,6 +1426,33 @@ test("audited outbox event is deduplicated and delivered with a safe site link",
   context.sqlite.close();
 });
 
+test("a future reminder never blocks a later-created message that is already due", async () => {
+  const context = await queuedLibrarianContext();
+  context.sqlite.prepare(`INSERT INTO telegram_delivery_outbox (
+    id,recipient_user_id,dedupe_key,category,type,title,message,target_path,
+    entity_type,entity_id,status,attempts,next_attempt_at,created_at,updated_at
+  ) VALUES (
+    'TGO-FUTURE','USR-LIB','future-reminder:USR-LIB','orders','material_request_prepare_reminder',
+    'Майбутнє нагадування','Ще не час','/librarian/orders','material_request','MRQ-FUTURE',
+    'pending',0,'2026-08-23T10:00:00.000Z','2026-08-21T10:00:00.000Z','2026-08-21T10:00:00.000Z'
+  )`).run();
+  const delivered = [];
+  const result = await telegram.drainTelegramOutbox(context.db, {
+    siteOrigin: "https://library.example.test",
+    now: new Date(context.now),
+    fetcher: async (_url, init) => {
+      delivered.push(JSON.parse(init.body).text);
+      return telegramOk(45);
+    },
+  });
+  assert.deepEqual(result, { attempted: 1, sent: 1, failed: 0 });
+  assert.equal(delivered.length, 1);
+  assert.match(delivered[0], /Новий запис/u);
+  assert.equal(context.sqlite.prepare("SELECT status FROM telegram_delivery_outbox WHERE id='TGO-FUTURE'").get().status, "pending");
+  assert.equal(context.sqlite.prepare("SELECT status FROM telegram_delivery_outbox WHERE id!='TGO-FUTURE'").get().status, "sent");
+  context.sqlite.close();
+});
+
 test("master mute cancels queued delivery and blocks new system events until enabled", async () => {
   const context = await queuedLibrarianContext();
   context.sqlite.prepare(`UPDATE telegram_delivery_outbox SET status='processing',attempts=1,
