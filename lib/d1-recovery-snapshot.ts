@@ -44,13 +44,13 @@ export async function createD1RecoverySnapshot(db: RecoveryDatabase) {
   const readQueries: string[] = [];
   let pending: string[] = [];
   for (const select of selects) {
-    if (new TextEncoder().encode([...pending, select].join(" UNION ALL ")).length > 75000 && pending.length) {
+    if (pending.length >= 4 || (new TextEncoder().encode([...pending, select].join(" UNION ALL ")).length > 75000 && pending.length)) {
       readQueries.push(pending.join(" UNION ALL ") + ` LIMIT ${MAX_RECOVERY_ROWS + 1}`); pending = [];
     }
     pending.push(select);
   }
   if (pending.length) readQueries.push(pending.join(" UNION ALL ") + ` LIMIT ${MAX_RECOVERY_ROWS + 1}`);
-  if (readQueries.length > 20) throw new Error("Запит резервного експорту перевищує безпечний розмір.");
+  if (readQueries.length > 32) throw new Error("Запит резервного експорту перевищує безпечний розмір.");
   const result = await db.batch([db.prepare(SCHEMA_QUERY), ...readQueries.map(sql => db.prepare(sql)), db.prepare(SCHEMA_QUERY)]);
   if (result.length !== readQueries.length + 2 || result.some((item) => item.success === false || !Array.isArray(item.results))) throw new Error("Неповний резервний експорт.");
   if (JSON.stringify(result[0].results) !== JSON.stringify(schema) || JSON.stringify(result.at(-1)!.results) !== JSON.stringify(schema)) throw new Error("Схема змінилася під час резервного експорту. Повторіть знімок.");
