@@ -10,6 +10,183 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
+// Reader/copy migration is additive; imported records do not grant authentication.
+export const libraryImportRuns = sqliteTable("library_import_runs", {
+  id: text("id").primaryKey(),
+  manifestSha256: text("manifest_sha256").notNull(),
+  sourceExportedAt: text("source_exported_at").notNull(),
+  state: text("state").notNull().default("loading"),
+  expectedCountsJson: text("expected_counts_json").notNull(),
+  reconciliationJson: text("reconciliation_json"),
+  recoverySha256: text("recovery_sha256").notNull(),
+  actorUserId: text("actor_user_id").notNull().references((): AnySQLiteColumn => users.id, {onDelete:"restrict"}),
+  createdAt: text("created_at").notNull(),
+  verifiedAt: text("verified_at"),
+}, table => [
+  uniqueIndex("idx_library_import_manifest").on(table.manifestSha256),
+  check("library_import_state",sql`${table.state} in ('loading','verified','reconciled')`),
+  check("library_import_counts_json",sql`json_valid(${table.expectedCountsJson})`),
+  check("library_import_reconciliation_json",sql`${table.reconciliationJson} is null or json_valid(${table.reconciliationJson})`),
+  check("library_import_manifest_hash",sql`length(${table.manifestSha256})=64 and ${table.manifestSha256} not glob '*[^0-9a-f]*'`),
+  check("library_import_recovery_hash",sql`length(${table.recoverySha256})=64 and ${table.recoverySha256} not glob '*[^0-9a-f]*'`),
+]);
+
+export const libraryEditions = sqliteTable("library_editions", {
+  id: text("id").primaryKey(),
+  sourceMediaId: text("source_media_id"),
+  materialId: text("material_id").references((): AnySQLiteColumn => materials.id, {onDelete:"restrict"}),
+  fund: text("fund").notNull().default("literature"),
+  title: text("title").notNull(),
+  publicMetadataJson: text("public_metadata_json").notNull().default("{}"),
+  sourceJson: text("source_json").notNull().default("{}"),
+  sourceRowSha256: text("source_row_sha256"),
+  importRunId: text("import_run_id").references(() => libraryImportRuns.id, {onDelete:"restrict"}),
+  publicationState: text("publication_state").notNull().default("draft"),
+  version: integer("version").notNull().default(1),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, table => [
+  uniqueIndex("idx_library_editions_source").on(table.sourceMediaId),
+  uniqueIndex("idx_library_editions_material").on(table.materialId),
+  index("idx_library_editions_fund_title").on(table.fund,table.publicationState,table.title,table.id),
+  check("library_edition_title",sql`length(trim(${table.title}))>0`),
+  check("library_edition_fund",sql`${table.fund} in ('education','literature')`),
+  check("library_edition_publication",sql`${table.publicationState} in ('draft','published','archived')`),
+  check("library_edition_metadata",sql`json_valid(${table.publicMetadataJson}) and json_valid(${table.sourceJson})`),
+  check("library_edition_version",sql`${table.version}>0`),
+]);
+
+export const libraryReaders = sqliteTable("library_readers", {
+  id: text("id").primaryKey(),
+  sourceMemberId: text("source_member_id"),
+  memberNo: text("member_no").notNull(),
+  fullName: text("full_name").notNull(),
+  sortName: text("sort_name").notNull(),
+  kind: text("kind").notNull().default("unclassified"),
+  status: text("status").notNull().default("active"),
+  accessStatus: text("access_status").notNull().default("inactive"),
+  accessVersion: integer("access_version").notNull().default(1),
+  linkedTeacherUserId: text("linked_teacher_user_id").references((): AnySQLiteColumn => users.id,{onDelete:"restrict"}),
+  sourceGroupLabel: text("source_group_label").notNull().default(""),
+  sourceGroupId: text("source_group_id"),
+  sourceJson: text("source_json").notNull().default("{}"),
+  sourceRowSha256: text("source_row_sha256"),
+  importRunId: text("import_run_id").references(() => libraryImportRuns.id,{onDelete:"restrict"}),
+  version: integer("version").notNull().default(1),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+},table => [
+  uniqueIndex("idx_library_readers_source").on(table.sourceMemberId),
+  uniqueIndex("idx_library_readers_number").on(table.memberNo),
+  uniqueIndex("idx_library_readers_teacher").on(table.linkedTeacherUserId),
+  index("idx_library_readers_directory").on(table.kind,table.status,table.sortName,table.id),
+  check("library_reader_name",sql`length(trim(${table.fullName}))>0 and length(trim(${table.sortName}))>0`),
+  check("library_reader_kind",sql`${table.kind} in ('student','teacher','staff','other','unclassified')`),
+  check("library_reader_status",sql`${table.status} in ('active','inactive')`),
+  check("library_reader_access",sql`${table.accessStatus} in ('inactive','active','blocked')`),
+  check("library_reader_student_isolation",sql`${table.kind}!='student' or ${table.linkedTeacherUserId} is null`),
+  check("library_reader_versions",sql`${table.version}>0 and ${table.accessVersion}>0`),
+  check("library_reader_source_json",sql`json_valid(${table.sourceJson})`),
+]);
+
+export const readerClassEnrollments = sqliteTable("reader_class_enrollments", {
+  id:text("id").primaryKey(),
+  readerId:text("reader_id").notNull().references(() => libraryReaders.id,{onDelete:"restrict"}),
+  classYearId:text("class_year_id").notNull().references((): AnySQLiteColumn => classYears.id,{onDelete:"restrict"}),
+  observedAt:text("observed_at").notNull(), endedAt:text("ended_at"),
+  importRunId:text("import_run_id").references(() => libraryImportRuns.id,{onDelete:"restrict"}),
+},table => [
+  uniqueIndex("idx_reader_current_class").on(table.readerId).where(sql`${table.endedAt} is null`),
+  index("idx_reader_enrollment_class").on(table.classYearId,table.endedAt,table.readerId),
+  check("reader_enrollment_dates",sql`${table.endedAt} is null or ${table.endedAt}>=${table.observedAt}`),
+]);
+
+export const libraryCopies = sqliteTable("library_copies", {
+  id:text("id").primaryKey(), sourceCopyId:text("source_copy_id"),
+  editionId:text("edition_id").notNull().references(() => libraryEditions.id,{onDelete:"restrict"}),
+  accessionNo:text("accession_no").notNull(), copyNo:text("copy_no").notNull().default(""),
+  locationId:text("location_id").references((): AnySQLiteColumn => locations.id,{onDelete:"restrict"}),
+  condition:text("condition").notNull().default("unspecified"),
+  physicalState:text("physical_state").notNull().default("unknown"),
+  registration:text("registration").notNull().default("unreconciled"),
+  sourceJson:text("source_json").notNull().default("{}"), sourceRowSha256:text("source_row_sha256"),
+  importRunId:text("import_run_id").references(() => libraryImportRuns.id,{onDelete:"restrict"}),
+  version:integer("version").notNull().default(1),
+  createdAt:text("created_at").notNull(),updatedAt:text("updated_at").notNull(),
+},table => [
+  uniqueIndex("idx_library_copy_source").on(table.sourceCopyId),
+  index("idx_library_copy_accession").on(table.accessionNo),
+  index("idx_library_copy_stock").on(table.editionId,table.locationId,table.condition,table.registration,table.physicalState),
+  check("library_copy_condition",sql`${table.condition} in ('unspecified','good','worn','damaged')`),
+  check("library_copy_state",sql`${table.physicalState} in ('unknown','on_shelf','on_loan','withdrawn')`),
+  check("library_copy_registration",sql`${table.registration} in ('unreconciled','registered')`),
+  check("library_copy_registration_consistency",sql`${table.registration}='unreconciled' or (${table.locationId} is not null and ${table.physicalState}!='unknown')`),
+  check("library_copy_source_json",sql`json_valid(${table.sourceJson})`),check("library_copy_version",sql`${table.version}>0`),
+]);
+
+export const readerCirculations = sqliteTable("reader_circulations", {
+  id:text("id").primaryKey(),sourceCirculationId:text("source_circulation_id"),
+  copyId:text("copy_id").notNull().references(() => libraryCopies.id,{onDelete:"restrict"}),
+  readerId:text("reader_id").notNull().references(() => libraryReaders.id,{onDelete:"restrict"}),
+  status:text("status").notNull(), issuedAt:text("issued_at"),dueAt:text("due_at"),receivedAt:text("received_at"),
+  accountingMode:text("accounting_mode").notNull().default("unreconciled"),
+  legacyLoanItemId:text("legacy_loan_item_id").references((): AnySQLiteColumn => loanItems.id,{onDelete:"restrict"}),
+  legacyClassLoanItemId:text("legacy_class_loan_item_id").references((): AnySQLiteColumn => classLoanItems.id,{onDelete:"restrict"}),
+  sourceJson:text("source_json").notNull().default("{}"),sourceRowSha256:text("source_row_sha256"),
+  importRunId:text("import_run_id").references(() => libraryImportRuns.id,{onDelete:"restrict"}),
+  version:integer("version").notNull().default(1),createdAt:text("created_at").notNull(),updatedAt:text("updated_at").notNull(),
+},table => [
+  uniqueIndex("idx_reader_circulation_source").on(table.sourceCirculationId),
+  uniqueIndex("idx_reader_outstanding_copy").on(table.copyId).where(sql`${table.status} in ('issued','overdue')`),
+  index("idx_reader_circulation_reader").on(table.readerId,table.status,table.dueAt,table.id),
+  index("idx_reader_circulation_copy").on(table.copyId,table.status),
+  check("reader_circulation_status",sql`${table.status} in ('issued','overdue','returned','cancelled','pending','reserved')`),
+  check("reader_circulation_accounting",sql`(${table.accountingMode} in ('unreconciled','native') and ${table.legacyLoanItemId} is null and ${table.legacyClassLoanItemId} is null) or (${table.accountingMode}='legacy_teacher' and ${table.legacyLoanItemId} is not null and ${table.legacyClassLoanItemId} is null) or (${table.accountingMode}='legacy_class' and ${table.legacyClassLoanItemId} is not null and ${table.legacyLoanItemId} is null)`),
+  check("reader_circulation_json",sql`json_valid(${table.sourceJson})`),check("reader_circulation_version",sql`${table.version}>0`),
+]);
+
+export const libraryCatalogEntities = sqliteTable("library_catalog_entities", {
+  id:text("id").primaryKey(),kind:text("kind").notNull(),name:text("name").notNull(),slug:text("slug").notNull(),
+  publicMetadataJson:text("public_metadata_json").notNull().default("{}"),
+  sourceJson:text("source_json").notNull().default("{}"),
+  importRunId:text("import_run_id").references(() => libraryImportRuns.id,{onDelete:"restrict"}),
+  version:integer("version").notNull().default(1),
+},table => [
+  uniqueIndex("idx_library_entity_slug").on(table.kind,table.slug),index("idx_library_entity_name").on(table.kind,table.name),
+  check("library_entity_kind",sql`${table.kind} in ('author','publisher','genre','tag','series')`),
+  check("library_entity_name",sql`length(trim(${table.name}))>0`),
+  check("library_entity_metadata",sql`json_valid(${table.publicMetadataJson}) and json_valid(${table.sourceJson})`),
+]);
+
+export const libraryEditionEntities = sqliteTable("library_edition_entities", {
+  editionId:text("edition_id").notNull().references(() => libraryEditions.id,{onDelete:"restrict"}),
+  entityId:text("entity_id").notNull().references(() => libraryCatalogEntities.id,{onDelete:"restrict"}),
+  role:text("role").notNull(),
+},table => [
+  primaryKey({columns:[table.editionId,table.entityId,table.role]}),
+  index("idx_library_edition_entity").on(table.entityId,table.editionId),
+  check("library_edition_entity_role",sql`${table.role} in ('author','coauthor','editor','illustrator','publisher','genre','tag','series')`),
+]);
+
+/** Source reviews retain provenance without claiming an unverified new reader identity. */
+export const libraryHistoricalReviews = sqliteTable("library_historical_reviews", {
+  id:text("id").primaryKey(),
+  editionId:text("edition_id").notNull().references(() => libraryEditions.id,{onDelete:"restrict"}),
+  sourceReviewId:text("source_review_id"),rating:integer("rating"),body:text("body").notNull(),
+  sourceDateDisplay:text("source_date_display").notNull().default(""),
+  sourceJson:text("source_json").notNull(),sourceRowSha256:text("source_row_sha256").notNull(),
+  importRunId:text("import_run_id").notNull().references(() => libraryImportRuns.id,{onDelete:"restrict"}),
+  publicationState:text("publication_state").notNull().default("draft"),
+  capturedAt:text("captured_at").notNull(),
+},table=>[
+  uniqueIndex("idx_library_historical_review_source").on(table.sourceReviewId),
+  index("idx_library_historical_review_edition").on(table.editionId,table.publicationState),
+  check("library_historical_rating",sql`${table.rating} is null or ${table.rating} between 1 and 5`),
+  check("library_historical_body",sql`length(trim(${table.body}))>0`),
+  check("library_historical_json",sql`json_valid(${table.sourceJson})`),
+  check("library_historical_publication",sql`${table.publicationState} in ('draft','published','hidden')`),
+]);
+
 // Assistant metadata only: catalog, loans and visits keep their existing tables.
 export const assistantConsents = sqliteTable("assistant_consents", {
   actorKey: text("actor_key").primaryKey(),
