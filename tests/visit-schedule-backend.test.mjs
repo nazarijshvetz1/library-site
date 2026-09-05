@@ -6,6 +6,32 @@ import test from "node:test";
 const validation = await import("../lib/visit-schedule-validation.ts");
 const portalValidation = await import("../lib/visit-portal-validation.ts");
 const store = await import("../lib/visit-schedule-store.ts");
+const assistant = await import("../lib/assistant-store.ts");
+const assistantLibrary = await import("../lib/assistant-library.ts");
+const assistantContract = await import("../lib/assistant-contract.ts");
+
+test("assistant registers voice calls before returning SDP and compensates storage failure", async () => {
+  const { db, sqlite } = await visitDatabase();
+  const session = await assistant.createAssistantSession(db, "librarian:test", 12);
+  const response = () => new Response("v=0\r\n", { headers: { Location: "/v1/realtime/calls/rtc_test" } });
+  const calls = [];
+  const fetcher = async (url) => { calls.push(url); return new Response(null, { status: 200 }); };
+  assert.equal(await assistant.registerAssistantCall(db, session.id, "librarian:test", response(), "test-key", fetcher), "v=0\r\n");
+  assert.equal(sqlite.prepare("SELECT provider_call_id FROM assistant_sessions WHERE id=?").get(session.id).provider_call_id, "rtc_test");
+  const failedDb = { prepare() { throw new Error("database unavailable"); } };
+  await assert.rejects(assistant.registerAssistantCall(failedDb, session.id, "librarian:test", response(), "test-key", fetcher), /database unavailable/);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /\/rtc_test\/hangup$/);
+  await assert.rejects(assistant.registerAssistantCall(db, session.id, "librarian:test", new Response("v=0"), "test-key", fetcher), (error) => error.code === "invalid_provider_call");
+  await assert.rejects(assistant.registerAssistantCall(db, session.id, "librarian:test", new Response("not SDP", { headers: { Location: "/v1/realtime/calls/rtc_test" } }), "test-key", fetcher), /invalid_provider_sdp/);
+  assert.equal(calls.length, 2);
+  assert.equal(sqlite.prepare("SELECT provider_call_id FROM assistant_sessions WHERE id=?").get(session.id).provider_call_id, null);
+});
+
+test("assistant conversation is remounted for a different role or signed-in identity", async () => {
+  const source = await readFile(new URL("../app/_components/library-assistant.tsx", import.meta.url), "utf8");
+  assert.match(source, /<AssistantPanel key=\{`\$\{props.assistantRole\}:\$\{props.identityKey\}`\}/);
+});
 
 class PreparedStatement {
   constructor(database, sql, bindings = []) { this.database = database; this.sql = sql; this.bindings = bindings; }
@@ -52,6 +78,7 @@ async function visitDatabase() {
     "0023_guest_public_teacher_name_consent.sql",
     "0036_eager_champions.sql",
     "0037_keen_carlie_cooper.sql",
+    "0038_legal_morph.sql",
   ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
   const now = new Date().toISOString();
   sqlite.prepare(`INSERT INTO users
@@ -106,6 +133,129 @@ function futureWeekday() {
 function bookingInput(requestId, date = futureWeekday()) {
   return { requestId, date, startTime: "09:00", endTime: "09:20", surname: "Шевченко", publicDisplayConsent: true, classYearId: null, purpose: null };
 }
+
+test("assistant uses allowlisted role tools without identity injection or model confirmation", () => {
+  assert.equal(assistantContract.ASSISTANT_NAMES.teacher, "Містер Букінгем · ШІ-помічник");
+  assert.equal(assistantContract.ASSISTANT_NAMES.librarian, "Джарвіс");
+  assert.equal(assistantContract.assistantTools("teacher").some((t) => t.name === "prepare_visit"), true);
+  for (const role of ["teacher", "librarian"]) {
+    assert.equal(assistantContract.assistantTools(role).some((t) => /confirm|sql|delete|issue|return/.test(t.name)), false);
+    assert.throws(() => assistantLibrary.validatedToolArguments(role, "search_catalog", { teacherUserId: "OTHER" }), /Невідоме/);
+    assert.throws(() => assistantLibrary.validatedToolArguments(role, "search_catalog", { query: "bad\ninput" }), /формат/);
+    assert.throws(() => assistantLibrary.validatedToolArguments(role, "search_catalog", { grade: 12 }), /формат/);
+  }
+  assert.throws(() => assistantLibrary.validatedToolArguments("librarian", "my_loans", {}), /недоступна/);
+  assert.throws(() => assistantLibrary.validatedToolArguments("librarian", "prepare_visit", {}), /недоступна/);
+  assert.deepEqual(assistantLibrary.validatedToolArguments("teacher", "my_orders", { cursor: "opaque-cursor" }), { cursor: "opaque-cursor" });
+  assert.throws(() => assistant.validateAssistantVisit({ date: "2026-99-99", startTime: "09:00", endTime: "09:20", classYearId: null, purpose: null }, crypto.randomUUID()), /Уточніть/);
+});
+
+test("assistant free intervals respect busy slots, closures, weekends and current Kyiv time", () => {
+  const schedule = { hours: { "1": [{ startTime: "09:00", endTime: "11:00" }] }, busy: [{ date: "2026-09-07", startTime: "09:30", endTime: "10:00" }], closures: [{ date: "2026-09-07", startTime: "10:20", endTime: "10:40" }] };
+  assert.deepEqual(assistant.freeVisitIntervals(schedule, "2026-09-07", 7, 20, { date: "2026-09-07", time: "09:00" }), [
+    { date: "2026-09-07", startTime: "09:05", endTime: "09:30" },
+    { date: "2026-09-07", startTime: "10:00", endTime: "10:20" },
+    { date: "2026-09-07", startTime: "10:40", endTime: "11:00" },
+  ]);
+  assert.deepEqual(assistant.freeVisitIntervals(schedule, "2026-09-07", 7, 30, { date: "2026-09-07", time: "09:00" }), []);
+  assert.throws(() => assistant.freeVisitIntervals(schedule, "2026-09-07", 1, 21), /кратну/);
+});
+
+test("assistant sessions enforce owner, expiry, concurrency, daily and tool limits", async () => {
+  const { db, sqlite } = await visitDatabase();
+  const now = new Date(); const actor = "teacher:USR-TEACHER";
+  const first = await assistant.createAssistantSession(db, actor, 3, now);
+  const second = await assistant.createAssistantSession(db, actor, 3, now);
+  await assert.rejects(assistant.createAssistantSession(db, actor, 3, now), { code: "assistant_session_limit" });
+  await assert.rejects(assistant.requireAssistantSession(db, first.id, "teacher:OTHER"), { code: "assistant_session_ended" });
+  sqlite.prepare("UPDATE assistant_sessions SET closed_at=? WHERE id=?").run(now.toISOString(), second.id);
+  await assistant.createAssistantSession(db, actor, 3, now);
+  sqlite.prepare("UPDATE assistant_sessions SET closed_at=? WHERE actor_key=?").run(now.toISOString(), actor);
+  await assert.rejects(assistant.createAssistantSession(db, actor, 3, now), { code: "assistant_session_limit" });
+  const independent = await assistant.createAssistantSession(db, "teacher:OTHER", 3, now);
+  sqlite.prepare("UPDATE assistant_sessions SET tool_calls=99 WHERE id=?").run(independent.id);
+  await assistant.requireAssistantSession(db, independent.id, "teacher:OTHER", "tool_calls", now);
+  await assert.rejects(assistant.requireAssistantSession(db, independent.id, "teacher:OTHER", "tool_calls", now), { code: "assistant_session_ended" });
+  await assert.rejects(assistant.requireAssistantSession(db, independent.id, "teacher:OTHER", undefined, new Date(now.getTime() + 600001)), { code: "assistant_session_ended" });
+});
+
+async function assistantDraft(db, overrides = {}) {
+  const actor = "teacher:USR-TEACHER";
+  const session = await assistant.createAssistantSession(db, actor, 12);
+  const input = bookingInput(crypto.randomUUID()); delete input.surname;
+  Object.assign(input, overrides);
+  const preview = await assistant.prepareAssistantVisit(db, actor, session.id, input, "Особистий візит");
+  return { actor, session, input, preview };
+}
+
+test("assistant proposal has no booking side effects; consent creates one core booking and receipt", async () => {
+  const { db, sqlite } = await visitDatabase();
+  const { actor, preview } = await assistantDraft(db);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM visit_bookings").get().n, 0);
+  await assert.rejects(assistant.confirmAssistantVisit(db, actor, teacherIdentity(), preview.id, false), { code: "consent_required" });
+  await assert.rejects(assistant.confirmAssistantVisit(db, "teacher:OTHER", teacherIdentity(), preview.id, true), { code: "assistant_tool_denied" });
+  const created = await assistant.confirmAssistantVisit(db, actor, teacherIdentity(), preview.id, true);
+  const repeated = await assistant.confirmAssistantVisit(db, actor, teacherIdentity(), preview.id, true);
+  assert.equal(created.id, repeated.id);
+  assert.equal(created.surname, "Учитель");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM visit_bookings").get().n, 1);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM visit_slot_claims").get().n, 4);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM visit_mutation_commands WHERE kind='visit_booking_create'").get().n, 1);
+});
+
+test("assistant recovers authoritative core receipt after lost draft cache and expired session", async () => {
+  const { db, sqlite } = await visitDatabase();
+  const { actor, input, session, preview } = await assistantDraft(db);
+  const created = await store.createVisitBooking(db, teacherIdentity(), input);
+  sqlite.prepare("UPDATE assistant_sessions SET closed_at=?,expires_at=? WHERE id=?").run("2000-01-01", "2000-01-01", session.id);
+  sqlite.prepare("UPDATE assistant_visit_drafts SET expires_at=?,result_json=NULL WHERE id=?").run("2000-01-01", preview.id);
+  const receipt = await assistant.readAssistantVisitReceipt(db, actor, preview.id);
+  assert.equal(receipt.id, created.id);
+  assert.equal(await assistant.readAssistantVisitReceipt(db, "teacher:OTHER", preview.id), null);
+  assert.equal((await assistant.confirmAssistantVisit(db, actor, teacherIdentity(), preview.id, true)).id, created.id);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM visit_bookings").get().n, 1);
+});
+
+test("assistant cannot create from an expired or closed session even after an earlier confirmation attempt", async () => {
+  const { db, sqlite } = await visitDatabase();
+  const { actor, session, preview } = await assistantDraft(db);
+  sqlite.prepare("UPDATE assistant_visit_drafts SET confirmed_at=?,expires_at=? WHERE id=?").run("2000-01-01", "2000-01-01", preview.id);
+  await assert.rejects(assistant.confirmAssistantVisit(db, actor, teacherIdentity(), preview.id, true), { code: "assistant_draft_expired" });
+  sqlite.prepare("UPDATE assistant_visit_drafts SET expires_at=? WHERE id=?").run("2999-01-01", preview.id);
+  sqlite.prepare("UPDATE assistant_sessions SET closed_at=? WHERE id=?").run(new Date().toISOString(), session.id);
+  await assert.rejects(assistant.confirmAssistantVisit(db, actor, teacherIdentity(), preview.id, true), { code: "assistant_session_ended" });
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM visit_bookings").get().n, 0);
+});
+
+test("assistant invalidates a conflicted proposal instead of booking it silently on a later retry", async () => {
+  const { db, sqlite } = await visitDatabase();
+  const { actor, preview } = await assistantDraft(db);
+  await store.createVisitBooking(db, teacherIdentity(), bookingInput(crypto.randomUUID()));
+  await assert.rejects(assistant.confirmAssistantVisit(db, actor, teacherIdentity(), preview.id, true), { code: "slot_unavailable" });
+  await assert.rejects(assistant.confirmAssistantVisit(db, actor, teacherIdentity(), preview.id, true), { code: "assistant_draft_expired" });
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM visit_bookings").get().n, 1);
+});
+
+test("assistant minute cleanup hangs up expired/closed calls, retries failures, and skips live calls", async () => {
+  const { db, sqlite } = await visitDatabase();
+  const now = new Date();
+  const expired = await assistant.createAssistantSession(db, "teacher:A", 12, new Date(now.getTime() - 700000));
+  const closed = await assistant.createAssistantSession(db, "teacher:B", 12, now);
+  const live = await assistant.createAssistantSession(db, "teacher:C", 12, now);
+  for (const [id, call] of [[expired.id, "rtc_expired"], [closed.id, "rtc_closed"], [live.id, "rtc_live"]]) sqlite.prepare("UPDATE assistant_sessions SET provider_call_id=? WHERE id=?").run(call, id);
+  sqlite.prepare("UPDATE assistant_sessions SET closed_at=? WHERE id=?").run(now.toISOString(), closed.id);
+  const calls = [];
+  const mockFetch = async (url) => { calls.push(url); return new Response(null, { status: url.includes("rtc_closed") ? 503 : 200 }); };
+  await assistant.expireAssistantCalls(db, undefined, now, mockFetch);
+  assert.equal(calls.length, 0);
+  await assistant.expireAssistantCalls(db, "test-secret", now, mockFetch);
+  assert.equal(calls.length, 2);
+  assert.equal(calls.some((url) => url.includes("rtc_live")), false);
+  assert.equal(sqlite.prepare("SELECT provider_call_id FROM assistant_sessions WHERE id=?").get(expired.id).provider_call_id, null);
+  assert.equal(sqlite.prepare("SELECT provider_call_id FROM assistant_sessions WHERE id=?").get(closed.id).provider_call_id, "rtc_closed");
+  await assistant.expireAssistantCalls(db, "test-secret", now, async () => new Response(null, { status: 404 }));
+  assert.equal(sqlite.prepare("SELECT provider_call_id FROM assistant_sessions WHERE id=?").get(closed.id).provider_call_id, null);
+});
 
 test("visit validators enforce 5-minute grid, duration, control characters and exact fields", () => {
   const valid = validation.validateVisitBookingCreateInput({

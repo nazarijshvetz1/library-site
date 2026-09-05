@@ -20,6 +20,7 @@ import {
 } from "./librarian-routes";
 import SiteIcon, { type SiteIconName } from "../../_components/site-icon";
 import styles from "./librarian-shell.module.css";
+import LibraryAssistant from "@/app/_components/library-assistant";
 
 export type LibrarianShellProps = {
   activeSection: LibrarianSection;
@@ -267,6 +268,8 @@ export default function LibrarianShell({
 
         <div className={styles.content}>{children}</div>
       </div>
+
+      <LibraryAssistant assistantRole="librarian" identityKey="librarian" fallbackHref={librarianToolHref("catalog", telegramMiniApp)} />
 
       <nav className={styles.mobileNav} aria-label="Основні розділи кабінету бібліотекаря">
         {PRIMARY_ITEMS.map((item) => {

@@ -10,6 +10,31 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
+// Assistant metadata only: catalog, loans and visits keep their existing tables.
+export const assistantSessions = sqliteTable("assistant_sessions", {
+  id: text("id").primaryKey(),
+  actorKey: text("actor_key").notNull(),
+  createdDay: text("created_day").notNull(),
+  createdAt: text("created_at").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  toolCalls: integer("tool_calls").notNull().default(0),
+  textTurns: integer("text_turns").notNull().default(0),
+  providerCallId: text("provider_call_id"),
+  closedAt: text("closed_at"),
+}, (table) => [index("idx_assistant_sessions_actor_day").on(table.actorKey, table.createdDay)]);
+
+export const assistantVisitDrafts = sqliteTable("assistant_visit_drafts", {
+  id: text("id").primaryKey(),
+  actorKey: text("actor_key").notNull(),
+  sessionId: text("session_id").notNull().references(() => assistantSessions.id),
+  payloadJson: text("payload_json").notNull(),
+  classLabel: text("class_label").notNull(),
+  createdAt: text("created_at").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  confirmedAt: text("confirmed_at"),
+  resultJson: text("result_json"),
+}, (table) => [index("idx_assistant_visit_drafts_session").on(table.sessionId, table.createdAt)]);
+
 const draftKinds = [
   "material.create",
   "material.update",

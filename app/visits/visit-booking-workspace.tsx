@@ -14,6 +14,7 @@ import {
 } from "react";
 import SiteIcon, { type SiteIconName } from "../_components/site-icon";
 import CollapsibleListSection from "../_components/collapsible-list-section";
+import LibraryAssistant from "../_components/library-assistant";
 
 import {
   busyPeriodParts,
@@ -1220,6 +1221,12 @@ function VisitBookingPanel({
     [data?.bookings],
   );
 
+  useEffect(() => {
+    const refresh = () => { void load(true); };
+    window.addEventListener("library:assistant-visit-created", refresh);
+    return () => window.removeEventListener("library:assistant-visit-created", refresh);
+  }, [load]);
+
   async function sendCreate(intent: Extract<VisitPendingIntent, { kind: "create" }>) {
     setSubmitting(true);
     setNotice("");
@@ -1614,6 +1621,7 @@ function VisitBookingPanel({
           </div>
         ) : null}
         {securityOpen ? <TeacherSecurityPanel pendingScope={pendingScope} onClose={() => setSecurityOpen(false)} onSessionRotated={onSessionRotated} /> : null}
+        <LibraryAssistant assistantRole="teacher" identityKey={pendingScope} fallbackHref={telegramMiniApp ? "/teacher/telegram/cabinet?tab=visits" : "/teacher?tab=visits"} />
       </section>
     </VisitShell>
   );

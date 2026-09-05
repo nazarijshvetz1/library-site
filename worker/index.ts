@@ -2,6 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { drainTelegramOutboxUntilIdle } from "../lib/telegram-delivery-runtime";
+import { expireAssistantCalls } from "../lib/assistant-store";
 
 interface AssetFetcher {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
@@ -10,6 +11,7 @@ interface AssetFetcher {
 interface Env {
   ASSETS: AssetFetcher;
   DB: (typeof import("cloudflare:workers").env)["DB"];
+  OPENAI_API_KEY?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -64,7 +66,7 @@ const worker = {
     headers.set(
       "Permissions-Policy",
       url.pathname.startsWith("/librarian") || url.pathname.startsWith("/teacher")
-        ? "camera=(self), microphone=(), geolocation=()"
+        ? "camera=(self), microphone=(self), geolocation=()"
         : "camera=(), microphone=(), geolocation=()",
     );
     return new Response(response.body, {
@@ -74,6 +76,7 @@ const worker = {
     });
   },
   async scheduled(_controller: unknown, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(expireAssistantCalls(env.DB, env.OPENAI_API_KEY));
     ctx.waitUntil(drainTelegramOutboxUntilIdle(env.DB, {
       siteOrigin: "https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site",
       maxBatches: 6,
