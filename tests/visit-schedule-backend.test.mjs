@@ -10,6 +10,28 @@ const assistant = await import("../lib/assistant-store.ts");
 const assistantLibrary = await import("../lib/assistant-library.ts");
 const assistantContract = await import("../lib/assistant-contract.ts");
 
+test("assistant original male voices and speaking styles stay isolated by role", async () => {
+  assert.deepEqual(assistantContract.ASSISTANT_VOICES, { teacher: "ash", librarian: "cedar" });
+  assert.equal(Object.isFrozen(assistantContract.ASSISTANT_VOICES), true);
+  const teacher = assistantContract.assistantInstructions("teacher", "2026-09-05 12:00");
+  const librarian = assistantContract.assistantInstructions("librarian", "2026-09-05 12:00");
+  assert.doesNotMatch(teacher, /Манера Джарвіса|іронія/);
+  assert.match(teacher, /оригінальний теплий чоловічий голос/);
+  assert.match(teacher, /Не наслідуй голос чи акцент/);
+  assert.match(teacher, /потрібно підтвердити кнопкою на екрані/);
+  assert.doesNotMatch(librarian, /Манера Містера Букінгема/);
+  assert.match(librarian, /оригінальний спокійний чоловічий голос/);
+  assert.match(librarian, /Не наслідуй голос, акцент/);
+  assert.match(librarian, /не змінює правил перевірки фактів, доступу та підтвердження дій/);
+  assert.equal(librarian.split("\nМанера Джарвіса:")[0], teacher.split("\nМанера Містера Букінгема:")[0]
+    .replace("Містер Букінгем · ШІ-помічник", "Джарвіс")
+    .replace("Роль користувача: teacher.", "Роль користувача: librarian."));
+  assert.deepEqual(assistantContract.assistantTools("librarian").map((t) => t.name), ["search_catalog", "material_details", "visit_schedule"]);
+  assert.deepEqual(assistantContract.assistantTools("teacher").map((t) => t.name), ["search_catalog", "material_details", "visit_schedule", "my_loans", "my_orders", "prepare_visit"]);
+  const route = await readFile(new URL("../app/api/assistant/route.ts", import.meta.url), "utf8");
+  assert.match(route, /output: \{ voice: ASSISTANT_VOICES\[role\] \}/);
+});
+
 test("assistant registers voice calls before returning SDP and compensates storage failure", async () => {
   const { db, sqlite } = await visitDatabase();
   const session = await assistant.createAssistantSession(db, "librarian:test", 12);

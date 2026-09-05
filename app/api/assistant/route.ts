@@ -5,7 +5,7 @@ import { requireVisitTeacherSession, type VisitTeacherIdentity } from "@/lib/vis
 import { readVisitJson, teacherPortalGate, featureGate, visitJson, visitError, visitBookingEnabled, visitScheduleEnabled } from "@/lib/visit-schedule-api";
 import { VisitScheduleError, type VisitD1Database } from "@/lib/visit-schedule-store";
 import { kyivLocalNow } from "@/lib/visit-schedule-validation";
-import { assistantInstructions, assistantTools, ASSISTANT_NAMES, type AssistantRole, type AssistantToolResult } from "@/lib/assistant-contract";
+import { assistantInstructions, assistantTools, ASSISTANT_NAMES, ASSISTANT_VOICES, type AssistantRole, type AssistantToolResult } from "@/lib/assistant-contract";
 import { createAssistantSession, requireAssistantSession, confirmAssistantVisit, readAssistantVisitReceipt, hangupAssistantCall, registerAssistantCall } from "@/lib/assistant-store";
 import type { CatalogD1Database } from "@/lib/catalog-d1";
 import { runAssistantLibraryTool } from "@/lib/assistant-library";
@@ -90,7 +90,7 @@ export async function POST(request: Request): Promise<Response> {
       form.set("sdp", body.value.sdp as string);
       form.set("session", JSON.stringify({ type: "realtime", model: getRuntimeString("ASSISTANT_REALTIME_MODEL") || "gpt-realtime-mini",
         instructions: assistantInstructions(role, `${now.date} ${now.time}`), tools: assistantTools(role), max_output_tokens: 1000,
-        audio: { input: { transcription: { model: "gpt-4o-mini-transcribe", language: "uk" }, turn_detection: { type: "semantic_vad", eagerness: "low", interrupt_response: true, create_response: true } }, output: { voice: "marin" } },
+        audio: { input: { transcription: { model: "gpt-4o-mini-transcribe", language: "uk" }, turn_detection: { type: "semantic_vad", eagerness: "low", interrupt_response: true, create_response: true } }, output: { voice: ASSISTANT_VOICES[role] } },
       }));
       try {
         const response = await providerFetch("realtime/calls", form, key, false);
