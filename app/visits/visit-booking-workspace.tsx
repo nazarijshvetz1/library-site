@@ -5,6 +5,7 @@
 import {
   type FormEvent,
   type KeyboardEvent,
+  type SetStateAction,
   useCallback,
   useEffect,
   useId,
@@ -15,6 +16,8 @@ import {
 import SiteIcon, { type SiteIconName } from "../_components/site-icon";
 import CollapsibleListSection from "../_components/collapsible-list-section";
 import LibraryAssistant from "../_components/library-assistant";
+import { cartSignature, type AssistantCartBridge, type AssistantCartSnapshot } from "@/lib/teacher-cart";
+import { telephoneHref } from "@/lib/telephone";
 
 import {
   busyPeriodParts,
@@ -108,6 +111,7 @@ type TeacherTabDefinition = {
 
 const TEACHER_TABS: TeacherTabDefinition[] = [
   { id: "overview", label: "Головна", shortLabel: "Головна", icon: "home", eyebrow: "Ваш простір", description: "Найважливіше про профіль, найближчий візит і бібліотечні справи — на одному екрані." },
+  { id: "assistant", label: "Містер Букінгем", shortLabel: "ШІ-помічник", icon: "assistant", eyebrow: "ШІ-помічник", description: "Знайдіть матеріали, підготуйте замовлення або запишіться в бібліотеку — голосом чи текстом." },
   { id: "visits", label: "Відвідування", shortLabel: "Графік", icon: "visits", eyebrow: "Планування", description: "Оберіть вільний час, запишіть клас і керуйте своїми майбутніми відвідуваннями." },
   { id: "orders", label: "Замовлення з фонду бібліотеки", shortLabel: "Замовити", icon: "orders", eyebrow: "Матеріали", description: "Знайдіть потрібні видання, сформуйте кошик і стежте за виконанням замовлення." },
   { id: "acquisition", label: "Запропонувати придбання", shortLabel: "Придбання", icon: "teacher-acquisition", eyebrow: "Комплектування", description: "Повідомте бібліотекарю, яких навчальних матеріалів або книжок бракує фонду." },
@@ -116,7 +120,7 @@ const TEACHER_TABS: TeacherTabDefinition[] = [
   { id: "telegram", label: "Telegram", shortLabel: "Telegram", icon: "telegram", eyebrow: "Швидкий зв’язок", description: "Підключіть бота, керуйте сповіщеннями та відкривайте кабінет без зайвих кроків." },
 ];
 
-const TEACHER_MOBILE_TABS: TeacherTab[] = ["overview", "visits", "orders", "loans"];
+const TEACHER_MOBILE_TABS: TeacherTab[] = ["overview", "visits", "orders", "assistant"];
 
 function clearTeacherPortalPendingStorage(storage: Storage, pendingScope: string): void {
   clearVisitPendingIntent(storage, visitPendingKey("teacher", pendingScope));
@@ -949,12 +953,14 @@ function VisitBookingPanel({
   telegramMiniApp: boolean;
 }) {
   const storageKey = visitPendingKey("teacher", pendingScope);
+  const sharedCart = useSharedTeacherCart(pendingScope);
   const [activeTab, setActiveTab] = useState(initialTab);
   const [activeOrderView, setActiveOrderView] = useState<TeacherOrderView | null>(
     initialOrderMaterialId ? "catalog" : initialOrderView,
   );
   const [pendingOrderMaterialId, setPendingOrderMaterialId] = useState(initialOrderMaterialId);
   const [orderCartSummary, setOrderCartSummary] = useState({ positions: 0, copies: 0 });
+  useEffect(() => { setOrderCartSummary({ positions: Object.keys(sharedCart.cart).length, copies: Object.values(sharedCart.cart).reduce((sum, row) => sum + row.quantity, 0) }); }, [sharedCart.cart]);
   const [deferredNavigation, setDeferredNavigation] = useState<
     | { type: "tab"; tab: TeacherTab; historyMode: "push" | "replace"; historyTraversal?: boolean }
     | { type: "order"; view: TeacherOrderView; historyMode: "push" | "replace"; historyTraversal?: boolean }
@@ -1223,9 +1229,14 @@ function VisitBookingPanel({
 
   useEffect(() => {
     const refresh = () => { void load(true); };
+    const refreshAfterAction = () => { void load(true); void loadProfile(); };
     window.addEventListener("library:assistant-visit-created", refresh);
-    return () => window.removeEventListener("library:assistant-visit-created", refresh);
-  }, [load]);
+    window.addEventListener("library:assistant-action-completed", refreshAfterAction);
+    return () => {
+      window.removeEventListener("library:assistant-visit-created", refresh);
+      window.removeEventListener("library:assistant-action-completed", refreshAfterAction);
+    };
+  }, [load, loadProfile]);
 
   async function sendCreate(intent: Extract<VisitPendingIntent, { kind: "create" }>) {
     setSubmitting(true);
@@ -1451,7 +1462,7 @@ function VisitBookingPanel({
                   onClick={() => selectTeacherTab(tab.id)}
                 >
                   <span className={styles.teacherNavIcon} aria-hidden="true"><SiteIcon name={tab.icon} /></span>
-                  <span><strong>{tab.label}</strong><small>{tab.eyebrow}</small></span>
+                  <span><strong>{tab.label}{tab.id === "assistant" ? <em className={styles.assistantBadge}>ШІ</em> : null}</strong><small>{tab.eyebrow}</small></span>
                 </button>
               ))}
             </nav>
@@ -1483,6 +1494,8 @@ function VisitBookingPanel({
             ) : null}
             {signOutNotice ? <div className={styles.error} role="alert">{signOutNotice}</div> : null}
             {notice ? <div className={styles[noticeTone]} role={noticeTone === "error" ? "alert" : "status"}>{notice}</div> : null}
+
+            {activeTab === "orders" && sharedCart.locked ? <div className={styles.info} role="status">Кошик тимчасово захищено від змін, поки завершується попередня дія. Якщо її підготував Містер Букінгем, <button type="button" className={styles.quiet} onClick={() => commitTeacherTab("assistant")}>перевірте результат у помічника</button>.</div> : null}
 
             {activeTab === "overview" ? (
               <TeacherOverview
@@ -1572,16 +1585,17 @@ function VisitBookingPanel({
             </CollapsibleListSection>
             </> : null}
 
-            {activeTab === "orders" ? <TeacherOrdersPanel key={pendingScope} pendingScope={pendingScope} view={activeOrderView} onViewChange={selectTeacherOrderView} onChoose={() => selectTeacherTab("orders")} onCartStateChange={setOrderCartSummary} initialMaterialId={pendingOrderMaterialId} onInitialMaterialConsumed={consumeInitialOrderMaterial} /> : null}
+            {activeTab === "orders" ? <TeacherOrdersPanel key={pendingScope} sharedCart={sharedCart} pendingScope={pendingScope} view={activeOrderView} onViewChange={selectTeacherOrderView} onChoose={() => selectTeacherTab("orders")} onCartStateChange={setOrderCartSummary} initialMaterialId={pendingOrderMaterialId} onInitialMaterialConsumed={consumeInitialOrderMaterial} /> : null}
             {activeTab === "acquisition" ? <TeacherAcquisitionPanel /> : null}
             {activeTab === "loans" ? <TeacherLoansPanel /> : null}
             {activeTab === "notifications" ? <TeacherNotificationsPanel pendingScope={pendingScope} /> : null}
             {activeTab === "telegram" ? <TeacherTelegramSettings /> : null}
+            <LibraryAssistant assistantRole="teacher" identityKey={pendingScope} embedded visible={activeTab === "assistant"} cartBridge={sharedCart.bridge} fallbackHref={teacherPortalHref("visits", telegramMiniApp)} />
           </div>
         </div>
 
         <nav className={styles.teacherMobileNav} aria-label="Основні розділи Кабінету учителя">
-          {TEACHER_TABS.filter((tab) => TEACHER_MOBILE_TABS.includes(tab.id)).map((tab) => (
+          {TEACHER_MOBILE_TABS.map((id) => TEACHER_TABS.find((tab) => tab.id === id)!).map((tab) => (
             <button key={tab.id} type="button" aria-current={activeTab === tab.id ? "page" : undefined} onClick={() => selectTeacherTab(tab.id)}>
               <span aria-hidden="true"><SiteIcon name={tab.icon} size={21} /></span><small>{tab.shortLabel}</small>
             </button>
@@ -1621,7 +1635,6 @@ function VisitBookingPanel({
           </div>
         ) : null}
         {securityOpen ? <TeacherSecurityPanel pendingScope={pendingScope} onClose={() => setSecurityOpen(false)} onSessionRotated={onSessionRotated} /> : null}
-        <LibraryAssistant assistantRole="teacher" identityKey={pendingScope} fallbackHref={telegramMiniApp ? "/teacher/telegram/cabinet?tab=visits" : "/teacher?tab=visits"} />
       </section>
     </VisitShell>
   );
@@ -1682,7 +1695,7 @@ function readTeacherOrderCartDraft(storage: Storage, key: string): TeacherOrderC
     return {
       version: 1,
       savedAt: typeof candidate.savedAt === "string" ? candidate.savedAt : new Date(0).toISOString(),
-      notes: candidate.notes.slice(0, 300),
+      notes: candidate.notes.slice(0, 2000),
       rows,
     };
   } catch {
@@ -1697,6 +1710,61 @@ function writeTeacherOrderCartDraft(storage: Storage, key: string, draft: Teache
   } catch {
     // The cart remains available in memory when private browsing blocks storage.
   }
+}
+
+function useSharedTeacherCart(scope: string) {
+  const [cart, renderCart] = useState<Record<string, TeacherOrderCartRow>>({});
+  const [notes, renderNotes] = useState("");
+  const [ready, setReady] = useState(false);
+  const [locked, renderLocked] = useState(false);
+  const current = useRef({ cart, notes, locked: false, ready: false, scope });
+  const key = `library.teacher.orders.cart.v1:${scope}`;
+  const persist = useCallback(() => {
+    const state = current.current;
+    writeTeacherOrderCartDraft(window.sessionStorage, key, Object.keys(state.cart).length ? { version: 1, savedAt: new Date().toISOString(), notes: state.notes, rows: Object.values(state.cart) } : null);
+  }, [key]);
+  useEffect(() => {
+    const restored = readTeacherOrderCartDraft(window.sessionStorage, key);
+    const cart = Object.fromEntries((restored?.rows ?? []).map((row) => [row.item.id, row]));
+    let assistantPending = false;
+    try { assistantPending = /^[0-9a-f-]{36}$/iu.test(JSON.parse(window.sessionStorage.getItem(`library.assistant.action.pending.v1:teacher:${scope}`) || "null")?.id ?? ""); } catch { /* Ignore malformed recovery storage. */ }
+    const ordinaryPending = readPortalPendingIntent<OrderPendingIntent>(window.sessionStorage, `library.teacher.orders.pending.v1:${scope}`, ["order-create", "order-cancel"]);
+    const locked = assistantPending || ordinaryPending?.kind === "order-create";
+    current.current = { cart, notes: restored?.notes ?? "", locked, ready: true, scope };
+    renderCart(cart); renderNotes(current.current.notes); renderLocked(locked); setReady(true);
+  }, [key, scope]);
+  const setCart = useCallback((update: SetStateAction<Record<string, TeacherOrderCartRow>>) => {
+    if (current.current.locked || !current.current.ready) return;
+    const next = typeof update === "function" ? update(current.current.cart) : update;
+    current.current.cart = next; renderCart(next); persist();
+  }, [persist]);
+  const setNotes = useCallback((value: string) => {
+    if (current.current.locked || !current.current.ready) return;
+    current.current.notes = value; renderNotes(value); persist();
+  }, [persist]);
+  const bridge = useMemo<AssistantCartBridge>(() => {
+    const read = (): AssistantCartSnapshot => ({ items: Object.values(current.current.cart).map(({ item, quantity }) => ({ materialId: item.id, quantity })), notes: current.current.notes });
+    return {
+      read,
+      isLocked: () => current.current.locked || !current.current.ready,
+      lock(value) { current.current.locked = value; renderLocked(value); },
+      apply(update) {
+        if (current.current.ready && cartSignature(read()) === cartSignature(update.snapshot)) return true;
+        if (!current.current.ready || current.current.locked || cartSignature(read()) !== update.before) return false;
+        const materials = new Map(update.materials.map((item) => [item.id, item]));
+        if (update.snapshot.items.some((row) => !materials.has(row.materialId))) return false;
+        const next = Object.fromEntries(update.snapshot.items.map((row) => [row.materialId, { item: materials.get(row.materialId)!, quantity: row.quantity }]));
+        current.current.cart = next; current.current.notes = update.snapshot.notes;
+        renderCart(next); renderNotes(update.snapshot.notes); persist(); return true;
+      },
+      clear(signature) {
+        if (cartSignature(read()) !== signature) return;
+        current.current.cart = {}; current.current.notes = "";
+        renderCart({}); renderNotes(""); persist();
+      },
+    };
+  }, [persist]);
+  return { cart, setCart, notes, setNotes, ready, locked, bridge };
 }
 
 type TeacherCatalogEnvelope = {
@@ -1856,6 +1924,7 @@ type TeacherCuratorRequestEnvelope = {
 };
 
 function teacherTabTitle(tab: TeacherTab): string {
+  if (tab === "assistant") return "Містер Букінгем";
   if (tab === "visits") return "Мої відвідування";
   if (tab === "orders") return "Замовлення матеріалів";
   if (tab === "acquisition") return "Запропонувати придбання";
@@ -2123,7 +2192,7 @@ function TeacherOverview({
                 <div><dt>Куратор класу</dt><dd><button className={styles.profileInlineEdit} type="button" aria-label="Редагувати кураторський клас" aria-expanded={editingProfile} aria-controls="teacher-profile-editor" onClick={() => openProfileEditor("curator")}><span>{profile.curatedClasses.length
                   ? profile.curatedClasses.map((item) => `${item.className}${item.location?.name ? ` · ${item.location.name}` : ""}`).join(", ")
                   : "Не призначено"}</span><SiteIcon name="edit" size={15} /></button></dd></div>
-                {profile.serviceContact ? <div><dt>Мобільний номер</dt><dd>{profile.serviceContact}</dd></div> : null}
+                {profile.serviceContact ? <div><dt>Мобільний номер</dt><dd>{telephoneHref(profile.serviceContact) ? <a href={telephoneHref(profile.serviceContact)!}>{profile.serviceContact}</a> : profile.serviceContact}</dd></div> : null}
               </dl>
             ) : <p>Відомості профілю зараз недоступні.</p>}
           </div>
@@ -2355,6 +2424,7 @@ function teacherInitials(fullName: string): string {
 }
 
 function TeacherOrdersPanel({
+  sharedCart,
   pendingScope,
   view,
   onViewChange,
@@ -2363,6 +2433,7 @@ function TeacherOrdersPanel({
   initialMaterialId,
   onInitialMaterialConsumed,
 }: {
+  sharedCart: ReturnType<typeof useSharedTeacherCart>;
   pendingScope: string;
   view: TeacherOrderView | null;
   onViewChange: (view: TeacherOrderView, historyMode?: "push" | "replace") => void;
@@ -2393,11 +2464,9 @@ function TeacherOrdersPanel({
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"success" | "error" | "info">("info");
-  const [cart, setCart] = useState<Record<string, TeacherOrderCartRow>>({});
+  const { cart, setCart, notes, setNotes, ready: cartRestored } = sharedCart;
   const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
-  const [notes, setNotes] = useState("");
   const [cartOpen, setCartOpen] = useState(false);
-  const [cartRestored, setCartRestored] = useState(false);
   const [cartToast, setCartToast] = useState("");
   const [requests, setRequests] = useState<MaterialRequest[]>([]);
   const [requestPage, setRequestPage] = useState<MaterialRequestsEnvelope["page"] | null>(null);
@@ -2420,30 +2489,6 @@ function TeacherOrdersPanel({
   const storageKey = `library.teacher.orders.pending.v1:${pendingScope}`;
   const cartStorageKey = `library.teacher.orders.cart.v1:${pendingScope}`;
   const catalogStorageKey = teacherCatalogFiltersKey(pendingScope);
-
-  useEffect(() => {
-    const restoreTimer = window.setTimeout(() => {
-      const restored = readTeacherOrderCartDraft(window.sessionStorage, cartStorageKey);
-      if (restored) {
-        setCart(Object.fromEntries(restored.rows.map((row) => [row.item.id, row])));
-        setNotes(restored.notes);
-      }
-      setCartRestored(true);
-    }, 0);
-
-    return () => window.clearTimeout(restoreTimer);
-  }, [cartStorageKey]);
-
-  useEffect(() => {
-    if (!cartRestored) return;
-    const rows = Object.values(cart);
-    writeTeacherOrderCartDraft(window.sessionStorage, cartStorageKey, rows.length ? {
-      version: 1,
-      savedAt: new Date().toISOString(),
-      notes,
-      rows,
-    } : null);
-  }, [cart, cartRestored, cartStorageKey, notes]);
 
   useEffect(() => {
     if (!cartToast) return;
@@ -2701,6 +2746,7 @@ function TeacherOrdersPanel({
       return;
     }
     setPending(intent);
+    if (intent.kind === "order-create") sharedCart.bridge.lock(true);
     setSubmitting(true);
     setNotice("");
     try {
@@ -2714,6 +2760,7 @@ function TeacherOrdersPanel({
       setNotice(intent.kind === "order-create" ? "Замовлення надіслано бібліотекарю." : "Замовлення скасовано.");
       setNoticeTone("success");
       if (intent.kind === "order-create") {
+        sharedCart.bridge.lock(false);
         setCart({});
         setQuantityDrafts({});
         setNotes("");
@@ -2724,6 +2771,7 @@ function TeacherOrdersPanel({
       await loadRequests(true);
     } catch (error) {
       if (!isUncertainVisitFailure(error)) {
+        if (intent.kind === "order-create") sharedCart.bridge.lock(false);
         clearPortalPendingIntent(window.sessionStorage, storageKey);
         setPending(null);
       }
@@ -2735,7 +2783,7 @@ function TeacherOrdersPanel({
   }
 
   function submitOrder() {
-    if (!cartRows.length || pending) return;
+    if (!cartRows.length || pending || sharedCart.locked || !cartRestored) return;
     const requestId = crypto.randomUUID();
     const payload = {
       requestId,
@@ -2779,7 +2827,7 @@ function TeacherOrdersPanel({
   }
 
   function add(item: TeacherCatalogItem) {
-    if (submitting || pending) return;
+    if (submitting || pending || sharedCart.locked) return;
     if (!cart[item.id] && cartRows.length >= 10) {
       setNotice("В одному замовленні можна обрати до 10 різних матеріалів.");
       setNoticeTone("info");

@@ -17,7 +17,7 @@ const read = (path) => readFile(new URL(path, root), "utf8");
 
 test("teacher route helper keeps web and Telegram Mini App destinations bounded", () => {
   assert.deepEqual([...TEACHER_PORTAL_TABS], [
-    "overview", "visits", "orders", "acquisition", "loans", "notifications", "telegram",
+    "overview", "assistant", "visits", "orders", "acquisition", "loans", "notifications", "telegram",
   ]);
   for (const tab of TEACHER_PORTAL_TABS) {
     assert.equal(new URL(teacherPortalHref(tab, false), "https://library.example").pathname, "/teacher");

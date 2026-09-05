@@ -28,6 +28,7 @@ import {
   updateTeacherProfile,
 } from "./teacher-management-client";
 import styles from "./teacher-management.module.css";
+import { telephoneHref } from "@/lib/telephone";
 
 type MainTab = "overview" | "teachers" | "orders" | "visits" | "telegram";
 type DetailTab = "profile" | "access" | "orders" | "issued" | "visits";
@@ -840,7 +841,7 @@ function TeacherDetailCard({
         <TeacherProfileForm mode="edit" teacher={teacher} locations={locations} disabled={!writesEnabled || busy} onCancel={() => setEditing(false)} onSaved={async (next) => { setEditing(false); await onSaved(next, "Інформацію про вчителя оновлено."); }} />
       ) : (
         <div className={styles.profilePane}>
-          <dl><div><dt>Предмет / посада</dt><dd>{teacher.subjectPosition || "—"}</dd></div><div><dt>Обліковий рівень</dt><dd>{accountRoleLabel(teacher.accountRole)}</dd></div><div><dt>Основний кабінет</dt><dd>{teacher.primaryLocation?.name || "—"}</dd></div><div><dt>Мобільний номер</dt><dd>{teacher.serviceContact || "—"}</dd></div><div><dt>Внутрішня примітка</dt><dd>{teacher.librarianNote || "—"}</dd></div></dl>
+          <dl><div><dt>Предмет / посада</dt><dd>{teacher.subjectPosition || "—"}</dd></div><div><dt>Обліковий рівень</dt><dd>{accountRoleLabel(teacher.accountRole)}</dd></div><div><dt>Основний кабінет</dt><dd>{teacher.primaryLocation?.name || "—"}</dd></div><div><dt>Мобільний номер</dt><dd>{telephoneHref(teacher.serviceContact) ? <a href={telephoneHref(teacher.serviceContact)} aria-label={`Зателефонувати: ${teacher.serviceContact}`}>{teacher.serviceContact}</a> : teacher.serviceContact || "—"}</dd></div><div><dt>Внутрішня примітка</dt><dd>{teacher.librarianNote || "—"}</dd></div></dl>
           <div className={styles.profileActions}><button type="button" onClick={() => setEditing(true)} disabled={!writesEnabled || busy}>Редагувати</button><button type="button" onClick={() => setTab("access")}>Код і доступ</button><button type="button" onClick={() => void changeStatus()} disabled={!writesEnabled || busy || (teacher.status === "active" && closeBlockers.length > 0)}>{teacher.status === "active" ? "Закрити картку" : "Поновити картку"}</button><button className={styles.dangerButton} type="button" onClick={() => void remove()} disabled={!writesEnabled || busy} title="Видалити картку й доступ, зберігши історію обліку">Видалити картку</button></div>
           {closeBlockers.length ? <p className={styles.closeGuard}>Щоб закрити картку, спочатку: {closeBlockers.join("; ")}.</p> : null}
           <p className={styles.deleteGuard}>Видалення прибере картку й доступ, але не видалить видачі, замовлення, відвідування та журнал операцій.</p>

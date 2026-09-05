@@ -9,6 +9,8 @@ import { listTeacherMaterialRequestPage, type TeacherMaterialRequestDatabase } f
 import { readVisitSchedule, VisitScheduleError, type VisitD1Database } from "./visit-schedule-store.ts";
 import { addDays, kyivLocalNow, parseVisitRange } from "./visit-schedule-validation.ts";
 import { freeVisitIntervals, prepareAssistantVisit, validateAssistantVisit } from "./assistant-store.ts";
+import { runTeacherAssistantTool } from "./assistant-teacher-tools.ts";
+import type { AssistantCartSnapshot } from "./teacher-cart.ts";
 
 export function validatedToolArguments(role: AssistantRole, name: string, input: unknown): Record<string, unknown> {
   const definition = assistantTools(role).find((item) => item.name === name);
@@ -36,8 +38,12 @@ function displayDate(value: string | null): string {
   return Number.isNaN(parsed.getTime()) ? value : new Intl.DateTimeFormat("uk-UA", { timeZone: "Europe/Kyiv", dateStyle: "medium" }).format(parsed);
 }
 
-export async function runAssistantLibraryTool(db: VisitD1Database & CatalogD1Database, context: { role: AssistantRole; actorKey: string; teacherUserId?: string; sessionId: string; bookingEnabled: boolean; scheduleEnabled: boolean; librarianWritesEnabled?: boolean }, name: string, input: unknown): Promise<AssistantToolResult> {
+export async function runAssistantLibraryTool(db: VisitD1Database & CatalogD1Database, context: { role: AssistantRole; actorKey: string; teacherUserId?: string; sessionId: string; bookingEnabled: boolean; scheduleEnabled: boolean; librarianWritesEnabled?: boolean; teacherWritesEnabled?: boolean; cart?: AssistantCartSnapshot }, name: string, input: unknown): Promise<AssistantToolResult> {
   const args = validatedToolArguments(context.role, name, input);
+  if (context.role === "teacher" && context.teacherUserId) {
+    const result = await runTeacherAssistantTool(db, { actorKey: context.actorKey, teacherUserId: context.teacherUserId, sessionId: context.sessionId, cart: context.cart ?? { items: [], notes: "" }, writesEnabled: Boolean(context.teacherWritesEnabled), bookingEnabled: context.bookingEnabled }, name, args);
+    if (result) return result;
+  }
   const now = kyivLocalNow();
   if (name === "librarian_reference") {
     const [reference, facets, classes] = await Promise.all([readLibraryReferenceData(db), listCatalogMaterialFacets(db),

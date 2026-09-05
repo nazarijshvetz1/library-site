@@ -31,7 +31,7 @@ export type LibrarianShellProps = {
   writesEnabled?: boolean;
   subsections?: LibrarianSubsection[];
   activeSubsection?: string;
-  onSubsectionNavigate?: (id: string) => void;
+  onSubsectionNavigate?: (id: string) => boolean;
   children: ReactNode;
 };
 
@@ -366,7 +366,7 @@ export default function LibrarianShell({
                             key={subsection.id}
                             subsection={subsection}
                             active={subsection.id === activeSubsection}
-                            onNavigate={subsection.section === activeSection ? onSubsectionNavigate : undefined}
+                        onNavigate={subsection.section === activeSection ? onSubsectionNavigate : undefined}
                             onActivate={() => closeDrawer()}
                             compact
                           />
@@ -400,7 +400,7 @@ function SubsectionLink({
 }: {
   subsection: LibrarianSubsection;
   active: boolean;
-  onNavigate?: (id: string) => void;
+  onNavigate?: (id: string) => boolean;
   onActivate?: () => void;
   compact?: boolean;
 }) {
@@ -413,8 +413,7 @@ function SubsectionLink({
         const plainPrimaryClick = event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
         if (plainPrimaryClick) onActivate?.();
         if (!onNavigate || !plainPrimaryClick) return;
-        event.preventDefault();
-        onNavigate(subsection.id);
+        if (onNavigate(subsection.id)) event.preventDefault();
       }}
     >
       <span aria-hidden="true"><SiteIcon name={subsection.icon} size={17} /></span>

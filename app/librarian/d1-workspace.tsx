@@ -844,7 +844,7 @@ export default function D1LibrarianWorkspace({
       writesEnabled={writesEnabled}
       subsections={shellSubsections}
       activeSubsection={librarianSubsectionForTool(tool)}
-      onSubsectionNavigate={(id) => chooseTool(id as Tool)}
+      onSubsectionNavigate={(id) => { const next = parseTool(id); if (!next) return false; chooseTool(next); return true; }}
     >
       <main className={styles.shell}>
         <div className={styles.body}>
@@ -4197,6 +4197,12 @@ function LoanIssueForm({
   const [activeTeacherSuggestion, setActiveTeacherSuggestion] = useState(-1);
   const teacherListboxId = useId();
   const teacherInputId = useId();
+  const issueTeacherPickerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const outside = (event: PointerEvent) => { if (event.target instanceof Node && !issueTeacherPickerRef.current?.contains(event.target)) { setTeacherSuggestionsOpen(false); setActiveTeacherSuggestion(-1); } };
+    document.addEventListener("pointerdown", outside);
+    return () => document.removeEventListener("pointerdown", outside);
+  }, []);
   const teacherSuggestions = filterTeachersByFullName(teachers, teacherQuery, 8);
   const teacherSuggestionsVisible = teacherSuggestionsOpen && teacherSuggestions.length > 0;
   const selectedTeacher = teachers.find((teacher) => teacher.id === teacherUserId) ?? null;
@@ -4322,8 +4328,9 @@ function LoanIssueForm({
         <div className={styles.formGrid}>
           <div
             className={`${styles.fieldWide} ${styles.teacherPicker}`}
+            ref={issueTeacherPickerRef}
             onBlur={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget)) {
+              if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) {
                 setTeacherSuggestionsOpen(false);
                 setActiveTeacherSuggestion(-1);
               }
@@ -4369,6 +4376,7 @@ function LoanIssueForm({
                     role="option"
                     aria-selected={index === activeTeacherSuggestion}
                     onMouseEnter={() => setActiveTeacherSuggestion(index)}
+                    onPointerDown={(event) => event.preventDefault()}
                     onClick={() => selectTeacher(teacher)}
                   >
                     <strong>{teacher.fullName}</strong>
@@ -5304,6 +5312,13 @@ function LoanReturnWorkspace({
   const [teacherQuery, setTeacherQuery] = useState("");
   const [selectedTeacherId, setSelectedTeacherId] = useState("");
   const [teacherPickerOpen, setTeacherPickerOpen] = useState(false);
+  const returnTeacherPickerRef = useRef<HTMLDivElement>(null);
+  const returnTeacherInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const outside = (event: PointerEvent) => { if (event.target instanceof Node && !returnTeacherPickerRef.current?.contains(event.target)) setTeacherPickerOpen(false); };
+    document.addEventListener("pointerdown", outside);
+    return () => document.removeEventListener("pointerdown", outside);
+  }, []);
   const [loans, setLoans] = useState<OpenLoan[]>([]);
   const [state, setState] = useState<LoadState>("idle");
   const [error, setError] = useState("");
@@ -5371,12 +5386,13 @@ function LoanReturnWorkspace({
         }} disabled={!selectedTeacherId || state === "loading"} title="Оновити" aria-label="Оновити відкриті видачі"><SiteIcon name="refresh" size={18} /></button>
       </div>
 
-      <div className={styles.returnTeacherPicker}>
+      <div className={styles.returnTeacherPicker} ref={returnTeacherPickerRef} onBlur={(event) => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setTeacherPickerOpen(false); }}>
         <label htmlFor="return-teacher-search">Учитель</label>
         <div className={styles.returnTeacherSearch}>
           <SiteIcon name="search" size={18} />
           <input
             id="return-teacher-search"
+            ref={returnTeacherInputRef}
             type="search"
             autoComplete="off"
             role="combobox"
@@ -5386,7 +5402,7 @@ function LoanReturnWorkspace({
             value={teacherQuery}
             placeholder="Прізвище або ім’я"
             onFocus={() => setTeacherPickerOpen(true)}
-            onBlur={() => window.setTimeout(() => setTeacherPickerOpen(false), 100)}
+            onKeyDown={(event) => { if (event.key === "Escape") setTeacherPickerOpen(false); }}
             onChange={(event) => {
               setTeacherQuery(event.target.value);
               setTeacherPickerOpen(true);
@@ -5406,6 +5422,7 @@ function LoanReturnWorkspace({
               setState("idle");
               setTeacherPickerOpen(true);
               setCompletionMessage("");
+              returnTeacherInputRef.current?.focus();
             }} aria-label="Очистити пошук учителя">×</button>
           ) : null}
         </div>
@@ -5417,7 +5434,7 @@ function LoanReturnWorkspace({
                 type="button"
                 role="option"
                 aria-selected={teacher.id === selectedTeacherId}
-                onMouseDown={(event) => event.preventDefault()}
+                onPointerDown={(event) => event.preventDefault()}
                 onClick={() => selectTeacher(teacher)}
               >
                 <ReturnTeacherAvatar teacher={teacher} />
@@ -6547,8 +6564,10 @@ function IsbnCameraScanner({ disabled, onDetected }: { disabled: boolean; onDete
   const controlsRef = useRef<IsbnScannerControls | null>(null);
   const scanningRef = useRef(false);
   const startingRef = useRef(false);
+  const scannerGeneration = useRef(0);
 
   const releaseCamera = useCallback(() => {
+    scannerGeneration.current++;
     scanningRef.current = false;
     controlsRef.current?.stop();
     controlsRef.current = null;
@@ -6570,8 +6589,11 @@ function IsbnCameraScanner({ disabled, onDetected }: { disabled: boolean; onDete
       setOpen(false);
     };
     window.addEventListener("pagehide", handlePageHide);
+    const handleVisibility = () => { if (document.hidden) handlePageHide(); };
+    document.addEventListener("visibilitychange", handleVisibility);
     return () => {
       window.removeEventListener("pagehide", handlePageHide);
+      document.removeEventListener("visibilitychange", handleVisibility);
       releaseCamera();
     };
   }, [releaseCamera]);
@@ -6595,6 +6617,8 @@ function IsbnCameraScanner({ disabled, onDetected }: { disabled: boolean; onDete
     setMessage("");
     setOpen(true);
     scanningRef.current = true;
+    const generation = ++scannerGeneration.current;
+    const isCurrent = () => scanningRef.current && generation === scannerGeneration.current;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -6604,19 +6628,21 @@ function IsbnCameraScanner({ disabled, onDetected }: { disabled: boolean; onDete
         },
         audio: false,
       });
-      if (!scanningRef.current) {
+      if (!isCurrent()) {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
       streamRef.current = stream;
       let video = videoRef.current;
-      for (let attempt = 0; !video && attempt < 30 && scanningRef.current; attempt += 1) {
+      for (let attempt = 0; !video && attempt < 30 && isCurrent(); attempt += 1) {
         await new Promise((resolve) => window.setTimeout(resolve, 16));
         video = videoRef.current;
       }
+      if (!isCurrent()) return;
       if (!video) throw new Error("camera_not_ready");
       video.srcObject = stream;
       await video.play();
+      if (!isCurrent()) return;
 
       const detectorConstructor = (window as Window & { BarcodeDetector?: NativeBarcodeDetectorConstructor }).BarcodeDetector;
       let detector: NativeBarcodeDetector | null = null;
@@ -6633,11 +6659,13 @@ function IsbnCameraScanner({ disabled, onDetected }: { disabled: boolean; onDete
         }
       }
 
+      if (!isCurrent()) return;
       if (detector) {
         const scan = async () => {
-          if (!scanningRef.current || !videoRef.current || !detector) return;
+          if (!isCurrent() || !videoRef.current || !detector) return;
           try {
             const results = await detector.detect(videoRef.current);
+            if (!isCurrent()) return;
             const normalized = results
               .map((result) => normalizeIsbn(result.rawValue))
               .find((value) => value?.length === 13) ?? null;
@@ -6649,7 +6677,7 @@ function IsbnCameraScanner({ disabled, onDetected }: { disabled: boolean; onDete
           } catch {
             // The camera can miss frames while it focuses; continue scanning.
           }
-          frameRef.current = requestAnimationFrame(scan);
+          if (isCurrent()) frameRef.current = requestAnimationFrame(scan);
         };
         frameRef.current = requestAnimationFrame(scan);
       } else {
@@ -6657,21 +6685,22 @@ function IsbnCameraScanner({ disabled, onDetected }: { disabled: boolean; onDete
           import("@zxing/browser"),
           import("@zxing/library"),
         ]);
-        if (!scanningRef.current) return;
+        if (!isCurrent()) return;
         const hints = new Map([[DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.EAN_13]]]);
         const reader = new BrowserMultiFormatOneDReader(hints);
-        controlsRef.current = await reader.decodeFromStream(stream, video, (result, _error, controls) => {
+        const activeControls = await reader.decodeFromStream(stream, video, (result, _error, controls) => {
+          if (!isCurrent()) { controls.stop(); return; }
           const normalized = result ? normalizeIsbn(result.getText()) : null;
           if (!normalized || normalized.length !== 13 || !scanningRef.current) return;
           controls.stop();
           onDetected(normalized);
           stop();
         });
+        if (!isCurrent()) { activeControls.stop(); return; }
+        controlsRef.current = activeControls;
       }
     } catch (error) {
-      if (scanningRef.current) setMessage(isbnCameraErrorMessage(error));
-      releaseCamera();
-      setOpen(false);
+      if (isCurrent()) { setMessage(isbnCameraErrorMessage(error)); releaseCamera(); setOpen(false); }
     } finally {
       startingRef.current = false;
       setStarting(false);

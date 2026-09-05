@@ -3828,4 +3828,10 @@ button.stockLocationRow:focus-visible,
   }
   .loanCard .formActions > button,
   .classCirculationCard .formActions > button { min-width: 0; flex: 1 1 auto; }
+  /* iOS/WebView keyboards resize the visual viewport, not always the layout viewport.
+     Keep actions in flow while editing; never place a sticky bar over a picker. */
+  .loanCard .formActions,
+  .classCirculationCard .formActions { position: static; bottom: auto; z-index: auto; box-shadow: none; }
+  .teacherSuggestions { position: relative; inset: auto; max-height: min(260px, 40dvh); z-index: 16; }
+  .returnTeacherOptions { position: relative; inset: auto; max-height: min(260px, 40dvh); }
 }

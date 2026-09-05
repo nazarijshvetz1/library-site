@@ -2723,6 +2723,7 @@ function telegramRoleKeyboard(
   if (teacherCapability) {
     const buttons = [
       ["👤 Кабінет учителя", "/teacher/telegram?tab=overview"],
+      ["✨ Містер Букінгем · ШІ", "/teacher/telegram?tab=assistant"],
       ["📚 Каталог", PUBLIC_CATALOG_URL],
       ["🛒 Замовлення з фонду бібліотеки", "/teacher/telegram?tab=orders"],
       ["➕ Запропонувати придбання", "/teacher/telegram?tab=acquisition"],

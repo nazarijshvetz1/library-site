@@ -5,7 +5,7 @@ import ts from "typescript";
 
 const source = await readFile(new URL("../app/_components/library-assistant.tsx", import.meta.url), "utf8");
 const start = source.indexOf("  async function finishAction(");
-const handler = ts.transpileModule(source.slice(start, source.indexOf("\n  return <>", start)), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+const handler = ts.transpileModule(source.slice(start, source.indexOf("\n  async function addCardToCart", start)), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 
 test("late cancellation cannot clear a new action, receipt, or operation lock after reopening", async () => {
   let resolve;
@@ -15,6 +15,7 @@ test("late cancellation cannot clear a new action, receipt, or operation lock af
   const mocks = {
     actionPreview: { id: "A", title: "Action A", lines: [] }, operationLock, consentChange: { current: null }, generation, actionRequest,
     actionPendingRef: { current: false }, api: () => reply,
+    cartRef: { current: null }, applyActionReceipt: () => {},
     clearStoredAction: (id) => { if (stored === id) stored = null; },
     setBusy: (value) => { busy = value; }, setActionPreview: (value) => { preview = value; },
     setActionPending: () => {}, setNotice: () => {}, append: () => {}, channel: { current: null },

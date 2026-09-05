@@ -1,4 +1,4 @@
-.page { min-height: 100vh; background: #f5f5ef; color: var(--ink); }
+.page { min-height: 100dvh; background: #f5f5ef; color: var(--ink); font-family: Inter, "Segoe UI", sans-serif; }
 .skipLink { position: fixed; left: 16px; top: -80px; z-index: 100; padding: 10px 14px; border-radius: 10px; background: white; color: var(--green-950); font-weight: 800; }
 .skipLink:focus { top: 12px; }
 .header { position: sticky; top: 0; z-index: 30; border-bottom: 1px solid rgba(23, 53, 34, .12); background: rgba(255, 254, 250, .94); backdrop-filter: blur(16px); }
@@ -17,7 +17,7 @@
 .hero, .gradePanel, .catalog, .footer { width: min(1440px, calc(100% - 40px)); margin-inline: auto; }
 .hero { margin-top: 18px; padding: clamp(28px, 5vw, 58px); display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, .44fr); gap: 40px; align-items: center; overflow: hidden; border-radius: 28px; color: white; background: radial-gradient(circle at 83% -20%, rgba(224, 173, 53, .26), transparent 28rem), linear-gradient(135deg, #173f2d, #0f3024 68%, #0b271d); box-shadow: 0 20px 55px rgba(23, 53, 34, .14); }
 .eyebrow { margin: 0 0 11px; color: #d6e9cd; font-size: 11px !important; font-weight: 850; letter-spacing: .12em; text-transform: uppercase; }
-.hero h1 { max-width: 800px; margin: 0; font: 650 clamp(34px, 5vw, 58px)/1 Georgia, "Times New Roman", serif; letter-spacing: -.035em; }
+.hero h1 { max-width: 800px; margin: 0; font: 700 clamp(32px, 4vw, 48px)/1.15 Georgia, "Times New Roman", serif; letter-spacing: -.02em; overflow-wrap: normal; }
 .hero > div > p:last-child { max-width: 720px; margin: 18px 0 0; color: rgba(255,255,255,.72); font-size: clamp(15px, 2vw, 18px); line-height: 1.55; }
 .heroNote { min-height: 118px; padding: 20px; display: flex; gap: 14px; align-items: flex-start; border: 1px solid rgba(255,255,255,.13); border-radius: 18px; background: rgba(255,255,255,.07); }
 .heroNote > svg { color: #dce99e; }
@@ -100,7 +100,7 @@
   .returnNav { width: min(100% - 20px, 680px); margin-bottom: 7px; display: grid; grid-template-columns: 1fr 1fr; }
   .returnNav a { min-height: 40px; padding-inline: 7px; font-size: 9px; }
   .hero { margin-top: 10px; padding: 26px 20px; display: block; border-radius: 20px; }
-  .hero h1 { font-size: clamp(31px, 10vw, 43px); }
+  .hero h1 { font-size: clamp(28px, 7.5vw, 36px); }
   .heroNote { min-height: 0; margin-top: 22px; padding: 14px; }
   .gradePanel, .catalog { margin-top: 10px; padding: 16px; border-radius: 17px; }
   .sectionHeading { align-items: flex-start; }

@@ -1,5 +1,6 @@
 export const TEACHER_PORTAL_TABS = [
   "overview",
+  "assistant",
   "visits",
   "orders",
   "acquisition",

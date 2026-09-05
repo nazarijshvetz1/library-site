@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import ts from "typescript";
 
 import {
   LIBRARIAN_SECTIONS,
@@ -22,6 +23,29 @@ const expectedWebRoutes = {
   reports: "/librarian/reports",
   management: "/librarian?tool=locations",
 };
+
+test("subsection links preserve real page navigation for e-textbooks and modified clicks", async () => {
+  const source = await readFile(new URL("../app/librarian/_components/librarian-shell.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("function SubsectionLink(");
+  const end = source.indexOf("type StoredNavigationHistory", start);
+  const code = ts.transpileModule(source.slice(start, end), { compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const React = { createElement: (type, props, ...children) => ({ type, props, children }) };
+  const render = new Function("React", "styles", "SiteIcon", `${code}; return SubsectionLink;`)(React, {}, () => null);
+  for (const id of ["catalog", "textbooks"]) {
+    let prevented = 0, activated = 0, handled = 0;
+    const href = id === "textbooks" ? librarianTextbooksHref(true) : librarianToolHref(id, true);
+    const link = render({ subsection: { id, href }, active: false, onActivate: () => activated++, onNavigate: (target) => { handled++; return target === "catalog"; } });
+    assert.equal(link.props.href, href);
+    link.props.onClick({ button: 0, preventDefault: () => prevented++ });
+    assert.equal(prevented, id === "catalog" ? 1 : 0);
+    assert.equal(activated, 1);
+    assert.equal(handled, 1);
+    link.props.onClick({ button: 0, ctrlKey: true, preventDefault: () => prevented++ });
+    assert.equal(prevented, id === "catalog" ? 1 : 0);
+    assert.equal(activated, 1);
+    assert.equal(handled, 1);
+  }
+});
 
 const expectedTelegramRoutes = {
   home: "/librarian/telegram/cabinet?target=home",
@@ -79,7 +103,7 @@ test("LibrarianShell keeps the official emblem, full-page navigation, and access
   assert.match(source, /className=\{styles\.sidebarUtilities\}/u);
   assert.match(source, /subsections\?: LibrarianSubsection\[\]/u);
   assert.match(source, /activeSubsection\?: string/u);
-  assert.match(source, /onSubsectionNavigate\?: \(id: string\) => void/u);
+  assert.match(source, /onSubsectionNavigate\?: \(id: string\) => boolean/u);
   assert.match(source, /function standardLibrarianSubsections\(telegramMiniApp: boolean\)/u);
   assert.match(source, /label: "Каталог"[\s\S]*?label: "Новий матеріал"[\s\S]*?label: "Е-підручники"/u);
   assert.match(source, /label: "Е-підручники"[\s\S]*?librarianTextbooksHref\(telegramMiniApp\)/u);

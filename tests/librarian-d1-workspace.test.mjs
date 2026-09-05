@@ -750,7 +750,7 @@ test("D1 workspace opens on a grouped accessible dashboard and keeps every tool 
   assert.match(workspace, /tool === "catalog" \|\| tool === "class-issue"/u);
   assert.match(workspace, /subsections=\{shellSubsections\}/u);
   assert.match(workspace, /activeSubsection=\{librarianSubsectionForTool\(tool\)\}/u);
-  assert.match(workspace, /onSubsectionNavigate=\{\(id\) => chooseTool\(id as Tool\)\}/u);
+  assert.match(workspace, /onSubsectionNavigate=\{\(id\) => \{[\s\S]*?const next = parseTool\(id\);[\s\S]*?if \(!next\) return false;[\s\S]*?chooseTool\(next\);[\s\S]*?return true;/u);
   assert.doesNotMatch(workspace, /<aside className=\{styles\.sidebar\}/u);
   assert.doesNotMatch(workspace, /<optgroup label=\{group\.label\}/u);
   for (const action of ["issue", "receipt", "transfer", "count", "writeoff"]) {

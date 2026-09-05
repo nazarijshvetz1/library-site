@@ -163,7 +163,7 @@ export default function TextbookCatalog() {
       <section className={styles.hero} aria-labelledby="textbooks-title">
         <div>
           <p className={styles.eyebrow}>Для учнів і батьків · 1–11 класи</p>
-          <h1 id="textbooks-title">Єдина бібліотека · Е-підручники</h1>
+          <h1 id="textbooks-title">Е‑підручники</h1>
           <p>Цифрова полиця з електронними версіями саме тих підручників, якими користується ліцей.</p>
         </div>
         <aside className={styles.heroNote}>

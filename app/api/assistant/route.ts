@@ -15,6 +15,12 @@ import { confirmAssistantAction, cancelAssistantAction, readAssistantActionRecei
 import { LibraryMutationError } from "@/lib/library-mutation-store";
 import { CatalogQueryValidationError } from "@/lib/catalog-d1";
 import type { ChatGPTUser } from "@/app/chatgpt-auth";
+import { assistantAudioInput } from "@/lib/assistant-audio";
+import { confirmTeacherAssistantAction, teacherActionRow } from "@/lib/assistant-teacher-actions";
+import { parseAssistantCart } from "@/lib/teacher-cart";
+import { AcquisitionStoreError } from "@/lib/acquisition-store";
+import { TeacherMaterialRequestError } from "@/lib/teacher-material-request-store";
+import { TelegramIntegrationError } from "@/lib/telegram-notifications";
 
 export const dynamic = "force-dynamic";
 type Principal = { actorKey: string; teacher?: VisitTeacherIdentity; librarian?: ChatGPTUser; writesEnabled?: boolean };
@@ -56,6 +62,9 @@ export async function POST(request: Request): Promise<Response> {
   const db = env.DB as unknown as VisitD1Database & CatalogD1Database;
   try {
     const principal = await authenticate(db, request, role); if (principal instanceof Response) return principal;
+    let cart: ReturnType<typeof parseAssistantCart>;
+    try { cart = parseAssistantCart(role === "teacher" ? body.value.cart : undefined); }
+    catch { return visitError(400, "invalid_cart", "Кошик має некоректний формат. Оновіть сторінку."); }
     const key = getRuntimeString("OPENAI_API_KEY");
     const enabled = getRuntimeBoolean("ASSISTANT_ENABLED") && Boolean(key);
     const dailyLimit = assistantDailyLimit(role, getRuntimeString(role === "librarian" ? "ASSISTANT_LIBRARIAN_DAILY_SESSIONS" : "ASSISTANT_TEACHER_DAILY_SESSIONS"));
@@ -69,6 +78,23 @@ export async function POST(request: Request): Promise<Response> {
     if (operation === "revoke_consent") return visitJson({ success: true,
       consent: await revokeAssistantConsent(db, principal.actorKey, key ?? undefined) });
     if (operation === "action_status" || operation === "confirm_action" || operation === "cancel_action") {
+      if (principal.teacher) {
+        const id = boundedId(body.value.draftId);
+        const row = await teacherActionRow(db, principal.actorKey, id);
+        if (row.result_json) return visitJson({ success: true, actionResult: JSON.parse(row.result_json), message: "Дію вже виконано. Повторних змін не створено." });
+        if (operation === "cancel_action") {
+          // The receipt and cancellation compete on the same row inside D1 transactions.
+          await db.prepare("UPDATE assistant_action_drafts SET cancelled_at=COALESCE(cancelled_at,?) WHERE id=? AND actor_key=? AND result_json IS NULL").bind(new Date().toISOString(), id, principal.actorKey).all();
+          const latest = await teacherActionRow(db, principal.actorKey, id);
+          return visitJson({ success: true, ...(latest.result_json ? { actionResult: JSON.parse(latest.result_json) } : {}), message: latest.result_json ? "Дію вже виконано." : "Підготовлену дію скасовано. Дані не змінено." });
+        }
+        if (row.cancelled_at || row.expires_at <= new Date().toISOString()) throw new VisitScheduleError("assistant_action_expired", 409, "Пропозиція застаріла. Підготуйте нову.");
+        if (operation === "action_status") return visitJson({ success: true, actionPreview: JSON.parse(row.preview_json) });
+        if (!enabled || !getRuntimeBoolean("ASSISTANT_WRITES_ENABLED") || (row.kind.startsWith("teacher.visit.") && !bookingEnabled)) return visitError(403, "assistant_writes_disabled", "Зміни через помічника зараз вимкнено.");
+        const actionResult = await confirmTeacherAssistantAction(db, principal.actorKey, principal.teacher, id, body.value.confirmed, cart, body.value.publicDisplayConsent);
+        scheduleTelegramOutboxDrain(db, request.url);
+        return visitJson({ success: true, actionResult, message: row.kind === "teacher.order.submit" ? "Замовлення надіслано бібліотекарю одним списком." : "Дію виконано й збережено в бібліотеці." });
+      }
       if (!principal.librarian) return visitError(403, "assistant_tool_denied", "Дії Джарвіса доступні лише бібліотекарю.");
       const draftId = boundedId(body.value.draftId);
       const receipt = await readAssistantActionReceipt(db, principal.actorKey, draftId);
@@ -102,6 +128,9 @@ export async function POST(request: Request): Promise<Response> {
     await requireAssistantConsent(db, principal.actorKey);
     if (operation === "start") {
       const mode = body.value.mode;
+      const audioMode = body.value.audioMode ?? "natural";
+      const microphone = body.value.microphone ?? "speaker";
+      if (!["natural", "noisy", "manual"].includes(String(audioMode)) || !["speaker", "headset"].includes(String(microphone))) return visitError(400, "invalid_audio_mode", "Оберіть режим мікрофона.");
       if (mode !== "voice" && mode !== "text") return visitError(400, "invalid_mode", "Оберіть голос або текст.");
       if (mode === "voice" && (typeof body.value.sdp !== "string" || body.value.sdp.length > 12_000 || !body.value.sdp.startsWith("v=0"))) return visitError(400, "invalid_sdp", "Не вдалося підготувати мікрофон.");
       const session = await createAssistantSession(db, principal.actorKey, dailyLimit);
@@ -113,7 +142,7 @@ export async function POST(request: Request): Promise<Response> {
       form.set("sdp", body.value.sdp as string);
       form.set("session", JSON.stringify({ type: "realtime", model: getRuntimeString("ASSISTANT_REALTIME_MODEL") || "gpt-realtime-mini",
         instructions: assistantInstructions(role, `${now.date} ${now.time}`), tools: assistantTools(role), max_output_tokens: 1000,
-        audio: { input: { transcription: { model: "gpt-4o-mini-transcribe", language: "uk" }, turn_detection: { type: "semantic_vad", eagerness: "low", interrupt_response: true, create_response: true } }, output: { voice: ASSISTANT_VOICES[role] } },
+        audio: { input: assistantAudioInput(audioMode as "natural" | "noisy" | "manual", microphone as "speaker" | "headset"), output: { voice: ASSISTANT_VOICES[role] } },
       }));
       try {
         await requireAssistantSession(db, session.id, principal.actorKey);
@@ -134,7 +163,9 @@ export async function POST(request: Request): Promise<Response> {
       if (current instanceof Response) throw new VisitScheduleError("authentication_required", 401, "Вхід завершився. Увійдіть ще раз.");
       await requireAssistantConsent(db, current.actorKey);
       await requireAssistantSession(db, sessionId, current.actorKey, "tool_calls");
-      return runAssistantLibraryTool(db, { role, actorKey: current.actorKey, teacherUserId: current.teacher?.teacherUserId, sessionId, bookingEnabled, scheduleEnabled: visitScheduleEnabled(), librarianWritesEnabled: Boolean(current.librarian && current.writesEnabled && getRuntimeBoolean("ASSISTANT_WRITES_ENABLED")) }, name, args);
+      const result = await runAssistantLibraryTool(db, { role, actorKey: current.actorKey, teacherUserId: current.teacher?.teacherUserId, sessionId, bookingEnabled, scheduleEnabled: visitScheduleEnabled(), librarianWritesEnabled: Boolean(current.librarian && current.writesEnabled && getRuntimeBoolean("ASSISTANT_WRITES_ENABLED")), teacherWritesEnabled: Boolean(current.teacher && getRuntimeBoolean("ASSISTANT_WRITES_ENABLED")), cart }, name, args);
+      if (result.cartUpdate) cart = result.cartUpdate.snapshot;
+      return result;
     };
     if (operation === "tool") {
       if (typeof body.value.name !== "string") return visitError(400, "invalid_tool", "Невідома дія.");
@@ -168,7 +199,7 @@ export async function POST(request: Request): Promise<Response> {
         for (const call of calls) {
           let result: AssistantToolResult;
           try { result = await execute(call.name ?? "", JSON.parse(call.arguments ?? "{}")); }
-          catch (error) { result = { success: false, message: error instanceof VisitScheduleError ? error.message : "Не вдалося перевірити дані. Спробуйте уточнити запит." }; }
+          catch (error) { result = { success: false, message: error instanceof VisitScheduleError || error instanceof TeacherMaterialRequestError || error instanceof AcquisitionStoreError || error instanceof TelegramIntegrationError ? error.message : "Не вдалося перевірити дані. Спробуйте уточнити запит." }; }
           results.push(result);
           input.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(result) });
         }
@@ -177,6 +208,7 @@ export async function POST(request: Request): Promise<Response> {
     }
     return visitError(400, "unknown_assistant_operation", "Невідома дія помічника.");
   } catch (error) {
+    if (error instanceof AcquisitionStoreError || error instanceof TeacherMaterialRequestError || error instanceof TelegramIntegrationError) return visitError(error.status, error.code, error.message);
     if (error instanceof LibraryMutationError) return visitError(error.status, error.code, error.message);
     if (error instanceof CatalogQueryValidationError) return visitError(400, "invalid_catalog_query", error.message);
     if (error instanceof AssistantLimitError) return visitError(error.status, error.code, error.message, { usage: error.usage });

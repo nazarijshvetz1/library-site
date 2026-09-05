@@ -1,6 +1,15 @@
 .launcher { position: fixed; right: 22px; bottom: 24px; z-index: 65; display: flex; align-items: center; gap: 9px; min-height: 46px; padding: 10px 17px; border: 1px solid #42725c; border-radius: 24px; background: #163f31; color: white; box-shadow: 0 5px 20px #123b3026; font: 700 15px/1.3 Inter, "Segoe UI", sans-serif; cursor: pointer; }
 .dialog { --assistant-height: 100dvh; --assistant-top: 0px; position: fixed; inset: var(--assistant-top) 0 auto auto; width: min(480px, 100vw); height: var(--assistant-height); max-width: 100vw; max-height: var(--assistant-height); margin: 0; padding: 0; border: 0; border-left: 1px solid #cedacf; background: #fbfcf9; color: #173b2e; box-shadow: -10px 0 40px #123b3026; font: 400 16px/1.5 Inter, "Segoe UI", sans-serif; overflow: hidden; }
 .dialog::backdrop { background: #102c234d; }
+.embedded { position: relative; inset: auto; width: 100%; max-width: none; height: clamp(360px, 72dvh, 780px); max-height: none; border: 1px solid #cedacf; border-radius: 18px; box-shadow: none; }
+.embedded[hidden] { display: none; }
+.audioSettings { margin-bottom: 8px; font-size: 14px; }
+.audioSettings summary { min-height: 36px; cursor: pointer; }
+.audioSettings label { display: grid; gap: 4px; margin: 6px 0; }
+.audioSettings select { min-height: 44px; max-width: 100%; border: 1px solid #bed0c2; border-radius: 8px; padding: 8px; color: #173b2e; background: white; font: 400 16px Inter, "Segoe UI", sans-serif; }
+.audioSettings small { display: block; }
+.talkButton { width: 100%; margin-bottom: 8px; }
+.talkButton[aria-pressed=true] { background: #205239; color: white; }
 .panel { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
 .header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: max(18px, env(safe-area-inset-top)) 18px 14px; border-bottom: 1px solid #dce4dc; background: #163f31; color: white; }
 .header small { display: block; color: #c9dfcf; font-size: 11px; letter-spacing: .12em; }
@@ -34,6 +43,9 @@
 .preview small { display: block; margin-top: 8px; }
 .dialog .secondary { background: transparent; color: #24533c; border-color: #c8d7c9; }
 .cards { display: grid; gap: 10px; margin-top: 14px; }
+.quickActions { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.quickActions button { font-size: 13px; padding: 6px 10px; }
+.quickActions small { flex-basis: 100%; color: #526b5c; }
 .card { display: flex; align-items: flex-start; gap: 12px; min-width: 0; padding: 12px; border: 1px solid #d9e4d8; border-radius: 12px; background: white; }
 .card img { width: 52px; height: 76px; flex: 0 0 52px; object-fit: contain; border-radius: 5px; }
 .card > div { min-width: 0; }
@@ -56,6 +68,7 @@
 @media (max-width: 760px) {
   .launcher { right: max(12px, env(safe-area-inset-right)); bottom: calc(90px + env(safe-area-inset-bottom)); min-height: 44px; padding: 9px 13px; font-size: 14px; }
   .dialog { width: 100vw; border: 0; }
+  .embedded { width: 100%; max-width: 100%; border: 1px solid #d8e3d7; height: min(720px, 80dvh); min-height: 340px; }
   .header { padding-top: max(14px, env(safe-area-inset-top)); }
   .header h2 { font-size: 20px; }
   .body { padding: 12px; }

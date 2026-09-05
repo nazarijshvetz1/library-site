@@ -408,7 +408,7 @@ test("teacher orders and notifications page with the frozen opaque cursor", asyn
   assert.match(cartDraftHelpers, /function readTeacherOrderCartDraft/u);
   assert.match(cartDraftHelpers, /candidate\.rows\.slice\(0, 10\)/u);
   assert.match(cartDraftHelpers, /function writeTeacherOrderCartDraft/u);
-  assert.match(orders, /readTeacherOrderCartDraft\(window\.sessionStorage, cartStorageKey\)/u);
+  assert.match(workspace, /readTeacherOrderCartDraft\(window\.sessionStorage, key\)/u);
   assert.match(orders, /writeTeacherOrderCartDraft\(window\.sessionStorage, cartStorageKey/u);
   assert.match(successfulCreate, /writeTeacherOrderCartDraft\(window\.sessionStorage, cartStorageKey, null\)/u);
   assert.match(orders, /window\.addEventListener\("beforeunload", remindBeforeUnload\)/u);
@@ -449,7 +449,7 @@ test("teacher cabinet exposes Telegram as a separate highlighted connection area
   assert.match(page, /boundedTeacherTab\(value\)/u);
   assert.match(miniPage, /boundedTeacherTab\(value\)/u);
   assert.match(routes, /"telegram"/u);
-  assert.match(launch, /type TeacherTab = [^;]*"telegram"/u);
+  assert.match(launch, /type TeacherTab = TeacherPortalTab/u);
   assert.match(workspace, /id: "telegram", label: "Telegram", shortLabel: "Telegram", icon: "telegram"/u);
   assert.match(workspace, /activeTab === "telegram" \? <TeacherTelegramSettings \/>/u);
   assert.match(workspace, /data-telegram=\{tab\.id === "telegram" \|\| undefined\}/u);

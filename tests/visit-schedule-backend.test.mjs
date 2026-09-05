@@ -87,7 +87,7 @@ test("assistant original male voices and speaking styles stay isolated by role",
     .replace("Містер Букінгем · ШІ-помічник", "Джарвіс")
     .replace("Роль користувача: teacher.", "Роль користувача: librarian."));
   assert.deepEqual(assistantContract.assistantTools("librarian").map((t) => t.name), ["search_catalog", "material_details", "visit_schedule", "librarian_reference", "librarian_loans", "material_history", "library_action_schema", "prepare_library_action", "librarian_report"]);
-  assert.deepEqual(assistantContract.assistantTools("teacher").map((t) => t.name), ["search_catalog", "material_details", "visit_schedule", "my_loans", "my_orders", "prepare_visit"]);
+  assert.deepEqual(assistantContract.assistantTools("teacher").map((t) => t.name), ["search_catalog", "material_details", "visit_schedule", "order_cart", "update_order_note", "update_order_cart", "my_visits", "my_profile", "my_acquisitions", "my_notifications", "teacher_action_schema", "prepare_teacher_action", "my_loans", "my_orders", "prepare_visit"]);
   const route = await readFile(new URL("../app/api/assistant/route.ts", import.meta.url), "utf8");
   assert.match(route, /output: \{ voice: ASSISTANT_VOICES\[role\] \}/);
 });

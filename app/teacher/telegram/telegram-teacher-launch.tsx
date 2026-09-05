@@ -23,12 +23,12 @@ import {
   type VisitTeacher,
   type VisitTeacherSearchEnvelope,
 } from "@/app/visits/visit-client";
-import { teacherTelegramCabinetHref } from "@/app/teacher/_components/teacher-routes";
+import { teacherTelegramCabinetHref, type TeacherPortalTab } from "@/app/teacher/_components/teacher-routes";
 import { finishTelegramLogin } from "./telegram-login-finish";
 import styles from "./telegram.module.css";
 
 const LOGO_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
-type TeacherTab = "overview" | "visits" | "orders" | "acquisition" | "loans" | "notifications" | "telegram";
+type TeacherTab = TeacherPortalTab;
 type ActivationIntent = "login" | "activate";
 type TelegramWebApp = {
   initData: string;

@@ -48,6 +48,7 @@ export const assistantActionDrafts = sqliteTable("assistant_action_drafts", {
   id: text("id").primaryKey(), actorKey: text("actor_key").notNull(),
   sessionId: text("session_id").notNull().references(() => assistantSessions.id),
   kind: text("kind").notNull(), payloadJson: text("payload_json").notNull(), previewJson: text("preview_json").notNull(),
+  resultJson: text("result_json"),
   createdAt: text("created_at").notNull(), expiresAt: text("expires_at").notNull(), cancelledAt: text("cancelled_at"),
 });
 

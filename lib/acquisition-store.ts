@@ -52,6 +52,7 @@ export type AcquisitionProjection = {
   requesterNote: string;
   librarianNote: string;
   clarificationMessage: string;
+  teacherReply: string;
   rejectionReason: string;
   status: AcquisitionStatus;
   duplicateKey: string;
@@ -89,6 +90,7 @@ type RequestRow = {
   requested_quantity: number; approved_quantity: number | null; ordered_quantity: number;
   received_quantity: number; source_url: string; subject: string; target_class: string;
   requester_note: string; librarian_note: string; clarification_message: string;
+  teacher_reply: string | null;
   rejection_reason: string; status: AcquisitionStatus; duplicate_key: string;
   academic_year_label: string; version: number; submitted_at: string; updated_at: string;
   teacher_hidden_at: string | null; librarian_hidden_at: string | null;
@@ -790,6 +792,7 @@ function projectionSql(): string {
     ar.requested_quantity,ar.approved_quantity,ar.ordered_quantity,ar.received_quantity,ar.source_url,ar.subject,ar.target_class,
     ar.requester_note,ar.librarian_note,ar.clarification_message,ar.rejection_reason,ar.status,ar.duplicate_key,
     ar.academic_year_label,ar.version,ar.submitted_at,ar.updated_at,ar.teacher_hidden_at,ar.librarian_hidden_at,
+    (SELECT json_extract(e.metadata_json,'$.message') FROM acquisition_request_events e WHERE e.request_id=ar.id AND e.kind='clarification_reply' AND e.actor_kind='teacher' ORDER BY e.created_at DESC,e.id DESC LIMIT 1) teacher_reply,
     (SELECT COUNT(*) FROM acquisition_requests dup WHERE dup.academic_year_id=ar.academic_year_id AND dup.duplicate_key=ar.duplicate_key) duplicate_count
     FROM acquisition_requests ar`;
 }
@@ -803,6 +806,7 @@ function projectRequest(row: RequestRow): AcquisitionProjection {
     orderedQuantity: number(row.ordered_quantity), receivedQuantity: number(row.received_quantity), sourceUrl: row.source_url,
     subject: row.subject, targetClass: row.target_class, requesterNote: row.requester_note, librarianNote: row.librarian_note,
     clarificationMessage: row.clarification_message, rejectionReason: row.rejection_reason, status: row.status,
+    teacherReply: row.teacher_reply ?? "",
     duplicateKey: row.duplicate_key, duplicateCount: number(row.duplicate_count), academicYearLabel: row.academic_year_label,
     version: number(row.version), submittedAt: row.submitted_at, updatedAt: row.updated_at,
     teacherHiddenAt: row.teacher_hidden_at, librarianHiddenAt: row.librarian_hidden_at,

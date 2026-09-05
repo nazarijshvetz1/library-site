@@ -56,6 +56,7 @@ import {
   School,
   Search,
   Send,
+  Sparkles,
   Settings2,
   Share2,
   ShoppingBasket,
@@ -69,6 +70,7 @@ import {
 } from "lucide-react";
 
 const SITE_ICONS = {
+  assistant: Sparkles,
   home: House,
   fund: LibraryBig,
   textbooks: BookOpen,

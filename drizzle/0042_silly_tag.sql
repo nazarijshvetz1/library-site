@@ -1,0 +1,1 @@
+ALTER TABLE `assistant_action_drafts` ADD `result_json` text;

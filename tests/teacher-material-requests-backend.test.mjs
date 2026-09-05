@@ -4,6 +4,17 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
+import { registerHooks } from "node:module";
+import { ASSISTANT_CONSENT_VERSION, assistantTools } from "../lib/assistant-contract.ts";
+import { listTeacherAcquisitionRequests } from "../lib/acquisition-store.ts";
+registerHooks({ resolve(specifier, context, nextResolve) {
+  if (specifier === "cloudflare:workers") return { url: "data:text/javascript,export const env={}", shortCircuit: true };
+  return nextResolve(specifier, context);
+} });
+const assistantActions = await import("../lib/assistant-teacher-actions.ts");
+const assistantStore = await import("../lib/assistant-store.ts");
+const assistantConsent = await import("../lib/assistant-consent.ts");
+const { runAssistantLibraryTool } = await import("../lib/assistant-library.ts");
 
 const root = process.cwd();
 const store = await import(
@@ -41,10 +52,8 @@ class PreparedStatement {
   }
 
   execute() {
-    return {
-      success: true,
-      results: this.database.sqlite.prepare(this.sql).all(...this.bindings),
-    };
+    const results = this.database.sqlite.prepare(this.sql).all(...this.bindings);
+    return { success: true, results, meta: { changes: this.database.sqlite.prepare("SELECT changes() AS n").get().n } };
   }
 }
 
@@ -163,6 +172,114 @@ const librarian = {
 function commandId() {
   return crypto.randomUUID();
 }
+
+const assistantCart = { items: [{ materialId: "CAT-0001", quantity: 2 }], notes: "Для уроку" };
+async function assistantFixture() {
+  const context = openDatabase();
+  const actor = "teacher:USR-T1";
+  await assistantConsent.acceptAssistantConsent(context.db, actor, ASSISTANT_CONSENT_VERSION, 0);
+  const session = await assistantStore.createAssistantSession(context.db, actor, 12);
+  return { ...context, actor, session };
+}
+function prepareTeacherAction(c, kind, details = {}, cart = assistantCart) {
+  return assistantActions.prepareTeacherAssistantAction(c.db, c.actor, c.session.id, teacher.teacherUserId, kind, details, cart);
+}
+function confirmTeacherAction(c, draft, cart = assistantCart, consent = false) {
+  return assistantActions.confirmTeacherAssistantAction(c.db, c.actor, teacher, draft.id, true, cart, consent);
+}
+
+test("assistant submits the shared cart once and replays a receipt after session closure", async () => {
+  const c = await assistantFixture();
+  try {
+    const draft = await prepareTeacherAction(c, "order.submit");
+    assert.equal(c.sqlite.prepare("SELECT count(*) n FROM material_requests").get().n, 0);
+    const result = await confirmTeacherAction(c, draft);
+    c.sqlite.prepare("UPDATE assistant_sessions SET closed_at=?").run(new Date().toISOString());
+    assert.deepEqual(await confirmTeacherAction(c, draft), result);
+    assert.equal(c.sqlite.prepare("SELECT count(*) n FROM material_requests").get().n, 1);
+    assert.equal(c.sqlite.prepare("SELECT requested_quantity FROM material_request_items").get().requested_quantity, 2);
+    assert.equal(c.sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 5);
+    assert.ok(result.cartSignature);
+  } finally { c.sqlite.close(); }
+});
+
+test("assistant rejects cart changes, unconfirmed actions and cross-teacher access", async () => {
+  const c = await assistantFixture();
+  try {
+    const draft = await prepareTeacherAction(c, "order.submit");
+    await assert.rejects(() => confirmTeacherAction(c, draft, { items: [], notes: "" }), e => e.code === "assistant_cart_changed");
+    await assert.rejects(() => assistantActions.confirmTeacherAssistantAction(c.db, c.actor, teacher, draft.id, false, assistantCart, false), e => e.code === "action_confirmation_required");
+    await assert.rejects(() => assistantActions.teacherActionRow(c.db, "teacher:USR-OTHER", draft.id), e => e.code === "assistant_action_not_found");
+    assert.equal(c.sqlite.prepare("SELECT count(*) n FROM material_requests").get().n, 0);
+    assert.equal(assistantTools("teacher").some(t => t.name === "prepare_library_action"), false);
+  } finally { c.sqlite.close(); }
+});
+
+for (const race of ["profile", "teacher-session", "assistant-session", "consent", "cancelled"]) test(`assistant phone transaction rolls back on concurrent ${race} change`, async () => {
+  const c = await assistantFixture();
+  try {
+    const draft = await prepareTeacherAction(c, "profile.phone", { phone: "+380 67 123 45 67" });
+    c.db.beforeBatch = async () => {
+      if (race === "profile") c.sqlite.exec("UPDATE teacher_profiles SET version=version+1");
+      if (race === "teacher-session") c.sqlite.exec("UPDATE visit_teacher_sessions SET revoked_at='2026-01-01T00:00:00.000Z'");
+      if (race === "assistant-session") c.sqlite.exec("UPDATE assistant_sessions SET closed_at='2026-01-01T00:00:00.000Z'");
+      if (race === "consent") c.sqlite.exec("UPDATE assistant_consents SET revoked_at='2026-01-01T00:00:00.000Z'");
+      if (race === "cancelled") c.sqlite.exec("UPDATE assistant_action_drafts SET cancelled_at='2026-01-01T00:00:00.000Z'");
+    };
+    await assert.rejects(() => confirmTeacherAction(c, draft));
+    assert.equal(c.sqlite.prepare("SELECT service_contact FROM teacher_profiles").get().service_contact, "");
+    assert.equal(c.sqlite.prepare("SELECT result_json FROM assistant_action_drafts").get().result_json, null);
+    assert.equal(c.sqlite.prepare("SELECT count(*) n FROM mutation_commands").get().n, 0);
+  } finally { c.sqlite.close(); }
+});
+
+test("assistant cart tools use canonical catalog data, exact quantities and no order writes", async () => {
+  const c = await assistantFixture();
+  try {
+    const context = { role: "teacher", actorKey: c.actor, teacherUserId: teacher.teacherUserId, sessionId: c.session.id, bookingEnabled: true, scheduleEnabled: true, teacherWritesEnabled: true, cart: assistantCart };
+    const result = await runAssistantLibraryTool(c.db, context, "update_order_cart", { materialId: "CAT-0001", quantity: 3 });
+    assert.equal(result.cartUpdate.snapshot.items[0].quantity, 3);
+    assert.equal(result.cartUpdate.materials[0].title, "Алгебра 7 клас");
+    const note = await runAssistantLibraryTool(c.db, context, "update_order_note", { details: { note: "До кабінету 205" } });
+    assert.equal(note.cartUpdate.snapshot.notes, "До кабінету 205");
+    await assert.rejects(() => runAssistantLibraryTool(c.db, context, "update_order_cart", { materialId: "CAT-0001", quantity: 6 }), e => e.code === "cart_stock_changed");
+    assert.equal(c.sqlite.prepare("SELECT count(*) n FROM material_requests").get().n, 0);
+  } finally { c.sqlite.close(); }
+});
+
+test("assistant clarification preserves the original question and note, exposes reply and audits once", async () => {
+  const c = await assistantFixture();
+  try {
+    const now = new Date().toISOString();
+    c.sqlite.prepare("INSERT INTO telegram_connections(user_id,telegram_user_id,chat_id,status,notify_orders,notify_visits,version,linked_at,created_at,updated_at) VALUES('USR-LIB','77001','77001','active',1,1,1,?,?,?)").run(now, now, now);
+    c.sqlite.prepare("INSERT INTO academic_years(id,label,start_date,end_date,status,notes,version,created_at,updated_at) VALUES('YR-2026','2026/2027','2026-09-01','2027-05-31','active','',1,?,?)").run(now, now);
+    const draft = await prepareTeacherAction(c, "acquisition.create", { category: "educational", sourceKind: "catalog", literatureKind: "none", materialId: "CAT-0001", title: "Алгебра 7 клас", author: "Автор", publicationYear: 2024, requestedQuantity: 2, sourceUrl: "", subject: "Математика", targetClass: "7-А", note: "На наступний рік" });
+    await confirmTeacherAction(c, draft);
+    const id = `ACQ-${draft.id}`;
+    c.sqlite.prepare("UPDATE acquisition_requests SET status='clarification',clarification_message='Для якого класу?',version=version+1 WHERE id=?").run(id);
+    const reply = await prepareTeacherAction(c, "acquisition.reply", { id, message: "Для 7-А класу" });
+    await confirmTeacherAction(c, reply); await confirmTeacherAction(c, reply);
+    const records = await listTeacherAcquisitionRequests(c.db, teacher.teacherUserId);
+    assert.equal(records[0].teacherReply, "Для 7-А класу");
+    assert.equal(records[0].clarificationMessage, "Для якого класу?");
+    assert.equal(records[0].requesterNote, "На наступний рік");
+    assert.equal(c.sqlite.prepare("SELECT count(*) n FROM audit_events WHERE action='acquisition_request.clarification_reply'").get().n, 1);
+    assert.equal(c.sqlite.prepare("SELECT count(*) n FROM acquisition_request_events WHERE kind='clarification_reply'").get().n, 1);
+    assert.equal(c.sqlite.prepare("SELECT count(*) n FROM telegram_delivery_outbox WHERE title='Відповідь на уточнення'").get().n, 1);
+  } finally { c.sqlite.close(); }
+});
+
+test("assistant Telegram preferences preserve connection, scope and replay only once", async () => {
+  const c = await assistantFixture();
+  try {
+    const now = new Date().toISOString();
+    c.sqlite.prepare("INSERT INTO telegram_connections(user_id,telegram_user_id,chat_id,status,notify_orders,notify_visits,version,linked_at,created_at,updated_at) VALUES('USR-T1','77002','77002','active',1,1,1,?,?,?)").run(now, now, now);
+    const draft = await prepareTeacherAction(c, "notifications.set", { enabled: false });
+    await confirmTeacherAction(c, draft); await confirmTeacherAction(c, draft);
+    const row = c.sqlite.prepare("SELECT status,notify_orders,notify_visits,version FROM telegram_connections WHERE user_id='USR-T1'").get();
+    assert.deepEqual({ ...row }, { status: "active", notify_orders: 0, notify_visits: 0, version: 2 });
+  } finally { c.sqlite.close(); }
+});
 
 async function createRequest(context, quantity = 3) {
   return store.createTeacherMaterialRequest(context.db, teacher, {

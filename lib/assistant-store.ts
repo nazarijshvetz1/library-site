@@ -158,7 +158,18 @@ export async function confirmAssistantVisit(db: VisitD1Database, actorKey: strin
     .bind(now.toISOString(), draftId, actorKey).all();
   let result: VisitBooking;
   try {
-    result = await createVisitBooking(db, teacher, JSON.parse(draft.payload_json) as VisitBookingCreateInput);
+    const guarded: VisitD1Database = { prepare: (sql) => db.prepare(sql), async batch(statements) {
+      const timestamp = new Date().toISOString();
+      const guard = db.prepare(`SELECT CASE WHEN EXISTS(SELECT 1 FROM assistant_visit_drafts d
+        JOIN assistant_sessions s ON s.id=d.session_id AND s.actor_key=d.actor_key
+        JOIN assistant_consents c ON c.actor_key=d.actor_key
+        WHERE d.id=? AND d.actor_key=? AND d.expires_at>? AND s.closed_at IS NULL AND s.expires_at>?
+        AND c.version=? AND c.accepted_at IS NOT NULL AND c.revoked_at IS NULL)
+        THEN 1 ELSE json('assistant_consent_changed') END`).bind(draftId, actorKey, timestamp, timestamp, ASSISTANT_CONSENT_VERSION);
+      const results = await db.batch([guard, ...statements]);
+      return results.slice(1);
+    } };
+    result = await createVisitBooking(guarded, teacher, JSON.parse(draft.payload_json) as VisitBookingCreateInput);
   } catch (error) {
     // Definitive conflicts invalidate the proposal; transport failures remain retryable with the same ID.
     if (error instanceof VisitScheduleError && ["slot_unavailable", "class_year_not_active", "visit_time_elapsed", "outside_booking_horizon"].includes(error.code)) {

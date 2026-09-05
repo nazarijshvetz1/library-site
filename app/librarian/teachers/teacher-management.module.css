@@ -464,3 +464,4 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .filters { grid-template-columns: 1fr; }
   .searchField { grid-column: auto; }
 }
+.profilePane dd a[href^="tel:"] { display: inline-flex; align-items: center; min-height: 44px; color: #245638; text-decoration: underline; text-underline-offset: 3px; }
