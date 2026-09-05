@@ -3,6 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import * as assistantActions from "../lib/assistant-actions.ts";
+import * as assistantConsent from "../lib/assistant-consent.ts";
+import * as assistantStore from "../lib/assistant-store.ts";
+import * as assistantLibrary from "../lib/assistant-library.ts";
 import { pathToFileURL } from "node:url";
 
 const root = process.cwd();
@@ -107,6 +111,10 @@ function openDatabase() {
     "0028_dusty_marten_broadcloak.sql",
     "0034_worthless_big_bertha.sql",
     "0035_soft_warstar.sql",
+    "0038_legal_morph.sql",
+    "0039_watery_black_crow.sql",
+    "0040_empty_piledriver.sql",
+    "0041_concerned_overlord.sql",
   ]) {
     const sql = fs.readFileSync(path.join(root, "drizzle", file), "utf8");
     for (const statement of sql.split(/-->\s*statement-breakpoint/gu)) {
@@ -246,6 +254,145 @@ const ids = {
   partialReturn: "10000000-0000-4000-8000-000000000004",
   finalReturn: "10000000-0000-4000-8000-000000000005",
 };
+
+async function assistantFixture() {
+  const data = openDatabase();
+  const actorKey = `librarian:${actor.userId}`;
+  const status = await assistantConsent.readAssistantConsent(data.d1, actorKey);
+  await assistantConsent.acceptAssistantConsent(data.d1, actorKey, status.version, status.revision);
+  const session = await assistantStore.createAssistantSession(data.d1, actorKey, null);
+  return { ...data, actorKey, session };
+}
+
+test("Jarvis metadata preview is inert, exact, owner-only and confirmed once in core", async () => {
+  const { d1, sqlite, actorKey, session } = await assistantFixture();
+  const draft = await assistantActions.prepareAssistantAction(d1, actorKey, session.id, "material.update", { materialId: "CAT-0001", changes: { title: "Назва після підтвердження" } });
+  assert.equal(sqlite.prepare("SELECT title FROM materials WHERE id='CAT-0001'").get().title, "Стара назва");
+  assert.ok(draft.lines.some((l) => l.includes("Стара назва → Назва після підтвердження")));
+  await assert.rejects(assistantActions.confirmAssistantAction(d1, actorKey, actor, draft.id, false), { code: "action_confirmation_required" });
+  await assert.rejects(assistantActions.confirmAssistantAction(d1, "librarian:other", actor, draft.id, true), { code: "assistant_tool_denied" });
+  const result = await assistantActions.confirmAssistantAction(d1, actorKey, actor, draft.id, true);
+  assert.equal(sqlite.prepare("SELECT title FROM materials WHERE id='CAT-0001'").get().title, "Назва після підтвердження");
+  assert.deepEqual(await assistantActions.confirmAssistantAction(d1, actorKey, actor, draft.id, true), result);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action='material.updated'").get().n, 1);
+  await assistantConsent.revokeAssistantConsent(d1, actorKey);
+  assert.deepEqual(await assistantActions.confirmAssistantAction(d1, actorKey, actor, draft.id, true), result);
+});
+
+test("Jarvis library tools read the same fixture DB and keep teacher/read-only contexts out of writes", async () => {
+  const { d1, actorKey, session } = await assistantFixture();
+  const context = { role: "librarian", actorKey, sessionId: session.id, bookingEnabled: true, scheduleEnabled: true, librarianWritesEnabled: true };
+  const reference = await assistantLibrary.runAssistantLibraryTool(d1, context, "librarian_reference", {});
+  assert.ok(reference.data.teachers.some((t) => t.id === "USR-TCH"));
+  assert.ok(reference.data.locations.some((l) => l.id === "LOC-001"));
+  const catalog = await assistantLibrary.runAssistantLibraryTool(d1, context, "search_catalog", { query: "CAT-0001" });
+  assert.equal(catalog.data.items[0].title, "Стара назва");
+  const input = { action: "material.update", details: { materialId: "CAT-0001", changes: { title: "Не можна" } } };
+  await assert.rejects(assistantLibrary.runAssistantLibraryTool(d1, { ...context, librarianWritesEnabled: false }, "prepare_library_action", input), { code: "assistant_writes_disabled" });
+  await assert.rejects(assistantLibrary.runAssistantLibraryTool(d1, { ...context, role: "teacher" }, "prepare_library_action", input), { code: "assistant_tool_denied" });
+  const loans = await assistantLibrary.runAssistantLibraryTool(d1, context, "librarian_loans", { overdueOnly: true });
+  assert.deepEqual(loans.data.personal, []);
+});
+
+test("Jarvis rejects stale previews, forged versions, teacher actions and revoked consent at commit", async () => {
+  const { d1, sqlite, actorKey, session } = await assistantFixture();
+  const details = { materialId: "CAT-0001", changes: { title: "Нова назва" } };
+  await assert.rejects(assistantActions.prepareAssistantAction(d1, "teacher:USR-TCH", session.id, "material.update", details), { code: "assistant_tool_denied" });
+  await assert.rejects(assistantActions.prepareAssistantAction(d1, actorKey, session.id, "material.update", { ...details, expectedVersion: 1 }), { code: "invalid_action" });
+  const first = await assistantActions.prepareAssistantAction(d1, actorKey, session.id, "material.update", details);
+  const second = await assistantActions.prepareAssistantAction(d1, actorKey, session.id, "material.update", details);
+  await assistantActions.confirmAssistantAction(d1, actorKey, actor, first.id, true);
+  await assert.rejects(assistantActions.confirmAssistantAction(d1, actorKey, actor, second.id, true), { code: "material_version_conflict" });
+  const third = await assistantActions.prepareAssistantAction(d1, actorKey, session.id, "material.update", { materialId: "CAT-0001", changes: { title: "Не зберігати" } });
+  d1.beforeBatch = () => sqlite.prepare("UPDATE assistant_consents SET revoked_at='2026-09-05T00:00:00Z' WHERE actor_key=?").run(actorKey);
+  await assert.rejects(assistantActions.confirmAssistantAction(d1, actorKey, actor, third.id, true));
+  assert.equal(sqlite.prepare("SELECT title FROM materials WHERE id='CAT-0001'").get().title, "Нова назва");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM mutation_commands").get().n, 1);
+});
+
+test("Jarvis preview preserves literal text and cancelled/completed receipts remain authoritative", async () => {
+  const { d1, sqlite, actorKey, session } = await assistantFixture();
+  const draft = await assistantActions.prepareAssistantAction(d1, actorKey, session.id, "material.update", { materialId: "CAT-0001", changes: { title: "good", author: "lost", notes: "LOC-001" } });
+  assert.ok(draft.lines.includes("Назва: good"));
+  assert.ok(draft.lines.includes("Автор: lost"));
+  assert.ok(draft.lines.includes("Примітка: LOC-001"));
+  assert.deepEqual(await assistantActions.readAssistantActionPreview(d1, actorKey, draft.id), draft);
+  await assert.rejects(assistantActions.readAssistantActionPreview(d1, "librarian:other", draft.id), { code: "assistant_action_not_found" });
+  await assert.rejects(assistantActions.cancelAssistantAction(d1, "librarian:other", draft.id), { code: "assistant_action_not_found" });
+  const result = await assistantActions.confirmAssistantAction(d1, actorKey, actor, draft.id, true);
+  assert.deepEqual(await assistantActions.cancelAssistantAction(d1, actorKey, draft.id), result, "a committed confirmation wins over a later cancellation");
+  assert.equal(sqlite.prepare("SELECT title FROM materials WHERE id='CAT-0001'").get().title, "good");
+});
+
+test("Jarvis issues and returns teacher copies through the existing ledger", async () => {
+  const { d1, sqlite, actorKey, session } = await assistantFixture();
+  const issue = await assistantActions.prepareAssistantAction(d1, actorKey, session.id, "loan.issue", { teacherUserId: "USR-TCH", issuedAt: "2026-09-05", dueAt: null,
+    items: [{ materialId: "CAT-0001", sourceLocationId: "LOC-001", condition: "unspecified", quantity: 2 }] });
+  assert.equal(sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 5);
+  assert.ok(issue.lines.includes("Повернути до: строк не встановлено"));
+  const issued = await assistantActions.confirmAssistantAction(d1, actorKey, actor, issue.id, true);
+  await assistantActions.confirmAssistantAction(d1, actorKey, actor, issue.id, true);
+  assert.equal(sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 3);
+  const loan = (await directory.listOpenLoans(d1, { teacherUserId: "USR-TCH" }))[0];
+  assert.equal(loan.loanId, issued.loanId);
+  const returned = await assistantActions.prepareAssistantAction(d1, actorKey, session.id, "loan.return", { loanId: loan.loanId, returnedAt: "2026-09-05",
+    items: [{ loanItemId: loan.items[0].loanItemId, quantity: 2, returnLocationId: "LOC-001", condition: "unspecified" }] });
+  await assistantActions.confirmAssistantAction(d1, actorKey, actor, returned.id, true);
+  assert.equal(sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 5);
+  assert.equal((await directory.listOpenLoans(d1, { teacherUserId: "USR-TCH" })).length, 0);
+});
+
+test("Jarvis stock count has server quantity guard and cancelled proposal cannot apply", async () => {
+  const { d1, sqlite, actorKey, session } = await assistantFixture();
+  const draft = await assistantActions.prepareAssistantAction(d1, actorKey, session.id, "stock.count", { materialId: "CAT-0001", locationId: "LOC-001", condition: "unspecified", countedQuantity: 4, reason: "inventory_count", occurredAt: "2026-09-05" });
+  assert.ok(draft.lines.includes("Зараз у базі: 5"));
+  assert.equal(sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 5);
+  await assistantActions.cancelAssistantAction(d1, actorKey, draft.id);
+  await assert.rejects(assistantActions.confirmAssistantAction(d1, actorKey, actor, draft.id, true), { code: "assistant_action_expired" });
+  assert.equal(sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 5);
+});
+
+test("Jarvis class issue appends to the same statement, history includes classes, return balances stock", async () => {
+  const { d1, sqlite, actorKey, session } = await assistantFixture();
+  seedActiveClassYear(sqlite);
+  const details = { classYearId: "CY-2026-001", responsibleTeacherUserId: "USR-TCH", issuedAt: "2026-09-05", dueAt: null,
+    items: [{ materialId: "CAT-0001", sourceLocationId: "LOC-001", condition: "unspecified", quantity: 1 }] };
+  for (let i = 0; i < 2; i++) {
+    const draft = await assistantActions.prepareAssistantAction(d1, actorKey, session.id, "class.issue", details);
+    await assistantActions.confirmAssistantAction(d1, actorKey, actor, draft.id, true);
+  }
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM class_loans").get().n, 1);
+  assert.equal(sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 3);
+  const history = await assistantLibrary.runAssistantLibraryTool(d1, { role: "librarian", actorKey, sessionId: session.id, bookingEnabled: true, scheduleEnabled: true }, "material_history", { materialId: "CAT-0001" });
+  assert.equal(history.data.rows.length, 2);
+  assert.equal(history.data.rows[0].className, "5-А клас");
+  const loan = (await directory.listOpenClassLoans(d1, { teacherUserId: "USR-TCH" }))[0];
+  const returned = await assistantActions.prepareAssistantAction(d1, actorKey, session.id, "class.return", { classLoanId: loan.classLoanId, returnedAt: "2026-09-05",
+    items: loan.items.map((i) => ({ classLoanItemId: i.classLoanItemId, quantity: i.quantityOutstanding, returnLocationId: "LOC-001", condition: "unspecified" })) });
+  await assistantActions.confirmAssistantAction(d1, actorKey, actor, returned.id, true);
+  assert.equal(sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 5);
+});
+
+test("Jarvis new material, ebook, receipt, transfer, writeoff and archive use core validators and audit", async () => {
+  const { d1, sqlite, actorKey, session } = await assistantFixture();
+  sqlite.exec("INSERT INTO locations SELECT 'LOC-002','Кабінет 2',type,status,is_public,2,created_at,updated_at FROM locations WHERE id='LOC-001'");
+  const execute = async (kind, details) => {
+    const draft = await assistantActions.prepareAssistantAction(d1, actorKey, session.id, kind, details);
+    const result = await assistantActions.confirmAssistantAction(d1, actorKey, actor, draft.id, true);
+    assert.deepEqual(await assistantActions.confirmAssistantAction(d1, actorKey, actor, draft.id, true), result);
+    return result;
+  };
+  const created = await execute("material.create", { title: "Новий підручник", rubric: "Підручники" });
+  await execute("ebook.add", { materialId: created.materialId, url: "https://example.com/textbook.pdf" });
+  const stock = { materialId: created.materialId, locationId: "LOC-001", condition: "good", occurredAt: "2026-09-05" };
+  await execute("stock.receive", { ...stock, quantity: 3 });
+  await execute("stock.count", { ...stock, countedQuantity: 4, reason: "inventory_count" });
+  await execute("stock.transfer", { materialId: created.materialId, sourceLocationId: "LOC-001", destinationLocationId: "LOC-002", condition: "good", quantity: 4, occurredAt: "2026-09-05" });
+  await execute("stock.writeoff", { ...stock, locationId: "LOC-002", quantity: 4, reason: "damaged" });
+  await execute("material.archive", { materialId: created.materialId });
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM mutation_commands").get().n, 7);
+  assert.ok(sqlite.prepare("SELECT archived_at FROM materials WHERE id=?").get(created.materialId).archived_at);
+});
 
 test("direct material edit commits once, preserves history and rejects stale versions", async () => {
   const { sqlite, d1 } = openDatabase();

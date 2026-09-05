@@ -11,6 +11,14 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 // Assistant metadata only: catalog, loans and visits keep their existing tables.
+export const assistantConsents = sqliteTable("assistant_consents", {
+  actorKey: text("actor_key").primaryKey(),
+  version: text("version").notNull(),
+  acceptedAt: text("accepted_at"),
+  revokedAt: text("revoked_at"),
+  revision: integer("revision").notNull().default(1),
+});
+
 export const assistantSessions = sqliteTable("assistant_sessions", {
   id: text("id").primaryKey(),
   actorKey: text("actor_key").notNull(),
@@ -35,6 +43,13 @@ export const assistantVisitDrafts = sqliteTable("assistant_visit_drafts", {
   confirmedAt: text("confirmed_at"),
   resultJson: text("result_json"),
 }, (table) => [index("idx_assistant_visit_drafts_session").on(table.sessionId, table.createdAt)]);
+
+export const assistantActionDrafts = sqliteTable("assistant_action_drafts", {
+  id: text("id").primaryKey(), actorKey: text("actor_key").notNull(),
+  sessionId: text("session_id").notNull().references(() => assistantSessions.id),
+  kind: text("kind").notNull(), payloadJson: text("payload_json").notNull(), previewJson: text("preview_json").notNull(),
+  createdAt: text("created_at").notNull(), expiresAt: text("expires_at").notNull(), cancelledAt: text("cancelled_at"),
+});
 
 const draftKinds = [
   "material.create",

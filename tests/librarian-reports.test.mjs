@@ -4,6 +4,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
+import { runAssistantLibraryTool } from "../lib/assistant-library.ts";
 
 const root = process.cwd();
 const statementExcel = await import(pathToFileURL(path.join(root, "lib/class-issue-statement-excel.ts")).href);
@@ -57,6 +58,18 @@ test("all operational report queries compile on the migrated schema", async () =
       assert.doesNotMatch(xml, /Період/u);
     }
   }
+  sqlite.close();
+});
+
+test("Jarvis report tool uses existing queries and returns authorized download routes", async () => {
+  const { sqlite, db } = openReportDatabase();
+  const context = { role: "librarian", actorKey: "librarian:test", sessionId: "test", bookingEnabled: false, scheduleEnabled: false };
+  for (const report of reportStore.LIBRARIAN_REPORT_KINDS) {
+    const result = await runAssistantLibraryTool(db, context, "librarian_report", { report, from: "2026-08-01", to: "2026-09-05" });
+    assert.equal(result.success, true);
+    assert.match(result.cards[0].href, /^\/api\/librarian\/reports\//u);
+  }
+  await assert.rejects(runAssistantLibraryTool(db, { ...context, role: "teacher" }, "librarian_report", { report: "inventory", from: "2026-08-01", to: "2026-09-05" }), { code: "assistant_tool_denied" });
   sqlite.close();
 });
 

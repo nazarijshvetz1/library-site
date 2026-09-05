@@ -57,6 +57,7 @@ type CatalogCursor = {
 
 export type CatalogSummary = {
   id: string;
+  archived?: boolean;
   title: string;
   author: string;
   year: number | null;
@@ -256,20 +257,21 @@ export function parseCatalogListQuery(
 export async function listCatalogMaterials(
   db: CatalogD1Database,
   query: CatalogListQuery,
+  options: { useFts?: boolean; includeArchived?: boolean } = {},
 ): Promise<CatalogListResult> {
-  let statement = buildCatalogListStatement(query, true);
+  let statement = buildCatalogListStatement(query, options.useFts !== false, options.includeArchived);
   let response: CatalogD1Result;
   try {
     response = await db.prepare(statement.sql).bind(...statement.bindings).all();
   } catch (error) {
     if (!statement.usesFts || !isMissingFtsError(error)) throw error;
-    statement = buildCatalogListStatement(query, false);
+    statement = buildCatalogListStatement(query, false, options.includeArchived);
     response = await db.prepare(statement.sql).bind(...statement.bindings).all();
   }
   const rawRows = Array.isArray(response.results) ? response.results : [];
   const hasMore = rawRows.length > query.limit;
   const visibleRows = rawRows.slice(0, query.limit);
-  const items = visibleRows.map((row) => mapSummaryRow(asRow(row)));
+  const items = visibleRows.map((row) => ({ ...mapSummaryRow(asRow(row)), ...(options.includeArchived ? { archived: asRow(row).material_status !== "active" || Boolean(asRow(row).archived_at) } : {}) }));
   const lastRow = visibleRows.at(-1);
   const nextCursor = hasMore && lastRow
     ? encodeCatalogCursor(cursorFromRow(asRow(lastRow), query))
@@ -303,12 +305,13 @@ export async function getCatalogMaterialDetail(
   db: CatalogD1Database,
   materialId: string,
   scope: "public" | "librarian",
+  options: { includeArchived?: boolean } = {},
 ): Promise<CatalogDetail | null> {
   const id = normalizeCatalogId(materialId);
   if (!id) return null;
 
   const statements = [
-    db.prepare(detailMaterialSql(scope)).bind(id),
+    db.prepare(detailMaterialSql(scope, scope === "librarian" && options.includeArchived === true)).bind(id),
     db.prepare(detailLinksSql(scope)).bind(id),
     db.prepare(detailHoldingsSql(scope)).bind(id),
   ];
@@ -347,6 +350,7 @@ export async function getCatalogMaterialDetail(
       ? {
           notes: boundedText(rawMaterial.notes, 4_000),
           version: positiveInteger(rawMaterial.version),
+          ...(options.includeArchived ? { archived: rawMaterial.material_status !== "active" || Boolean(rawMaterial.archived_at) } : {}),
         }
       : {}),
     links,
@@ -404,12 +408,12 @@ export function encodeCatalogCursor(cursor: CatalogCursor): string {
   }));
 }
 
-function buildCatalogListStatement(query: CatalogListQuery, useFts: boolean): {
+function buildCatalogListStatement(query: CatalogListQuery, useFts: boolean, includeArchived = false): {
   sql: string;
   bindings: D1Value[];
   usesFts: boolean;
 } {
-  const predicates = ["m.status = 'active'", "m.archived_at IS NULL"];
+  const predicates = includeArchived ? ["1=1"] : ["m.status = 'active'", "m.archived_at IS NULL"];
   const bindings: D1Value[] = [];
   const exactId = normalizeCatalogId(query.q);
   const exactIsbn = normalizeCatalogIsbn(query.q);
@@ -431,8 +435,10 @@ function buildCatalogListStatement(query: CatalogListQuery, useFts: boolean): {
       bindings.push(fullTextQuery);
       didUseFts = true;
     } else {
-      predicates.push("m.search_text LIKE ? ESCAPE '!'");
-      bindings.push(`%${escapeLike(normalizedQuery)}%`);
+      for (const token of normalizedQuery.split(" ").filter(Boolean).slice(0, 16)) {
+        predicates.push("m.search_text LIKE ? ESCAPE '!'");
+        bindings.push(`%${escapeLike(token)}%`);
+      }
     }
   }
   const normalizedTitle = normalizeCatalogSearchText(query.title);
@@ -499,6 +505,7 @@ function buildCatalogListStatement(query: CatalogListQuery, useFts: boolean): {
       SELECT
         ${query.cursor ? "NULL" : "COUNT(*) OVER()"} AS total_count,
         m.id,
+        m.status AS material_status, m.archived_at,
         m.catalog_number,
         m.title,
         m.sort_title AS cursor_sort_title,
@@ -536,10 +543,11 @@ function buildCatalogListStatement(query: CatalogListQuery, useFts: boolean): {
   };
 }
 
-function detailMaterialSql(scope: "public" | "librarian"): string {
+function detailMaterialSql(scope: "public" | "librarian", includeArchived = false): string {
   return `
     SELECT
       m.id,
+      m.status AS material_status, m.archived_at,
       m.catalog_number,
       m.title,
       m.sort_title AS cursor_sort_title,
@@ -571,7 +579,7 @@ function detailMaterialSql(scope: "public" | "librarian"): string {
     LEFT JOIN material_stock_totals st ON st.material_id = m.id
     LEFT JOIN material_cover_assets c
       ON c.material_id = m.id AND c.status = 'ready'
-    WHERE m.id = ? AND m.status = 'active' AND m.archived_at IS NULL
+    WHERE m.id = ? ${includeArchived ? "" : "AND m.status = 'active' AND m.archived_at IS NULL"}
     LIMIT 1
   `;
 }

@@ -10,9 +10,14 @@ import { AssistantLimitError, readAssistantUsage, closeAssistantSessions, failAs
 import type { CatalogD1Database } from "@/lib/catalog-d1";
 import { runAssistantLibraryTool } from "@/lib/assistant-library";
 import { scheduleTelegramOutboxDrain } from "@/lib/telegram-delivery-runtime";
+import { acceptAssistantConsent, readAssistantConsent, requireAssistantConsent, revokeAssistantConsent } from "@/lib/assistant-consent";
+import { confirmAssistantAction, cancelAssistantAction, readAssistantActionReceipt, readAssistantActionPreview } from "@/lib/assistant-actions";
+import { LibraryMutationError } from "@/lib/library-mutation-store";
+import { CatalogQueryValidationError } from "@/lib/catalog-d1";
+import type { ChatGPTUser } from "@/app/chatgpt-auth";
 
 export const dynamic = "force-dynamic";
-type Principal = { actorKey: string; teacher?: VisitTeacherIdentity };
+type Principal = { actorKey: string; teacher?: VisitTeacherIdentity; librarian?: ChatGPTUser; writesEnabled?: boolean };
 
 async function authenticate(db: VisitD1Database, request: Request, role: AssistantRole): Promise<Principal | Response> {
   if (role === "teacher") {
@@ -21,7 +26,7 @@ async function authenticate(db: VisitD1Database, request: Request, role: Assista
     return { actorKey: `teacher:${teacher.teacherUserId}`, teacher };
   }
   const auth = await authorizeLibrarianApi();
-  return auth.ok ? { actorKey: `librarian:${auth.value.user.userId}` } : auth.response;
+  return auth.ok ? { actorKey: `librarian:${auth.value.user.userId}`, librarian: auth.value.user, writesEnabled: auth.value.access.writesEnabled } : auth.response;
 }
 
 function boundedId(value: unknown): string {
@@ -56,8 +61,28 @@ export async function POST(request: Request): Promise<Response> {
     const dailyLimit = assistantDailyLimit(role, getRuntimeString(role === "librarian" ? "ASSISTANT_LIBRARIAN_DAILY_SESSIONS" : "ASSISTANT_TEACHER_DAILY_SESSIONS"));
     const bookingEnabled = getRuntimeBoolean("ASSISTANT_WRITES_ENABLED") && visitBookingEnabled() && visitScheduleEnabled();
     if (operation === "status") return visitJson({ success: true, name: ASSISTANT_NAMES[role], enabled, bookingEnabled: role === "teacher" && bookingEnabled,
+      consent: await readAssistantConsent(db, principal.actorKey),
       usage: await readAssistantUsage(db, principal.actorKey, dailyLimit),
       message: enabled ? "Готовий до розмови" : "Помічник готується до запуску. Голосовий сервіс ще не підключено. Пошук і графік сайту працюють як раніше." });
+    if (operation === "accept_consent") return visitJson({ success: true,
+      consent: await acceptAssistantConsent(db, principal.actorKey, body.value.version, body.value.revision) });
+    if (operation === "revoke_consent") return visitJson({ success: true,
+      consent: await revokeAssistantConsent(db, principal.actorKey, key ?? undefined) });
+    if (operation === "action_status" || operation === "confirm_action" || operation === "cancel_action") {
+      if (!principal.librarian) return visitError(403, "assistant_tool_denied", "Дії Джарвіса доступні лише бібліотекарю.");
+      const draftId = boundedId(body.value.draftId);
+      const receipt = await readAssistantActionReceipt(db, principal.actorKey, draftId);
+      if (receipt) return visitJson({ success: true, actionResult: receipt, message: "Дію вже виконано. Повторних змін не створено." });
+      if (operation === "action_status") return visitJson({ success: true, actionPreview: await readAssistantActionPreview(db, principal.actorKey, draftId) });
+      if (operation === "cancel_action") {
+        const completed = await cancelAssistantAction(db, principal.actorKey, draftId);
+        if (completed) return visitJson({ success: true, actionResult: completed, message: "Дію вже виконано. Повторних змін не створено." });
+        return visitJson({ success: true, message: "Підготовлену дію скасовано. Облік не змінено." });
+      }
+      if (!enabled || !principal.writesEnabled || !getRuntimeBoolean("ASSISTANT_WRITES_ENABLED")) return visitError(403, "assistant_writes_disabled", "Зміни через Джарвіса зараз вимкнено.");
+      const result = await confirmAssistantAction(db, principal.actorKey, principal.librarian, draftId, body.value.confirmed);
+      return visitJson({ success: true, actionResult: result, message: "Дію виконано й збережено в базі бібліотеки." });
+    }
     if (operation === "confirm_visit") {
       if (!principal.teacher) return visitError(403, "assistant_tool_denied", "Потрібен вхід учителя.");
       const draftId = boundedId(body.value.draftId);
@@ -74,8 +99,8 @@ export async function POST(request: Request): Promise<Response> {
       return visitJson({ success: true, usage: await readAssistantUsage(db, principal.actorKey, dailyLimit) });
     }
     if (!enabled || !key) return visitError(503, "assistant_not_configured", "Голосовий сервіс ще не підключено. Скористайтеся пошуком і графіком сайту.");
+    await requireAssistantConsent(db, principal.actorKey);
     if (operation === "start") {
-      if (body.value.aiConsent !== true) return visitError(400, "ai_consent_required", "Потрібна згода на обробку запитів ШІ-сервісом.");
       const mode = body.value.mode;
       if (mode !== "voice" && mode !== "text") return visitError(400, "invalid_mode", "Оберіть голос або текст.");
       if (mode === "voice" && (typeof body.value.sdp !== "string" || body.value.sdp.length > 12_000 || !body.value.sdp.startsWith("v=0"))) return visitError(400, "invalid_sdp", "Не вдалося підготувати мікрофон.");
@@ -91,6 +116,8 @@ export async function POST(request: Request): Promise<Response> {
         audio: { input: { transcription: { model: "gpt-4o-mini-transcribe", language: "uk" }, turn_detection: { type: "semantic_vad", eagerness: "low", interrupt_response: true, create_response: true } }, output: { voice: ASSISTANT_VOICES[role] } },
       }));
       try {
+        await requireAssistantSession(db, session.id, principal.actorKey);
+        await requireAssistantConsent(db, principal.actorKey);
         const response = await providerFetch("realtime/calls", form, key, false);
         const sdp = await registerAssistantCall(db, session.id, principal.actorKey, response, key);
         return visitJson({ success: true, sessionId: session.id, expiresAt: session.expires_at, sdp, usage });
@@ -105,8 +132,9 @@ export async function POST(request: Request): Promise<Response> {
     const execute = async (name: string, args: unknown): Promise<AssistantToolResult> => {
       const current = await authenticate(db, request, role);
       if (current instanceof Response) throw new VisitScheduleError("authentication_required", 401, "Вхід завершився. Увійдіть ще раз.");
+      await requireAssistantConsent(db, current.actorKey);
       await requireAssistantSession(db, sessionId, current.actorKey, "tool_calls");
-      return runAssistantLibraryTool(db, { role, actorKey: current.actorKey, teacherUserId: current.teacher?.teacherUserId, sessionId, bookingEnabled, scheduleEnabled: visitScheduleEnabled() }, name, args);
+      return runAssistantLibraryTool(db, { role, actorKey: current.actorKey, teacherUserId: current.teacher?.teacherUserId, sessionId, bookingEnabled, scheduleEnabled: visitScheduleEnabled(), librarianWritesEnabled: Boolean(current.librarian && current.writesEnabled && getRuntimeBoolean("ASSISTANT_WRITES_ENABLED")) }, name, args);
     };
     if (operation === "tool") {
       if (typeof body.value.name !== "string") return visitError(400, "invalid_tool", "Невідома дія.");
@@ -123,6 +151,7 @@ export async function POST(request: Request): Promise<Response> {
         // Do not start further paid rounds after the user closes/expires the session.
         await requireAssistantSession(db, sessionId, principal.actorKey);
         const current = await authenticate(db, request, role); if (current instanceof Response) return current;
+        await requireAssistantConsent(db, current.actorKey);
         const response = await providerFetch("responses", JSON.stringify({ model: getRuntimeString("ASSISTANT_TEXT_MODEL") || "gpt-5.4-mini", store: false,
           instructions: assistantInstructions(role, `${now.date} ${now.time}`), input, tools: assistantTools(role).map((t) => ({ ...t, strict: false })),
           max_output_tokens: 1600, reasoning: { effort: "low" }, include: ["reasoning.encrypted_content"],
@@ -148,6 +177,8 @@ export async function POST(request: Request): Promise<Response> {
     }
     return visitError(400, "unknown_assistant_operation", "Невідома дія помічника.");
   } catch (error) {
+    if (error instanceof LibraryMutationError) return visitError(error.status, error.code, error.message);
+    if (error instanceof CatalogQueryValidationError) return visitError(400, "invalid_catalog_query", error.message);
     if (error instanceof AssistantLimitError) return visitError(error.status, error.code, error.message, { usage: error.usage });
     return error instanceof VisitScheduleError ? visitError(error.status, error.code, error.message)
       : visitError(503, "assistant_unavailable", "Помічник тимчасово недоступний. Звичайні розділи бібліотеки працюють.");

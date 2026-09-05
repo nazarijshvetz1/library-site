@@ -6,9 +6,69 @@ import test from "node:test";
 const validation = await import("../lib/visit-schedule-validation.ts");
 const portalValidation = await import("../lib/visit-portal-validation.ts");
 const store = await import("../lib/visit-schedule-store.ts");
-const assistant = await import("../lib/assistant-store.ts");
+const assistantStore = await import("../lib/assistant-store.ts");
+const assistantConsent = await import("../lib/assistant-consent.ts");
+// Existing session tests begin with an explicitly consenting fixture user.
+const assistant = { ...assistantStore, async createAssistantSession(db, actor, ...args) {
+  const consent = await assistantConsent.readAssistantConsent(db, actor);
+  if (!consent.accepted) await assistantConsent.acceptAssistantConsent(db, actor, consent.version, consent.revision);
+  return assistantStore.createAssistantSession(db, actor, ...args);
+} };
 const assistantLibrary = await import("../lib/assistant-library.ts");
 const assistantContract = await import("../lib/assistant-contract.ts");
+
+test("assistant consent is durable, owner-scoped, versioned and costs no session quota", async () => {
+  const { db, sqlite } = await visitDatabase();
+  const actor = "librarian:consent-test";
+  const initial = await assistantConsent.readAssistantConsent(db, actor);
+  assert.equal(initial.accepted, false);
+  await assert.rejects(assistantStore.createAssistantSession(db, actor, null), { code: "ai_consent_required" });
+  const saved = await assistantConsent.acceptAssistantConsent(db, actor, initial.version, initial.revision);
+  assert.deepEqual(await assistantConsent.readAssistantConsent(new TestD1(sqlite), actor), saved);
+  assert.equal((await assistantConsent.readAssistantConsent(db, "teacher:other")).accepted, false);
+  assert.equal((await assistantStore.readAssistantUsage(db, actor, null)).usedToday, 0);
+  sqlite.prepare("UPDATE assistant_consents SET version='old' WHERE actor_key=?").run(actor);
+  await assert.rejects(assistantConsent.requireAssistantConsent(db, actor), { code: "ai_consent_required" });
+  await assert.rejects(assistantStore.createAssistantSession(db, actor, null), { code: "ai_consent_required" });
+  await assert.rejects(assistantConsent.acceptAssistantConsent(db, actor, "old", saved.revision), { code: "ai_consent_changed" });
+});
+
+test("revocation closes only own sessions and a stale accept or delayed call cannot revive them", async () => {
+  const { db, sqlite } = await visitDatabase();
+  const actor = "librarian:consent-owner";
+  const own = await assistant.createAssistantSession(db, actor, null);
+  const other = await assistant.createAssistantSession(db, "teacher:consent-other", 12);
+  const before = await assistantConsent.readAssistantConsent(db, actor);
+  const revoked = await assistantConsent.revokeAssistantConsent(db, actor);
+  assert.equal(revoked.accepted, false);
+  await assert.rejects(assistantConsent.acceptAssistantConsent(db, actor, before.version, before.revision), { code: "ai_consent_changed" });
+  await assert.rejects(assistantStore.createAssistantSession(db, actor, null), { code: "ai_consent_required" });
+  await assert.rejects(assistant.requireAssistantSession(db, own.id, actor), { code: "assistant_session_ended" });
+  await assistant.requireAssistantSession(db, other.id, "teacher:consent-other");
+  const calls = [];
+  await assert.rejects(assistant.registerAssistantCall(db, own.id, actor,
+    new Response("v=0", { headers: { Location: "/v1/realtime/calls/rtc_revoked" } }), "test-key",
+    async (url) => { calls.push(url); return new Response(null, { status: 200 }); }));
+  assert.equal(calls.length, 1);
+  const accepted = await assistantConsent.acceptAssistantConsent(db, actor, revoked.version, revoked.revision);
+  assert.equal(accepted.accepted, true);
+  await assert.rejects(assistant.requireAssistantSession(db, own.id, actor), { code: "assistant_session_ended" });
+  await assistantStore.createAssistantSession(db, actor, null);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM assistant_sessions WHERE actor_key=?").get(actor).n, 2);
+});
+
+test("consent acceptance is explicit and cannot be smuggled on start or visit confirmation", async () => {
+  const route = await readFile(new URL("../app/api/assistant/route.ts", import.meta.url), "utf8");
+  const ui = await readFile(new URL("../app/_components/library-assistant.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(route, /body\.value\.aiConsent/);
+  assert.match(route, /operation === "accept_consent"/);
+  assert.match(route, /await requireAssistantConsent\(db, principal.actorKey\)/);
+  assert.match(ui, /consentToken === consentRequest.current/);
+  assert.doesNotMatch(ui, /aiConsent: true/);
+  assert.match(ui, /consentChange.current = change/);
+  assert.match(ui, /publicDisplayConsent: true/);
+  assert.match(ui, /Не диктуйте PIN або паролі/);
+});
 
 test("assistant original male voices and speaking styles stay isolated by role", async () => {
   assert.deepEqual(assistantContract.ASSISTANT_VOICES, { teacher: "ash", librarian: "cedar" });
@@ -26,7 +86,7 @@ test("assistant original male voices and speaking styles stay isolated by role",
   assert.equal(librarian.split("\nМанера Джарвіса:")[0], teacher.split("\nМанера Містера Букінгема:")[0]
     .replace("Містер Букінгем · ШІ-помічник", "Джарвіс")
     .replace("Роль користувача: teacher.", "Роль користувача: librarian."));
-  assert.deepEqual(assistantContract.assistantTools("librarian").map((t) => t.name), ["search_catalog", "material_details", "visit_schedule"]);
+  assert.deepEqual(assistantContract.assistantTools("librarian").map((t) => t.name), ["search_catalog", "material_details", "visit_schedule", "librarian_reference", "librarian_loans", "material_history", "library_action_schema", "prepare_library_action", "librarian_report"]);
   assert.deepEqual(assistantContract.assistantTools("teacher").map((t) => t.name), ["search_catalog", "material_details", "visit_schedule", "my_loans", "my_orders", "prepare_visit"]);
   const route = await readFile(new URL("../app/api/assistant/route.ts", import.meta.url), "utf8");
   assert.match(route, /output: \{ voice: ASSISTANT_VOICES\[role\] \}/);
@@ -102,6 +162,8 @@ async function visitDatabase() {
     "0037_keen_carlie_cooper.sql",
     "0038_legal_morph.sql",
     "0039_watery_black_crow.sql",
+    "0040_empty_piledriver.sql",
+    "0041_concerned_overlord.sql",
   ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
   const now = new Date().toISOString();
   sqlite.prepare(`INSERT INTO users

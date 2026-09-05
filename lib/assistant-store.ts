@@ -3,6 +3,7 @@ import { VisitScheduleError, createVisitBooking } from "./visit-schedule-store.t
 import type { VisitTeacherIdentity } from "./visit-teacher-auth.ts";
 import { isoWeekday, addDays, kyivLocalNow, validateVisitBookingCreateInput, type VisitBookingCreateInput } from "./visit-schedule-validation.ts";
 import type { AssistantUsage, AssistantVisitPreview } from "./assistant-contract.ts";
+import { ASSISTANT_CONSENT_VERSION } from "./assistant-contract.ts";
 
 export const ASSISTANT_SESSION_MINUTES = 10;
 export const ASSISTANT_CONCURRENT_SESSIONS = 2;
@@ -38,10 +39,14 @@ export async function createAssistantSession(db: VisitD1Database, actorKey: stri
     SELECT ?,?,?,?,? WHERE (? IS NULL OR (SELECT COUNT(*) FROM assistant_sessions WHERE actor_key=? AND created_day=? AND startup_failed_at IS NULL) < ?)
     AND (SELECT COUNT(*) FROM assistant_sessions WHERE actor_key=? AND closed_at IS NULL AND expires_at>?) < ?
     AND (SELECT COUNT(*) FROM assistant_sessions WHERE actor_key=? AND created_at>?) < ?
+    AND EXISTS(SELECT 1 FROM assistant_consents WHERE actor_key=? AND version=? AND accepted_at IS NOT NULL AND revoked_at IS NULL)
     RETURNING id,actor_key,expires_at,provider_call_id,closed_at`)
     .bind(id, actorKey, day, createdAt, expiresAt, dailyLimit, actorKey, day, dailyLimit, actorKey, createdAt, ASSISTANT_CONCURRENT_SESSIONS,
-      actorKey, new Date(now.getTime() - 60_000).toISOString(), ASSISTANT_STARTS_PER_MINUTE).first<AssistantSession>();
+      actorKey, new Date(now.getTime() - 60_000).toISOString(), ASSISTANT_STARTS_PER_MINUTE, actorKey, ASSISTANT_CONSENT_VERSION).first<AssistantSession>();
   if (!row) {
+    const consent = await db.prepare("SELECT 1 AS accepted FROM assistant_consents WHERE actor_key=? AND version=? AND accepted_at IS NOT NULL AND revoked_at IS NULL")
+      .bind(actorKey, ASSISTANT_CONSENT_VERSION).first();
+    if (!consent) throw new VisitScheduleError("ai_consent_required", 403, "Потрібна збережена згода на обробку голосу й тексту.");
     const usage = await readAssistantUsage(db, actorKey, dailyLimit, now);
     if (usage.remainingToday === 0) throw new AssistantLimitError("assistant_daily_limit",
       `Використано ${usage.usedToday} із ${dailyLimit} розмов на сьогодні. Нові будуть доступні ${usage.resetsOn} о 00:00 за Києвом. Вихід із сеансів не поновлює денний ліміт. Звичайні розділи бібліотеки працюють.`, usage);

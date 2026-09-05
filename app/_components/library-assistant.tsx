@@ -3,11 +3,11 @@
 /* eslint-disable @next/next/no-img-element -- Reuses existing catalog cover URLs. */
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Mic, MicOff, Send, Volume2, VolumeX, X, Sparkles, CalendarDays, Square } from "lucide-react";
-import { ASSISTANT_NAMES, type AssistantUsage, type AssistantRole, type AssistantCard, type AssistantToolResult, type AssistantVisitPreview } from "@/lib/assistant-contract";
+import { ASSISTANT_NAMES, type AssistantActionPreview, type AssistantConsent, type AssistantUsage, type AssistantRole, type AssistantCard, type AssistantToolResult, type AssistantVisitPreview } from "@/lib/assistant-contract";
 import styles from "./library-assistant.module.css";
 
 type Message = { role: "user" | "assistant"; content: string };
-type Reply = { success: boolean; error?: string; message?: string; code?: string; usage?: AssistantUsage; sessionId?: string; expiresAt?: string; sdp?: string; text?: string; results?: AssistantToolResult[]; enabled?: boolean; result?: { id: string; date: string; startTime: string; endTime: string } };
+type Reply = { success: boolean; error?: string; message?: string; code?: string; actionPreview?: AssistantActionPreview; actionResult?: unknown; consent?: AssistantConsent; usage?: AssistantUsage; sessionId?: string; expiresAt?: string; sdp?: string; text?: string; results?: AssistantToolResult[]; enabled?: boolean; result?: { id: string; date: string; startTime: string; endTime: string } };
 
 class AssistantApiError extends Error {
   code: string;
@@ -26,6 +26,9 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
   const [enabled, setEnabled] = useState(false);
   const [checking, setChecking] = useState(false);
   const [consent, setConsent] = useState(false);
+  const [consentInfo, setConsentInfo] = useState<AssistantConsent | null>(null);
+  const [savingConsent, setSavingConsent] = useState(false);
+  const [revokeFailed, setRevokeFailed] = useState(false);
   const [notice, setNotice] = useState("");
   const [usage, setUsage] = useState<AssistantUsage | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,6 +42,10 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
   const [cards, setCards] = useState<AssistantCard[]>([]);
   const [preview, setPreview] = useState<AssistantVisitPreview | null>(null);
   const [pending, setPending] = useState(false);
+  const [actionPreview, setActionPreview] = useState<AssistantActionPreview | null>(null);
+  const [actionPending, setActionPending] = useState(false);
+  const actionPendingRef = useRef(false);
+  const actionRequest = useRef<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const pc = useRef<RTCPeerConnection | null>(null);
@@ -49,6 +56,9 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
   const stopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generation = useRef(0);
   const usageRequest = useRef(0);
+  const consentRequest = useRef(0);
+  const consentChange = useRef<Promise<Reply> | null>(null);
+  const revokeIntent = useRef(false);
   const closing = useRef<Promise<void>>(Promise.resolve());
   const operationLock = useRef(false);
   const pendingRef = useRef(false);
@@ -57,14 +67,29 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
   const responseActive = useRef(false);
   const responseQueued = useRef(false);
   const storageKey = `library.assistant.visit.pending.v1:${identityKey}`;
+  const actionStorageKey = `library.assistant.action.pending.v1:${role}:${identityKey}`;
+
+  function clearStoredAction(id: string) {
+    try {
+      const stored = JSON.parse(window.sessionStorage.getItem(actionStorageKey) || "null") as { id?: string } | null;
+      if (stored?.id === id) window.sessionStorage.removeItem(actionStorageKey);
+    } catch { /* A storage failure cannot undo a committed library operation. */ }
+  }
 
   const api = useCallback(async (operation: string, data: Record<string, unknown> = {}, keepalive = false): Promise<Reply> => {
     const token = generation.current;
     const usageToken = ["status", "start", "close", "close_all"].includes(operation) ? ++usageRequest.current : 0;
+    const consentToken = ["status", "accept_consent", "revoke_consent"].includes(operation) ? ++consentRequest.current : 0;
     const response = await fetch("/api/assistant", { method: "POST", credentials: "same-origin", cache: "no-store", keepalive,
       headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role, operation, ...data }) });
     const reply = await response.json() as Reply;
     if (reply.usage && token === generation.current && usageToken === usageRequest.current) setUsage(reply.usage);
+    if (reply.consent && token === generation.current && consentToken === consentRequest.current) {
+      if (!reply.consent.accepted) { revokeIntent.current = false; setRevokeFailed(false); }
+      setConsentInfo(reply.consent); setConsent(reply.consent.accepted && !revokeIntent.current);
+      if (revokeIntent.current) setRevokeFailed(true);
+    }
+    if (reply.code === "ai_consent_required" && token === generation.current) { setConsent(false); setConsentInfo(null); }
     if (!response.ok || !reply.success) throw new AssistantApiError(reply.error || reply.message || "Не вдалося виконати запит.", reply.code);
     return reply;
   }, [role]);
@@ -87,11 +112,13 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
     const previous = session.current; session.current = null;
     if (previous) closing.current = api("close", { sessionId: previous.id }, true).then(() => {}, () => {});
     operationLock.current = false;
+    actionRequest.current = null;
     setBusy(false); setVoice(false); setMuted(false); setPartial("");
     setPhase("Мікрофон вимкнено");
   }, [api]);
 
   useEffect(() => () => { stop(); }, [stop]);
+  useEffect(() => { if (!consent && session.current) stop(); }, [consent, stop]);
   useEffect(() => {
     const onHidden = () => { if (document.hidden) stop(); };
     const onExit = () => stop();
@@ -117,18 +144,62 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
   }, [open]);
 
   function openAssistant() {
-    setOpen(true); setChecking(true); setEnabled(false); setUsage(null);
+    setOpen(true); setChecking(true); setEnabled(false); setUsage(null); setConsent(false); setConsentInfo(null);
     const token = generation.current;
-    void api("status").then((reply) => { if (generation.current === token) { setEnabled(Boolean(reply.enabled)); setNotice(reply.enabled ? "" : reply.message ?? ""); } })
+    void Promise.resolve(consentChange.current).catch(() => {}).then(() => api("status")).then((reply) => { if (generation.current === token) { setEnabled(Boolean(reply.enabled)); setNotice(reply.enabled ? "" : reply.message ?? ""); } })
       .catch((error: unknown) => { if (generation.current === token) setNotice(error instanceof Error ? error.message : "Не вдалося перевірити доступ."); })
       .finally(() => { if (generation.current === token) setChecking(false); });
     try {
       const stored = JSON.parse(window.sessionStorage.getItem(storageKey) || "null") as AssistantVisitPreview | null;
       if (stored && /^[0-9a-f-]{36}$/iu.test(stored.id)) { setPreview(stored); setPending(true); pendingRef.current = true; }
     } catch { /* No persisted pending confirmation. */ }
+    if (role === "librarian") try {
+      const stored = JSON.parse(window.sessionStorage.getItem(actionStorageKey) || "null") as { id?: string } | null;
+      if (stored?.id && /^[0-9a-f-]{36}$/iu.test(stored.id)) {
+        const id = stored.id;
+        setActionPreview(null); setActionPending(true); actionPendingRef.current = true;
+        // Storage holds only a recovery ID; the review text always comes from D1.
+        void api("action_status", { draftId: id }).then((reply) => {
+          if (reply.actionResult) clearStoredAction(id);
+          if (token !== generation.current) return;
+          if (reply.actionResult) { setActionPending(false); actionPendingRef.current = false; setNotice(reply.message ?? "Дію вже виконано."); }
+          else if (reply.actionPreview) setActionPreview(reply.actionPreview);
+        }).catch((error: unknown) => {
+          if (token !== generation.current) return;
+          if (error instanceof AssistantApiError && error.code === "assistant_action_not_found") { clearStoredAction(id); setActionPending(false); actionPendingRef.current = false; }
+          setNotice("Не вдалося відновити картку дії. Закрийте й відкрийте помічника, щоб перевірити результат.");
+        });
+      }
+    } catch { /* Pending action receipt is optional. */ }
   }
 
   function close() { stop(); setOpen(false); requestAnimationFrame(() => trigger.current?.focus()); }
+
+  async function changeConsent(accept: boolean) {
+    if (consentChange.current || (accept && (!consentInfo || checking || revokeIntent.current))) return;
+    if (!accept) { revokeIntent.current = true; stop(); setConsent(false); }
+    setSavingConsent(true); setNotice("");
+    const token = generation.current;
+    // Dispatch immediately: closing the panel must not cancel an explicit revocation.
+    const change = api(accept ? "accept_consent" : "revoke_consent", accept ? { version: consentInfo!.version, revision: consentInfo!.revision } : {}, true);
+    consentChange.current = change;
+    try {
+      await change;
+      if (!accept) { revokeIntent.current = false; setRevokeFailed(false); }
+      if (token === generation.current) {
+        setRevokeFailed(false);
+        if (!accept && !pendingRef.current) setPreview(null);
+        if (!accept && !actionPendingRef.current) setActionPreview(null);
+        setNotice(accept ? "Згоду збережено у вашому обліковому записі. Можна починати розмову." : "Згоду відкликано. Нові запити заблоковано, мікрофон тут вимкнено. Завершення інших голосових з’єднань може зайняти час; вже надіслані дані це не відкликає.");
+      }
+    } catch (error) {
+      if (!accept) { revokeIntent.current = true; setRevokeFailed(true); setConsent(false); }
+      if (token === generation.current) {
+        setConsent(false); setConsentInfo(null); setRevokeFailed(!accept);
+        setNotice(`${error instanceof Error ? error.message : "Не вдалося зберегти згоду."} ${accept ? "Натисніть «Перевірити доступ» і повторіть." : "Мікрофон вимкнено. Повторіть відкликання, щоб зберегти його для всіх пристроїв."}`);
+      }
+    } finally { consentChange.current = null; setSavingConsent(false); }
+  }
 
   async function finishOwnSessions() {
     if (operationLock.current) return;
@@ -153,7 +224,7 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
   }
 
   async function refreshUsage() {
-    if (operationLock.current) return;
+    if (operationLock.current || consentChange.current) return;
     operationLock.current = true; setBusy(true);
     const token = generation.current;
     try {
@@ -181,6 +252,7 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
     if (results.some((result) => result.cards)) setCards(nextCards.slice(0, 60));
     for (const result of results) {
       if (result.preview && !pendingRef.current) setPreview(result.preview);
+      if (result.actionPreview && !actionPendingRef.current && !actionRequest.current) setActionPreview(result.actionPreview);
       if (!result.success && result.message) setNotice(result.message);
     }
   }
@@ -190,7 +262,7 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
   }
 
   async function startVoice() {
-    if (!consent || !enabled || operationLock.current) return;
+    if (!consent || !enabled || operationLock.current || consentChange.current || revokeFailed) return;
     stop();
     operationLock.current = true; setBusy(true); setNotice("");
     const token = generation.current;
@@ -250,7 +322,7 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
       const offer = await peer.createOffer(); await peer.setLocalDescription(offer);
       await closing.current;
       if (token !== generation.current) return;
-      const reply = await api("start", { mode: "voice", aiConsent: true, sdp: offer.sdp });
+      const reply = await api("start", { mode: "voice", sdp: offer.sdp });
       if (token !== generation.current) { if (reply.sessionId) void api("close", { sessionId: reply.sessionId }).catch(() => {}); return; }
       if (!reply.sessionId || !reply.sdp) throw new Error("Не вдалося підключити голос.");
       session.current = { id: reply.sessionId, mode: "voice" }; armExpiry(reply.expiresAt);
@@ -263,7 +335,7 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
   async function sendMessage(event: FormEvent) {
     event.preventDefault();
     const message = input.trim();
-    if (!message || !consent || !enabled || operationLock.current) return;
+    if (!message || !consent || !enabled || operationLock.current || consentChange.current || revokeFailed) return;
     if (session.current?.mode === "voice" && channel.current?.readyState === "open") {
       channel.current.send(JSON.stringify({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text: message }] } }));
       requestVoiceResponse();
@@ -277,7 +349,7 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
       if (!session.current) {
         await closing.current;
         if (token !== generation.current) return;
-        const started = await api("start", { mode: "text", aiConsent: true });
+        const started = await api("start", { mode: "text" });
         if (token !== generation.current) { if (started.sessionId) void api("close", { sessionId: started.sessionId }).catch(() => {}); return; }
         if (!started.sessionId) throw new Error("Не вдалося почати розмову.");
         session.current = { id: started.sessionId, mode: "text" }; armExpiry(started.expiresAt);
@@ -315,6 +387,33 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
     finally { operationLock.current = false; setBusy(false); }
   }
 
+  async function finishAction(confirm: boolean) {
+    if (!actionPreview || operationLock.current || consentChange.current) return;
+    const draft = actionPreview;
+    const token = generation.current;
+    if (confirm) {
+      try { window.sessionStorage.setItem(actionStorageKey, JSON.stringify({ id: draft.id })); }
+      catch { setNotice("Не вдалося зберегти запит для безпечного повтору. Скористайтеся карткою матеріалу."); return; }
+      setActionPending(true); actionPendingRef.current = true;
+    }
+    actionRequest.current = draft.id; operationLock.current = true; setBusy(true);
+    try {
+      const reply = await api(confirm ? "confirm_action" : "cancel_action", { draftId: draft.id, ...(confirm ? { confirmed: true } : {}) });
+      clearStoredAction(draft.id);
+      if (reply.actionResult) window.dispatchEvent(new CustomEvent("library:assistant-action-completed"));
+      if (token !== generation.current) return;
+      setActionPreview(null); setActionPending(false); actionPendingRef.current = false;
+      append({ role: "assistant", content: `${draft.title}: ${reply.message}` }); setNotice(reply.message ?? "");
+      if (channel.current?.readyState === "open") channel.current.send(JSON.stringify({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text: `Серверний результат кнопки для «${draft.title}»: ${reply.message}. Для нової наявності перевір базу знову.` }] } }));
+    } catch (error) {
+      const terminal = error instanceof AssistantApiError && ["assistant_action_not_found", "assistant_action_expired", "assistant_session_ended", "ai_consent_required", "material_version_conflict", "stock_quantity_conflict", "stock_changed", "class_loan_version_conflict", "reserved_stock_conflict", "material_reserved_conflict"].includes(error.code);
+      if (terminal) clearStoredAction(draft.id);
+      if (token !== generation.current) return;
+      if (terminal) { setActionPreview(null); setActionPending(false); actionPendingRef.current = false; }
+      setNotice(`${error instanceof Error ? error.message : "Не вдалося підтвердити результат."} ${terminal ? "Підготуйте нову картку дії." : "Повторіть перевірку — запит не створить дубль."}`);
+    } finally { if (token === generation.current) { actionRequest.current = null; operationLock.current = false; setBusy(false); } }
+  }
+
   return <>
     <button ref={trigger} type="button" className={styles.launcher} aria-haspopup="dialog" onClick={openAssistant}><Sparkles size={20} /><span>{role === "teacher" ? "ШІ-помічник" : "Джарвіс"}</span></button>
     {open ? <dialog ref={dialog} className={styles.dialog} aria-labelledby={`assistant-title-${role}`} onCancel={(e) => { e.preventDefault(); close(); }}>
@@ -322,7 +421,9 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
         <header className={styles.header}><div><small>ЄДИНА БІБЛІОТЕКА · ШІ</small><h2 id={`assistant-title-${role}`}>{ASSISTANT_NAMES[role]}</h2></div><button type="button" onClick={close} aria-label="Закрити помічника"><X size={22} /></button></header>
         <div className={styles.body}>
           {!messages.length ? <p>Запитайте звичайними словами про книгу, наявність{role === "teacher" ? " або вільний час для відвідування" : " чи місце зберігання"}.</p> : null}
-          {!consent ? <label className={styles.consent}><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} /><span>Погоджуюся на передачу мого голосу, тексту та потрібних даних бібліотеки до OpenAI для відповіді ШІ. Сайт не зберігає аудіозаписи. Не диктуйте PIN або паролі.</span></label> : null}
+          {!checking && !consent ? <div><label className={styles.consent}><input type="checkbox" checked={false} disabled={savingConsent || !consentInfo || revokeFailed} onChange={(e) => { if (e.target.checked) void changeConsent(true); }} /><span>Погоджуюся на передачу мого голосу, тексту та потрібних даних бібліотеки до OpenAI для відповіді ШІ. Сайт не зберігає аудіозаписи. Не диктуйте PIN або паролі. Згода зберігається у моєму обліковому записі до відкликання або зміни умов.</span></label>{revokeFailed ? <button type="button" disabled={savingConsent} onClick={() => void changeConsent(false)}>Повторити відкликання згоди</button> : null}</div> : null}
+          {savingConsent ? <p role="status">Зберігаю згоду…</p> : null}
+          {consent && !checking ? <details className={styles.consentSettings}><summary>Згоду збережено · налаштування</summary><p>Діє для вашого облікового запису на інших пристроях. Мікрофон вмикається лише після «Поговорити»; дозвіл браузера на нього надається окремо.</p><button type="button" className={styles.secondary} disabled={savingConsent} onClick={() => void changeConsent(false)}>Відкликати згоду й зупинити розмови</button></details> : null}
           {checking ? <p role="status">Перевіряю доступ…</p> : null}
           {notice ? <p className={styles.notice} role="status">{notice}</p> : null}
           {usage ? <section className={styles.usage} aria-label="Доступ до розмов">
@@ -333,8 +434,9 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
           </section> : null}
           {!enabled && !checking ? <a className={styles.fallback} href={fallbackHref}>{role === "teacher" ? <><CalendarDays size={18} /> Відкрити графік і записатися</> : "Відкрити пошук у фонді"}</a> : null}
           <div className={styles.messages} aria-label="Розмова">{messages.map((m, i) => <p key={i} className={m.role === "user" ? styles.user : styles.answer}><small>{m.role === "user" ? "Ви" : ASSISTANT_NAMES[role]}</small>{m.content}</p>)}{partial ? <p className={styles.answer}>{partial}</p> : null}</div>
+          {role === "librarian" && actionPreview ? <section className={styles.preview} aria-label="Підтвердження дії бібліотекаря"><h3>{actionPreview.title}</h3><p>{actionPending ? "Перевіряємо результат попереднього підтвердження." : "Дані ще не змінено. Перевірте всі поля."}</p><ul>{actionPreview.lines.map((line, i) => <li key={i}>{line}</li>)}</ul><button type="button" disabled={busy || savingConsent || (!actionPending && !consent)} onClick={() => void finishAction(true)}>{busy ? "Перевіряю…" : actionPending ? "Перевірити результат" : "Підтвердити дію"}</button>{!actionPending ? <button type="button" className={styles.secondary} disabled={busy} onClick={() => void finishAction(false)}>Скасувати</button> : <small>Повторна перевірка не дублює видачу або зміну залишків.</small>}</section> : null}
           {preview ? <section className={styles.preview} aria-labelledby="assistant-visit-preview"><h3 id="assistant-visit-preview">{pending ? "Перевірка запису" : "Підтвердьте відвідування"}</h3><strong>{preview.date} · {preview.startTime}–{preview.endTime}</strong><p>{preview.classLabel}{preview.purpose ? ` · ${preview.purpose}` : ""}</p><p>Після підтвердження ваші ПІБ, дата й точний час будуть видимі у відкритому графіку. Клас і мета візиту залишаться приватними.</p><button type="button" disabled={busy} onClick={() => void confirmVisit()}>{busy ? "Перевіряю…" : pending ? "Перевірити запис" : "Погоджуюся й записатися"}</button>{!pending ? <button type="button" className={styles.secondary} onClick={() => setPreview(null)}>Не записувати</button> : <small>Повторна перевірка не створить другого запису.</small>}</section> : null}
-          {cards.length ? <div className={styles.cards} aria-label="Перевірені результати">{cards.map((card) => <article key={`${card.kind}-${card.id}`} className={styles.card}>{card.image ? <img src={card.image} alt="" width={52} height={76} loading="lazy" /> : null}<div><h3>{card.title}</h3><p>{card.description}</p>{card.details.map((detail, i) => <small key={i}>{detail}</small>)}{card.kind === "material" ? <button type="button" className={styles.secondary} disabled={busy || !enabled || !consent} onClick={() => setInput(`Покажи деталі матеріалу ${card.id}`)}>Детальніше</button> : null}</div></article>)}</div> : null}
+          {cards.length ? <div className={styles.cards} aria-label="Перевірені результати">{cards.map((card) => <article key={`${card.kind}-${card.id}`} className={styles.card}>{card.image ? <img src={card.image} alt="" width={52} height={76} loading="lazy" /> : null}<div><h3>{card.title}</h3><p>{card.description}</p>{card.details.map((detail, i) => <small key={i}>{detail}</small>)}{role === "librarian" && card.href?.startsWith("/api/librarian/reports/") ? <a className={styles.reportLink} href={card.href}>Завантажити повний звіт</a> : null}{card.kind === "material" ? <button type="button" className={styles.secondary} disabled={busy || !enabled || !consent} onClick={() => setInput(`Покажи деталі матеріалу ${card.id}`)}>Детальніше</button> : null}</div></article>)}</div> : null}
         </div>
         <footer className={styles.footer}>
           <div className={styles.voiceBar}><span role="status" aria-live="polite"><i data-active={voice && !muted} />{muted ? "Мікрофон вимкнено" : phase}</span><div>{voice ? <><button type="button" aria-label={muted ? "Увімкнути мікрофон" : "Вимкнути мікрофон"} onClick={() => { stream.current?.getAudioTracks().forEach((track) => { track.enabled = muted; }); setMuted(!muted); }}>{muted ? <MicOff size={20} /> : <Mic size={20} />}</button><button type="button" aria-label="Завершити голосову розмову" onClick={stop}><Square size={18} /></button></> : <button type="button" disabled={!enabled || !consent || busy} onClick={() => void startVoice()}><Mic size={18} /> Поговорити</button>}<button type="button" aria-label={quiet ? "Увімкнути звук" : "Вимкнути звук"} onClick={() => { if (audio.current) { audio.current.muted = !quiet; if (quiet) void audio.current.play().catch(() => {}); } setQuiet(!quiet); }}>{quiet ? <VolumeX size={20} /> : <Volume2 size={20} />}</button></div></div>

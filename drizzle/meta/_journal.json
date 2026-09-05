@@ -281,6 +281,20 @@
       "when": 1788599520168,
       "tag": "0039_watery_black_crow",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1788600901479,
+      "tag": "0040_empty_piledriver",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1788601321126,
+      "tag": "0041_concerned_overlord",
+      "breakpoints": true
     }
   ]
 }

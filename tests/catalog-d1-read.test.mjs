@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import { searchAssistantCatalog } from "../lib/assistant-search.ts";
 
 import {
   CatalogQueryValidationError,
@@ -50,6 +51,42 @@ class MockD1Database {
     return Promise.all(statements.map((statement) => statement.all()));
   }
 }
+
+test("assistant searches live rows despite empty FTS, inflected author and subject case", async () => {
+  const { db, sqlite } = fixture();
+  sqlite.exec("INSERT INTO materials_fts(materials_fts) VALUES('delete-all')");
+  for (const args of [{ query: "Петренко" }, { query: "книги Петренко" }, { query: "Петренка" }, { query: "математика", subject: "математика", grade: 1 }]) {
+    const result = await searchAssistantCatalog(db, args, false);
+    assert.deepEqual(result.items.map((i) => i.id), ["CAT-0001"]);
+    if (args.query === "Петренка") assert.equal(result.approximate, true);
+  }
+  assert.equal((await searchAssistantCatalog(db, { query: "Петренка", grade: 11 }, false)).items.length, 0);
+  sqlite.close();
+});
+
+test("assistant archive details remain librarian-only and approximate pagination preserves its warning", async () => {
+  const { db, sqlite } = fixture();
+  const archived = await searchAssistantCatalog(db, { query: "CAT-0003", includeArchived: true }, true);
+  assert.equal(archived.items[0].archived, true);
+  assert.equal((await getCatalogMaterialDetail(db, "CAT-0003", "librarian", { includeArchived: true })).archived, true);
+  assert.equal(await getCatalogMaterialDetail(db, "CAT-0003", "librarian"), null, "write paths must still reject archived materials");
+  assert.equal(await getCatalogMaterialDetail(db, "CAT-0003", "public", { includeArchived: true }), null);
+  assert.equal((await searchAssistantCatalog(db, { query: "CAT-0003", includeArchived: true }, false)).items.length, 0);
+  const sample = sqlite.prepare("SELECT * FROM materials WHERE id='CAT-0001'").get();
+  const keys = Object.keys(sample);
+  const insert = sqlite.prepare(`INSERT INTO materials (${keys.join(",")}) VALUES (${keys.map(() => "?").join(",")})`);
+  for (let i = 100; i < 115; i++) {
+    const row = { ...sample, id: `CAT-${i.toString().padStart(4, "0")}`, catalog_number: i, sort_title: `математика ${i}` };
+    insert.run(...keys.map((key) => row[key]));
+  }
+  const page1 = await searchAssistantCatalog(db, { query: "Петренка" }, true);
+  assert.equal(page1.items.length, 12); assert.equal(page1.approximate, true);
+  const page2 = await searchAssistantCatalog(db, page1.effectiveQuery, true);
+  assert.equal(page2.items.length, 4); assert.equal(page2.approximate, true);
+  assert.match(page2.message, /можливі збіги/u);
+  assert.equal(new Set([...page1.items, ...page2.items].map((i) => i.id)).size, 16);
+  sqlite.close();
+});
 
 function fixture() {
   const sqlite = new DatabaseSync(":memory:");
