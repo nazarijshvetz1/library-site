@@ -1,5 +1,22 @@
 export type AssistantRole = "teacher" | "librarian";
 
+export type AssistantUsage = {
+  dailyLimit: number | null;
+  usedToday: number;
+  remainingToday: number | null;
+  activeSessions: number;
+  maxActiveSessions: number;
+  resetsOn: string;
+};
+
+// Called only with the authenticated server role and server configuration.
+export function assistantDailyLimit(role: AssistantRole, configured?: string | null): number | null {
+  const value = configured?.trim();
+  if (role === "librarian" && (!value || value === "unlimited")) return null;
+  const number = Number(value);
+  return value && Number.isInteger(number) && number >= 1 && number <= 30 ? number : 12;
+}
+
 export const ASSISTANT_NAMES: Record<AssistantRole, string> = {
   teacher: "Містер Букінгем · ШІ-помічник",
   librarian: "Джарвіс",

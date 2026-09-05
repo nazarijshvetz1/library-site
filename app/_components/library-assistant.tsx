@@ -3,11 +3,11 @@
 /* eslint-disable @next/next/no-img-element -- Reuses existing catalog cover URLs. */
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Mic, MicOff, Send, Volume2, VolumeX, X, Sparkles, CalendarDays, Square } from "lucide-react";
-import { ASSISTANT_NAMES, type AssistantRole, type AssistantCard, type AssistantToolResult, type AssistantVisitPreview } from "@/lib/assistant-contract";
+import { ASSISTANT_NAMES, type AssistantUsage, type AssistantRole, type AssistantCard, type AssistantToolResult, type AssistantVisitPreview } from "@/lib/assistant-contract";
 import styles from "./library-assistant.module.css";
 
 type Message = { role: "user" | "assistant"; content: string };
-type Reply = { success: boolean; error?: string; message?: string; code?: string; sessionId?: string; expiresAt?: string; sdp?: string; text?: string; results?: AssistantToolResult[]; enabled?: boolean; result?: { id: string; date: string; startTime: string; endTime: string } };
+type Reply = { success: boolean; error?: string; message?: string; code?: string; usage?: AssistantUsage; sessionId?: string; expiresAt?: string; sdp?: string; text?: string; results?: AssistantToolResult[]; enabled?: boolean; result?: { id: string; date: string; startTime: string; endTime: string } };
 
 class AssistantApiError extends Error {
   code: string;
@@ -27,6 +27,7 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
   const [checking, setChecking] = useState(false);
   const [consent, setConsent] = useState(false);
   const [notice, setNotice] = useState("");
+  const [usage, setUsage] = useState<AssistantUsage | null>(null);
   const [busy, setBusy] = useState(false);
   const [voice, setVoice] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -47,6 +48,8 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
   const session = useRef<{ id: string; mode: "voice" | "text" } | null>(null);
   const stopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generation = useRef(0);
+  const usageRequest = useRef(0);
+  const closing = useRef<Promise<void>>(Promise.resolve());
   const operationLock = useRef(false);
   const pendingRef = useRef(false);
   const messagesRef = useRef<Message[]>([]);
@@ -56,9 +59,12 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
   const storageKey = `library.assistant.visit.pending.v1:${identityKey}`;
 
   const api = useCallback(async (operation: string, data: Record<string, unknown> = {}, keepalive = false): Promise<Reply> => {
+    const token = generation.current;
+    const usageToken = ["status", "start", "close", "close_all"].includes(operation) ? ++usageRequest.current : 0;
     const response = await fetch("/api/assistant", { method: "POST", credentials: "same-origin", cache: "no-store", keepalive,
       headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role, operation, ...data }) });
     const reply = await response.json() as Reply;
+    if (reply.usage && token === generation.current && usageToken === usageRequest.current) setUsage(reply.usage);
     if (!response.ok || !reply.success) throw new AssistantApiError(reply.error || reply.message || "Не вдалося виконати запит.", reply.code);
     return reply;
   }, [role]);
@@ -79,7 +85,7 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
     responseActive.current = false; responseQueued.current = false;
     if (audio.current) { audio.current.pause(); audio.current.srcObject = null; }
     const previous = session.current; session.current = null;
-    if (previous) void api("close", { sessionId: previous.id }, true).catch(() => {});
+    if (previous) closing.current = api("close", { sessionId: previous.id }, true).then(() => {}, () => {});
     operationLock.current = false;
     setBusy(false); setVoice(false); setMuted(false); setPartial("");
     setPhase("Мікрофон вимкнено");
@@ -111,7 +117,7 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
   }, [open]);
 
   function openAssistant() {
-    setOpen(true); setChecking(true); setEnabled(false);
+    setOpen(true); setChecking(true); setEnabled(false); setUsage(null);
     const token = generation.current;
     void api("status").then((reply) => { if (generation.current === token) { setEnabled(Boolean(reply.enabled)); setNotice(reply.enabled ? "" : reply.message ?? ""); } })
       .catch((error: unknown) => { if (generation.current === token) setNotice(error instanceof Error ? error.message : "Не вдалося перевірити доступ."); })
@@ -123,6 +129,47 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
   }
 
   function close() { stop(); setOpen(false); requestAnimationFrame(() => trigger.current?.focus()); }
+
+  async function finishOwnSessions() {
+    if (operationLock.current) return;
+    stop(); operationLock.current = true; setBusy(true);
+    const token = generation.current;
+    try {
+      await closing.current;
+      if (token !== generation.current) return;
+      const closeAll = api("close_all");
+      closing.current = closeAll.then(() => {}, () => {});
+      const reply = await closeAll;
+      if (token === generation.current) {
+        // A pending confirmation may already have committed: keep its recovery receipt.
+        if (!pendingRef.current) setPreview(null);
+        setNotice(reply.usage?.remainingToday === 0
+          ? "Ваші активні розмови завершено. Денний ліміт уже використано; він поновиться опівночі за Києвом."
+          : "Ваші активні розмови завершено. Можна почати нову розмову.");
+      }
+    } catch (error) {
+      if (token === generation.current) setNotice(error instanceof Error ? error.message : "Не вдалося завершити розмови. Спробуйте ще раз.");
+    } finally { if (token === generation.current) { operationLock.current = false; setBusy(false); } }
+  }
+
+  async function refreshUsage() {
+    if (operationLock.current) return;
+    operationLock.current = true; setBusy(true);
+    const token = generation.current;
+    try {
+      const reply = await api("status");
+      if (token === generation.current) {
+        setEnabled(Boolean(reply.enabled));
+        setNotice(!reply.enabled ? reply.message ?? "" : reply.usage?.remainingToday === 0
+          ? "Денний ліміт використано. Нові розмови будуть доступні опівночі за Києвом; поточну можна продовжити."
+          : reply.usage && reply.usage.activeSessions >= reply.usage.maxActiveSessions
+            ? "У вас дві активні розмови. Для нової завершіть їх кнопкою нижче."
+            : "Доступ перевірено. Можна повторити запит.");
+      }
+    } catch (error) {
+      if (token === generation.current) setNotice(error instanceof Error ? error.message : "Не вдалося перевірити доступ.");
+    } finally { if (token === generation.current) { operationLock.current = false; setBusy(false); } }
+  }
   function requestVoiceResponse() {
     responseQueued.current = true;
     if (responseActive.current || channel.current?.readyState !== "open") return;
@@ -201,6 +248,8 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
         }
       };
       const offer = await peer.createOffer(); await peer.setLocalDescription(offer);
+      await closing.current;
+      if (token !== generation.current) return;
       const reply = await api("start", { mode: "voice", aiConsent: true, sdp: offer.sdp });
       if (token !== generation.current) { if (reply.sessionId) void api("close", { sessionId: reply.sessionId }).catch(() => {}); return; }
       if (!reply.sessionId || !reply.sdp) throw new Error("Не вдалося підключити голос.");
@@ -226,6 +275,8 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
     append({ role: "user", content: message }); setInput("");
     try {
       if (!session.current) {
+        await closing.current;
+        if (token !== generation.current) return;
         const started = await api("start", { mode: "text", aiConsent: true });
         if (token !== generation.current) { if (started.sessionId) void api("close", { sessionId: started.sessionId }).catch(() => {}); return; }
         if (!started.sessionId) throw new Error("Не вдалося почати розмову.");
@@ -234,7 +285,10 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
       const reply = await api("message", { sessionId: session.current.id, message, history });
       if (token !== generation.current) return;
       applyResults(reply.results ?? []); append({ role: "assistant", content: reply.text ?? "Перегляньте результати нижче." }); setPhase("Готовий допомогти");
-    } catch (error) { if (token === generation.current) { setNotice(error instanceof Error ? error.message : "Не вдалося перевірити дані."); setInput(message); } }
+    } catch (error) { if (token === generation.current) {
+      if (error instanceof AssistantApiError && error.code === "assistant_session_ended") stop();
+      setNotice(error instanceof Error ? error.message : "Не вдалося перевірити дані."); setInput(message);
+    } }
     finally { if (token === generation.current) { operationLock.current = false; setBusy(false); } }
   }
 
@@ -271,6 +325,12 @@ function AssistantPanel({ assistantRole: role, identityKey, fallbackHref }: Assi
           {!consent ? <label className={styles.consent}><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} /><span>Погоджуюся на передачу мого голосу, тексту та потрібних даних бібліотеки до OpenAI для відповіді ШІ. Сайт не зберігає аудіозаписи. Не диктуйте PIN або паролі.</span></label> : null}
           {checking ? <p role="status">Перевіряю доступ…</p> : null}
           {notice ? <p className={styles.notice} role="status">{notice}</p> : null}
+          {usage ? <section className={styles.usage} aria-label="Доступ до розмов">
+            <span>{usage.dailyLimit === null ? "Без денного ліміту розмов" : `Сьогодні: ${usage.usedToday} із ${usage.dailyLimit} · залишилося ${usage.remainingToday}`}</span>
+            {usage.dailyLimit !== null ? <small>Ліміт поновлюється {usage.resetsOn} о 00:00 за Києвом. Закриття розмови не обнуляє лічильник.</small> : null}
+            {usage.activeSessions > 0 ? <><small>Активних розмов: {usage.activeSessions} із {usage.maxActiveSessions}.</small><button type="button" className={styles.secondary} disabled={busy} onClick={() => void finishOwnSessions()}>Завершити мої активні розмови</button></> : null}
+            <button type="button" className={styles.secondary} disabled={busy} onClick={() => void refreshUsage()}>Перевірити доступ</button>
+          </section> : null}
           {!enabled && !checking ? <a className={styles.fallback} href={fallbackHref}>{role === "teacher" ? <><CalendarDays size={18} /> Відкрити графік і записатися</> : "Відкрити пошук у фонді"}</a> : null}
           <div className={styles.messages} aria-label="Розмова">{messages.map((m, i) => <p key={i} className={m.role === "user" ? styles.user : styles.answer}><small>{m.role === "user" ? "Ви" : ASSISTANT_NAMES[role]}</small>{m.content}</p>)}{partial ? <p className={styles.answer}>{partial}</p> : null}</div>
           {preview ? <section className={styles.preview} aria-labelledby="assistant-visit-preview"><h3 id="assistant-visit-preview">{pending ? "Перевірка запису" : "Підтвердьте відвідування"}</h3><strong>{preview.date} · {preview.startTime}–{preview.endTime}</strong><p>{preview.classLabel}{preview.purpose ? ` · ${preview.purpose}` : ""}</p><p>Після підтвердження ваші ПІБ, дата й точний час будуть видимі у відкритому графіку. Клас і мета візиту залишаться приватними.</p><button type="button" disabled={busy} onClick={() => void confirmVisit()}>{busy ? "Перевіряю…" : pending ? "Перевірити запис" : "Погоджуюся й записатися"}</button>{!pending ? <button type="button" className={styles.secondary} onClick={() => setPreview(null)}>Не записувати</button> : <small>Повторна перевірка не створить другого запису.</small>}</section> : null}

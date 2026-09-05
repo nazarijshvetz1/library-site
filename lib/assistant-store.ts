@@ -2,24 +2,75 @@ import type { VisitD1Database, VisitHours, VisitBooking } from "./visit-schedule
 import { VisitScheduleError, createVisitBooking } from "./visit-schedule-store.ts";
 import type { VisitTeacherIdentity } from "./visit-teacher-auth.ts";
 import { isoWeekday, addDays, kyivLocalNow, validateVisitBookingCreateInput, type VisitBookingCreateInput } from "./visit-schedule-validation.ts";
-import type { AssistantVisitPreview } from "./assistant-contract.ts";
+import type { AssistantUsage, AssistantVisitPreview } from "./assistant-contract.ts";
 
 export const ASSISTANT_SESSION_MINUTES = 10;
+export const ASSISTANT_CONCURRENT_SESSIONS = 2;
+export const ASSISTANT_STARTS_PER_MINUTE = 6;
 export type AssistantSession = { id: string; actor_key: string; expires_at: string; provider_call_id: string | null; closed_at: string | null };
 type Draft = { id: string; actor_key: string; session_id: string; payload_json: string; class_label: string; expires_at: string; confirmed_at: string | null; result_json: string | null };
 
-export async function createAssistantSession(db: VisitD1Database, actorKey: string, dailyLimit: number, now = new Date()): Promise<AssistantSession> {
+export class AssistantLimitError extends VisitScheduleError {
+  usage: AssistantUsage;
+  constructor(code: string, message: string, usage: AssistantUsage) {
+    super(code, 429, message);
+    this.usage = usage;
+  }
+}
+
+export async function readAssistantUsage(db: VisitD1Database, actorKey: string, dailyLimit: number | null, now = new Date()): Promise<AssistantUsage> {
+  const day = kyivLocalNow(now).date;
+  const row = await db.prepare(`SELECT
+    (SELECT COUNT(*) FROM assistant_sessions WHERE actor_key=? AND created_day=? AND startup_failed_at IS NULL) AS used_today,
+    (SELECT COUNT(*) FROM assistant_sessions WHERE actor_key=? AND closed_at IS NULL AND expires_at>?) AS active_sessions`)
+    .bind(actorKey, day, actorKey, now.toISOString()).first<{ used_today: number; active_sessions: number }>();
+  const usedToday = Number(row?.used_today ?? 0);
+  return { dailyLimit, usedToday, remainingToday: dailyLimit === null ? null : Math.max(0, dailyLimit - usedToday),
+    activeSessions: Number(row?.active_sessions ?? 0), maxActiveSessions: ASSISTANT_CONCURRENT_SESSIONS, resetsOn: addDays(day, 1) };
+}
+
+export async function createAssistantSession(db: VisitD1Database, actorKey: string, dailyLimit: number | null, now = new Date()): Promise<AssistantSession> {
   const id = crypto.randomUUID();
   const createdAt = now.toISOString();
   const day = kyivLocalNow(now).date;
   const expiresAt = new Date(now.getTime() + ASSISTANT_SESSION_MINUTES * 60_000).toISOString();
   const row = await db.prepare(`INSERT INTO assistant_sessions(id,actor_key,created_day,created_at,expires_at)
-    SELECT ?,?,?,?,? WHERE (SELECT COUNT(*) FROM assistant_sessions WHERE actor_key=? AND created_day=?) < ?
-    AND (SELECT COUNT(*) FROM assistant_sessions WHERE actor_key=? AND closed_at IS NULL AND expires_at>?) < 2
+    SELECT ?,?,?,?,? WHERE (? IS NULL OR (SELECT COUNT(*) FROM assistant_sessions WHERE actor_key=? AND created_day=? AND startup_failed_at IS NULL) < ?)
+    AND (SELECT COUNT(*) FROM assistant_sessions WHERE actor_key=? AND closed_at IS NULL AND expires_at>?) < ?
+    AND (SELECT COUNT(*) FROM assistant_sessions WHERE actor_key=? AND created_at>?) < ?
     RETURNING id,actor_key,expires_at,provider_call_id,closed_at`)
-    .bind(id, actorKey, day, createdAt, expiresAt, actorKey, day, dailyLimit, actorKey, createdAt).first<AssistantSession>();
-  if (!row) throw new VisitScheduleError("assistant_session_limit", 429, "Досягнуто ліміт розмов: завершіть інші сеанси або спробуйте пізніше. Звичайні розділи бібліотеки працюють.");
+    .bind(id, actorKey, day, createdAt, expiresAt, dailyLimit, actorKey, day, dailyLimit, actorKey, createdAt, ASSISTANT_CONCURRENT_SESSIONS,
+      actorKey, new Date(now.getTime() - 60_000).toISOString(), ASSISTANT_STARTS_PER_MINUTE).first<AssistantSession>();
+  if (!row) {
+    const usage = await readAssistantUsage(db, actorKey, dailyLimit, now);
+    if (usage.remainingToday === 0) throw new AssistantLimitError("assistant_daily_limit",
+      `Використано ${usage.usedToday} із ${dailyLimit} розмов на сьогодні. Нові будуть доступні ${usage.resetsOn} о 00:00 за Києвом. Вихід із сеансів не поновлює денний ліміт. Звичайні розділи бібліотеки працюють.`, usage);
+    if (usage.activeSessions >= ASSISTANT_CONCURRENT_SESSIONS) throw new AssistantLimitError("assistant_concurrent_limit",
+      "У вас уже є дві активні розмови. Завершіть їх кнопкою нижче та почніть нову. Інших користувачів це не зачепить.", usage);
+    const recent = await db.prepare("SELECT COUNT(*) AS starts FROM assistant_sessions WHERE actor_key=? AND created_at>?")
+      .bind(actorKey, new Date(now.getTime() - 60_000).toISOString()).first<{ starts: number }>();
+    if (Number(recent?.starts ?? 0) >= ASSISTANT_STARTS_PER_MINUTE) throw new AssistantLimitError("assistant_start_rate_limit", "Забагато підключень поспіль. Зачекайте одну хвилину та повторіть. Це не денний ліміт розмов.", usage);
+    throw new AssistantLimitError("assistant_session_retry", "Стан розмов щойно змінився. Повторіть підключення.", usage);
+  }
   return row;
+}
+
+// Only the server's failed voice-start path can refund an unused reservation.
+// Keep the row for audit and the short retry guard; never infer failures from old rows.
+export async function failAssistantStartup(db: VisitD1Database, id: string, actorKey: string, now = new Date()): Promise<void> {
+  await db.prepare(`UPDATE assistant_sessions SET closed_at=COALESCE(closed_at,?),startup_failed_at=COALESCE(startup_failed_at,?)
+    WHERE id=? AND actor_key=? AND tool_calls=0 AND text_turns=0`)
+    .bind(now.toISOString(), now.toISOString(), id, actorKey).all();
+}
+
+export async function closeAssistantSessions(db: VisitD1Database, actorKey: string, key: string | undefined, id?: string, now = new Date(), fetcher: typeof fetch = fetch): Promise<number> {
+  const rows = await db.prepare(`UPDATE assistant_sessions SET closed_at=COALESCE(closed_at,?)
+    WHERE actor_key=? AND (? IS NULL OR id=?) AND (closed_at IS NULL OR provider_call_id IS NOT NULL)
+    RETURNING id,provider_call_id`).bind(now.toISOString(), actorKey, id ?? null, id ?? null).all<{ id: string; provider_call_id: string | null }>();
+  // Snapshot the exact owner-scoped calls. Registration racing this update sees the closed row and compensates.
+  if (key) await Promise.allSettled((rows.results ?? []).filter((row) => row.provider_call_id)
+    .map((row) => hangupAssistantCall(db, row.id, row.provider_call_id!, key, fetcher)));
+  return rows.results?.length ?? 0;
 }
 
 export async function requireAssistantSession(db: VisitD1Database, id: string, actorKey: string, counter?: "tool_calls" | "text_turns", now = new Date()): Promise<AssistantSession> {

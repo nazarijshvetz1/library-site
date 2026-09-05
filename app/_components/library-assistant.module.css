@@ -14,6 +14,10 @@
 .consent { display: flex; align-items: flex-start; gap: 10px; padding: 12px; margin-bottom: 12px; border-radius: 12px; background: #edf3ec; font-size: 14px; }
 .consent input { flex: 0 0 20px; width: 20px; height: 20px; margin: 2px 0 0; accent-color: #20563e; }
 .notice { padding: 10px 12px; border-left: 3px solid #6a9879; border-radius: 5px; background: #edf2e9; font-size: 14px; overflow-wrap: anywhere; }
+.usage { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 12px; padding: 10px 12px; border-radius: 10px; background: #f0f5ee; font-size: 13px; }
+.usage > span { flex-basis: 100%; font-weight: 600; }
+.usage small { flex-basis: 100%; color: #54695b; }
+.usage button { font-size: 12px; }
 .fallback { display: inline-flex; gap: 8px; align-items: center; margin-bottom: 12px; padding: 10px 12px; background: #e2eddf; border-radius: 9px; color: #173b2e; }
 .messages { display: grid; gap: 10px; }
 .messages p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; border-radius: 12px; }

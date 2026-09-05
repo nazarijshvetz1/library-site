@@ -101,6 +101,7 @@ async function visitDatabase() {
     "0036_eager_champions.sql",
     "0037_keen_carlie_cooper.sql",
     "0038_legal_morph.sql",
+    "0039_watery_black_crow.sql",
   ]) sqlite.exec(await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8"));
   const now = new Date().toISOString();
   sqlite.prepare(`INSERT INTO users
@@ -188,17 +189,184 @@ test("assistant sessions enforce owner, expiry, concurrency, daily and tool limi
   const now = new Date(); const actor = "teacher:USR-TEACHER";
   const first = await assistant.createAssistantSession(db, actor, 3, now);
   const second = await assistant.createAssistantSession(db, actor, 3, now);
-  await assert.rejects(assistant.createAssistantSession(db, actor, 3, now), { code: "assistant_session_limit" });
+  await assert.rejects(assistant.createAssistantSession(db, actor, 3, now), { code: "assistant_concurrent_limit" });
   await assert.rejects(assistant.requireAssistantSession(db, first.id, "teacher:OTHER"), { code: "assistant_session_ended" });
   sqlite.prepare("UPDATE assistant_sessions SET closed_at=? WHERE id=?").run(now.toISOString(), second.id);
   await assistant.createAssistantSession(db, actor, 3, now);
   sqlite.prepare("UPDATE assistant_sessions SET closed_at=? WHERE actor_key=?").run(now.toISOString(), actor);
-  await assert.rejects(assistant.createAssistantSession(db, actor, 3, now), { code: "assistant_session_limit" });
+  await assert.rejects(assistant.createAssistantSession(db, actor, 3, now), { code: "assistant_daily_limit" });
   const independent = await assistant.createAssistantSession(db, "teacher:OTHER", 3, now);
   sqlite.prepare("UPDATE assistant_sessions SET tool_calls=99 WHERE id=?").run(independent.id);
   await assistant.requireAssistantSession(db, independent.id, "teacher:OTHER", "tool_calls", now);
   await assert.rejects(assistant.requireAssistantSession(db, independent.id, "teacher:OTHER", "tool_calls", now), { code: "assistant_session_ended" });
   await assert.rejects(assistant.requireAssistantSession(db, independent.id, "teacher:OTHER", undefined, new Date(now.getTime() + 600001)), { code: "assistant_session_ended" });
+});
+
+test("assistant role settings allow unlimited librarian starts but exactly 12 daily teacher conversations", async () => {
+  assert.equal(assistantContract.assistantDailyLimit("librarian", "unlimited"), null);
+  assert.equal(assistantContract.assistantDailyLimit("librarian"), null);
+  for (const input of [undefined, "12", "unlimited", "0", "-1", "NaN", "Infinity", "12.5", "999"]) {
+    assert.equal(assistantContract.assistantDailyLimit("teacher", input), 12);
+  }
+  const { db } = await visitDatabase();
+  const begin = Date.parse("2026-09-05T08:00:00Z");
+  for (let i = 0; i < 35; i++) {
+    const now = new Date(begin + i * 61_000);
+    await assistant.createAssistantSession(db, "librarian:unlimited", null, now);
+    await assistant.closeAssistantSessions(db, "librarian:unlimited", undefined, undefined, now);
+    if (i < 12) {
+      await assistant.createAssistantSession(db, "teacher:twelve", 12, now);
+      await assistant.closeAssistantSessions(db, "teacher:twelve", undefined, undefined, now);
+    } else await assert.rejects(assistant.createAssistantSession(db, "teacher:twelve", 12, now), { code: "assistant_daily_limit" });
+  }
+  const usage = await assistant.readAssistantUsage(db, "librarian:unlimited", null, new Date(begin + 36 * 61_000));
+  assert.equal(usage.usedToday, 35); assert.equal(usage.remainingToday, null); assert.equal(usage.activeSessions, 0);
+  const teacherUsage = await assistant.readAssistantUsage(db, "teacher:twelve", 12, new Date(begin));
+  assert.equal(teacherUsage.usedToday, 12); assert.equal(teacherUsage.remainingToday, 0);
+  const route = await readFile(new URL("../app/api/assistant/route.ts", import.meta.url), "utf8");
+  assert.match(route, /ASSISTANT_LIBRARIAN_DAILY_SESSIONS/);
+  assert.match(route, /ASSISTANT_TEACHER_DAILY_SESSIONS/);
+  assert.doesNotMatch(route, /getRuntimeString\("ASSISTANT_DAILY_SESSIONS"\)/);
+});
+
+test("assistant known failed voice starts release daily reservation without bypassing short retry guard", async () => {
+  const { db, sqlite } = await visitDatabase();
+  const now = new Date("2026-09-05T08:00:00Z"); const actor = "teacher:failed";
+  for (let i = 0; i < 6; i++) {
+    const session = await assistant.createAssistantSession(db, actor, 1, now);
+    await assistant.failAssistantStartup(db, session.id, "teacher:someone-else", now);
+    assert.equal((await assistant.readAssistantUsage(db, actor, 1, now)).usedToday, 1);
+    await assistant.failAssistantStartup(db, session.id, actor, now);
+    await assistant.failAssistantStartup(db, session.id, actor, now);
+    const usage = await assistant.readAssistantUsage(db, actor, 1, now);
+    assert.equal(usage.usedToday, 0); assert.equal(usage.activeSessions, 0);
+  }
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM assistant_sessions").get().n, 6);
+  await assert.rejects(assistant.createAssistantSession(db, actor, 1, now), { code: "assistant_start_rate_limit" });
+  const later = new Date(now.getTime() + 60_000);
+  const valid = await assistant.createAssistantSession(db, actor, 1, later);
+  await assistant.requireAssistantSession(db, valid.id, actor, "tool_calls", later);
+  await assistant.failAssistantStartup(db, valid.id, actor, later);
+  assert.equal((await assistant.readAssistantUsage(db, actor, 1, later)).usedToday, 1);
+  await assistant.closeAssistantSessions(db, actor, undefined, undefined, later);
+  await assert.rejects(assistant.createAssistantSession(db, actor, 1, later), { code: "assistant_daily_limit" });
+});
+
+test("assistant daily reset is Kyiv calendar midnight across summer, winter and DST dates", async () => {
+  for (const [before, after, nextDay] of [
+    ["2026-09-05T20:59:59Z", "2026-09-05T21:00:00Z", "2026-09-06"],
+    ["2026-01-05T21:59:59Z", "2026-01-05T22:00:00Z", "2026-01-06"],
+    ["2026-03-29T20:59:59Z", "2026-03-29T21:00:00Z", "2026-03-30"],
+    ["2026-10-25T21:59:59Z", "2026-10-25T22:00:00Z", "2026-10-26"],
+  ]) {
+    const { db } = await visitDatabase(); const actor = "teacher:midnight";
+    const session = await assistant.createAssistantSession(db, actor, 1, new Date(before));
+    await assistant.closeAssistantSessions(db, actor, undefined, session.id, new Date(before));
+    const usage = await assistant.readAssistantUsage(db, actor, 1, new Date(before));
+    assert.equal(usage.resetsOn, nextDay); assert.equal(usage.remainingToday, 0);
+    await assert.rejects(assistant.createAssistantSession(db, actor, 1, new Date(before)), (error) => {
+      assert.equal(error.code, "assistant_daily_limit"); assert.match(error.message, /00:00 за Києвом/);
+      assert.deepEqual(error.usage, usage); return true;
+    });
+    assert.equal((await assistant.readAssistantUsage(db, actor, 1, new Date(after))).usedToday, 0);
+    await assistant.createAssistantSession(db, actor, 1, new Date(after));
+  }
+});
+
+test("assistant close-all is owner scoped, idempotent and retains failed hangups for cron", async () => {
+  const { db, sqlite } = await visitDatabase(); const now = new Date();
+  const own = await assistant.createAssistantSession(db, "librarian:owner", null, now);
+  const other = await assistant.createAssistantSession(db, "librarian:other", null, now);
+  sqlite.prepare("UPDATE assistant_sessions SET provider_call_id=? WHERE id=?").run("rtc_own", own.id);
+  sqlite.prepare("UPDATE assistant_sessions SET provider_call_id=? WHERE id=?").run("rtc_other", other.id);
+  const urls = [];
+  await assistant.closeAssistantSessions(db, "librarian:owner", "test", undefined, now, async (url) => { urls.push(url); return new Response(null, { status: 503 }); });
+  assert.equal(urls.length, 1); assert.match(urls[0], /rtc_own\/hangup$/);
+  assert.equal(sqlite.prepare("SELECT provider_call_id FROM assistant_sessions WHERE id=?").get(own.id).provider_call_id, "rtc_own");
+  await assistant.requireAssistantSession(db, other.id, "librarian:other", undefined, now);
+  await assert.rejects(assistant.requireAssistantSession(db, own.id, "librarian:owner", undefined, now), { code: "assistant_session_ended" });
+  await assistant.closeAssistantSessions(db, "librarian:owner", "test", undefined, now, async () => new Response(null, { status: 404 }));
+  assert.equal(await assistant.closeAssistantSessions(db, "librarian:owner", "test", undefined, now), 0);
+  assert.equal((await assistant.readAssistantUsage(db, "librarian:owner", null, now)).usedToday, 1);
+  await assistant.closeAssistantSessions(db, "librarian:owner", undefined, other.id, now);
+  await assistant.requireAssistantSession(db, other.id, "librarian:other", undefined, now);
+});
+
+test("assistant close-all racing voice registration compensates the remote call and never resurrects the session", async () => {
+  const { db, sqlite } = await visitDatabase(); const actor = "librarian:race";
+  const session = await assistant.createAssistantSession(db, actor, null);
+  await assistant.closeAssistantSessions(db, actor, undefined);
+  const urls = [];
+  await assert.rejects(assistant.registerAssistantCall(db, session.id, actor,
+    new Response("v=0\r\n", { headers: { Location: "/v1/realtime/calls/rtc_race" } }), "test",
+    async (url) => { urls.push(url); return new Response(null, { status: 200 }); }), /assistant_call_not_registered/);
+  assert.equal(urls.length, 1); assert.match(urls[0], /rtc_race\/hangup$/);
+  assert.notEqual(sqlite.prepare("SELECT closed_at FROM assistant_sessions WHERE id=?").get(session.id).closed_at, null);
+  await assistant.failAssistantStartup(db, session.id, actor);
+  assert.equal((await assistant.readAssistantUsage(db, actor, null)).usedToday, 0);
+});
+
+test("assistant expiry releases concurrency but not daily quota; usage reads never consume conversations", async () => {
+  const { db } = await visitDatabase(); const actor = "teacher:expiry"; const now = new Date();
+  await assistant.createAssistantSession(db, actor, 2, now);
+  await assistant.createAssistantSession(db, actor, 2, now);
+  const later = new Date(now.getTime() + 600_001);
+  for (let i = 0; i < 5; i++) {
+    const usage = await assistant.readAssistantUsage(db, actor, 2, later);
+    assert.equal(usage.usedToday, 2); assert.equal(usage.activeSessions, 0);
+  }
+  await assert.rejects(assistant.createAssistantSession(db, actor, 2, later), { code: "assistant_daily_limit" });
+});
+
+test("assistant UI exposes recovery and quota without clearing pending visit receipts", async () => {
+  const source = await readFile(new URL("../app/_components/library-assistant.tsx", import.meta.url), "utf8");
+  assert.match(source, /Завершити мої активні розмови/);
+  assert.match(source, /Без денного ліміту розмов/);
+  assert.match(source, /await closing.current/);
+  assert.match(source, /if \(!pendingRef.current\) setPreview\(null\)/);
+  assert.match(source, /reply.usage && token === generation.current/);
+  assert.match(source, /error.code === "assistant_session_ended"\) stop\(\)/);
+});
+
+test("assistant delayed close-all cannot be dispatched from a closed panel or overtake a new start", async () => {
+  const source = await readFile(new URL("../app/_components/library-assistant.tsx", import.meta.url), "utf8");
+  const implementation = source.slice(source.indexOf("async function finishOwnSessions()"), source.indexOf("async function refreshUsage()"));
+  const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
+  const createHarness = (priorClose, api) => {
+    const state = { operationLock: { current: false }, generation: { current: 0 }, closing: { current: priorClose }, pendingRef: { current: true }, notices: [] };
+    state.stop = () => { state.generation.current++; state.operationLock.current = false; };
+    state.api = api; state.setBusy = () => {}; state.setPreview = () => { throw new Error("pending receipt cleared"); };
+    state.setNotice = (message) => state.notices.push(message);
+    // Exercise the actual plain-JS component handler, not a duplicate implementation.
+    state.finish = new Function("state", `const { operationLock, generation, closing, pendingRef, stop, api, setBusy, setPreview, setNotice } = state; return (${implementation});`)(state);
+    return state;
+  };
+  const previous = deferred(); let calls = 0;
+  const abandoned = createHarness(previous.promise, async () => { calls++; return { success: true }; });
+  const abandonedRequest = abandoned.finish();
+  abandoned.stop(); previous.resolve(); await abandonedRequest;
+  assert.equal(calls, 0);
+  const remoteClose = deferred();
+  const running = createHarness(Promise.resolve(), () => { calls++; return remoteClose.promise; });
+  const request = running.finish(); await Promise.resolve();
+  assert.equal(calls, 1);
+  running.stop(); let newStart = false;
+  const next = running.closing.current.then(() => { newStart = true; });
+  await Promise.resolve(); assert.equal(newStart, false);
+  remoteClose.resolve({ success: true, usage: { remainingToday: null } });
+  await Promise.all([request, next]); assert.equal(newStart, true); assert.equal(running.notices.length, 0);
+});
+
+test("assistant informational usage-read failure still returns a usable text session ID", async () => {
+  const source = await readFile(new URL("../app/api/assistant/route.ts", import.meta.url), "utf8");
+  const begin = source.indexOf("const session = await createAssistantSession");
+  const implementation = source.slice(begin, source.indexOf("const now = kyivLocalNow();", begin));
+  const run = new Function("deps", `const { createAssistantSession, readAssistantUsage, visitJson } = deps;
+    const db = {}, principal = { actorKey: 'teacher:test' }, dailyLimit = 12, mode = 'text';
+    return (async () => { ${implementation} })();`);
+  const response = await run({ createAssistantSession: async () => ({ id: "known-id", expires_at: "known-expiry" }),
+    readAssistantUsage: async () => { throw new Error("temporary read failure"); }, visitJson: (body) => body });
+  assert.equal(response.success, true); assert.equal(response.sessionId, "known-id"); assert.equal(response.usage, undefined);
 });
 
 async function assistantDraft(db, overrides = {}) {

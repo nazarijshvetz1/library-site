@@ -1,0 +1,1 @@
+ALTER TABLE `assistant_sessions` ADD `startup_failed_at` text;

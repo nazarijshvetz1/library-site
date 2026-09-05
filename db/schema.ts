@@ -21,6 +21,7 @@ export const assistantSessions = sqliteTable("assistant_sessions", {
   textTurns: integer("text_turns").notNull().default(0),
   providerCallId: text("provider_call_id"),
   closedAt: text("closed_at"),
+  startupFailedAt: text("startup_failed_at"),
 }, (table) => [index("idx_assistant_sessions_actor_day").on(table.actorKey, table.createdDay)]);
 
 export const assistantVisitDrafts = sqliteTable("assistant_visit_drafts", {
