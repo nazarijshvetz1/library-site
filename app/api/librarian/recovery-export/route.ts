@@ -16,7 +16,11 @@ export async function GET(): Promise<Response> {
       "Content-Disposition": 'attachment; filename="library-d1-recovery.json"',
       "X-Content-Type-Options": "nosniff", "X-Recovery-Tables": String(snapshot.tables), "X-Recovery-Rows": String(snapshot.rows),
     } });
-  } catch {
+  } catch (error) {
+    // Fixed diagnostic categories only: never emit SQL, table contents or secrets.
+    const message = error instanceof Error ? error.message : "";
+    const category = /too many.*quer/i.test(message) ? "query_budget" : /безпечний|обсяг|розмір/.test(message) ? "size_bound" : /структур|віртуаль|схем/i.test(message) ? "schema_bound" : "database_read";
+    console.warn("library_recovery_export_failed", category);
     return librarianError(503, "recovery_unavailable", "Повний резервний експорт не сформовано. Дані бібліотеки не змінено.", false);
   }
 }

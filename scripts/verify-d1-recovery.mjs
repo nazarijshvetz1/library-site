@@ -7,10 +7,15 @@ import { pathToFileURL } from "node:url";
 const quote = (value) => '"' + String(value).replaceAll('"', '""') + '"';
 const digest = (rows) => crypto.createHash("sha256").update(JSON.stringify(rows.map(row => JSON.stringify(Object.keys(row).sort().map(key => [key, normalize(row[key])]))).sort())).digest("hex");
 function normalize(value) {
-  if (value instanceof Uint8Array || Array.isArray(value)) return { $blob: Array.from(value) };
+  if (value instanceof Uint8Array || Array.isArray(value)) return { $blobHex: Buffer.from(value).toString("hex").toUpperCase() };
+  if (value && typeof value === "object" && Array.isArray(value.$blob)) return { $blobHex: Buffer.from(value.$blob).toString("hex").toUpperCase() };
   return value;
 }
 function decode(value) {
+  if (value && typeof value === "object" && typeof value.$blobHex === "string") {
+    if (!/^(?:[0-9a-f]{2})*$/i.test(value.$blobHex)) throw new Error("Invalid BLOB hex");
+    return Buffer.from(value.$blobHex, "hex");
+  }
   if (value && typeof value === "object" && Array.isArray(value.$blob)) {
     if (!value.$blob.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255)) throw new Error("Invalid BLOB");
     return Buffer.from(value.$blob);
@@ -31,11 +36,18 @@ export function restoreAndVerifySnapshot(snapshot, databasePath = ":memory:") {
   const db = new DatabaseSync(databasePath);
   try {
     db.exec("PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE");
-    for (const table of ordinarySchema) db.exec(table.sql);
+    for (const table of ordinarySchema) if (table.name !== "sqlite_sequence") db.exec(table.sql);
     for (const table of snapshot.tables) {
+      // AUTOINCREMENT table creation creates this SQLite-owned table automatically.
+      if (table.name === "sqlite_sequence") continue;
       const columns = db.prepare(`PRAGMA table_xinfo(${quote(table.name)})`).all().filter(column => column.hidden === 0).map(column => column.name);
       const statement = db.prepare(`INSERT INTO ${quote(table.name)} (${columns.map(quote).join(",")}) VALUES (${columns.map(() => "?").join(",")})`);
       for (const row of table.rows) statement.run(...columns.map(column => decode(row[column])));
+    }
+    const sequence = snapshot.tables.find(table => table.name === "sqlite_sequence");
+    if (sequence) {
+      db.exec("DELETE FROM sqlite_sequence");
+      for (const row of sequence.rows) db.prepare("INSERT INTO sqlite_sequence(name,seq) VALUES(?,?)").run(row.name, row.seq);
     }
     for (const name of virtualNames) {
       const table = snapshot.schema.find(item => item.name === name && item.type === "table");
@@ -51,7 +63,7 @@ export function restoreAndVerifySnapshot(snapshot, databasePath = ":memory:") {
       if (rows.length !== table.rows.length || digest(rows) !== digest(table.rows)) throw new Error(`Recovery data mismatch in ${table.name}`);
       return { name: table.name, rows: rows.length, sha256: digest(rows) };
     });
-    const restoredSchema = db.prepare("SELECT type,name,sql FROM sqlite_schema WHERE sql IS NOT NULL AND name NOT GLOB 'sqlite_*' AND name NOT GLOB '_cf_*' ORDER BY type,name").all();
+    const restoredSchema = db.prepare("SELECT type,name,sql FROM sqlite_schema WHERE sql IS NOT NULL AND (name NOT GLOB 'sqlite_*' OR name='sqlite_sequence') AND name NOT GLOB '_cf_*' ORDER BY type,name").all();
     const expectedSchema = snapshot.schema.map(({type,name,sql}) => ({type,name,sql}));
     if (digest(restoredSchema) !== digest(expectedSchema)) throw new Error("Recovery schema mismatch");
     db.exec("COMMIT; PRAGMA foreign_keys=ON");
