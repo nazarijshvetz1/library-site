@@ -59,8 +59,15 @@ export async function scanReaderCatalog(db:ReaderDatabase,code:string){
   code=code.trim();if(!code||code.length>120)readerFail("scan_code","Введіть код примірника або ISBN.");
   if(/^https:\/\//.test(code)){try{const url=new URL(code);if(url.hostname!=="yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site")readerFail("scan_external","Це код іншого сайту. Введіть бібліотечний номер вручну.");code=url.searchParams.get("copy")||url.searchParams.get("book")||"";}catch{readerFail("scan_code","Некоректний код.");}}
   const normalized=code.replace(/[^0-9X]/gi,"").toUpperCase(),isbn=/^(?:\d{13}|\d{9}[\dX])$/.test(normalized)?normalized:"";
-  const rows=await db.prepare(`SELECT c.id AS copy_id,c.accession_no,c.copy_no,c.physical_state,e.id AS edition_id,e.title,${libraryCoverSql} AS cover_url
+  const rows=await db.prepare(`SELECT c.id AS copy_id,c.accession_no AS accession_no,c.copy_no AS copy_no,c.physical_state AS physical_state,e.id AS edition_id,e.title AS title,${libraryCoverSql} AS cover_url,'copy' AS result_kind
     FROM library_copies c JOIN library_editions e ON e.id=c.edition_id JOIN materials m ON m.id=e.material_id WHERE e.publication_state='published' AND m.status='active' AND c.registration='registered' AND c.physical_state!='withdrawn'
-      AND (c.id=? OR c.accession_no=? OR e.id=? OR (?<>'' AND m.isbn_normalized=?)) ORDER BY e.title,c.copy_no,c.id LIMIT 100`).bind(code,code,code,isbn,isbn).all();
+      AND (c.id=? OR c.accession_no=? OR e.id=? OR m.id=? OR (?<>'' AND m.isbn_normalized=?))
+    UNION ALL
+    SELECT 'edition:'||coalesce(e.id,m.id) AS copy_id,'' AS accession_no,'' AS copy_no,'' AS physical_state,coalesce(e.id,m.id) AS edition_id,m.title AS title,coalesce(${libraryCoverSql},'/api/catalog-v2/covers/'||m.id) AS cover_url,'edition' AS result_kind
+    FROM materials m LEFT JOIN library_editions e ON e.material_id=m.id
+    WHERE m.status='active' AND (e.id IS NULL OR e.publication_state='published')
+      AND NOT EXISTS(SELECT 1 FROM library_copies c WHERE c.edition_id=e.id AND c.registration='registered' AND c.physical_state!='withdrawn')
+      AND (m.id=? OR e.id=? OR (?<>'' AND m.isbn_normalized=?))
+    ORDER BY title,copy_no,copy_id LIMIT 100`).bind(code,code,code,code,isbn,isbn,code,code,isbn,isbn).all();
   return {matches:rows.results||[],ambiguous:(rows.results||[]).length>1};
 }

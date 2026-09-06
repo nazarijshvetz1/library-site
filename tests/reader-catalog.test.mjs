@@ -24,3 +24,12 @@ test("scan preserves duplicate accession choices and never matches empty ISBN ac
 }finally{db.sqlite.close();}});
 
 test("a draft mapped edition cannot escape through the canonical CAT fallback",async()=>{const db=setup();try{db.sqlite.exec("UPDATE library_editions SET publication_state='draft'");await assert.rejects(catalog.getReaderCatalogBook(db,"edition"));await assert.rejects(catalog.getReaderCatalogBook(db,"CAT-2000"));assert.equal((await catalog.scanReaderCatalog(db,"copy-a")).matches.length,0);}finally{db.sqlite.close();}});
+
+test("scanner finds educational editions by ISBN and canonical QR without inventing copies",async()=>{const db=setup();try{
+ db.sqlite.exec("UPDATE materials SET isbn='9789664290011',isbn_normalized='9789664290011' WHERE id='CAT-2001'");
+ for(const code of ['978-966-429-001-1','CAT-2001','https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/library?book=CAT-2001']){
+  const scan=await catalog.scanReaderCatalog(db,code);assert.equal(scan.matches.length,1);assert.equal(scan.matches[0].edition_id,'CAT-2001');assert.equal(scan.matches[0].result_kind,'edition');
+ }
+ assert.equal((await catalog.scanReaderCatalog(db,'CAT-2000')).matches.length,2);
+ db.sqlite.exec("UPDATE materials SET status='archived' WHERE id='CAT-2001'");assert.equal((await catalog.scanReaderCatalog(db,'9789664290011')).matches.length,0);
+}finally{db.sqlite.close();}});

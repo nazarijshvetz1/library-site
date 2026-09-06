@@ -6,6 +6,13 @@ function setup(){const db=readerDatabase();db.sqlite.exec(`INSERT INTO library_i
  INSERT INTO library_copies(id,edition_id,accession_no,copy_no,created_at,updated_at) VALUES('copy-1','edition','1','1','2026-09-06','2026-09-06'),('copy-2','edition','2','2','2026-09-06','2026-09-06');
  INSERT INTO reader_circulations(id,copy_id,reader_id,status,issued_at,due_at,created_at,updated_at) VALUES('old-loan','copy-2','reader-a','overdue','2026-08-01','2026-08-15','2026-09-06','2026-09-06');`);return db;}
 const activation=()=>({requestId:crypto.randomUUID(),editionId:"edition",expectedVersion:1,confirmation:"ACTIVATE_SOURCE_EDITION"});
+
+test("librarian circulation search matches Ukrainian title regardless of case",async()=>{const db=setup();try{
+ const {listReaderCirculations}=await import('../lib/library-reader-admin.ts');
+ db.sqlite.exec("UPDATE library_editions SET title='Дюна'");await store.activateImportedEdition(db,actor,activation());
+ for(const query of ['Дюна','дюна','ДЮНА'])assert.equal((await listReaderCirculations(db,new URL('https://local.example.test/?q='+encodeURIComponent(query)))).length,1);
+ assert.equal((await listReaderCirculations(db,new URL('https://local.example.test/?q='+encodeURIComponent('невідома')))).length,0);
+}finally{db.sqlite.close();}});
 test("source activation requires complete authors and confirmed non-placeholder covers",async()=>{
  const db=setup();try{
   const sha="f".repeat(64);

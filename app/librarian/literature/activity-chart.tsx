@@ -1,0 +1,11 @@
+import s from '@/app/reader/reader.module.css';
+export type BookActivity={days:{day:string;issued:number;returned:number}[];undatedReturns:number};
+export default function ActivityChart({activity}:{activity:BookActivity}){
+ const max=Math.max(1,...activity.days.flatMap(day=>[day.issued,day.returned]));
+ const issued=activity.days.reduce((n,day)=>n+day.issued,0),returned=activity.days.reduce((n,day)=>n+day.returned,0);
+ return <section className={s.panel} aria-label="Рух книг за 14 днів" style={{marginTop:20}}><h2 style={{fontSize:23,marginTop:0}}>Видачі та повернення</h2><p className={s.muted}>Останні 14 календарних днів · одна одиниця — один примірник</p>
+  <div role="img" aria-label={`За 14 днів видано ${issued}, повернено ${returned} примірників.`} style={{display:'grid',gridTemplateColumns:'repeat(14,minmax(0,1fr))',gap:5,height:132,alignItems:'end',borderBottom:'1px solid #d8dfcc'}}>{activity.days.map((day,index)=><div key={day.day} title={`${day.day}: видано ${day.issued}, повернено ${day.returned}`} style={{minWidth:0,textAlign:'center'}}><div style={{height:100,display:'flex',gap:2,alignItems:'end',justifyContent:'center'}}><span style={{width:'45%',height:day.issued?Math.max(3,day.issued/max*100):0,background:'#274f37',borderRadius:'3px 3px 0 0'}}/><span style={{width:'45%',height:day.returned?Math.max(3,day.returned/max*100):0,background:'#c6a448',borderRadius:'3px 3px 0 0'}}/></div><span style={{fontSize:9,whiteSpace:'nowrap'}}>{[0,6,13].includes(index)?day.day.slice(8)+'.'+day.day.slice(5,7):' '}</span></div>)}</div>
+  <p style={{fontSize:12,display:'flex',gap:16}}><span>🟩 Видано: {issued}</span><span>🟨 Повернено: {returned}</span></p><details><summary>Розгорнути дані за днями</summary><table style={{width:'100%',fontSize:12,textAlign:'left'}}><thead><tr><th>Дата</th><th>Видано</th><th>Повернено</th></tr></thead><tbody>{activity.days.map(day=><tr key={day.day}><td>{day.day.split('-').reverse().join('.')}</td><td>{day.issued}</td><td>{day.returned}</td></tr>)}</tbody></table></details>
+  {activity.undatedReturns>0&&<p className={s.muted}>Історичних повернень без дати: {activity.undatedReturns}. Вони збережені в історії, але не включені до графіка.</p>}<p className={s.muted}>Це рух книг, а не кількість відвідувачів. Фактичні приходи цим графіком не вимірюються.</p>
+ </section>;
+}
