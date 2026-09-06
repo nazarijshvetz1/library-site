@@ -101,6 +101,9 @@ class TestBucket {
 
 function openDatabase() {
   const sqlite = new DatabaseSync(":memory:");
+  // Cover-only legacy fixture has no registered copy inventory.
+  sqlite.exec("CREATE VIEW library_tracked_shelf_stock AS SELECT NULL material_id,NULL location_id,NULL condition,0 quantity WHERE 0");
+  sqlite.exec("CREATE TABLE library_editions(id TEXT PRIMARY KEY,material_id TEXT,fund TEXT,publication_state TEXT NOT NULL DEFAULT 'published')");
   sqlite.exec("PRAGMA foreign_keys = ON");
   for (const file of [
     "0000_librarian_drafts.sql",

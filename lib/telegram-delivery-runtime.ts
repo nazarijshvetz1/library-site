@@ -7,12 +7,12 @@ import {
 
 export async function drainTelegramOutboxUntilIdle(
   db: TelegramDatabase,
-  options: { siteOrigin: string; maxBatches?: number },
+  options: { siteOrigin: string; maxBatches?: number; batchLimit?: number },
 ): Promise<{ attempted: number; sent: number; failed: number }> {
   const maxBatches = Math.max(1, Math.min(12, Math.trunc(options.maxBatches ?? 6)));
   const total = { attempted: 0, sent: 0, failed: 0 };
   for (let batch = 0; batch < maxBatches; batch += 1) {
-    const result = await drainTelegramOutbox(db, { siteOrigin: options.siteOrigin });
+    const result = await drainTelegramOutbox(db, { siteOrigin: options.siteOrigin, limit: options.batchLimit });
     total.attempted += result.attempted;
     total.sent += result.sent;
     total.failed += result.failed;

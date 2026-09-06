@@ -6,11 +6,17 @@ type CapturedLink = {name:string;source_id:string};
 type CapturedBook = { source_id: string; identity_verified: boolean; page_count?: number | null; language?: string | null; annotation?: string | null; description?: string | null; series?: string | null; cover_kind?: string; cover?: { sha256?: string; path?: string; final_url?: string; content_type?: string }; review_details?: unknown[];authors?:CapturedLink[];coauthors?:CapturedLink[];editors?:CapturedLink[];illustrators?:CapturedLink[];publishers?:CapturedLink[] };
 type CapturedEntity = {id:string;name:string;nickname?:string;country?:string;yearBorn?:string;yearDied?:string;biography?:string;biographyLanguage?:string;website?:string;sourceBiographyHtml?:string;[key:string]:unknown};
 type CapturedTaxonomy = {authors:CapturedEntity[];publishers:CapturedEntity[]};
+export type LibrarikaEnrichment={
+  translations:{id:string;name:string;sourceBiographySha256:string;biographyUk:string;translationMethod:string}[];
+  reviews:{capturedAt:string;records:{id:string;sourceMediaId:string;body:string;rating:number;ratingScale:number;createdAt:string|null;sourceRelativeDate:string}[]};
+  authorDetails:{complete:boolean;expectedCount:number;verified:number;pending:number;records:{id:string;name:string;sourceFile:string;sourceFileSha256:string;biography:{listTextMatches:boolean;referenceSourceId:string};publications:{text:string};awards:{text:string};detailDateOfBirth:{text:string};detailYearDied:{text:string};[key:string]:unknown}[]};
+};
 export type LibrarikaImportPlan = {
   format: "library-librarika-append"; version: 1; runId: string; sourceSha256: string; recoverySha256: string; capturedAt: string;
   tables: Record<string, PlannedRow[]>; counts: Record<string, number>; warnings: {code:string;sourceId:string}[];
   historicalReviews: {editionId:string;details:unknown[]}[];
   safeguards: { authenticationActivated: false; notificationsCreated: false; stockChanged: false; catalogPublished: false };
+  sourceCompleteness?:{authorDetailsComplete:boolean;authorsVerified:number;authorsPending:string[]};
 };
 
 export async function sha256Text(text: string): Promise<string> {
@@ -22,12 +28,17 @@ const numericSourceId = (value:string) => { if (!/^\d+$/.test(value)) throw new 
 const groups = <T>(values:T[], key:(value:T)=>string) => {const result=new Map<string,T[]>();for(const value of values){const k=key(value);result.set(k,[...(result.get(k)||[]),value]);}return result;};
 
 /** Pure mapping only. No network, SQL, credentials, stock writes or automatic identity links. */
-export async function buildLibrarikaImportPlan(data:LibrarikaDataset, captured:CapturedBook[], provenance:{sourceSha256:string;recoverySha256:string;capturedAt:string}, taxonomy?:CapturedTaxonomy):Promise<LibrarikaImportPlan> {
+export async function buildLibrarikaImportPlan(data:LibrarikaDataset, captured:CapturedBook[], provenance:{sourceSha256:string;recoverySha256:string;capturedAt:string}, taxonomy?:CapturedTaxonomy,enrichment?:LibrarikaEnrichment):Promise<LibrarikaImportPlan> {
   if (!/^[0-9a-f]{64}$/.test(provenance.sourceSha256) || !/^[0-9a-f]{64}$/.test(provenance.recoverySha256) || !Number.isFinite(Date.parse(provenance.capturedAt))) throw new Error("Invalid verified provenance");
   const runId="LRK-IMPORT-"+provenance.sourceSha256.slice(0,24), at=provenance.capturedAt;
   const tables:Record<string,PlannedRow[]>={library_catalog_entities:[],library_editions:[],library_edition_entities:[],library_readers:[],library_copies:[],reader_circulations:[],library_historical_reviews:[]};
   const warnings:{code:string;sourceId:string}[]=[];
   const historicalReviews:{editionId:string;details:unknown[]}[]=[];
+  const translations=new Map(enrichment?.translations.map(row=>[row.id,row])||[]),details=new Map(enrichment?.authorDetails.records.map(row=>[row.id,row])||[]);
+  if(enrichment){if(!taxonomy||translations.size!==enrichment.translations.length||details.size!==enrichment.authorDetails.records.length||enrichment.authorDetails.expectedCount!==taxonomy.authors.length||enrichment.authorDetails.verified!==details.size||enrichment.authorDetails.pending!==taxonomy.authors.length-details.size)throw new Error("Invalid enrichment identities or counts");
+    const authorIds=new Set(taxonomy.authors.map(row=>row.id));if([...translations.keys(),...details.keys()].some(id=>!authorIds.has(id)))throw new Error("Unknown author enrichment identity");
+    if(enrichment.authorDetails.complete&&enrichment.authorDetails.pending!==0)throw new Error("Incomplete author details cannot be marked complete");
+  }
   for(const [kind,key] of [["titles","Id"],["copies","Id"],["members","Id"],["circulations","ID"]] as const){const ids=data[kind].map(row=>numericSourceId(row[key]));if(new Set(ids).size!==ids.length)throw new Error(`Duplicate ${kind} source identity`);}
   if(new Set(data.members.map(row=>row["Member No"])).size!==data.members.length)throw new Error("Ambiguous member numbers");
   const sourceTitles=groups(data.titles,copyKey);
@@ -53,9 +64,12 @@ export async function buildLibrarikaImportPlan(data:LibrarikaDataset, captured:C
       if(entities.has(key))throw new Error("Duplicate captured entity identity");
       const csvRows=data[sourceKind].filter(row=>norm(row.Name)===norm(source.name));
       if(!csvRows.length)throw new Error("Captured entity is absent from native CSV");
-      const metadata=kind==="author"?{nickname:source.nickname||"",country:source.country||"",dateOfBirth:source.yearBorn||"",yearDied:source.yearDied||"",biography:source.biography||"",biographyLanguage:source.biographyLanguage||"und",sourceAuthorIds:[sourceId]}:{country:source.country||"",website:safeHttps(source.website),description:"",sourcePublisherIds:[sourceId]};
+      const translation=kind==="author"?translations.get(sourceId):undefined,detail=kind==="author"?details.get(sourceId):undefined;
+      if(translation&&(translation.name!==source.name||translation.sourceBiographySha256!==await sha256Text(source.biography||"")||!translation.biographyUk.trim()))throw new Error("Biography translation source changed");
+      if(detail&&(detail.name!==source.name||!detail.biography.listTextMatches||detail.biography.referenceSourceId!==sourceId))throw new Error("Author detail identity or biography changed");
+      const metadata=kind==="author"?{nickname:source.nickname||"",country:source.country||"",dateOfBirth:detail?.detailDateOfBirth.text||source.yearBorn||"",yearDied:detail?.detailYearDied.text||source.yearDied||"",biography:translation?.biographyUk||source.biography||"",biographyLanguage:translation?"uk":source.biographyLanguage||"und",sourceAuthorIds:[sourceId],...(detail?{publications:detail.publications.text,awards:detail.awards.text}:{})}:{country:source.country||"",website:safeHttps(source.website),description:"",sourcePublisherIds:[sourceId]};
       const entity={id:`LRK-${kind.toUpperCase()}-SRC-${sourceId}`,kind,name:norm(source.name),slug:`source-${sourceId}`,public_metadata_json:JSON.stringify(metadata),source_json:"[]",import_run_id:runId,version:1};
-      entities.set(key,entity);entitySources.set(key,[{csvRows,capture:source}]);capturedById.set(kind+":"+sourceId,entity);
+      entities.set(key,entity);entitySources.set(key,[{csvRows,capture:source,...(translation?{translation}:{}),...(detail?{detail}:{})}]);capturedById.set(kind+":"+sourceId,entity);
       const nameKey=kind+"\0"+norm(source.name);capturedByName.set(nameKey,[...capturedByName.get(nameKey)||[],entity]);
     }
     if(data[sourceKind].some(row=>!capturedByName.has(kind+"\0"+norm(row.Name))))throw new Error("Taxonomy capture misses CSV records");
@@ -92,7 +106,7 @@ export async function buildLibrarikaImportPlan(data:LibrarikaDataset, captured:C
         const key=JSON.stringify(link);if(!links.has(key)){links.add(key);tables.library_edition_entities.push(link);}
       }
     }
-    if(book.review_details?.length){
+    if(!enrichment&&book.review_details?.length){
       historicalReviews.push({editionId:id,details:book.review_details});
       for(const unknownReview of book.review_details){
         const review=unknownReview as {text?:unknown;rating?:unknown;source_review_id?:unknown;date_display?:unknown;captured_at?:unknown};
@@ -101,6 +115,13 @@ export async function buildLibrarikaImportPlan(data:LibrarikaDataset, captured:C
         tables.library_historical_reviews.push({id:`${id}-REVIEW-${reviewHash.slice(0,20)}`,edition_id:id,source_review_id:typeof review.source_review_id==="string"?review.source_review_id:null,rating:Number(review.rating),body:review.text,source_date_display:typeof review.date_display==="string"?review.date_display:"",source_json:sourceReviewJson,source_row_sha256:reviewHash,import_run_id:runId,publication_state:"draft",captured_at:typeof review.captured_at==="string"?review.captured_at:at});
       }
     }
+  }
+  if(enrichment){const reviewIds=new Set<string>();for(const review of enrichment.reviews.records){numericSourceId(review.id);numericSourceId(review.sourceMediaId);if(reviewIds.has(review.id)||!books.has(review.sourceMediaId)||!data.titles.some(row=>row.Id===review.sourceMediaId)||typeof review.body!=="string"||!review.body.trim()||!Number.isInteger(review.rating)||review.rating<1||review.rating>5||review.ratingScale!==5||!Number.isFinite(Date.parse(enrichment.reviews.capturedAt)))throw new Error("Invalid verified historical review");reviewIds.add(review.id);
+      const publicReview=books.get(review.sourceMediaId)!.review_details as {text?:string;rating?:number}[]|undefined;if(!publicReview?.some(row=>norm(row.text||"")===norm(review.body)&&row.rating===review.rating))throw new Error("Review does not match verified public capture");
+      const safeSource={id:review.id,sourceMediaId:review.sourceMediaId,body:review.body,rating:review.rating,ratingScale:5,createdAt:review.createdAt,sourceRelativeDate:review.sourceRelativeDate},json=JSON.stringify(safeSource),editionId="LRK-ED-"+review.sourceMediaId;
+      tables.library_historical_reviews.push({id:"LRK-REVIEW-SRC-"+review.id,edition_id:editionId,source_review_id:review.id,rating:review.rating,body:review.body,source_date_display:review.sourceRelativeDate,source_json:json,source_row_sha256:await sha256Text(json),import_run_id:runId,publication_state:"draft",captured_at:enrichment.reviews.capturedAt});historicalReviews.push({editionId,details:[safeSource]});
+    }
+    if(enrichment.reviews.records.length!==captured.reduce((total,row)=>total+(row.review_details?.length||0),0))throw new Error("Historical review capture is incomplete");
   }
   for(const [key,entity] of entities){entity.source_json=JSON.stringify(entitySources.get(key));tables.library_catalog_entities.push(entity);}
   const members=new Map(data.members.map(row=>[row["Member No"],row]));
@@ -138,7 +159,7 @@ export async function buildLibrarikaImportPlan(data:LibrarikaDataset, captured:C
     if(source["Member Group ID"]){const reader=tables.library_readers.find(row=>row.id==="LRK-RD-"+member.Id)!;if(reader.source_group_label===source["Member Group"]){if(reader.source_group_id&&reader.source_group_id!==source["Member Group ID"])throw new Error("Conflicting source group IDs");reader.source_group_id=source["Member Group ID"];}}
   }
   for(const copy of tables.library_copies)if(activeCopies.has(String(copy.id)))copy.physical_state="on_loan";
-  return {format:"library-librarika-append",version:1,runId,...provenance,tables,counts:Object.fromEntries(Object.entries(tables).map(([name,rows])=>[name,rows.length])),warnings,historicalReviews,safeguards:{authenticationActivated:false,notificationsCreated:false,stockChanged:false,catalogPublished:false}};
+  return {format:"library-librarika-append",version:1,runId,...provenance,tables,counts:Object.fromEntries(Object.entries(tables).map(([name,rows])=>[name,rows.length])),warnings,historicalReviews,...(enrichment?{sourceCompleteness:{authorDetailsComplete:enrichment.authorDetails.complete,authorsVerified:details.size,authorsPending:taxonomy!.authors.filter(author=>!details.has(author.id)).map(author=>author.id)}}:{}),safeguards:{authenticationActivated:false,notificationsCreated:false,stockChanged:false,catalogPublished:false}};
 }
 function validIsbn13(value:string){return /^\d{13}$/.test(value)&&[...value].reduce((sum,digit,index)=>sum+Number(digit)*(index%2?3:1),0)%10===0;}
 function safeHttps(value:string|undefined){try{const url=new URL(value||"");return url.protocol==="https:"&&!url.username&&!url.password?url.href:"";}catch{return "";}}

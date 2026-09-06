@@ -16,7 +16,8 @@ export const IMPORT_COLUMNS:Record<string,string[]>={
   library_historical_reviews:["id","edition_id","source_review_id","rating","body","source_date_display","source_json","source_row_sha256","import_run_id","publication_state","captured_at"],
 };
 type Part={index:number;table:string;rows:number;sha256:string};
-export type ImportStart={runId:string;sourceSha256:string;recoverySha256:string;capturedAt:string;planSha256:string;counts:Record<string,number>;parts:Part[]};
+export type SourceCompleteness={authorDetailsComplete:boolean;authorsVerified:number;authorsPending:string[]};
+export type ImportStart={sourceCompleteness:SourceCompleteness;runId:string;sourceSha256:string;recoverySha256:string;capturedAt:string;planSha256:string;counts:Record<string,number>;parts:Part[]};
 export class LibrarikaImportError extends Error { code:string; status:number; constructor(code:string, status:number, message:string){super(message);this.code=code;this.status=status;} }
 function fail(code:string,message:string,status=400):never{throw new LibrarikaImportError(code,status,message);}
 const isHash=(value:unknown):value is string=>typeof value==="string"&&/^[0-9a-f]{64}$/.test(value);
@@ -44,7 +45,7 @@ export async function splitLibrarikaImportTables(tables:Record<string,Row[]>) {
 export async function startLibrarikaImport(db:LibrarikaImportDatabase,actor:ImportActor,input:ImportStart){
   validateStart(input);
   const stored=await db.prepare("SELECT id,manifest_sha256,recovery_sha256,expected_counts_json,reconciliation_json,state FROM library_import_runs WHERE id=?").bind(input.runId).first();
-  const contract={planSha256:input.planSha256,parts:input.parts};
+  const contract={planSha256:input.planSha256,parts:input.parts,sourceCompleteness:input.sourceCompleteness};
   if(stored){
     const prior=JSON.parse(String(stored.reconciliation_json||"{}"));
     if(stored.manifest_sha256!==input.sourceSha256||stored.recovery_sha256!==input.recoverySha256||stable(JSON.parse(String(stored.expected_counts_json)))!==stable(input.counts)||stable(prior.contract)!==stable(contract))fail("run_conflict","Цей ідентифікатор уже має інший план імпорту.",409);
@@ -150,6 +151,7 @@ export async function verifyLibrarikaImport(db:LibrarikaImportDatabase,actor:Imp
 
 function validateStart(input:ImportStart){
   if(!input||!runPattern.test(input.runId)||input.runId!=="LRK-IMPORT-"+input.sourceSha256?.slice(0,24)||![input.sourceSha256,input.recoverySha256,input.planSha256].every(isHash)||!Number.isFinite(Date.parse(input.capturedAt)))fail("plan_invalid","Некоректний план або контрольні суми.");
+  if(input.sourceCompleteness?.authorDetailsComplete!==true||!Number.isInteger(input.sourceCompleteness.authorsVerified)||input.sourceCompleteness.authorsVerified<1||!Array.isArray(input.sourceCompleteness.authorsPending)||input.sourceCompleteness.authorsPending.length)fail("source_incomplete","Повний архів авторів ще не підтверджено. Пробний план не можна завантажувати до робочого сайту.");
   if(!input.counts||Object.keys(input.counts).some(table=>!Object.hasOwn(IMPORT_COLUMNS,table))||!Array.isArray(input.parts)||input.parts.length>1000)fail("plan_invalid","Некоректна структура плану.");
   const counts:Record<string,number>={};
   for(const [index,part]of input.parts.entries()){

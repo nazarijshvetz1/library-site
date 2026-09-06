@@ -14,8 +14,8 @@ export type LibrarianSection = (typeof LIBRARIAN_SECTIONS)[number];
 
 export type LibrarianUtility = "publicCatalog" | "excelExport" | "excelImport" | "telegram";
 
-export const PUBLIC_CATALOG_URL = "https://nazarijshvetz1.github.io/library-site/";
-export const LIBRARY_EMBLEM_URL = `${PUBLIC_CATALOG_URL}library-logo.png`;
+export const PUBLIC_CATALOG_URL = "/library";
+export const LIBRARY_EMBLEM_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
 
 const WEB_SECTION_ROUTES: Record<LibrarianSection, string> = {
   home: "/librarian",
@@ -56,6 +56,10 @@ export function librarianTextbooksHref(telegramMiniApp = false): string {
   return telegramMiniApp
     ? "/librarian/telegram/cabinet?target=textbooks"
     : "/librarian/textbooks";
+}
+
+export function librarianLiteratureHref(telegramMiniApp = false): string {
+  return telegramMiniApp ? "/librarian/telegram/cabinet?target=literature" : "/librarian/literature";
 }
 
 /** Full-page destinations used by both the website and Telegram Mini App shells. */

@@ -90,6 +90,9 @@ test("assistant archive details remain librarian-only and approximate pagination
 
 function fixture() {
   const sqlite = new DatabaseSync(":memory:");
+  // This projection fixture represents the pre-copy catalog: no tracked stock.
+  sqlite.exec("CREATE VIEW library_tracked_shelf_stock AS SELECT NULL material_id,NULL location_id,NULL condition,0 quantity WHERE 0");
+  sqlite.exec("CREATE TABLE library_editions(id TEXT PRIMARY KEY,material_id TEXT,fund TEXT,publication_state TEXT NOT NULL DEFAULT 'published')");
   sqlite.exec(`
     CREATE TABLE materials (
       id TEXT PRIMARY KEY,

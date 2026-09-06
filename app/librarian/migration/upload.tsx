@@ -3,7 +3,7 @@ import { useState } from "react";
 import { sha256Text } from "@/lib/librarika-import-plan";
 import { splitLibrarikaImportTables } from "@/lib/librarika-import-store";
 
-type Plan = {format:string;version:number;runId:string;sourceSha256:string;recoverySha256:string;capturedAt:string;tables:Record<string,Record<string,string|number|null>[]>;counts:Record<string,number>};
+type Plan = {sourceCompleteness:{authorDetailsComplete:boolean;authorsVerified:number;authorsPending:string[]};format:string;version:number;runId:string;sourceSha256:string;recoverySha256:string;capturedAt:string;tables:Record<string,Record<string,string|number|null>[]>;counts:Record<string,number>};
 
 export default function ImportUpload() {
   const [file,setFile]=useState<File|null>(null);
@@ -21,8 +21,9 @@ export default function ImportUpload() {
       if(file.size>32*1024*1024)throw new Error("План перевищує 32 МБ.");
       const content=await file.text(),plan=JSON.parse(content) as Plan;
       if(plan.format!=="library-librarika-append"||plan.version!==1||!plan.tables||!plan.counts)throw new Error("Потрібен перевірений план перенесення версії 1.");
+      if(plan.sourceCompleteness?.authorDetailsComplete!==true||!Number.isInteger(plan.sourceCompleteness.authorsVerified)||plan.sourceCompleteness.authorsVerified<1||!Array.isArray(plan.sourceCompleteness.authorsPending)||plan.sourceCompleteness.authorsPending.length)throw new Error("Це неповний пробний план. Спочатку потрібно завершити перевірку джерела.");
       const chunks=await splitLibrarikaImportTables(plan.tables);
-      const input={runId:plan.runId,sourceSha256:plan.sourceSha256,recoverySha256:plan.recoverySha256,capturedAt:plan.capturedAt,planSha256:await sha256Text(content),counts:plan.counts,parts:chunks.map(chunk=>chunk.part)};
+      const input={sourceCompleteness:plan.sourceCompleteness,runId:plan.runId,sourceSha256:plan.sourceSha256,recoverySha256:plan.recoverySha256,capturedAt:plan.capturedAt,planSha256:await sha256Text(content),counts:plan.counts,parts:chunks.map(chunk=>chunk.part)};
       await send({action:"start",input});
       const response=await fetch("/api/librarian/librarika-import?runId="+encodeURIComponent(plan.runId),{cache:"no-store"});
       const state=await response.json();

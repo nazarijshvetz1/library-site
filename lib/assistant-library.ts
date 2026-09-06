@@ -46,7 +46,7 @@ export async function runAssistantLibraryTool(db: VisitD1Database & CatalogD1Dat
   }
   const now = kyivLocalNow();
   if (name === "librarian_reference") {
-    const [reference, facets, classes] = await Promise.all([readLibraryReferenceData(db), listCatalogMaterialFacets(db),
+    const [reference, facets, classes] = await Promise.all([readLibraryReferenceData(db), listCatalogMaterialFacets(db, undefined, "librarian"),
       db.prepare("SELECT id,class_name AS name,grade,academic_year_id AS academicYearId,version FROM class_years WHERE status='active' ORDER BY grade,code LIMIT 200").all<Record<string, unknown>>()]);
     const words = normalizeCatalogSearchText(args.query).split(" ").filter(Boolean);
     const matches = (row: unknown) => words.every((word) => normalizeCatalogSearchText(JSON.stringify(row)).includes(word));

@@ -47,11 +47,12 @@ async function activeReservedQuantity(
   condition: string,
 ): Promise<number> {
   const row = await db.prepare(`
-    SELECT COALESCE(SUM(reserved_quantity-issued_quantity-released_quantity), 0) AS quantity
+    SELECT COALESCE(SUM(reserved_quantity-issued_quantity-released_quantity), 0)
+      + COALESCE((SELECT quantity FROM library_tracked_shelf_stock WHERE material_id=? AND location_id=? AND condition=?),0) AS quantity
     FROM material_request_reservations
     WHERE material_id=? AND source_location_id=? AND condition=?
       AND reserved_quantity>issued_quantity+released_quantity
-  `).bind(materialId, locationId, condition).first<{ quantity: number }>();
+  `).bind(materialId, locationId, condition, materialId, locationId, condition).first<{ quantity: number }>();
   return Math.max(0, Number(row?.quantity) || 0);
 }
 
@@ -846,6 +847,31 @@ export async function updateMaterialDirect(
     deleteMaterialSearchStatement(db, material, nextVersion),
     insertMaterialSearchStatement(db, materialId, nextVersion),
   ];
+
+  // Keep both catalog editors on the same versioned bibliographic record. Only
+  // explicitly changed canonical fields replace public metadata; source_json is untouched.
+  const editionPatch: Record<string, string> = {};
+  const editionFields: Array<[keyof MaterialUpdateInput["changes"], string]> = [
+    ["author", "author"], ["publisher", "publisher"], ["publicationYear", "year"],
+    ["rubric", "genre"], ["publicationType", "type"], ["subject", "subject"],
+  ];
+  for (const [key, publicKey] of editionFields) {
+    if (key in input.changes) editionPatch[publicKey] = String(input.changes[key] ?? "");
+  }
+  if ("isbn" in input.changes) {
+    editionPatch.isbn = String(input.changes.isbn ?? "");
+    editionPatch.isbn13 = nextIsbnNormalized.length === 13 ? nextIsbnNormalized : "";
+    editionPatch.isbn10 = nextIsbnNormalized.length === 10 ? nextIsbnNormalized : "";
+  }
+  if ("title" in input.changes || Object.keys(editionPatch).length) {
+    statements.push(db.prepare(`
+      UPDATE library_editions SET
+        title = CASE WHEN ? = 1 THEN ? ELSE title END,
+        public_metadata_json = json_patch(public_metadata_json, ?),
+        version = version + 1, updated_at = ?
+      WHERE material_id = ?
+    `).bind(Number("title" in input.changes), after.title, JSON.stringify(editionPatch), updatedAt, materialId));
+  }
 
   if (input.changes.links) {
     statements.push(
@@ -3067,7 +3093,7 @@ export async function issueLoanToClass(
         AS active_location_id,
       h.quantity,
       h.version,
-      COALESCE(active_reservations.quantity, 0) AS reserved_quantity
+      COALESCE(active_reservations.quantity, 0)+COALESCE((SELECT quantity FROM library_tracked_shelf_stock tracked WHERE tracked.material_id=requested.material_id AND tracked.location_id=requested.location_id AND tracked.condition=requested.condition),0) AS reserved_quantity
     FROM requested
     LEFT JOIN materials m ON m.id = requested.material_id
     LEFT JOIN locations l ON l.id = requested.location_id
@@ -5599,6 +5625,10 @@ function rebuildStockTotalsStatement(
         WHERE clo.status != 'cancelled'
           AND cli.lifecycle_status = 'active'
           AND cli.quantity_issued > cli.quantity_returned
+        UNION ALL
+        SELECT e.material_id, 1 AS quantity FROM reader_circulations rc
+        JOIN library_copies c ON c.id=rc.copy_id JOIN library_editions e ON e.id=c.edition_id
+        WHERE rc.accounting_mode='native' AND rc.status IN ('issued','overdue')
       ) outstanding_rows
       GROUP BY material_id
     ) outstanding ON outstanding.material_id = m.id
@@ -5665,6 +5695,10 @@ function rebuildStockTotalsBulkStatement(
         WHERE clo.status != 'cancelled'
           AND cli.lifecycle_status = 'active'
           AND cli.quantity_issued > cli.quantity_returned
+        UNION ALL
+        SELECT e.material_id, 1 AS quantity FROM reader_circulations rc
+        JOIN library_copies c ON c.id=rc.copy_id JOIN library_editions e ON e.id=c.edition_id
+        WHERE rc.accounting_mode='native' AND rc.status IN ('issued','overdue')
       ) outstanding_rows
       GROUP BY material_id
     ) outstanding ON outstanding.material_id = m.id
@@ -5704,6 +5738,7 @@ async function executeIdempotentBatch<T>(
     const replay = await replayCompletedCommand<T>(db, requestId, requestHash);
     if (replay) return replay;
     const errorMessage = error instanceof Error ? error.message : String(error ?? "");
+    if(errorMessage.includes("tracked_stock_conflict"))throw new LibraryMutationError("tracked_stock_conflict",409,"Ці книги обліковуються попримірниково. Відкрийте художню та наукову літературу й оберіть конкретний примірник.");
     if (errorMessage.includes("material_reserved_conflict")) {
       throw new LibraryMutationError(
         "material_reserved_conflict",

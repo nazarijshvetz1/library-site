@@ -20,9 +20,16 @@ async function setup(db,extra={}){
   tables.library_catalog_entities=[{id:"LRK-TAG-1",kind:"tag",name:"Тег",slug:"test",public_metadata_json:"{}",source_json:"[]",import_run_id:runId,version:1},...extra.entities||[]];
   if(extra.mutate)extra.mutate(tables);
   const chunks=await splitLibrarikaImportTables(tables);
-  const input={runId,sourceSha256:"a".repeat(64),recoverySha256:"b".repeat(64),planSha256:"c".repeat(64),capturedAt:"2026-09-05T21:33:28.100Z",counts:Object.fromEntries(Object.entries(tables).map(([table,rows])=>[table,rows.length])),parts:chunks.map(chunk=>chunk.part)};
+  const input={sourceCompleteness:{authorDetailsComplete:true,authorsVerified:1,authorsPending:[]},runId,sourceSha256:"a".repeat(64),recoverySha256:"b".repeat(64),planSha256:"c".repeat(64),capturedAt:"2026-09-05T21:33:28.100Z",counts:Object.fromEntries(Object.entries(tables).map(([table,rows])=>[table,rows.length])),parts:chunks.map(chunk=>chunk.part)};
   await startLibrarikaImport(db,actor,input);return {chunks,input};
 }
+test("missing or incomplete author collection cannot begin or resume a production import",async()=>{
+ const db=database();try{const {input}=await setup(db);
+  for(const sourceCompleteness of [undefined,{authorDetailsComplete:false,authorsVerified:479,authorsPending:['missing']},{authorDetailsComplete:true,authorsVerified:0,authorsPending:[]},{authorDetailsComplete:true,authorsVerified:543,authorsPending:['missing']}]){
+   await assert.rejects(startLibrarikaImport(db,actor,{...input,sourceCompleteness}),/Повний архів/);
+  }
+ }finally{db.sqlite.close();}
+});
 test("append import replays safely and leaves old users, holdings and stock unchanged",async()=>{
   const db=database();try{
     const {chunks,input}=await setup(db);

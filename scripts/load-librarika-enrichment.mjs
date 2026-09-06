@@ -1,0 +1,18 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {sha256Text} from '../lib/librarika-import-plan.ts';
+export async function loadLibrarikaEnrichment(directory,{allowIncompleteAuthorDetails=false}={}){
+ const read=name=>fs.readFileSync(path.join(directory,name),'utf8'),json=name=>JSON.parse(read(name));
+ const translations=json('biographies-uk-translations.json'),translationQa=json('biographies-uk-translations.qa.json'),reviews=json('reviews.verified.json'),details=json('author-details/authors-details.normalized.json'),verification=json('author-details/verification.json'),manifest=json('author-details/manifest.json'),authors=json('authors.normalized.json');
+ if(translations.format!=='librarika-biography-translations'||translations.version!==1||!translationQa.passed||translations.records.length!==translations.expectedCount||translations.records.length!==translationQa.recordCount||translationQa.sourceNormalizedFileSha256!==await sha256Text(read('authors.normalized.json'))||translationQa.translationFileSha256!==await sha256Text(read('biographies-uk-translations.json')))throw Error('Unverified biography translations');
+ if(reviews.format!=='librarika-reviews-readonly-dom'||reviews.version!==1||!reviews.complete||reviews.records.length!==reviews.expectedCount)throw Error('Incomplete verified reviews');
+ if(details.format!=='librarika-author-details-dom'||details.version!==1||!verification.passed||manifest.baseSourceFileSha256!==await sha256Text(read('authors.normalized.json'))||manifest.verified!==details.records.length||verification.verifiedCount!==details.records.length||details.expectedCount!==authors.records.length)throw Error('Invalid author details evidence');
+ for(const [name,hash]of Object.entries(verification.files)){if(!['authors-details.normalized.json','manifest.json','queue.json'].includes(name)||await sha256Text(read('author-details/'+name))!==hash)throw Error('Author detail artifact checksum changed');}
+ const detailsById=new Map(details.records.map(row=>[row.id,row]));if(detailsById.size!==details.records.length||manifest.sources.length!==details.records.length)throw Error('Duplicate or missing author detail IDs');
+ for(const source of manifest.sources){if(!/^raw\/\d+\.json$/.test(source.file)||source.file!==`raw/${source.id}.json`||await sha256Text(read('author-details/'+source.file))!==source.sha256)throw Error('Author detail source checksum changed');const normalized=detailsById.get(source.id);if(!normalized||normalized.sourceFile!==source.file||normalized.sourceFileSha256!==source.sha256)throw Error('Author detail normalization reference changed');}
+ const complete=verification.complete&&details.complete&&manifest.complete&&details.pending===0&&verification.pendingCount===0&&details.records.length===authors.records.length;
+ if(!complete&&!allowIncompleteAuthorDetails)throw Error(`Source login required: ${details.pending} author detail pages are not yet verified. No final plan was written.`);
+ const hashes={};for(const name of ['biographies-uk-translations.json','biographies-uk-translations.qa.json','reviews.verified.json','author-details/authors-details.normalized.json','author-details/verification.json','author-details/manifest.json'])hashes[name]=await sha256Text(read(name));
+ const safeReviews=reviews.records.map(({id,sourceMediaId,body,rating,ratingScale,createdAt,sourceRelativeDate})=>({id,sourceMediaId,body,rating,ratingScale,createdAt,sourceRelativeDate}));
+ return {enrichment:{translations:translations.records,reviews:{capturedAt:reviews.capturedAt,records:safeReviews},authorDetails:{complete,expectedCount:details.expectedCount,verified:details.records.length,pending:details.pending,records:details.records}},hashes};
+}

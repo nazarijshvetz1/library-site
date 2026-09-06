@@ -1720,7 +1720,7 @@ async function readyMaterialRequest(
         SELECT requested.*, m.id AS active_material_id,
                source.id AS active_source_id,
                COALESCE(h.quantity, 0) AS physical_quantity,
-               COALESCE(active_reservations.quantity, 0) AS reserved_quantity,
+               COALESCE(active_reservations.quantity, 0)+COALESCE((SELECT t.quantity FROM library_tracked_shelf_stock t WHERE t.material_id=requested.material_id AND t.location_id=requested.source_location_id AND t.condition=requested.condition),0) AS reserved_quantity,
                pickup.id AS pickup_id, pickup.name AS pickup_name
         FROM requested
         LEFT JOIN materials m ON m.id=requested.material_id
@@ -1883,7 +1883,7 @@ async function readyMaterialRequest(
             AND active.source_location_id=holding.location_id
             AND active.condition=holding.condition
             AND active.reserved_quantity>active.issued_quantity+active.released_quantity
-        ), 0)=?
+        ), 0)-COALESCE((SELECT tracked.quantity FROM library_tracked_shelf_stock tracked WHERE tracked.material_id=holding.material_id AND tracked.location_id=holding.location_id AND tracked.condition=holding.condition),0)=?
     `).bind(
       reservation.id,
       reservation.quantity,
@@ -3124,6 +3124,8 @@ function rebuildStockTotalsBulkStatement(
         FROM class_loan_items cli JOIN class_loans clo ON clo.id=cli.class_loan_id
         WHERE clo.status!='cancelled' AND cli.lifecycle_status='active'
           AND cli.quantity_issued>cli.quantity_returned
+        UNION ALL
+        SELECT e.material_id,1 AS quantity FROM reader_circulations rc JOIN library_copies c ON c.id=rc.copy_id JOIN library_editions e ON e.id=c.edition_id WHERE rc.accounting_mode='native' AND rc.status IN ('issued','overdue')
       ) outstanding_rows GROUP BY material_id
     ) outstanding ON outstanding.material_id=m.id
     LEFT JOIN (
@@ -3288,6 +3290,7 @@ async function executeIdempotentBatch<T>(
     if (
       errorMessage.includes("reservation_stock_conflict")
       || errorMessage.includes("reserved_stock_conflict")
+      || errorMessage.includes("tracked_stock_conflict")
     ) {
       throw new TeacherMaterialRequestError(
         "reservation_stock_conflict",

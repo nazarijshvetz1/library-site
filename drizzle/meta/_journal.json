@@ -316,6 +316,41 @@
       "when": 1788647129069,
       "tag": "0044_demonic_rafael_vega",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1788649099399,
+      "tag": "0045_harsh_molten_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1788649472039,
+      "tag": "0046_flawless_dreaming_celestial",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1788652426835,
+      "tag": "0047_oval_leo",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1788655019426,
+      "tag": "0048_third_morlocks",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "6",
+      "when": 1788658045719,
+      "tag": "0049_talented_colossus",
+      "breakpoints": true
     }
   ]
 }

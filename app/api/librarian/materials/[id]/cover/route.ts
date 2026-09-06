@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 
-import { normalizeCatalogId } from "@/lib/catalog-d1";
+import { normalizeCatalogId,getCatalogCoverAsset,type CatalogD1Database } from "@/lib/catalog-d1";
 import {
   type PromotedCoverSourceCleanup,
   settlePromotedCoverSource,
@@ -30,6 +30,18 @@ import {
 export const dynamic = "force-dynamic";
 
 type RouteContext = { params: Promise<{ id: string }> };
+
+export async function GET(_request:Request,context:RouteContext):Promise<Response>{
+ const authorization=await authorizeLibrarianApi();if(!authorization.ok)return authorization.response;
+ try{
+  const {id}=await context.params,asset=await getCatalogCoverAsset(env.DB as unknown as CatalogD1Database,id,"librarian");
+  const headers=new Headers({"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff","Cross-Origin-Resource-Policy":"same-origin"});
+  if(!asset)return new Response(null,{status:404,headers});
+  if(asset.externalUrl){headers.set("Location",asset.externalUrl);return new Response(null,{status:302,headers});}
+  const object=await env.COVER_UPLOADS.get(asset.storageKey);if(!object)return new Response(null,{status:404,headers});
+  headers.set("Content-Type",asset.mimeType);return new Response(object.body,{headers});
+ }catch{return librarianError(503,"cover_unavailable","Обкладинка тимчасово недоступна.",false);}
+}
 
 export async function POST(
   request: Request,

@@ -25,7 +25,7 @@ const STATUS_LABELS: Record<string, string> = {
   planned: "Заплановано", ordered: "Замовлено", partially_received: "Частково отримано", received: "Отримано",
   rejected: "Відхилено", cancelled: "Скасовано",
 };
-const PUBLIC_CATALOG_URL = "https://nazarijshvetz1.github.io/library-site/";
+const PUBLIC_CATALOG_URL = "https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/library";
 
 export default function TeacherAcquisitionPanel() {
   const [category, setCategory] = useState<"educational" | "literature">("educational");
@@ -95,7 +95,7 @@ export default function TeacherAcquisitionPanel() {
     setSelected(item); setTitle(item.title); setAuthor(item.author || "");
     setYear(item.year ? String(item.year) : ""); setSubject(item.subject || "");
     setTargetClass(formatCatalogClass(item.classFrom, item.classTo));
-    setSourceUrl(`${PUBLIC_CATALOG_URL}?material=${encodeURIComponent(item.id)}`);
+    setSourceUrl(`${PUBLIC_CATALOG_URL}?book=${encodeURIComponent(item.id)}`);
     setCatalog([]); setQuery(item.id); setDetailLoading(true);
     try {
       const response = await fetch(`/api/catalog-v2/${encodeURIComponent(item.id)}`, { cache: "no-store" });
@@ -105,7 +105,7 @@ export default function TeacherAcquisitionPanel() {
       setAuthor(detail.author || ""); setYear(detail.year ? String(detail.year) : "");
       setSubject(detail.subject || ""); setTargetClass(formatCatalogClass(detail.classFrom, detail.classTo));
       setSourceUrl(detail.links.find((link) => /^https?:\/\//iu.test(link.url))?.url
-        ?? `${PUBLIC_CATALOG_URL}?material=${encodeURIComponent(detail.id)}`);
+        ?? `${PUBLIC_CATALOG_URL}?book=${encodeURIComponent(detail.id)}`);
     } catch {
       // The catalog summary is enough to continue; an edition link is optional in this mode.
     } finally {

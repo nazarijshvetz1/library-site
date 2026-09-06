@@ -36,6 +36,9 @@ type LocationRow = {
   inventory_line_refs: number;
   request_refs: number;
   reservation_refs: number;
+  copy_refs: number;
+  copy_movement_refs: number;
+  active_copies: number;
 };
 
 export type ManagedLocation = {
@@ -143,6 +146,7 @@ export async function updateManagedLocation(
   const deactivationGuard = next.status === "inactive" ? `
         AND type != 'library'
         AND NOT EXISTS (SELECT 1 FROM holdings h WHERE h.location_id = locations.id AND h.quantity > 0)
+        AND NOT EXISTS (SELECT 1 FROM library_copies c WHERE c.location_id=locations.id AND c.registration='registered' AND c.physical_state!='withdrawn')
         AND NOT EXISTS (
           SELECT 1 FROM material_request_reservations r
           WHERE r.source_location_id = locations.id
@@ -222,6 +226,9 @@ async function requireLocation(db: LocationRegistryDatabase, id: string): Promis
 function locationDirectorySql(): string {
   return `
     SELECT l.*,
+      (SELECT COUNT(*) FROM library_copies c WHERE c.location_id=l.id) AS copy_refs,
+      (SELECT COUNT(*) FROM library_copy_movements x WHERE x.source_location_id=l.id OR x.destination_location_id=l.id) AS copy_movement_refs,
+      (SELECT COUNT(*) FROM library_copies c WHERE c.location_id=l.id AND c.registration='registered' AND c.physical_state!='withdrawn') AS active_copies,
       COALESCE((SELECT SUM(h.quantity) FROM holdings h WHERE h.location_id = l.id), 0) AS stock_quantity,
       COALESCE((SELECT SUM(r.reserved_quantity-r.issued_quantity-r.released_quantity) FROM material_request_reservations r WHERE r.source_location_id = l.id AND r.reserved_quantity > r.issued_quantity+r.released_quantity), 0) AS active_reservations,
       (SELECT COUNT(*) FROM class_years cy WHERE cy.location_id = l.id AND cy.status IN ('planned','active')) AS active_classes,
@@ -244,7 +251,7 @@ function locationDirectorySql(): string {
 
 function toManagedLocation(row: LocationRow): ManagedLocation {
   const totalReferences = [row.teacher_profile_refs, row.class_year_refs, row.holding_refs, row.class_loan_item_refs,
-    row.class_loan_line_refs, row.loan_item_refs, row.inventory_line_refs, row.request_refs, row.reservation_refs]
+    row.class_loan_line_refs, row.loan_item_refs, row.inventory_line_refs, row.request_refs, row.reservation_refs,row.copy_refs,row.copy_movement_refs]
     .reduce((sum, value) => sum + nonNegative(value), 0);
   const dependencies = {
     stockQuantity: nonNegative(row.stock_quantity),
@@ -255,6 +262,7 @@ function toManagedLocation(row: LocationRow): ManagedLocation {
     totalReferences,
   };
   const blockers: string[] = [];
+  if(nonNegative(row.active_copies))blockers.push(`${row.active_copies} зареєстрованих примірників`);
   if (row.type === "library") blockers.push("основне місце бібліотеки");
   if (dependencies.stockQuantity) blockers.push(`${dependencies.stockQuantity} примірників`);
   if (dependencies.activeReservations) blockers.push(`${dependencies.activeReservations} активних резервів`);

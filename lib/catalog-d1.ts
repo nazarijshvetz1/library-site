@@ -35,6 +35,7 @@ export type CatalogD1Database = {
 export type CatalogSort = "title" | "newest";
 
 export type CatalogListQuery = {
+  fund?: "all" | "education";
   q: string;
   title: string;
   rubric: string;
@@ -87,6 +88,8 @@ export type CatalogLink = {
 };
 
 export type CatalogHolding = {
+  trackedQuantity?: number;
+  untrackedAvailableQuantity?: number;
   locationId: string;
   locationName: string;
   locationType: string;
@@ -213,6 +216,7 @@ export function parseCatalogListQuery(
   options: {
     defaultLimit?: number;
     maxLimit?: number;
+    defaultFund?: "all" | "education";
   } = {},
 ): CatalogListQuery {
   const url = input instanceof URL ? input : new URL(input);
@@ -237,6 +241,7 @@ export function parseCatalogListQuery(
   );
   const sort = parseSort(url.searchParams.get("sort"));
   const queryWithoutCursor: Omit<CatalogListQuery, "cursor"> = {
+    fund: url.searchParams.get("fund") === "education" ? "education" : url.searchParams.get("fund") === "all" ? "all" : options.defaultFund || "all",
     q,
     title,
     rubric,
@@ -257,15 +262,15 @@ export function parseCatalogListQuery(
 export async function listCatalogMaterials(
   db: CatalogD1Database,
   query: CatalogListQuery,
-  options: { useFts?: boolean; includeArchived?: boolean } = {},
+  options: { useFts?: boolean; includeArchived?: boolean; scope?: "public" | "librarian" } = {},
 ): Promise<CatalogListResult> {
-  let statement = buildCatalogListStatement(query, options.useFts !== false, options.includeArchived);
+  let statement = buildCatalogListStatement(query, options.useFts !== false, options.includeArchived, options.scope);
   let response: CatalogD1Result;
   try {
     response = await db.prepare(statement.sql).bind(...statement.bindings).all();
   } catch (error) {
     if (!statement.usesFts || !isMissingFtsError(error)) throw error;
-    statement = buildCatalogListStatement(query, false, options.includeArchived);
+    statement = buildCatalogListStatement(query, false, options.includeArchived, options.scope);
     response = await db.prepare(statement.sql).bind(...statement.bindings).all();
   }
   const rawRows = Array.isArray(response.results) ? response.results : [];
@@ -285,18 +290,20 @@ export async function listCatalogMaterials(
 export async function listCatalogRubrics(
   db: CatalogD1Database,
   limit = MAX_CATALOG_RUBRIC_OPTIONS,
+  scope: "public" | "librarian" = "public",
 ): Promise<string[]> {
-  return listCatalogFacetValues(db, "rubric", 180, limit);
+  return listCatalogFacetValues(db, "rubric", 180, limit, scope);
 }
 
 export async function listCatalogMaterialFacets(
   db: CatalogD1Database,
   limit = MAX_CATALOG_FACET_OPTIONS,
+  scope: "public" | "librarian" = "public",
 ): Promise<CatalogMaterialFacets> {
   const [rubrics, subjects, publicationTypes] = await Promise.all([
-    listCatalogFacetValues(db, "rubric", 180, limit),
-    listCatalogFacetValues(db, "subject", 180, limit),
-    listCatalogFacetValues(db, "publication_type", 120, limit),
+    listCatalogFacetValues(db, "rubric", 180, limit, scope),
+    listCatalogFacetValues(db, "subject", 180, limit, scope),
+    listCatalogFacetValues(db, "publication_type", 120, limit, scope),
   ]);
   return { rubrics, subjects, publicationTypes };
 }
@@ -362,6 +369,7 @@ export async function getCatalogMaterialDetail(
 export async function getCatalogCoverAsset(
   db: CatalogD1Database,
   materialId: string,
+  scope: "public" | "librarian" = "public",
 ): Promise<CatalogCoverAsset | null> {
   const id = normalizeCatalogId(materialId);
   if (!id) return null;
@@ -372,6 +380,7 @@ export async function getCatalogCoverAsset(
     JOIN materials m ON m.id = c.material_id
     WHERE c.material_id = ? AND c.status = 'ready'
       AND m.status = 'active' AND m.archived_at IS NULL
+      ${scope === "public" ? "AND NOT EXISTS(SELECT 1 FROM library_editions le WHERE le.material_id=m.id AND le.publication_state!='published')" : ""}
     LIMIT 1
   `).bind(id).first();
   if (!row) return null;
@@ -408,12 +417,14 @@ export function encodeCatalogCursor(cursor: CatalogCursor): string {
   }));
 }
 
-function buildCatalogListStatement(query: CatalogListQuery, useFts: boolean, includeArchived = false): {
+function buildCatalogListStatement(query: CatalogListQuery, useFts: boolean, includeArchived = false, scope: "public" | "librarian" = "public"): {
   sql: string;
   bindings: D1Value[];
   usesFts: boolean;
 } {
   const predicates = includeArchived ? ["1=1"] : ["m.status = 'active'", "m.archived_at IS NULL"];
+  if(scope==="public")predicates.push("NOT EXISTS(SELECT 1 FROM library_editions le WHERE le.material_id=m.id AND le.publication_state!='published')");
+  if(query.fund === "education")predicates.push("NOT EXISTS(SELECT 1 FROM library_editions le WHERE le.material_id=m.id AND le.fund='literature')");
   const bindings: D1Value[] = [];
   const exactId = normalizeCatalogId(query.q);
   const exactIsbn = normalizeCatalogIsbn(query.q);
@@ -580,6 +591,7 @@ function detailMaterialSql(scope: "public" | "librarian", includeArchived = fals
     LEFT JOIN material_cover_assets c
       ON c.material_id = m.id AND c.status = 'ready'
     WHERE m.id = ? ${includeArchived ? "" : "AND m.status = 'active' AND m.archived_at IS NULL"}
+      ${scope === "public" ? "AND NOT EXISTS(SELECT 1 FROM library_editions le WHERE le.material_id=m.id AND le.publication_state!='published')" : ""}
     LIMIT 1
   `;
 }
@@ -637,6 +649,7 @@ function detailHoldingsSql(scope: "public" | "librarian"): string {
       l.status AS location_status,
       h.condition,
       h.quantity AS physical_quantity,
+      COALESCE((SELECT quantity FROM library_tracked_shelf_stock tracked WHERE tracked.material_id=h.material_id AND tracked.location_id=h.location_id AND tracked.condition=h.condition),0) AS tracked_quantity,
       COALESCE((
         SELECT SUM(reservation.reserved_quantity-reservation.issued_quantity-reservation.released_quantity)
         FROM material_request_reservations reservation
@@ -730,6 +743,8 @@ function mapHoldingRow(
   const physicalQuantity = nonNegativeInteger(row.physical_quantity);
   const reservedQuantity = Math.min(physicalQuantity, nonNegativeInteger(row.reserved_quantity));
   const availableQuantity = Math.max(0, physicalQuantity - reservedQuantity);
+  const trackedQuantity = Math.min(physicalQuantity,nonNegativeInteger(row.tracked_quantity));
+  const untrackedAvailableQuantity = Math.max(0,availableQuantity-trackedQuantity);
   return {
     locationId,
     locationName,
@@ -741,8 +756,10 @@ function mapHoldingRow(
     physicalQuantity,
     reservedQuantity,
     availableQuantity,
+    trackedQuantity,
+    untrackedAvailableQuantity,
     // Backwards-compatible effective availability used by existing issue forms.
-    quantity: Math.min(availableQuantity, nonNegativeInteger(row.quantity)),
+    quantity: Math.min(scope==="librarian"?untrackedAvailableQuantity:availableQuantity, nonNegativeInteger(row.quantity)),
     updatedAt: boundedText(row.updated_at, 40),
   };
 }
@@ -754,15 +771,17 @@ async function listCatalogFacetValues(
   column: CatalogFacetColumn,
   maximumLength: number,
   limit: number,
+  scope: "public" | "librarian",
 ): Promise<string[]> {
   const boundedLimit = Number.isInteger(limit)
     ? Math.max(1, Math.min(limit, MAX_CATALOG_FACET_OPTIONS))
     : MAX_CATALOG_FACET_OPTIONS;
   const response = await db.prepare(`
     SELECT DISTINCT TRIM(${column}) AS value
-    FROM materials
+    FROM materials m
     WHERE status = 'active' AND archived_at IS NULL
       AND TRIM(${column}) != ''
+      ${scope === "public" ? "AND NOT EXISTS(SELECT 1 FROM library_editions le WHERE le.material_id=m.id AND le.publication_state!='published')" : ""}
     ORDER BY value ASC
     LIMIT ?
   `).bind(boundedLimit).all();
@@ -880,6 +899,7 @@ function catalogQueryScope(
   ];
   const normalizedTitle = normalizeCatalogSearchText(query.title);
   if (normalizedTitle) canonicalParts.push(`title:${normalizedTitle}`);
+  if(query.fund === "education")canonicalParts.push("fund:education");
   return `${query.sort}:${fnv1a(JSON.stringify(canonicalParts))}`;
 }
 

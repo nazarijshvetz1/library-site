@@ -19,7 +19,7 @@ const PUBLIC_HEADERS = {
 
 export async function GET(request: Request): Promise<Response> {
   try {
-    const query = parseCatalogListQuery(new URL(request.url));
+    const query = parseCatalogListQuery(new URL(request.url), { defaultFund: "education" });
     const result = await listCatalogMaterials(
       env.DB as unknown as CatalogD1Database,
       query,

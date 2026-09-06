@@ -7,8 +7,8 @@ import {
 } from "./chatgpt-auth";
 import SiteIcon from "./_components/site-icon";
 
-const PUBLIC_CATALOG_URL = "https://nazarijshvetz1.github.io/library-site/";
-const LOGO_URL = `${PUBLIC_CATALOG_URL}library-logo.png`;
+const PUBLIC_CATALOG_URL = "/library";
+const LOGO_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +46,7 @@ export default async function Home() {
           </p>
 
           <div className="hero-actions">
+            <a className="button button-secondary" href="/reader">Кабінет учня / читача</a>
             <a className="button button-secondary" href="/teacher">
               Кабінет учителя
             </a>

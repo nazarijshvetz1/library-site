@@ -2,8 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildLibrarikaImportPlan, sha256Text } from "../lib/librarika-import-plan.ts";
 import { parseLibrarikaCsv } from "../lib/librarika-csv.ts";
+import {loadLibrarikaEnrichment} from "./load-librarika-enrichment.mjs";
 
 const args=process.argv.slice(2);
+const allowIncompleteAuthorDetails=args[5]==="--allow-incomplete-author-details";
+if(allowIncompleteAuthorDetails)args.pop();
 if(args.length!==5)throw new Error("Usage: build-librarika-plan CANONICAL_JSON PUBLIC_METADATA_MANIFEST VERIFIED_RECOVERY_DIRECTORY TAXONOMY_DIRECTORY NEW_PRIVATE_OUTPUT_DIRECTORY");
 const [sourcePath,metadataPath,recoveryPath,taxonomyPath,output]=args.map(value=>path.resolve(value));
 if(!output.split(path.sep).includes(".migration-private")||fs.existsSync(output))throw new Error("A new private output directory is required");
@@ -28,11 +31,12 @@ for(const artifact of taxonomyManifest.sourceFiles){
 const authorsText=fs.readFileSync(path.join(taxonomyPath,"authors.normalized.json"),"utf8"),publishersText=fs.readFileSync(path.join(taxonomyPath,"publishers.normalized.json"),"utf8");
 const authors=JSON.parse(authorsText),publishers=JSON.parse(publishersText);
 if(!authors.complete||!publishers.complete)throw new Error("Incomplete taxonomy capture");
-const inputHashes={mapperVersion:3,canonicalCsvSha256:await sha256Text(sourceText),publicBookMetadataSha256:await sha256Text(metadataText),authorsSha256:await sha256Text(authorsText),publishersSha256:await sha256Text(publishersText),taxonomyManifestSha256:await sha256Text(JSON.stringify(taxonomyManifest))};
-const plan=await buildLibrarikaImportPlan(source.data,metadata.records,{sourceSha256:await sha256Text(JSON.stringify(inputHashes)),recoverySha256:recovery.sha256,capturedAt:source.manifest.capturedAt},{authors:authors.records,publishers:publishers.records});
+const {enrichment,hashes:enrichmentHashes}=await loadLibrarikaEnrichment(taxonomyPath,{allowIncompleteAuthorDetails});
+const inputHashes={mapperVersion:4,canonicalCsvSha256:await sha256Text(sourceText),publicBookMetadataSha256:await sha256Text(metadataText),authorsSha256:await sha256Text(authorsText),publishersSha256:await sha256Text(publishersText),taxonomyManifestSha256:await sha256Text(JSON.stringify(taxonomyManifest)),enrichmentHashes};
+const plan=await buildLibrarikaImportPlan(source.data,metadata.records,{sourceSha256:await sha256Text(JSON.stringify(inputHashes)),recoverySha256:recovery.sha256,capturedAt:source.manifest.capturedAt},{authors:authors.records,publishers:publishers.records},enrichment);
 plan.inputHashes=inputHashes;
 fs.mkdirSync(output,{recursive:true});
 fs.writeFileSync(path.join(output,"plan-private.json"),JSON.stringify(plan),{flag:"wx"});
-const report={format:plan.format,runId:plan.runId,counts:plan.counts,warnings:plan.warnings,historicalReviewTitles:plan.historicalReviews.length,safeguards:plan.safeguards,sha256:await sha256Text(JSON.stringify(plan))};
+const report={format:plan.format,runId:plan.runId,counts:plan.counts,warnings:plan.warnings,historicalReviewTitles:plan.historicalReviews.length,safeguards:plan.safeguards,sourceCompleteness:plan.sourceCompleteness,sha256:await sha256Text(JSON.stringify(plan))};
 fs.writeFileSync(path.join(output,"report.json"),JSON.stringify(report,null,2),{flag:"wx"});
 console.log(JSON.stringify(report));

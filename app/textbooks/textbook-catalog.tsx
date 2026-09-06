@@ -9,8 +9,8 @@ import { useEffect, useMemo, useState } from "react";
 import SiteIcon from "@/app/_components/site-icon";
 import styles from "./textbooks.module.css";
 
-const PUBLIC_CATALOG_URL = "https://nazarijshvetz1.github.io/library-site/";
-const LOGO_URL = `${PUBLIC_CATALOG_URL}library-logo.png`;
+const PUBLIC_CATALOG_URL = "/library";
+const LOGO_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
 const GRADES = Array.from({ length: 11 }, (_, index) => index + 1);
 
 type Resource = {

@@ -1,3 +1,4 @@
+import {processReaderTelegramMessage} from "./reader-telegram.ts";
 import type { ChatGPTUser } from "../app/chatgpt-auth.ts";
 import { getRuntimeBoolean, getRuntimeString } from "./runtime-env.ts";
 
@@ -29,7 +30,7 @@ const TELEGRAM_MAX_ATTEMPTS = 8;
 const TELEGRAM_DRAIN_LIMIT = 10;
 const TELEGRAM_API_TIMEOUT_MS = 6_000;
 const TELEGRAM_BOT_API = "https://api.telegram.org";
-const PUBLIC_CATALOG_URL = "https://nazarijshvetz1.github.io/library-site/";
+const PUBLIC_CATALOG_URL = "/library";
 export const TELEGRAM_TEACHER_MENU_VERSION = 2;
 const TELEGRAM_TEACHER_MENU_OUTBOX_TYPE = "teacher_menu_refresh";
 const TELEGRAM_TEACHER_MENU_ENTITY = `menu-v${TELEGRAM_TEACHER_MENU_VERSION}`;
@@ -1223,6 +1224,10 @@ export async function processTelegramWebhookUpdate(
     return { outcome: "ignored_non_private", duplicate: !inserted };
   }
   const privateMessage = update.message;
+  if(siteOrigin){
+    const readerResult=await processReaderTelegramMessage(db,{message:privateMessage,updateId:update.updateId,payloadHash,siteOrigin:trustedSiteOrigin(siteOrigin),send:body=>telegramApiRequest(configuration.botToken,"sendMessage",body,fetcher)});
+    if(readerResult)return readerResult;
+  }
   const command = telegramCommand(privateMessage.text);
   if (siteOrigin && command.kind !== "other") {
     await bestEffortRefreshWebhookSubscriptions(configuration, siteOrigin, fetcher);
@@ -2137,7 +2142,7 @@ async function telegramSendMessage(
   return { messageId };
 }
 
-async function telegramApiRequest(
+export async function telegramApiRequest(
   botToken: string,
   method: string,
   body: Record<string, unknown>,
@@ -2346,8 +2351,8 @@ async function bestEffortTeacherOnboardingMenu(
         [{
           text: "📚 Переглянути каталог",
           ...(configuration.miniAppEnabled
-            ? { web_app: { url: PUBLIC_CATALOG_URL } }
-            : { url: PUBLIC_CATALOG_URL }),
+            ? { web_app: { url: new URL("/reader/telegram?tab=catalog",origin).toString() } }
+            : { url: new URL(PUBLIC_CATALOG_URL,origin).toString() }),
         }],
         [{ text: "📅 Переглянути графік", url: new URL("/visits", origin).toString() }],
       ],
@@ -2724,7 +2729,7 @@ function telegramRoleKeyboard(
     const buttons = [
       ["👤 Кабінет учителя", "/teacher/telegram?tab=overview"],
       ["✨ Містер Букінгем · ШІ", "/teacher/telegram?tab=assistant"],
-      ["📚 Каталог", PUBLIC_CATALOG_URL],
+      ["📚 Каталог", miniAppEnabled ? "/reader/telegram?tab=catalog" : PUBLIC_CATALOG_URL],
       ["🛒 Замовлення з фонду бібліотеки", "/teacher/telegram?tab=orders"],
       ["➕ Запропонувати придбання", "/teacher/telegram?tab=acquisition"],
       ["📅 Записатися / мої відвідування", "/teacher/telegram?tab=visits"],

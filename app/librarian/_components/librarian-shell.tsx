@@ -13,6 +13,7 @@ import {
 import {
   LIBRARY_EMBLEM_URL,
   librarianSectionHref,
+  librarianLiteratureHref,
   librarianTextbooksHref,
   librarianToolHref,
   librarianUtilityHref,
@@ -553,7 +554,8 @@ function standardLibrarianSubsections(telegramMiniApp: boolean): LibrarianSubsec
   const reportsBase = librarianSectionHref("reports", telegramMiniApp);
   const acquisitionsBase = librarianSectionHref("acquisitions", telegramMiniApp);
   return [
-    { id: "catalog", section: "fund", label: "Каталог", hint: "Пошук і картка", icon: "catalog", href: librarianToolHref("catalog", telegramMiniApp) },
+    { id: "catalog", section: "fund", label: "Підручники й посібники", hint: "Пошук і картка", icon: "catalog", href: librarianToolHref("catalog", telegramMiniApp) },
+    { id: "literature", section: "fund", label: "Художня та наукова література", hint: "Книги й читачі", icon: "catalog", href: librarianLiteratureHref(telegramMiniApp) },
     { id: "create", section: "fund", label: "Новий матеріал", hint: "Додати до фонду", icon: "new-material", href: librarianToolHref("create", telegramMiniApp) },
     { id: "textbooks", section: "fund", label: "Е-підручники", hint: "Список для учнів", icon: "textbooks", href: librarianTextbooksHref(telegramMiniApp) },
     { id: "issue", section: "circulation", label: "Видача вчителю", hint: "Оформити видачу", icon: "issue-teacher", href: librarianToolHref("issue", telegramMiniApp) },

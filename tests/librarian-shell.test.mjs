@@ -65,8 +65,8 @@ test("shared librarian route helper freezes web and Telegram Mini App destinatio
     assert.equal(librarianSectionHref(section, false), expectedWebRoutes[section]);
     assert.equal(librarianSectionHref(section, true), expectedTelegramRoutes[section]);
   }
-  assert.equal(librarianUtilityHref("publicCatalog", false), "https://nazarijshvetz1.github.io/library-site/");
-  assert.equal(librarianUtilityHref("publicCatalog", true), "https://nazarijshvetz1.github.io/library-site/");
+  assert.equal(librarianUtilityHref("publicCatalog", false), "/library");
+  assert.equal(librarianUtilityHref("publicCatalog", true), "/library");
   assert.equal(librarianUtilityHref("excelExport", false), "/librarian/reports");
   assert.equal(librarianUtilityHref("excelExport", true), null);
   assert.equal(librarianUtilityHref("excelImport", false), "/librarian/import");
@@ -105,7 +105,7 @@ test("LibrarianShell keeps the official emblem, full-page navigation, and access
   assert.match(source, /activeSubsection\?: string/u);
   assert.match(source, /onSubsectionNavigate\?: \(id: string\) => boolean/u);
   assert.match(source, /function standardLibrarianSubsections\(telegramMiniApp: boolean\)/u);
-  assert.match(source, /label: "Каталог"[\s\S]*?label: "Новий матеріал"[\s\S]*?label: "Е-підручники"/u);
+  assert.match(source, /label: "Підручники й посібники"[\s\S]*?label: "Художня та наукова література"[\s\S]*?label: "Новий матеріал"[\s\S]*?label: "Е-підручники"/u);
   assert.match(source, /label: "Е-підручники"[\s\S]*?librarianTextbooksHref\(telegramMiniApp\)/u);
   assert.doesNotMatch(source, /telegramMiniApp \? \[\] : \[[\s\S]*?Е-підручники/u);
   assert.match(source, /function mergeSubsections/u);

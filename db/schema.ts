@@ -31,6 +31,21 @@ export const libraryImportRuns = sqliteTable("library_import_runs", {
   check("library_import_recovery_hash",sql`length(${table.recoverySha256})=64 and ${table.recoverySha256} not glob '*[^0-9a-f]*'`),
 ]);
 
+export const libraryImportCoverReceipts = sqliteTable("library_import_cover_receipts", {
+  importRunId: text("import_run_id").notNull().references(() => libraryImportRuns.id, {onDelete:"restrict"}),
+  sha256: text("sha256").notNull(),
+  objectKey: text("object_key").notNull(),
+  byteLength: integer("byte_length").notNull(),
+  mimeType: text("mime_type").notNull(),
+  verifiedAt: text("verified_at").notNull(),
+}, table => [
+  primaryKey({columns:[table.importRunId,table.sha256]}),
+  check("library_import_cover_hash",sql`length(${table.sha256})=64 and ${table.sha256} not glob '*[^0-9a-f]*'`),
+  check("library_import_cover_key",sql`${table.objectKey}='librarika-covers/' || ${table.sha256}`),
+  check("library_import_cover_bytes",sql`${table.byteLength}>0 and ${table.byteLength}<=12582912`),
+  check("library_import_cover_mime",sql`${table.mimeType} in ('image/jpeg','image/png','image/webp')`),
+]);
+
 export const libraryEditions = sqliteTable("library_editions", {
   id: text("id").primaryKey(),
   sourceMediaId: text("source_media_id"),
@@ -186,6 +201,126 @@ export const libraryHistoricalReviews = sqliteTable("library_historical_reviews"
   check("library_historical_json",sql`json_valid(${table.sourceJson})`),
   check("library_historical_publication",sql`${table.publicationState} in ('draft','published','hidden')`),
 ]);
+
+// Reader identity is isolated from staff privileges and never created by CSV import.
+export const readerProfiles=sqliteTable("reader_profiles",{
+  readerId:text("reader_id").primaryKey().references(()=>libraryReaders.id,{onDelete:"restrict"}),
+  displayName:text("display_name").notNull().default("Читач"),phone:text("phone").notNull().default(""),
+  photoKey:text("photo_key"),photoMime:text("photo_mime"),communityEnabled:integer("community_enabled").notNull().default(0),
+  notifyLoans:integer("notify_loans").notNull().default(0),notifyBooks:integer("notify_books").notNull().default(0),
+  // Loan consent floor is a Europe/Kyiv YYYY-MM-DD calendar day, not a UTC timestamp.
+  notifyLoansSince:text("notify_loans_since"),notifyBooksSince:text("notify_books_since"),
+  version:integer("version").notNull().default(1),updatedAt:text("updated_at").notNull(),
+},t=>[check("reader_profile_flags",sql`${t.communityEnabled} in (0,1) and ${t.notifyLoans} in (0,1) and ${t.notifyBooks} in (0,1)`),check("reader_profile_version",sql`${t.version}>0`)]);
+
+export const readerInvites=sqliteTable("reader_invites",{
+  tokenHash:text("token_hash").primaryKey(),readerId:text("reader_id").notNull().references(()=>libraryReaders.id,{onDelete:"restrict"}),
+  accessVersion:integer("access_version").notNull(),purpose:text("purpose").notNull(),expiresAt:text("expires_at").notNull(),
+  consumedAt:text("consumed_at"),revokedAt:text("revoked_at"),createdAt:text("created_at").notNull(),
+  createdBy:text("created_by").notNull().references(():AnySQLiteColumn=>users.id,{onDelete:"restrict"}),
+},t=>[index("idx_reader_invite_reader").on(t.readerId,t.expiresAt),check("reader_invite_purpose",sql`${t.purpose} in ('web','telegram')`),check("reader_invite_hash",sql`length(${t.tokenHash})=64`)]);
+
+export const readerSessions=sqliteTable("reader_sessions",{
+  tokenHash:text("token_hash").primaryKey(),readerId:text("reader_id").notNull().references(()=>libraryReaders.id,{onDelete:"restrict"}),
+  accessVersion:integer("access_version").notNull(),telegramUserId:text("telegram_user_id"),
+  createdAt:text("created_at").notNull(),expiresAt:text("expires_at").notNull(),revokedAt:text("revoked_at"),
+},t=>[index("idx_reader_session_owner").on(t.readerId,t.expiresAt),check("reader_session_hash",sql`length(${t.tokenHash})=64`)]);
+
+export const readerTelegramConnections=sqliteTable("reader_telegram_connections",{
+  telegramUserId:text("telegram_user_id").primaryKey(),readerId:text("reader_id").notNull().references(()=>libraryReaders.id,{onDelete:"restrict"}),
+  chatId:text("chat_id").notNull(),status:text("status").notNull().default("active"),version:integer("version").notNull().default(1),
+  linkedAt:text("linked_at").notNull(),disabledAt:text("disabled_at"),lastFailureAt:text("last_failure_at"),
+},t=>[uniqueIndex("idx_reader_telegram_owner").on(t.readerId),uniqueIndex("idx_reader_telegram_chat").on(t.chatId),check("reader_telegram_status",sql`${t.status} in ('active','disabled','blocked')`)]);
+
+export const readerTelegramReceipts=sqliteTable("reader_telegram_receipts",{
+  initDataHash:text("init_data_hash").primaryKey(),telegramUserId:text("telegram_user_id").notNull(),
+  readerId:text("reader_id").notNull().references(()=>libraryReaders.id,{onDelete:"restrict"}),expiresAt:text("expires_at").notNull(),createdAt:text("created_at").notNull(),
+});
+
+export const readerAuthLimits=sqliteTable("reader_auth_limits",{
+  scopeHash:text("scope_hash").primaryKey(),windowStart:text("window_start").notNull(),attempts:integer("attempts").notNull(),updatedAt:text("updated_at").notNull(),
+});
+
+export const readerPhotoCleanup=sqliteTable("reader_photo_cleanup",{
+  key:text("key").primaryKey(),notBefore:text("not_before").notNull(),createdAt:text("created_at").notNull(),
+},t=>[index("idx_reader_photo_cleanup_due").on(t.notBefore)]);
+
+export const readerMutationReceipts=sqliteTable("reader_mutation_receipts",{
+  id:text("id").primaryKey(),readerId:text("reader_id").notNull().references(()=>libraryReaders.id,{onDelete:"restrict"}),
+  kind:text("kind").notNull(),requestHash:text("request_hash").notNull(),resultJson:text("result_json").notNull(),createdAt:text("created_at").notNull(),
+},t=>[index("idx_reader_receipt_owner").on(t.readerId,t.createdAt),check("reader_receipt_json",sql`json_valid(${t.resultJson})`)]);
+
+export const readerBookRequests=sqliteTable("reader_book_requests",{
+  id:text("id").primaryKey(),readerId:text("reader_id").notNull().references(()=>libraryReaders.id,{onDelete:"restrict"}),
+  editionId:text("edition_id").notNull().references(()=>libraryEditions.id,{onDelete:"restrict"}),
+  status:text("status").notNull().default("requested"),note:text("note").notNull().default(""),
+  version:integer("version").notNull().default(1),createdAt:text("created_at").notNull(),updatedAt:text("updated_at").notNull(),
+  fulfilledCirculationId:text("fulfilled_circulation_id").references(()=>readerCirculations.id,{onDelete:"restrict"}),
+},t=>[index("idx_reader_request_owner").on(t.readerId,t.status,t.createdAt),index("idx_reader_request_edition").on(t.editionId,t.status),
+  uniqueIndex("idx_reader_request_open").on(t.readerId,t.editionId).where(sql`${t.status} in ('requested','ready')`),
+  check("reader_request_status",sql`${t.status} in ('requested','ready','fulfilled','cancelled','rejected')`)]);
+
+export const libraryRatings=sqliteTable("library_ratings",{
+  editionId:text("edition_id").notNull().references(()=>libraryEditions.id,{onDelete:"restrict"}),
+  readerId:text("reader_id").notNull().references(()=>libraryReaders.id,{onDelete:"restrict"}),rating:integer("rating").notNull(),
+  body:text("body").notNull().default(""),reviewState:text("review_state").notNull().default("pending"),
+  version:integer("version").notNull().default(1),createdAt:text("created_at").notNull(),updatedAt:text("updated_at").notNull(),
+},t=>[primaryKey({columns:[t.editionId,t.readerId]}),index("idx_library_rating_public").on(t.editionId,t.reviewState),check("library_rating_value",sql`${t.rating} between 1 and 5`),check("library_review_state",sql`${t.reviewState} in ('pending','published','hidden')`),check("library_review_body",sql`length(${t.body})<=4000`)]);
+
+export const readerBookSubscriptions=sqliteTable("reader_book_subscriptions",{
+  readerId:text("reader_id").notNull().references(()=>libraryReaders.id,{onDelete:"restrict"}),
+  editionId:text("edition_id").notNull().references(()=>libraryEditions.id,{onDelete:"restrict"}),createdAt:text("created_at").notNull(),
+},t=>[primaryKey({columns:[t.readerId,t.editionId]})]);
+
+export const libraryCopyMovements=sqliteTable("library_copy_movements",{
+  id:text("id").primaryKey(),copyId:text("copy_id").notNull().references(()=>libraryCopies.id,{onDelete:"restrict"}),
+  circulationId:text("circulation_id").references(()=>readerCirculations.id,{onDelete:"restrict"}),
+  commandId:text("command_id").notNull().references(():AnySQLiteColumn=>mutationCommands.id,{onDelete:"restrict"}),
+  kind:text("kind").notNull(),previousState:text("previous_state").notNull(),nextState:text("next_state").notNull(),
+  sourceLocationId:text("source_location_id").references(():AnySQLiteColumn=>locations.id,{onDelete:"restrict"}),
+  destinationLocationId:text("destination_location_id").references(():AnySQLiteColumn=>locations.id,{onDelete:"restrict"}),
+  note:text("note").notNull().default(""),createdAt:text("created_at").notNull(),
+},t=>[index("idx_library_copy_movement").on(t.copyId,t.createdAt),check("library_copy_movement_kind",sql`${t.kind} in ('register','issue','return','transfer','condition','withdraw','reconcile')`)]);
+
+export const readerNotificationOutbox=sqliteTable("reader_notification_outbox",{
+  id:text("id").primaryKey(),readerId:text("reader_id").notNull().references(()=>libraryReaders.id,{onDelete:"restrict"}),
+  circulationId:text("circulation_id").references(()=>readerCirculations.id,{onDelete:"restrict"}),editionId:text("edition_id").references(()=>libraryEditions.id,{onDelete:"restrict"}),
+  kind:text("kind").notNull(),expectedVersion:integer("expected_version"),dueDate:text("due_date"),
+  status:text("status").notNull().default("pending"),attempts:integer("attempts").notNull().default(0),
+  nextAttemptAt:text("next_attempt_at").notNull(),leaseToken:text("lease_token"),leaseUntil:text("lease_until"),
+  createdAt:text("created_at").notNull(),sentAt:text("sent_at"),lastError:text("last_error"),
+},t=>[index("idx_reader_notification_queue").on(t.status,t.nextAttemptAt),check("reader_notification_kind",sql`${t.kind} in ('due_soon','due_today','overdue','book_available')`),check("reader_notification_status",sql`${t.status} in ('pending','processing','sent','cancelled','failed')`)]);
+
+export const readingThreads=sqliteTable("reading_threads",{
+  id:text("id").primaryKey(),kind:text("kind").notNull(),title:text("title").notNull(),
+  ownerReaderId:text("owner_reader_id").notNull().references(()=>libraryReaders.id,{onDelete:"restrict"}),
+  editionId:text("edition_id").references(()=>libraryEditions.id,{onDelete:"restrict"}),directPairKey:text("direct_pair_key"),
+  status:text("status").notNull().default("active"),createdAt:text("created_at").notNull(),updatedAt:text("updated_at").notNull(),
+},t=>[uniqueIndex("idx_reading_direct_pair").on(t.directPairKey),index("idx_reading_book_thread").on(t.editionId,t.kind,t.status),uniqueIndex("idx_reading_book_active").on(t.editionId).where(sql`${t.kind}='book' and ${t.status}='active'`),
+  check("reading_thread_kind",sql`${t.kind} in ('book','group','direct')`),check("reading_thread_status",sql`${t.status} in ('active','closed','hidden')`),
+  check("reading_thread_direct_key",sql`(${t.kind}='direct' and ${t.directPairKey} is not null) or (${t.kind}!='direct' and ${t.directPairKey} is null)`)]);
+
+export const readingMemberships=sqliteTable("reading_memberships",{
+  threadId:text("thread_id").notNull().references(()=>readingThreads.id,{onDelete:"restrict"}),readerId:text("reader_id").notNull().references(()=>libraryReaders.id,{onDelete:"restrict"}),
+  role:text("role").notNull().default("member"),status:text("status").notNull().default("invited"),createdAt:text("created_at").notNull(),updatedAt:text("updated_at").notNull(),
+},t=>[primaryKey({columns:[t.threadId,t.readerId]}),index("idx_reading_member_threads").on(t.readerId,t.status),check("reading_membership_role",sql`${t.role} in ('owner','moderator','member')`),check("reading_membership_status",sql`${t.status} in ('invited','accepted','declined','left','removed')`)]);
+
+export const readingMessages=sqliteTable("reading_messages",{
+  id:text("id").primaryKey(),threadId:text("thread_id").notNull().references(()=>readingThreads.id,{onDelete:"restrict"}),
+  readerId:text("reader_id").notNull().references(()=>libraryReaders.id,{onDelete:"restrict"}),body:text("body").notNull().default(""),
+  editionId:text("edition_id").references(()=>libraryEditions.id,{onDelete:"restrict"}),status:text("status").notNull().default("visible"),createdAt:text("created_at").notNull(),
+},t=>[index("idx_reading_message_thread").on(t.threadId,t.createdAt,t.id),index("idx_reading_message_rate").on(t.readerId,t.createdAt),check("reading_message_body",sql`length(${t.body})<=4000 and (length(trim(${t.body}))>0 or ${t.editionId} is not null)`),check("reading_message_status",sql`${t.status} in ('visible','removed','hidden')`)]);
+
+export const readerBlocks=sqliteTable("reader_blocks",{
+  readerId:text("reader_id").notNull().references(()=>libraryReaders.id,{onDelete:"restrict"}),blockedReaderId:text("blocked_reader_id").notNull().references(()=>libraryReaders.id,{onDelete:"restrict"}),createdAt:text("created_at").notNull(),
+},t=>[primaryKey({columns:[t.readerId,t.blockedReaderId]}),check("reader_block_self",sql`${t.readerId}!=${t.blockedReaderId}`)]);
+
+export const readingReports=sqliteTable("reading_reports",{
+  id:text("id").primaryKey(),reporterReaderId:text("reporter_reader_id").notNull().references(()=>libraryReaders.id,{onDelete:"restrict"}),
+  threadId:text("thread_id").notNull().references(()=>readingThreads.id,{onDelete:"restrict"}),messageId:text("message_id").references(()=>readingMessages.id,{onDelete:"restrict"}),
+  reason:text("reason").notNull(),status:text("status").notNull().default("open"),createdAt:text("created_at").notNull(),resolvedAt:text("resolved_at"),
+  resolvedBy:text("resolved_by").references(():AnySQLiteColumn=>users.id,{onDelete:"restrict"}),
+},t=>[index("idx_reading_reports_open").on(t.status,t.createdAt),check("reading_report_reason",sql`length(trim(${t.reason})) between 5 and 2000`),check("reading_report_status",sql`${t.status} in ('open','resolved','dismissed')`)]);
 
 // Assistant metadata only: catalog, loans and visits keep their existing tables.
 export const assistantConsents = sqliteTable("assistant_consents", {

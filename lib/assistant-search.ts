@@ -12,11 +12,11 @@ export async function searchAssistantCatalog(db: CatalogD1Database, args: Record
   for (const [key, value] of Object.entries(args)) if (mapping[key] && value !== null) url.searchParams.set(mapping[key], String(value));
   url.searchParams.set("limit", "12");
   if (url.searchParams.get("subject")) {
-    const facets = await listCatalogMaterialFacets(db);
+    const facets = await listCatalogMaterialFacets(db, undefined, librarian ? "librarian" : "public");
     const canonical = facets.subjects.find((s) => normalizeCatalogSearchText(s) === normalizeCatalogSearchText(args.subject));
     if (canonical) url.searchParams.set("subject", canonical);
   }
-  const options = { useFts: false, includeArchived: librarian && args.includeArchived === true };
+  const options = { useFts: false, scope: librarian ? "librarian" as const : "public" as const, includeArchived: librarian && args.includeArchived === true };
   let query = parseCatalogListQuery(url);
   let result = await listCatalogMaterials(db, query, options);
   let approximate = args.approximate === true;

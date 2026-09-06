@@ -25,10 +25,12 @@ export async function GET(request: Request): Promise<Response> {
     const query = parseCatalogListQuery(new URL(request.url), {
       defaultLimit: DEFAULT_LIBRARIAN_SEARCH_LIMIT,
       maxLimit: MAX_LIBRARIAN_SEARCH_LIMIT,
+      defaultFund: "education",
     });
     const result = await listCatalogMaterials(
       env.DB as unknown as CatalogD1Database,
       query,
+      { scope: "librarian" },
     );
     return librarianJson({
       schemaVersion: 2,

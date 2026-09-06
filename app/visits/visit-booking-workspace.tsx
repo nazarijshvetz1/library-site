@@ -86,7 +86,7 @@ import {
 import styles from "./visits.module.css";
 
 const LOGO_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
-const PUBLIC_CATALOG_URL = "https://nazarijshvetz1.github.io/library-site/";
+const PUBLIC_CATALOG_URL = "/library";
 
 type Props = {
   initialDate: string;
@@ -1467,6 +1467,7 @@ function VisitBookingPanel({
               ))}
             </nav>
             <div className={styles.teacherSidebarUtilities}>
+              <a href={telegramMiniApp ? "/reader/telegram?tab=books" : "/reader?tab=books"}><SiteIcon name="catalog" size={18} /> Мої книги · Художня та наукова література</a>
               <button type="button" onClick={() => setSecurityOpen(true)} disabled={signingOut || submitting || Boolean(pending)}><SiteIcon name="security" size={18} /> Безпека і PIN</button>
               <a href={PUBLIC_CATALOG_URL} target="_blank" rel="noreferrer"><SiteIcon name="external" size={18} /> Відкрити каталог</a>
               <button type="button" className={styles.teacherSignOut} onClick={() => void onSignOut()} disabled={signingOut || submitting || Boolean(pending)}><SiteIcon name="logout" size={18} /> {signingOut ? "Виходимо…" : "Вийти"}</button>
@@ -1614,6 +1615,7 @@ function VisitBookingPanel({
                 {TEACHER_TABS.map((tab) => <button key={tab.id} type="button" aria-current={activeTab === tab.id ? "page" : undefined} data-telegram={tab.id === "telegram" || undefined} onClick={() => selectTeacherTab(tab.id)}><span aria-hidden="true"><SiteIcon name={tab.icon} /></span><strong>{tab.label}</strong></button>)}
               </nav>
               <div className={styles.teacherMobileMenuUtilities}>
+                <a href={telegramMiniApp ? "/reader/telegram?tab=books" : "/reader?tab=books"}><SiteIcon name="catalog" size={18} /> Мої книги · Художня та наукова література</a>
                 <button type="button" onClick={() => { setMobileMenuOpen(false); setSecurityOpen(true); }} disabled={signingOut || submitting || Boolean(pending)}><SiteIcon name="security" size={18} /> Безпека і PIN</button>
                 <a href={PUBLIC_CATALOG_URL} target="_blank" rel="noreferrer"><SiteIcon name="external" size={18} /> Відкрити каталог</a>
                 <button type="button" className={styles.teacherSignOut} onClick={() => void onSignOut()} disabled={signingOut || submitting || Boolean(pending)}><SiteIcon name="logout" size={18} /> Вийти з кабінету</button>

@@ -20,6 +20,9 @@ const migrationFiles = [
   "0017_fresh_robbie_robertson.sql",
   "0018_yielding_skaar.sql",
   "0019_kindly_wolfsbane.sql",
+  "0043_strong_blob.sql", "0044_demonic_rafael_vega.sql", "0045_harsh_molten_man.sql",
+  "0046_flawless_dreaming_celestial.sql", "0047_oval_leo.sql",
+  "0048_third_morlocks.sql", "0049_talented_colossus.sql",
 ];
 
 class PreparedStatement {

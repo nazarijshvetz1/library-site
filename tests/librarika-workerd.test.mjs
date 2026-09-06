@@ -19,7 +19,7 @@ test("append engine and safety guards execute against Cloudflare D1 runtime",{ti
     const title={Id:"1",Title:"Книга",Authors:"Автор",Publisher:"Видавництво",Year:"2020",Type:"Book"};
     const plan=await buildLibrarikaImportPlan({titles:[title],copies:[{...title,Id:"2","Accession No":"01","Copy No":"1"}],members:[{Id:"3",Name:"Тестовий читач","Member No":"У-1",Status:"Active","Member Group":"5-IT1"}],circulations:[{ID:"4","Member No":"У-1","Media ID":"1","ASN No":"01","Copy No":"1",Status:"Overdue","Booking Date":"2026-09-01","Issued At":"2026-09-01 12:30:00","Return Date":"2026-09-05"}],authors:[{Name:"Автор"}],publishers:[{Name:"Видавництво"}],categories:[],tags:[]},[{source_id:"1",identity_verified:true,review_details:[{text:"Відгук",rating:3}]}],{sourceSha256:"d".repeat(64),recoverySha256:"e".repeat(64),capturedAt:"2026-09-06T00:00:00Z"});
     const chunks=await splitLibrarikaImportTables(plan.tables);
-    await startLibrarikaImport(db,actor,{...plan,planSha256:"f".repeat(64),parts:chunks.map(chunk=>chunk.part)});
+    await startLibrarikaImport(db,actor,{...plan,sourceCompleteness:{authorDetailsComplete:true,authorsVerified:1,authorsPending:[]},planSha256:"f".repeat(64),parts:chunks.map(chunk=>chunk.part)});
     for(const chunk of chunks)await appendLibrarikaImportPart(db,actor,{runId:plan.runId,index:chunk.part.index,table:chunk.part.table,rows:chunk.rows});
     assert.equal((await verifyLibrarikaImport(db,actor,plan.runId)).verification.openLoans,1);
     assert.equal((await appendLibrarikaImportPart(db,actor,{runId:plan.runId,index:0,table:chunks[0].part.table,rows:chunks[0].rows})).replayed,true);

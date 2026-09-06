@@ -6,9 +6,9 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import SiteIcon from "../_components/site-icon";
 import styles from "./suggest-book.module.css";
 
-const PUBLIC_CATALOG_URL = "https://nazarijshvetz1.github.io/library-site/";
+const PUBLIC_CATALOG_URL = "/library";
 const TEACHER_CABINET_URL = "https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/teacher";
-const LOGO_URL = `${PUBLIC_CATALOG_URL}library-logo.png`;
+const LOGO_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
 
 type ClassReference = { id: string; name: string };
 type PublicResponseBody = {

@@ -1,0 +1,16 @@
+import {detectCoverImage} from "./cover-upload.ts";
+import {readerBatch,requireChanged,readerFail,type ReaderDatabase,type LibraryActor} from "./reader-core.ts";
+type Bucket={put(key:string,body:ArrayBuffer,options:{httpMetadata:{contentType:string};customMetadata:Record<string,string>}):Promise<unknown>;head(key:string):Promise<{customMetadata?:Record<string,string>}|null>};
+export async function importLibrarikaCover(db:ReaderDatabase,bucket:Bucket,actor:LibraryActor,input:{runId:string;sha256:string;mime:string;base64:string}){
+  if(!/^[0-9a-f]{64}$/.test(input.sha256)||typeof input.base64!=="string"||input.base64.length>12*1024*1024||!input.base64.length||input.base64.length%4!==0||!/^[A-Za-z0-9+/]*={0,2}$/.test(input.base64))readerFail("cover_invalid","Некоректний файл обкладинки.");
+  const allowed=await db.prepare("SELECT 1 ok FROM users u WHERE u.id=? AND u.role='admin' AND u.status='active' AND EXISTS(SELECT 1 FROM library_editions e JOIN library_import_runs r ON r.id=e.import_run_id WHERE r.id=? AND r.state IN ('verified','reconciled') AND json_extract(e.public_metadata_json,'$.coverSha256')=?)").bind(actor.id,input.runId,input.sha256).first();if(!allowed)readerFail("cover_source_unverified","Обкладинка не належить перевіреному імпорту.",403);
+  let decoded:string;try{decoded=atob(input.base64);}catch{readerFail("cover_invalid","Не вдалося прочитати зображення.");}
+  const bytes=Uint8Array.from(decoded,character=>character.charCodeAt(0)),detected=detectCoverImage(bytes.subarray(0,16));if(!detected||!['image/jpeg','image/png','image/webp'].includes(input.mime))readerFail("cover_format","Потрібна растрова обкладинка JPG, PNG або WEBP.");
+  const mime=detected.contentType;if(mime!==input.mime)readerFail("cover_format","Тип файлу не збігається із зображенням.");
+  const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),byte=>byte.toString(16).padStart(2,'0')).join('');if(hash!==input.sha256)readerFail("cover_checksum","Контрольна сума обкладинки не збігається.");
+  const key='librarika-covers/'+hash,prior=await bucket.head(key);
+  const confirm=async()=>readerBatch(db,[db.prepare("INSERT INTO library_import_cover_receipts(import_run_id,sha256,object_key,byte_length,mime_type,verified_at) SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM users WHERE id=? AND role='admin' AND status='active') AND EXISTS(SELECT 1 FROM library_editions e JOIN library_import_runs r ON r.id=e.import_run_id WHERE r.id=? AND r.state IN ('verified','reconciled') AND json_extract(e.public_metadata_json,'$.coverSha256')=?) ON CONFLICT(import_run_id,sha256) DO UPDATE SET object_key=excluded.object_key,byte_length=excluded.byte_length,mime_type=excluded.mime_type,verified_at=excluded.verified_at").bind(input.runId,hash,key,bytes.length,mime,new Date().toISOString(),actor.id,input.runId,hash),requireChanged(db,1)]);
+  if(prior?.customMetadata?.sha256===hash){await confirm();return {sha256:hash,verified:true,replayed:true};}
+  await bucket.put(key,bytes.buffer,{httpMetadata:{contentType:mime},customMetadata:{sha256:hash,source:'librarika',runId:input.runId}});
+  if((await bucket.head(key))?.customMetadata?.sha256!==hash)readerFail("cover_verify","Сховище не підтвердило обкладинку.",503);await confirm();return {sha256:hash,verified:true,replayed:false};
+}

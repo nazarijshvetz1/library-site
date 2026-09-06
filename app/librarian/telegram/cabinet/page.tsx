@@ -8,6 +8,7 @@ import AcquisitionWorkspace from "@/app/librarian/acquisitions/acquisition-works
 import ProcurementPlanningWorkspace from "@/app/librarian/acquisitions/planning/procurement-planning-workspace";
 import ReportsWorkspace from "@/app/librarian/reports/reports-workspace";
 import TextbookManagementWorkspace from "@/app/librarian/textbooks/textbook-management-workspace";
+import LiteratureWorkspace from "@/app/librarian/literature/workspace";
 import { getLibrarianAccess } from "@/lib/librarian-access";
 import { readLibrarianTelegramUser } from "@/lib/librarian-telegram-auth";
 import type { VisitD1Database } from "@/lib/visit-schedule-store";
@@ -40,6 +41,7 @@ export default async function TelegramLibrarianCabinetPage({ searchParams }: Pag
   const access = getLibrarianAccess(session.user);
   const pendingScope = await sessionPendingScope(session.user.d1UserId ?? session.user.userId);
   const botHref = "https://t.me/MAUP_Library_Bot";
+  if(target === "literature") return <LiteratureWorkspace writesEnabled={access.writesEnabled} admin={session.role === "admin"} telegramMiniApp />;
   if (target === "teachers") {
     return (
       <TeacherManagementWorkspace
@@ -123,8 +125,8 @@ function boundedAcquisitionView(value: string | string[] | undefined): "requests
   return value === "planning" ? "planning" : "requests";
 }
 
-function boundedTarget(value: string | string[] | undefined): "home" | "visits" | "teachers" | "acquisitions" | "reports" | "textbooks" {
-  return value === "visits" || value === "teachers" || value === "acquisitions" || value === "reports" || value === "textbooks" ? value : "home";
+function boundedTarget(value: string | string[] | undefined): "home" | "visits" | "teachers" | "acquisitions" | "reports" | "textbooks" | "literature" {
+  return value === "visits" || value === "teachers" || value === "acquisitions" || value === "reports" || value === "textbooks" || value === "literature" ? value : "home";
 }
 
 function boundedTeacherTab(value: string | string[] | undefined): "overview" | "teachers" | "orders" | "visits" | "telegram" {

@@ -22,7 +22,7 @@ try{
   const db={prepare(sql){const make=bindings=>({bind(...values){return make(values);},async all(){return{success:true,results:sqlite.prepare(sql).all(...bindings)};},async first(){return sqlite.prepare(sql).get(...bindings)??null;}});return make([]);},async batch(statements){sqlite.exec("BEGIN IMMEDIATE");try{const output=[];for(const statement of statements)output.push(await statement.all());sqlite.exec("COMMIT");return output;}catch(error){sqlite.exec("ROLLBACK");throw error;}}};
   const actor=sqlite.prepare("SELECT id,email FROM users WHERE role='admin' AND status='active' ORDER BY id LIMIT 1").get();if(!actor)throw new Error("No existing admin in local snapshot");
   const chunks=await splitLibrarikaImportTables(plan.tables);
-  const header={runId:plan.runId,sourceSha256:plan.sourceSha256,recoverySha256:plan.recoverySha256,capturedAt:plan.capturedAt,planSha256:await sha256Text(planText),counts:plan.counts,parts:chunks.map(chunk=>chunk.part)};
+  const header={sourceCompleteness:plan.sourceCompleteness,runId:plan.runId,sourceSha256:plan.sourceSha256,recoverySha256:plan.recoverySha256,capturedAt:plan.capturedAt,planSha256:await sha256Text(planText),counts:plan.counts,parts:chunks.map(chunk=>chunk.part)};
   await startLibrarikaImport(db,actor,header);
   for(const chunk of chunks)await appendLibrarikaImportPart(db,actor,{runId:plan.runId,index:chunk.part.index,table:chunk.part.table,rows:chunk.rows});
   const result=await verifyLibrarikaImport(db,actor,plan.runId);

@@ -1,5 +1,7 @@
+import ActivationUpload from "./activation-upload";
 import { authorizeLibrarianApi } from "@/lib/librarian-api";
 import ImportUpload from "./upload";
+import CoverUpload from "./cover-upload";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Перенесення Librarika · Єдина бібліотека", robots: { index: false, follow: false } };
@@ -13,5 +15,7 @@ export default async function MigrationPage() {
     <p>Завантаження перевіреного плану в приховану область тієї самої бази. Чинний фонд, видачі, доступ читачів і розсилки не змінюються.</p>
     <p>План містить приватні дані. Він надсилається лише цьому сайту. Перед початком має бути перевірена <a href="/librarian/recovery">резервна копія</a>.</p>
     {auth.value.access.writesEnabled ? <ImportUpload /> : <p>Запис тимчасово вимкнено.</p>}
+    {auth.value.access.writesEnabled && <CoverUpload />}
+    {auth.value.access.writesEnabled && <ActivationUpload />}
   </main>;
 }

@@ -162,7 +162,7 @@ test("student and librarian UIs provide class selection, sorting, safe external 
   assert.match(adminUi, /Сервіс е-підручників тимчасово недоступний/u);
   assert.match(adminUi, /telegramMiniApp=\{telegramMiniApp\}/u);
   assert.match(shell, /label: "Е-підручники"/u);
-  assert.match(shell, /label: "Каталог"[\s\S]*?label: "Новий матеріал"[\s\S]*?label: "Е-підручники"/u);
+  assert.match(shell, /label: "Підручники й посібники"[\s\S]*?label: "Художня та наукова література"[\s\S]*?label: "Новий матеріал"[\s\S]*?label: "Е-підручники"/u);
   assert.match(telegramCabinet, /target === "textbooks"[\s\S]*?<TextbookManagementWorkspace[\s\S]*?telegramMiniApp/u);
   assert.match(telegramLaunch, /value === "textbooks"/u);
   assert.match(home, /href="\/textbooks"/u);

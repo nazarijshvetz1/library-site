@@ -177,7 +177,7 @@ declare global {
 
 const LOGO_URL =
   "https://nazarijshvetz1.github.io/library-site/library-logo.png";
-const PUBLIC_CATALOG_URL = "https://nazarijshvetz1.github.io/library-site/";
+const PUBLIC_CATALOG_URL = "/library";
 
 const SCENARIOS: Array<{
   kind: DraftKind;

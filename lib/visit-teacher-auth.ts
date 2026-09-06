@@ -2611,7 +2611,8 @@ function isTelegramTeacherRequest(request: Request): boolean {
   try {
     const source = new URL(referer);
     return source.origin === new URL(request.url).origin
-      && (source.pathname === "/teacher/telegram" || source.pathname.startsWith("/teacher/telegram/"));
+      && (source.pathname === "/teacher/telegram" || source.pathname.startsWith("/teacher/telegram/")
+        || source.pathname === "/reader/telegram" || source.pathname.startsWith("/reader/telegram/"));
   } catch {
     return false;
   }

@@ -3,6 +3,8 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 import { drainTelegramOutboxUntilIdle } from "../lib/telegram-delivery-runtime";
 import { expireAssistantCalls } from "../lib/assistant-store";
+import {runReaderMaintenance} from "../lib/reader-notifications";
+import {cleanReaderPhotos} from "../lib/reader-photo-cleanup";
 
 interface AssetFetcher {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
@@ -12,6 +14,7 @@ interface Env {
   ASSETS: AssetFetcher;
   DB: (typeof import("cloudflare:workers").env)["DB"];
   OPENAI_API_KEY?: string;
+  COVER_UPLOADS: {delete(key:string):Promise<void>};
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -52,7 +55,8 @@ const worker = {
     const isTelegramMiniApp = url.pathname === "/teacher/telegram"
       || url.pathname.startsWith("/teacher/telegram/")
       || url.pathname === "/librarian/telegram"
-      || url.pathname.startsWith("/librarian/telegram/");
+      || url.pathname.startsWith("/librarian/telegram/")
+      || url.pathname === "/reader/telegram" || url.pathname.startsWith("/reader/telegram/");
     headers.set(
       "Content-Security-Policy",
       isTelegramMiniApp
@@ -67,7 +71,9 @@ const worker = {
       "Permissions-Policy",
       url.pathname.startsWith("/librarian") || url.pathname.startsWith("/teacher")
         ? "camera=(self), microphone=(self), geolocation=()"
-        : "camera=(), microphone=(), geolocation=()",
+        : url.pathname === "/library" || url.pathname === "/reader" || url.pathname.startsWith("/reader/")
+          ? "camera=(self), microphone=(), geolocation=()"
+          : "camera=(), microphone=(), geolocation=()",
     );
     return new Response(response.body, {
       status: response.status,
@@ -77,9 +83,14 @@ const worker = {
   },
   async scheduled(_controller: unknown, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(expireAssistantCalls(env.DB, env.OPENAI_API_KEY));
-    ctx.waitUntil(drainTelegramOutboxUntilIdle(env.DB, {
+    // waitUntil tasks share one D1 budget. Separate maintenance ticks and cap the old outbox batch.
+    if(new Date().getUTCMinutes()%5===0){
+      ctx.waitUntil(runReaderMaintenance(env.DB).catch(()=>undefined));
+      ctx.waitUntil(cleanReaderPhotos(env.DB,env.COVER_UPLOADS).catch(()=>undefined));
+    }else ctx.waitUntil(drainTelegramOutboxUntilIdle(env.DB, {
       siteOrigin: "https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site",
-      maxBatches: 6,
+      maxBatches: 1,
+      batchLimit: 2,
     }));
   },
 };

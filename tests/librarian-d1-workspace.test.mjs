@@ -484,7 +484,7 @@ test("new librarian route renders D1 workspace inside the shared branded shell",
   assert.match(shell, /LIBRARY_EMBLEM_URL/u);
   assert.match(shell, /target="_blank"/u);
   assert.match(shell, /rel="noopener noreferrer"/u);
-  assert.match(routes, /PUBLIC_CATALOG_URL = "https:\/\/nazarijshvetz1\.github\.io\/library-site\/"/u);
+  assert.match(routes, /PUBLIC_CATALOG_URL = "\/library"/u);
   assert.doesNotMatch(
     workspace,
     /<Link href="\/" className=\{styles\.catalogLink\}>/u,

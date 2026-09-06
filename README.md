@@ -151,6 +151,8 @@ npm test
 
 ## Документація
 
+- [Стан перенесення Librarika та безпечне продовження](docs/LIBRARIKA_MIGRATION_STATUS_2026_09_06.md)
+
 - [Графік відвідування бібліотеки](docs/VISIT_SCHEDULE_UK.md)
 - [Контрольований rollout D1 Phase 1](docs/D1_CORE_ROLLOUT_UK.md)
 - [Підготовка, dry-run і loader для D1](docs/D1_IMPORTER_UK.md)
