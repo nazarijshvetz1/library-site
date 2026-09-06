@@ -2034,6 +2034,27 @@ async function setTelegramNotificationsFromWebhook(
         AND ?=0 AND EXISTS (SELECT 1 FROM telegram_webhook_updates
           WHERE update_id=? AND payload_hash=? AND outcome=? AND processed_at=?)`)
       .bind(now, chatId, telegramUserId, desired, updateId, payloadHash, outcome, now),
+    // A bot-wide opt-out also covers the exact linked teacher's reader notices.
+    // Enabling the old teacher categories must never create reader consent.
+    db.prepare(`UPDATE reader_profiles
+      SET notify_loans=0,notify_books=0,notify_loans_since=NULL,notify_books_since=NULL,
+        version=version+1,updated_at=?
+      WHERE reader_id IN (SELECT r.id FROM library_readers r
+        JOIN telegram_connections tc ON tc.user_id=r.linked_teacher_user_id
+        WHERE tc.chat_id=? AND tc.telegram_user_id=? AND tc.status='active')
+        AND ?=0 AND EXISTS (SELECT 1 FROM telegram_webhook_updates
+          WHERE update_id=? AND payload_hash=? AND outcome=? AND processed_at=?)
+        AND (notify_loans!=0 OR notify_books!=0 OR notify_loans_since IS NOT NULL OR notify_books_since IS NOT NULL)`)
+      .bind(now, chatId, telegramUserId, desired, updateId, payloadHash, outcome, now),
+    db.prepare(`UPDATE reader_notification_outbox
+      SET status='cancelled',lease_token=NULL,lease_until=NULL
+      WHERE reader_id IN (SELECT r.id FROM library_readers r
+        JOIN telegram_connections tc ON tc.user_id=r.linked_teacher_user_id
+        WHERE tc.chat_id=? AND tc.telegram_user_id=? AND tc.status='active')
+        AND status IN ('pending','processing')
+        AND ?=0 AND EXISTS (SELECT 1 FROM telegram_webhook_updates
+          WHERE update_id=? AND payload_hash=? AND outcome=? AND processed_at=?)`)
+      .bind(chatId, telegramUserId, desired, updateId, payloadHash, outcome, now),
   ]);
   return {
     inserted: Number(results[0]?.meta?.changes ?? 0) === 1,
