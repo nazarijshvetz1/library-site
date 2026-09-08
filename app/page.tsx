@@ -29,7 +29,7 @@ export default async function Home() {
         <div className="hero-actions" style={{ marginTop: 0 }}>
           <a className="nav-link" href="/textbooks">Е-підручники</a>
           <a className="nav-link" href={PUBLIC_CATALOG_URL}>
-            Відкрити каталог
+            Каталог художньої літератури · Librarika
             <SiteIcon name="external" size={17} />
           </a>
         </div>
@@ -40,8 +40,8 @@ export default async function Home() {
           <p className="eyebrow"><span aria-hidden="true" /> Робоче місце бібліотеки</p>
           <h1 id="landing-title">Уся бібліотечна робота — в одному зрозумілому просторі</h1>
           <p className="hero-lead">
-            Переглядайте відкритий каталог або увійдіть до захищеного кабінету,
-            щоб одразу додавати й редагувати матеріали, реєструвати надходження,
+            Художня й наукова література ведеться у Librarika. На цьому сайті
+            працюють кабінети та облік навчальних матеріалів: тут можна реєструвати надходження,
             переміщення, списання, видачу вчителям і класам та керувати навчальними роками.
           </p>
 
@@ -63,11 +63,11 @@ export default async function Home() {
             ) : (
               <a className="button button-primary" href={chatGPTSignInPath("/librarian")}>
                 <span className="chatgpt-mark" aria-hidden="true">✦</span>
-                Sign in with ChatGPT
+                  Увійти через ChatGPT
               </a>
             )}
             <a className="button button-secondary" href={PUBLIC_CATALOG_URL}>
-              Переглянути каталог
+              Каталог художньої літератури · Librarika
             </a>
             <a className="button button-secondary" href="/textbooks">
               Е-підручники 1–11 класів
@@ -104,7 +104,7 @@ export default async function Home() {
 
       <footer className="landing-footer">
         <span>© {new Date().getFullYear()} Бібліотека Міжнародного ліцею МАУП</span>
-        <span>Каталог і кабінет працюють з єдиною захищеною базою</span>
+        <span>Підручники й внутрішні сервіси — тут; художня та наукова література — у Librarika</span>
       </footer>
     </main>
   );

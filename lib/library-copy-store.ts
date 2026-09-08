@@ -10,12 +10,12 @@ export async function libraryCommand(db:ReaderDatabase,actor:LibraryActor,reques
   if(saved&&(saved.actor_user_id!==actor.id||saved.request_hash!==hash))readerFail("command_conflict","Ідентифікатор дії вже використано з іншими даними.",409);
   return {hash,replayed:saved?.status==="completed"?JSON.parse(String(saved.result_json)):null};
 }
-export function beginLibraryCommand(db:ReaderDatabase,actor:LibraryActor,requestId:string,kind:string,hash:string,targetId:string,now:string){
+export function beginLibraryCommand(db:ReaderDatabase,actor:LibraryActor,requestId:string,kind:string,hash:string,targetId:string,now:string,targetType="library_copy"){
   return db.prepare(`INSERT INTO mutation_commands(id,kind,actor_user_id,status,target_type,target_id,request_hash,created_at,updated_at)
-    VALUES(?,?,(SELECT id FROM users WHERE id=? AND status='active' AND role IN ('admin','librarian')),'processing','library_copy',?,?,?,?)`).bind(requestId,kind,actor.id,targetId,hash,now,now);
+    VALUES(?,?,(SELECT id FROM users WHERE id=? AND status='active' AND role IN ('admin','librarian')),'processing',?,?,?, ?,?)`).bind(requestId,kind,actor.id,targetType,targetId,hash,now,now);
 }
-export function finishLibraryCommand(db:ReaderDatabase,actor:LibraryActor,requestId:string,kind:string,targetId:string,result:unknown,now:string):Statements{return[
-  db.prepare("INSERT INTO audit_events(id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,metadata_json,created_at) VALUES(?,?,?,?,'library_copy',?,?,?,?)").bind(crypto.randomUUID(),actor.id,actor.email,kind,targetId,requestId,JSON.stringify(result),now),
+export function finishLibraryCommand(db:ReaderDatabase,actor:LibraryActor,requestId:string,kind:string,targetId:string,result:unknown,now:string,targetType="library_copy"):Statements{return[
+  db.prepare("INSERT INTO audit_events(id,actor_user_id,actor_email,action,entity_type,entity_id,request_id,metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)").bind(crypto.randomUUID(),actor.id,actor.email,kind,targetType,targetId,requestId,JSON.stringify(result),now),
   db.prepare("UPDATE mutation_commands SET status='completed',result_json=?,updated_at=?,completed_at=? WHERE id=? AND status='processing'").bind(JSON.stringify(result),now,now,requestId),requireChanged(db,1),
 ];}
 export function rebuildReaderStock(db:ReaderDatabase,materialId:string,now:string){return db.prepare(`

@@ -1,15 +1,17 @@
-import {env} from "cloudflare:workers";
-import {requireReaderSession} from "@/lib/reader-auth";
-import {cancelReaderBookRequest,getReaderBooks,getReaderBookState,requestReaderBook,saveReaderRating,setReaderBookSubscription} from "@/lib/reader-profile-store";
-import {readerApiError,readerJson,readerWriteBody} from "@/lib/reader-api";
-import {readerFail,type ReaderDatabase} from "@/lib/reader-core";
+import {readerJson} from "@/lib/reader-api";
+import {LIBRARIKA_CATALOG_URL,LIBRARIKA_DASHBOARD_URL} from "@/lib/librarika";
 export const dynamic="force-dynamic";
-export async function GET(request:Request){try{const db=env.DB as unknown as ReaderDatabase,identity=await requireReaderSession(db,request),edition=new URL(request.url).searchParams.get("edition");return readerJson({success:true,...(edition?await getReaderBookState(db,identity,edition):await getReaderBooks(db,identity))});}catch(error){return readerApiError(error);}}
-export async function POST(request:Request){try{const body=await readerWriteBody(request),db=env.DB as unknown as ReaderDatabase,identity=await requireReaderSession(db,request);let result:unknown;
-  if(body.action==="request")result=await requestReaderBook(db,identity,body.input as Parameters<typeof requestReaderBook>[2]);
-  else if(body.action==="cancel")result=await cancelReaderBookRequest(db,identity,body.input as Parameters<typeof cancelReaderBookRequest>[2]);
-  else if(body.action==="rating")result=await saveReaderRating(db,identity,body.input as Parameters<typeof saveReaderRating>[2]);
-  else if(body.action==="subscribe")result=await setReaderBookSubscription(db,identity,body.input as Parameters<typeof setReaderBookSubscription>[2]);
-  else readerFail("action_invalid","Невідома дія.");
-  return readerJson({success:true,result});
-}catch(error){return readerApiError(error);}}
+
+function retiredReaderBooks(){return readerJson({
+  success:false,
+  code:"librarika_authoritative",
+  error:"Актуальні видачі, строки повернення, резервування, оцінки й відгуки ведуться у Librarika.",
+  syncState:"circulation_source_not_connected",
+  links:{account:LIBRARIKA_DASHBOARD_URL,catalog:LIBRARIKA_CATALOG_URL},
+},{status:410});}
+
+export const GET=retiredReaderBooks;
+export const POST=retiredReaderBooks;
+export const PUT=retiredReaderBooks;
+export const PATCH=retiredReaderBooks;
+export const DELETE=retiredReaderBooks;

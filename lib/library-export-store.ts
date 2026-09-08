@@ -380,6 +380,10 @@ const MATERIALS_SQL = `
       ORDER BY ml.sort_order, ml.id LIMIT 1), '') AS electronicUrl
   FROM materials m
   LEFT JOIN material_stock_totals st ON st.material_id = m.id
+  WHERE NOT EXISTS (
+    SELECT 1 FROM library_editions edition
+    WHERE edition.material_id = m.id AND edition.fund = 'literature'
+  )
   ORDER BY m.catalog_number, m.id
   LIMIT ?`;
 
@@ -401,6 +405,10 @@ const HOLDINGS_SQL = `
   JOIN locations l ON l.id = h.location_id
   LEFT JOIN active_reservations r ON r.material_id = h.material_id
     AND r.source_location_id = h.location_id AND r.condition = h.condition
+  WHERE NOT EXISTS (
+    SELECT 1 FROM library_editions edition
+    WHERE edition.material_id = h.material_id AND edition.fund = 'literature'
+  )
   ORDER BY m.catalog_number, l.sort_order, l.name, h.condition
   LIMIT ?`;
 
@@ -444,6 +452,10 @@ const TEACHER_LOANS_SQL = `
   JOIN users u ON u.id = l.teacher_user_id
   JOIN materials m ON m.id = li.material_id
   JOIN locations loc ON loc.id = li.source_location_id
+  WHERE NOT EXISTS (
+    SELECT 1 FROM library_editions edition
+    WHERE edition.material_id = li.material_id AND edition.fund = 'literature'
+  )
   ORDER BY l.issued_at DESC, l.id, m.catalog_number, li.id
   LIMIT ?`;
 
@@ -485,6 +497,10 @@ const CLASS_LOANS_SQL = `
   LEFT JOIN users removed_by ON removed_by.id = cli.removed_by_user_id
   JOIN materials m ON m.id = cli.material_id
   JOIN locations loc ON loc.id = cli.source_location_id
+  WHERE NOT EXISTS (
+    SELECT 1 FROM library_editions edition
+    WHERE edition.material_id = cli.material_id AND edition.fund = 'literature'
+  )
   ORDER BY issuedAt DESC, cl.id, m.catalog_number, cli.id
   LIMIT ?`;
 
@@ -508,6 +524,10 @@ const CLASS_LOAN_ADJUSTMENTS_SQL = `
   LEFT JOIN materials material ON material.id = item.material_id
   LEFT JOIN locations location ON location.id = adjustment.location_id
   LEFT JOIN users actor ON actor.id = adjustment.actor_user_id
+  WHERE NOT EXISTS (
+    SELECT 1 FROM library_editions edition
+    WHERE edition.material_id = item.material_id AND edition.fund = 'literature'
+  )
   ORDER BY adjustment.created_at DESC, adjustment.id DESC
   LIMIT ?`;
 
@@ -533,5 +553,9 @@ const MATERIAL_REQUESTS_SQL = `
   JOIN users u ON u.id = mr.teacher_user_id
   LEFT JOIN locations loc ON loc.id = mr.pickup_location_id
   LEFT JOIN reservation_totals rt ON rt.request_item_id = mri.id
+  WHERE NOT EXISTS (
+    SELECT 1 FROM library_editions edition
+    WHERE edition.material_id = mri.material_id AND edition.fund = 'literature'
+  )
   ORDER BY mr.submitted_at DESC, mr.id, mri.sort_order, mri.id
   LIMIT ?`;

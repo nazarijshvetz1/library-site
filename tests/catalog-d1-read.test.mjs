@@ -641,13 +641,14 @@ test("cover asset lookup returns only safe ready R2 metadata", async () => {
   }
 });
 
-test("public routes are cacheable, fund-scoped and librarian material routes require authorization", async () => {
-  const [publicList, publicFacets, publicDetail, cover, literatureCover, coverHelper, privateSearch, privateFacets, privateDetail] = await Promise.all([
+test("public textbook routes are cacheable and librarian material routes require authorization", async () => {
+  const [publicList, publicFacets, publicDetail, cover, literatureCover, importedLiteratureCover, coverHelper, privateSearch, privateFacets, privateDetail] = await Promise.all([
     read("app/api/catalog-v2/route.ts"),
     read("app/api/catalog-v2/facets/route.ts"),
     read("app/api/catalog-v2/[id]/route.ts"),
     read("app/api/catalog-v2/covers/[id]/route.ts"),
     read("app/api/library/material-covers/[id]/route.ts"),
+    read("app/api/library/covers/[sha]/route.ts"),
     read("lib/public-catalog-cover.ts"),
     read("app/api/librarian/materials/search/route.ts"),
     read("app/api/librarian/materials/facets/route.ts"),
@@ -662,7 +663,11 @@ test("public routes are cacheable, fund-scoped and librarian material routes req
   assert.doesNotMatch(publicFacets, /authorizeLibrarianApi/u);
   assert.match(publicDetail, /getCatalogMaterialDetail\([\s\S]*"public",\s*\{ fund: "education" \}/u);
   assert.match(cover, /publicCatalogCoverResponse\([\s\S]*"education"/u);
-  assert.match(literatureCover, /publicCatalogCoverResponse\([\s\S]*"literature"/u);
+  for (const retiredCover of [literatureCover, importedLiteratureCover]) {
+    assert.match(retiredCover, /librarika_authoritative/u);
+    assert.match(retiredCover, /status: 410/u);
+    assert.doesNotMatch(retiredCover, /publicCatalogCoverResponse|cover-storage|cloudflare:workers/u);
+  }
   assert.match(coverHelper, /COVER_UPLOADS\.get\(asset\.storageKey\)/);
   assert.match(coverHelper, /max-age=31536000, immutable/);
   assert.match(privateSearch, /authorizeLibrarianApi\(\)/);

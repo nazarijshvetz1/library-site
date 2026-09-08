@@ -87,6 +87,11 @@ export type ProcurementPlanResource = {
   surplusQuantity: number | null;
 };
 
+export type ProcurementBlockedResource = {
+  id: string;
+  title: string;
+};
+
 export type ProcurementCategorySummary = {
   category: ProcurementCategory;
   resourceCount: number;
@@ -103,6 +108,8 @@ export type ProcurementPlanDetail = ProcurementPlanSummary & {
   snapshotCount: number;
   classes: ProcurementPlanClass[];
   resources: ProcurementPlanResource[];
+  /** Present on live plans. Optional so historical immutable snapshots remain readable. */
+  blockedResources?: ProcurementBlockedResource[];
   categorySummary: ProcurementCategorySummary[];
   totals: Omit<ProcurementCategorySummary, "category">;
 };
@@ -145,6 +152,10 @@ export async function listProcurementPlans(db: ProcurementPlanningDatabase): Pro
     FROM procurement_plans p
     LEFT JOIN procurement_plan_classes pc ON pc.plan_id=p.id
     LEFT JOIN procurement_plan_resources pr ON pr.plan_id=p.id
+      AND (pr.material_id IS NULL OR NOT EXISTS (
+        SELECT 1 FROM library_editions e
+        WHERE e.material_id=pr.material_id AND e.fund='literature'
+      ))
     WHERE p.status != 'archived'
     GROUP BY p.id
     ORDER BY p.updated_at DESC, p.id DESC
@@ -160,12 +171,16 @@ export async function readProcurementPlan(db: ProcurementPlanningDatabase, planI
       (SELECT COUNT(*) FROM procurement_plan_snapshots ps WHERE ps.plan_id=p.id) AS snapshot_count,
       (SELECT COUNT(*) FROM procurement_plan_classes pc WHERE pc.plan_id=p.id) AS class_count,
       (SELECT COUNT(*) FROM procurement_plan_classes pc WHERE pc.plan_id=p.id AND pc.student_count IS NULL) AS class_counts_missing,
-      (SELECT COUNT(*) FROM procurement_plan_resources pr WHERE pr.plan_id=p.id) AS resource_count
+      (SELECT COUNT(*) FROM procurement_plan_resources pr WHERE pr.plan_id=p.id
+        AND (pr.material_id IS NULL OR NOT EXISTS (
+          SELECT 1 FROM library_editions e
+          WHERE e.material_id=pr.material_id AND e.fund='literature'
+        ))) AS resource_count
     FROM procurement_plans p WHERE p.id=? AND p.status != 'archived' LIMIT 1
   `).bind(planId).first<Record<string, unknown>>();
   if (!plan) throw new ProcurementPlanningError("plan_not_found", 404, "План комплектування не знайдено.");
 
-  const [classResult, resourceResult, allocationResult] = await Promise.all([
+  const [classResult, resourceResult, allocationResult, blockedResourceResult] = await Promise.all([
     db.prepare(`SELECT id, class_name, grade, student_count, notes, sort_order, version
       FROM procurement_plan_classes WHERE plan_id=? ORDER BY grade, sort_order, class_name, id`).bind(planId).all(),
     db.prepare(`
@@ -192,6 +207,10 @@ export async function readProcurementPlan(db: ProcurementPlanningDatabase, planI
         GROUP BY material_id
       ) incoming ON incoming.material_id=pr.material_id
       WHERE pr.plan_id=?
+        AND (pr.material_id IS NULL OR NOT EXISTS (
+          SELECT 1 FROM library_editions e
+          WHERE e.material_id=pr.material_id AND e.fund='literature'
+        ))
       ORDER BY pr.category, pr.sort_order, pr.title, pr.id
     `).bind(planId).all(),
     db.prepare(`
@@ -203,10 +222,21 @@ export async function readProcurementPlan(db: ProcurementPlanningDatabase, planI
       JOIN procurement_plan_classes pc ON pc.id=pa.class_id AND pc.plan_id=pr.plan_id
       ORDER BY pc.grade, pc.sort_order, pc.class_name, pa.id
     `).bind(planId).all(),
+    db.prepare(`
+      SELECT pr.id, pr.title
+      FROM procurement_plan_resources pr
+      JOIN library_editions e ON e.material_id=pr.material_id AND e.fund='literature'
+      WHERE pr.plan_id=?
+      ORDER BY pr.sort_order, pr.title, pr.id
+    `).bind(planId).all(),
   ]);
   const classes = (classResult.results ?? []).map(classRow);
   const allocationRows = allocationResult.results ?? [];
   const resources = (resourceResult.results ?? []).map((raw) => resourceRow(raw, allocationRows));
+  const blockedResources = (blockedResourceResult.results ?? []).map((raw) => ({
+    id: text(raw.id),
+    title: text(raw.title),
+  }));
   const categorySummary = PROCUREMENT_CATEGORIES.map((category) => summarizeCategory(category, resources));
   const totals = categorySummary.reduce<Omit<ProcurementCategorySummary, "category">>((sum, row) => ({
     resourceCount: sum.resourceCount + row.resourceCount,
@@ -223,6 +253,7 @@ export async function readProcurementPlan(db: ProcurementPlanningDatabase, planI
     snapshotCount: nonNegative(plan.snapshot_count),
     classes,
     resources,
+    blockedResources,
     categorySummary,
     totals,
   };
@@ -262,7 +293,12 @@ export async function searchProcurementCatalog(db: ProcurementPlanningDatabase, 
       COALESCE((SELECT SUM(h.quantity) FROM holdings h WHERE h.material_id=m.id AND h.condition='damaged'), 0) AS damaged_quantity
     FROM materials m
     LEFT JOIN material_stock_totals mst ON mst.material_id=m.id
-    WHERE m.status='active' AND (
+    WHERE m.status='active'
+      AND NOT EXISTS (
+        SELECT 1 FROM library_editions e
+        WHERE e.material_id=m.id AND e.fund='literature'
+      )
+      AND (
       lower(m.title) LIKE ? OR lower(m.author) LIKE ? OR lower(m.subject) LIKE ? OR lower(m.rubric) LIKE ?
     )
     ORDER BY CASE WHEN lower(m.title) LIKE ? THEN 0 ELSE 1 END, m.sort_title, m.publication_year DESC, m.id
@@ -326,6 +362,7 @@ export async function mutateProcurementPlan(db: ProcurementPlanningDatabase, use
     if (!nextStatus) throw new ProcurementPlanningError("validation_failed", 400, "Некоректний статус плану.");
     const expectedVersion = positiveInteger(input.expectedVersion);
     if (nextStatus === "finalized") {
+      await assertPlanContainsOnlyEducation(db, planId);
       const detail = await readProcurementPlan(db, planId);
       if (detail.version !== expectedVersion || detail.status !== "draft") {
         throw new ProcurementPlanningError("version_conflict", 409, "Статус плану вже змінився. Оновіть сторінку.");
@@ -333,8 +370,10 @@ export async function mutateProcurementPlan(db: ProcurementPlanningDatabase, use
       if (detail.classCountsMissing || detail.totals.incompleteResources) throw new ProcurementPlanningError("plan_incomplete", 409, "Внесіть кількість учнів у всіх класах перед завершенням плану.");
       if (!detail.revisionConfirmedAt) throw new ProcurementPlanningError("revision_not_confirmed", 409, "Підтвердьте завершення ревізії перед фіналізацією плану.");
       const outstanding = await db.prepare(`SELECT
-        COALESCE((SELECT SUM(li.quantity_issued-li.quantity_returned) FROM loan_items li JOIN loans l ON l.id=li.loan_id WHERE l.status='open' AND li.quantity_issued>li.quantity_returned),0)
-        + COALESCE((SELECT SUM(cli.quantity_issued-cli.quantity_returned) FROM class_loan_items cli JOIN class_loans cl ON cl.id=cli.class_loan_id WHERE cl.status='open' AND cli.lifecycle_status='active' AND cli.quantity_issued>cli.quantity_returned),0) AS quantity`).first<{ quantity: number }>();
+        COALESCE((SELECT SUM(li.quantity_issued-li.quantity_returned) FROM loan_items li JOIN loans l ON l.id=li.loan_id WHERE l.status='open' AND li.quantity_issued>li.quantity_returned
+          AND NOT EXISTS (SELECT 1 FROM library_editions e WHERE e.material_id=li.material_id AND e.fund='literature')),0)
+        + COALESCE((SELECT SUM(cli.quantity_issued-cli.quantity_returned) FROM class_loan_items cli JOIN class_loans cl ON cl.id=cli.class_loan_id WHERE cl.status='open' AND cli.lifecycle_status='active' AND cli.quantity_issued>cli.quantity_returned
+          AND NOT EXISTS (SELECT 1 FROM library_editions e WHERE e.material_id=cli.material_id AND e.fund='literature')),0) AS quantity`).first<{ quantity: number }>();
       if (nonNegative(outstanding?.quantity) > 0) throw new ProcurementPlanningError("open_loans", 409, "Перед завершенням плану потрібно оформити всі повернення.");
       const payload = JSON.stringify({
         schemaVersion: 1,
@@ -346,7 +385,15 @@ export async function mutateProcurementPlan(db: ProcurementPlanningDatabase, use
       const sequence = await nextSnapshotSequence(db, planId);
       const results = await db.batch([
         db.prepare(`UPDATE procurement_plans SET status='finalized', finalized_at=?, finalized_by_user_id=?, version=version+1, updated_at=?
-          WHERE id=? AND version=? AND status='draft'`).bind(now, actor.id, now, planId, expectedVersion),
+          WHERE id=? AND version=? AND status='draft'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM procurement_plan_resources boundary_resource
+              JOIN library_editions boundary_edition
+                ON boundary_edition.material_id=boundary_resource.material_id
+               AND boundary_edition.fund='literature'
+              WHERE boundary_resource.plan_id=procurement_plans.id
+            )`).bind(now, actor.id, now, planId, expectedVersion),
         db.prepare(`INSERT INTO procurement_plan_snapshots (id, plan_id, sequence, schema_version, payload_json, payload_sha256, inventory_cutoff_at, created_by_user_id, created_at)
           VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?)`)
           .bind(`PSNAP-${crypto.randomUUID()}`, planId, sequence, payload, await sha256(payload), now, actor.id, now),
@@ -377,6 +424,9 @@ export async function mutateProcurementPlan(db: ProcurementPlanningDatabase, use
     throw new ProcurementPlanningError("invalid_action", 400, "Така дія не підтримується.");
   }
   } catch (error) {
+    if (action === "set_status" && input.status === "finalized") {
+      await assertPlanContainsOnlyEducation(db, planId);
+    }
     if (String(error).includes("procurement_plan_locked")) {
       throw new ProcurementPlanningError("plan_locked", 409, "План уже завершено. Оновіть сторінку.");
     }
@@ -386,6 +436,28 @@ export async function mutateProcurementPlan(db: ProcurementPlanningDatabase, use
     throw error;
   }
   return readProcurementPlan(db, planId);
+}
+
+async function assertPlanContainsOnlyEducation(
+  db: ProcurementPlanningDatabase,
+  planId: string,
+): Promise<void> {
+  const literature = await db.prepare(`
+    SELECT 1 AS found
+    FROM procurement_plan_resources resource
+    JOIN library_editions edition
+      ON edition.material_id=resource.material_id
+     AND edition.fund='literature'
+    WHERE resource.plan_id=?
+    LIMIT 1
+  `).bind(planId).first<{ found: number }>();
+  if (literature) {
+    throw new ProcurementPlanningError(
+      "librarika_authoritative",
+      410,
+      "Вилучіть із плану художню або наукову літературу: її комплектування ведеться у Librarika.",
+    );
+  }
 }
 
 async function prefillClasses(db: ProcurementPlanningDatabase, actor: Actor, planId: string, now: string) {
@@ -463,11 +535,24 @@ async function upsertResource(db: ProcurementPlanningDatabase, actor: Actor, pla
   let publisher = boundedText(input.publisher, 200);
   let publicationYear = optionalBoundedInteger(input.publicationYear, 1000, 2100);
   let sourceUrl = safeUrl(input.sourceUrl);
+  if (materialId) await assertEducationalMaterial(db, materialId);
+  if (id) {
+    const current = await db.prepare(`
+      SELECT material_id FROM procurement_plan_resources
+      WHERE id=? AND plan_id=? LIMIT 1
+    `).bind(id, planId).first<{ material_id: string | null }>();
+    if (current?.material_id) await assertEducationalMaterial(db, current.material_id);
+  }
   if (!id && materialId) {
     const material = await db.prepare(`SELECT m.title, m.subject, m.author, m.publisher, m.publication_year,
       COALESCE((SELECT ml.url FROM material_links ml WHERE ml.material_id=m.id AND ml.status='active'
         ORDER BY CASE ml.kind WHEN 'ebook' THEN 0 WHEN 'details' THEN 1 WHEN 'publisher' THEN 2 ELSE 3 END, ml.sort_order, ml.id LIMIT 1), '') AS source_url
-      FROM materials m WHERE m.id=? AND m.status='active' LIMIT 1`).bind(materialId).first<Record<string, unknown>>();
+      FROM materials m WHERE m.id=? AND m.status='active'
+        AND NOT EXISTS (
+          SELECT 1 FROM library_editions e
+          WHERE e.material_id=m.id AND e.fund='literature'
+        )
+      LIMIT 1`).bind(materialId).first<Record<string, unknown>>();
     if (!material) throw new ProcurementPlanningError("material_not_found", 404, "Видання з каталогу не знайдено.");
     title = text(material.title); subject = text(material.subject); author = text(material.author); publisher = text(material.publisher);
     publicationYear = nullableInteger(material.publication_year); sourceUrl = text(material.source_url);
@@ -478,10 +563,19 @@ async function upsertResource(db: ProcurementPlanningDatabase, actor: Actor, pla
   if (!id) {
     const newId = `PRES-${crypto.randomUUID()}`;
     try {
-      await db.prepare(`INSERT INTO procurement_plan_resources (id, plan_id, material_id, category, stock_mode, subject, title, author, publisher, publication_year, source_url, notes, usable_quantity_override, additional_incoming_quantity, sort_order, version, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`)
-        .bind(newId, planId, materialId, ...values, now, now).run();
+      const result = await db.prepare(`INSERT INTO procurement_plan_resources (id, plan_id, material_id, category, stock_mode, subject, title, author, publisher, publication_year, source_url, notes, usable_quantity_override, additional_incoming_quantity, sort_order, version, created_at, updated_at)
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?
+        WHERE ? IS NULL OR NOT EXISTS (
+          SELECT 1 FROM library_editions e
+          WHERE e.material_id=? AND e.fund='literature'
+        )`)
+        .bind(newId, planId, materialId, ...values, now, now, materialId, materialId).run();
+      if (!Number(result.meta?.changes)) {
+        if (materialId) await assertEducationalMaterial(db, materialId);
+        throw new ProcurementPlanningError("material_not_found", 404, "Видання з каталогу не знайдено.");
+      }
     } catch (error) {
+      if (materialId) await assertEducationalMaterial(db, materialId);
       if (String(error).includes("UNIQUE constraint failed")) throw new ProcurementPlanningError("resource_exists", 409, "Це видання вже додано до плану.");
       throw error;
     }
@@ -490,9 +584,36 @@ async function upsertResource(db: ProcurementPlanningDatabase, actor: Actor, pla
   }
   const expectedVersion = positiveInteger(input.expectedVersion);
   const result = await db.prepare(`UPDATE procurement_plan_resources SET category=?, stock_mode=?, subject=?, title=?, author=?, publisher=?, publication_year=?, source_url=?, notes=?, usable_quantity_override=?, additional_incoming_quantity=?, sort_order=?, version=version+1, updated_at=?
-    WHERE id=? AND plan_id=? AND version=?`).bind(...values, now, id, planId, expectedVersion).run();
+    WHERE id=? AND plan_id=? AND version=?
+      AND (material_id IS NULL OR NOT EXISTS (
+        SELECT 1 FROM library_editions e
+        WHERE e.material_id=procurement_plan_resources.material_id AND e.fund='literature'
+      ))`).bind(...values, now, id, planId, expectedVersion).run();
+  if (!Number(result.meta?.changes)) {
+    const current = await db.prepare(`SELECT material_id FROM procurement_plan_resources WHERE id=? AND plan_id=? LIMIT 1`)
+      .bind(id, planId).first<{ material_id: string | null }>();
+    if (current?.material_id) await assertEducationalMaterial(db, current.material_id);
+  }
   requireChange(result, "Видання вже змінилося. Оновіть сторінку.");
   await audit(db, actor, "procurement_resource.updated", "procurement_plan_resource", id, null, { planId, title }, now);
+}
+
+async function assertEducationalMaterial(
+  db: ProcurementPlanningDatabase,
+  materialId: string,
+): Promise<void> {
+  const literature = await db.prepare(`
+    SELECT 1 AS found FROM library_editions
+    WHERE material_id=? AND fund='literature'
+    LIMIT 1
+  `).bind(materialId).first<{ found: number }>();
+  if (literature) {
+    throw new ProcurementPlanningError(
+      "librarika_authoritative",
+      410,
+      "Художня та наукова література ведеться у Librarika й не додається до внутрішнього плану підручників.",
+    );
+  }
 }
 
 async function removeResource(db: ProcurementPlanningDatabase, actor: Actor, planId: string, input: Record<string, unknown>, now: string) {
@@ -507,8 +628,16 @@ async function upsertAllocation(db: ProcurementPlanningDatabase, actor: Actor, p
   const resourceId = requiredId(input.resourceId);
   const classId = requiredId(input.classId);
   const validPair = await db.prepare(`SELECT pr.id FROM procurement_plan_resources pr JOIN procurement_plan_classes pc ON pc.plan_id=pr.plan_id
-    WHERE pr.id=? AND pc.id=? AND pr.plan_id=? LIMIT 1`).bind(resourceId, classId, planId).first();
-  if (!validPair) throw new ProcurementPlanningError("allocation_scope_invalid", 409, "Клас і видання належать до різних планів.");
+    WHERE pr.id=? AND pc.id=? AND pr.plan_id=?
+      AND (pr.material_id IS NULL OR NOT EXISTS (
+        SELECT 1 FROM library_editions e
+        WHERE e.material_id=pr.material_id AND e.fund='literature'
+      ))
+    LIMIT 1`).bind(resourceId, classId, planId).first();
+  if (!validPair) {
+    await assertEducationalProcurementResource(db, planId, resourceId);
+    throw new ProcurementPlanningError("allocation_scope_invalid", 409, "Клас і видання належать до різних планів.");
+  }
   const demandMode = enumValue(input.demandMode, PROCUREMENT_DEMAND_MODES, "Оберіть спосіб розрахунку.");
   const copiesPerUnit = boundedInteger(input.copiesPerUnit, 1, 100);
   const fixedQuantity = boundedInteger(input.fixedQuantity, 0, 100000);
@@ -517,10 +646,22 @@ async function upsertAllocation(db: ProcurementPlanningDatabase, actor: Actor, p
   if (!id) {
     const newId = `PALLOC-${crypto.randomUUID()}`;
     try {
-      await db.prepare(`INSERT INTO procurement_plan_allocations (id, resource_id, class_id, demand_mode, copies_per_unit, fixed_quantity, reserve_quantity, notes, version, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`)
-        .bind(newId, resourceId, classId, demandMode, copiesPerUnit, fixedQuantity, reserveQuantity, notes, now, now).run();
+      const result = await db.prepare(`INSERT INTO procurement_plan_allocations (id, resource_id, class_id, demand_mode, copies_per_unit, fixed_quantity, reserve_quantity, notes, version, created_at, updated_at)
+        SELECT ?, pr.id, pc.id, ?, ?, ?, ?, ?, 1, ?, ?
+        FROM procurement_plan_resources pr
+        JOIN procurement_plan_classes pc ON pc.plan_id=pr.plan_id
+        WHERE pr.id=? AND pc.id=? AND pr.plan_id=?
+          AND (pr.material_id IS NULL OR NOT EXISTS (
+            SELECT 1 FROM library_editions e
+            WHERE e.material_id=pr.material_id AND e.fund='literature'
+          ))`)
+        .bind(newId, demandMode, copiesPerUnit, fixedQuantity, reserveQuantity, notes, now, now, resourceId, classId, planId).run();
+      if (!Number(result.meta?.changes)) {
+        await assertEducationalProcurementResource(db, planId, resourceId);
+        throw new ProcurementPlanningError("allocation_scope_invalid", 409, "Клас і видання належать до різних планів.");
+      }
     } catch (error) {
+      await assertEducationalProcurementResource(db, planId, resourceId);
       if (String(error).includes("UNIQUE constraint failed")) throw new ProcurementPlanningError("allocation_exists", 409, "Для цього класу розрахунок уже додано.");
       throw error;
     }
@@ -529,9 +670,42 @@ async function upsertAllocation(db: ProcurementPlanningDatabase, actor: Actor, p
   }
   const expectedVersion = positiveInteger(input.expectedVersion);
   const result = await db.prepare(`UPDATE procurement_plan_allocations SET class_id=?, demand_mode=?, copies_per_unit=?, fixed_quantity=?, reserve_quantity=?, notes=?, version=version+1, updated_at=?
-    WHERE id=? AND resource_id=? AND version=?`).bind(classId, demandMode, copiesPerUnit, fixedQuantity, reserveQuantity, notes, now, id, resourceId, expectedVersion).run();
+    WHERE id=? AND resource_id=? AND version=?
+      AND EXISTS (
+        SELECT 1 FROM procurement_plan_resources pr
+        WHERE pr.id=procurement_plan_allocations.resource_id
+          AND pr.plan_id=?
+          AND (pr.material_id IS NULL OR NOT EXISTS (
+            SELECT 1 FROM library_editions e
+            WHERE e.material_id=pr.material_id AND e.fund='literature'
+          ))
+      )`).bind(classId, demandMode, copiesPerUnit, fixedQuantity, reserveQuantity, notes, now, id, resourceId, expectedVersion, planId).run();
+  if (!Number(result.meta?.changes)) {
+    await assertEducationalProcurementResource(db, planId, resourceId);
+  }
   requireChange(result, "Розрахунок уже змінився. Оновіть сторінку.");
   await audit(db, actor, "procurement_allocation.updated", "procurement_plan_allocation", id, null, { planId, resourceId, classId }, now);
+}
+
+async function assertEducationalProcurementResource(
+  db: ProcurementPlanningDatabase,
+  planId: string,
+  resourceId: string,
+): Promise<void> {
+  const resource = await db.prepare(`
+    SELECT material_id
+    FROM procurement_plan_resources
+    WHERE id=? AND plan_id=?
+    LIMIT 1
+  `).bind(resourceId, planId).first<{ material_id: string | null }>();
+  if (!resource) {
+    throw new ProcurementPlanningError(
+      "allocation_scope_invalid",
+      409,
+      "Клас і видання належать до різних планів.",
+    );
+  }
+  if (resource.material_id) await assertEducationalMaterial(db, resource.material_id);
 }
 
 async function removeAllocation(db: ProcurementPlanningDatabase, actor: Actor, planId: string, input: Record<string, unknown>, now: string) {

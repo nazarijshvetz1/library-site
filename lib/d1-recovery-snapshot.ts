@@ -5,9 +5,11 @@ const SCHEMA_QUERY = "SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE 
 const COLUMNS_QUERY = "SELECT s.name AS table_name, p.name AS column_name FROM sqlite_schema AS s JOIN pragma_table_xinfo(s.name) AS p WHERE s.type = 'table' AND (s.name NOT GLOB 'sqlite_*' OR s.name = 'sqlite_sequence') AND s.name NOT GLOB '_cf_*' ORDER BY s.name, p.cid";
 export const MAX_RECOVERY_ROWS = 100000;
 export const MAX_RECOVERY_BYTES = 32 * 1024 * 1024;
+const MAX_TABLE_SELECTS_PER_QUERY = 5;
 
 export function quoteRecoveryIdentifier(value: string) {
-  if (!value || value.length > 160 || /[\x00-\x1f]/.test(value)) throw new Error("Некоректна назва таблиці.");
+  const hasControlCharacter = Array.from(value).some((character) => character.charCodeAt(0) <= 0x1f);
+  if (!value || value.length > 160 || hasControlCharacter) throw new Error("Некоректна назва таблиці.");
   return '"' + value.replaceAll('"', '""') + '"';
 }
 
@@ -44,7 +46,7 @@ export async function createD1RecoverySnapshot(db: RecoveryDatabase) {
   const readQueries: string[] = [];
   let pending: string[] = [];
   for (const select of selects) {
-    if (pending.length >= 4 || (new TextEncoder().encode([...pending, select].join(" UNION ALL ")).length > 75000 && pending.length)) {
+    if (pending.length >= MAX_TABLE_SELECTS_PER_QUERY || (new TextEncoder().encode([...pending, select].join(" UNION ALL ")).length > 75000 && pending.length)) {
       readQueries.push(pending.join(" UNION ALL ") + ` LIMIT ${MAX_RECOVERY_ROWS + 1}`); pending = [];
     }
     pending.push(select);

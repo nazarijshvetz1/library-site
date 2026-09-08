@@ -100,7 +100,7 @@ export default function ProcurementPlanningWorkspace({ displayName, role = "libr
     } catch (createError) { setError(message(createError)); } finally { setBusy(false); }
   }
 
-  const incomplete = Boolean(plan && (plan.classCountsMissing > 0 || plan.totals.incompleteResources > 0));
+  const incomplete = Boolean(plan && (plan.classCountsMissing > 0 || plan.totals.incompleteResources > 0 || (plan.blockedResources?.length ?? 0) > 0));
   return <LibrarianShell
     activeSection="acquisitions"
     displayName={displayName}
@@ -201,10 +201,12 @@ function ClassEditor({ item, busy, onMutate }: { item: ProcurementPlanClass; bus
 
 function ResourceSection({ plan, busy, onMutate }: { plan: ProcurementPlanDetail; busy: boolean; onMutate: Mutate }) {
   const [query, setQuery] = useState(""); const [results, setResults] = useState<CatalogPlanningResult[]>([]); const [searching, setSearching] = useState(false); const [searchError, setSearchError] = useState("");
+  const blockedResources = plan.blockedResources ?? [];
   async function search(event: FormEvent) { event.preventDefault(); setSearching(true); setSearchError(""); try { const response = await fetch(`/api/librarian/procurement-plans/catalog?q=${encodeURIComponent(query)}`, { cache: "no-store" }); const body = await response.json() as { materials?: CatalogPlanningResult[]; error?: string }; if (!response.ok) throw new Error(body.error || "Пошук не виконано."); setResults(body.materials ?? []); } catch (error) { setSearchError(message(error)); } finally { setSearching(false); } }
   return <details className={styles.section}>
     <summary><span><small>03 · матеріали й формула</small><strong>Позиції плану</strong></span><span>{plan.resources.length} найменувань · замовити {plan.totals.toOrderQuantity}<SiteIcon name="expand" size={18} /></span></summary>
     <div className={styles.sectionBody}>
+      {blockedResources.length ? <section className={styles.boundaryCleanup} aria-label="Очищення старих позицій Librarika"><p><strong>У старому плані є {blockedResources.length} позиц.</strong><span>Вони тепер ведуться лише у Librarika, не входять у розрахунок і мають бути вилучені з цього плану перед завершенням.</span></p><div>{blockedResources.map((resource) => <article key={resource.id}><span>{resource.title}</span><button type="button" disabled={busy} onClick={() => { if (window.confirm(`Вилучити «${resource.title}» лише з плану комплектування? Сама книга та її історія не видаляються.`)) void onMutate({ action: "remove_resource", id: resource.id }, "Застарілу позицію Librarika вилучено лише з плану."); }}><SiteIcon name="delete" size={15} /> Вилучити з плану</button></article>)}</div></section> : null}
       <form className={styles.catalogSearch} onSubmit={search}><label><span>Знайти у фонді</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Назва, автор або предмет" minLength={2} required /></label><button type="submit" disabled={searching}>{searching ? <SiteIcon name="loading" size={16} /> : <SiteIcon name="search" size={16} />} Знайти</button></form>
       {searchError ? <p className={styles.error}>{searchError}</p> : null}
       {results.length ? <div className={styles.searchResults}>{results.map((material) => <article key={material.id}><div><strong>{material.title}</strong><span>{[material.author, material.publicationYear, material.subject, material.classLabel].filter(Boolean).join(" · ")}</span><small>Придатно попередньо: {material.usableQuantity}</small></div><button type="button" disabled={busy || plan.resources.some((item) => item.materialId === material.id)} onClick={() => void onMutate({ action: "upsert_resource", materialId: material.id, category: categoryFromMaterial(material), stockMode: stockModeFromCategory(categoryFromMaterial(material)), title: material.title, subject: material.subject, author: material.author, publisher: material.publisher, publicationYear: material.publicationYear, sourceUrl: material.sourceUrl, notes: "", usableQuantityOverride: null, additionalIncomingQuantity: 0, sortOrder: plan.resources.length }, "Видання додано до плану.")}>{plan.resources.some((item) => item.materialId === material.id) ? "У плані" : "Додати"}</button></article>)}</div> : null}

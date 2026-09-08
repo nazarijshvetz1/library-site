@@ -40,7 +40,7 @@ export async function GET(_request: Request, context: Context): Promise<Response
       : "Не вдалося сформувати Excel-відомість.";
     const code = error instanceof ClassIssueStatementError ? error.code : "statement_unavailable";
     return librarianError(
-      code === "statement_not_found" ? 404 : code === "statement_invalid" ? 409 : 503,
+      error instanceof ClassIssueStatementError ? error.status : 503,
       code,
       message,
       authorization.value.access.writesEnabled,

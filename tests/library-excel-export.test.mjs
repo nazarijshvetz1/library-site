@@ -106,6 +106,35 @@ function seed(sqlite) {
     VALUES ('RES-1','REQ-1','MRI-1','CAT-0001','LOC-001','good',1,0,0,?,?)`).run(now, now);
 }
 
+function seedLiteratureRows(sqlite) {
+  const now = "2026-08-22T09:00:00.000Z";
+  sqlite.prepare(`INSERT INTO materials (id,catalog_number,title,sort_title,search_text,rubric,publication_type,subject,class_from,class_to,author,publication_year,isbn,isbn_normalized,publisher,notes,status,version,created_at,updated_at)
+    VALUES ('CAT-0002',2,'Роман Librarika','роман librarika','роман librarika','Художня література','Книга','',NULL,NULL,'Письменник',2025,'','','','', 'active',1,?,?)`).run(now, now);
+  sqlite.prepare(`INSERT INTO library_editions (id,source_media_id,material_id,fund,title,public_metadata_json,source_json,publication_state,version,created_at,updated_at)
+    VALUES ('ED-LIT','LBR-1','CAT-0002','literature','Роман Librarika','{}','{}','published',1,?,?)`).run(now, now);
+  sqlite.prepare(`INSERT INTO holdings (material_id,location_id,condition,quantity,version,updated_at)
+    VALUES ('CAT-0002','LOC-001','good',2,1,?)`).run(now);
+  sqlite.prepare(`INSERT INTO material_stock_totals (material_id,total_quantity,library_quantity,other_location_quantity,loaned_quantity,reserved_quantity,updated_at)
+    VALUES ('CAT-0002',2,2,0,0,0,?)`).run(now);
+  sqlite.prepare(`INSERT INTO loans (id,teacher_user_id,status,issued_at,due_at,notes,issued_by_user_id,version,created_at,updated_at)
+    VALUES ('LOAN-LIT','USR-TEACH','open',?,'2027-06-01','', 'USR-LIB',1,?,?)`).run(now, now, now);
+  sqlite.prepare(`INSERT INTO loan_items (id,loan_id,material_id,source_location_id,condition,quantity_issued,quantity_returned,notes,created_at,updated_at)
+    VALUES ('LI-LIT','LOAN-LIT','CAT-0002','LOC-001','good',1,0,'',?,?)`).run(now, now);
+  sqlite.prepare(`INSERT INTO class_loan_items (id,class_loan_id,material_id,source_location_id,condition,quantity_issued,quantity_returned,notes,created_at,updated_at)
+    VALUES ('CLI-LIT','CLOAN-1','CAT-0002','LOC-001','good',1,0,'',?,?)`).run(now, now);
+  sqlite.prepare(`INSERT INTO class_loan_item_adjustments (
+      id,request_id,class_loan_id,class_loan_item_id,statement_line_id,transaction_id,action,
+      quantity_before,quantity_after,quantity_returned_snapshot,stock_delta,location_id,condition,reason,actor_user_id,created_at)
+    VALUES ('CLADJ-LIT','REQ-CLASS-LIT','CLOAN-1','CLI-LIT',NULL,NULL,'quantity_changed',
+      1,2,0,-1,'LOC-001','good','Літературна тестова позиція','USR-LIB',?)`).run(now);
+  sqlite.prepare(`INSERT INTO material_requests (id,teacher_user_id,status,teacher_notes,librarian_note,rejection_reason,pickup_location_id,due_at,reviewed_by_user_id,version,submitted_at,ready_at,created_at,updated_at)
+    VALUES ('REQ-LIT','USR-TEACH','ready','','','','LOC-001','2027-06-01','USR-LIB',1,?,?,?,?)`).run(now, now, now, now);
+  sqlite.prepare(`INSERT INTO material_request_items (id,request_id,material_id,title_snapshot,author_snapshot,requested_quantity,approved_quantity,fulfilled_quantity,sort_order,created_at,updated_at)
+    VALUES ('MRI-LIT','REQ-LIT','CAT-0002','Роман Librarika','Письменник',1,1,0,0,?,?)`).run(now, now);
+  sqlite.prepare(`INSERT INTO material_request_reservations (id,request_id,request_item_id,material_id,source_location_id,condition,reserved_quantity,issued_quantity,released_quantity,created_at,updated_at)
+    VALUES ('RES-LIT','REQ-LIT','MRI-LIT','CAT-0002','LOC-001','good',1,0,0,?,?)`).run(now, now);
+}
+
 test("export reads all requested blocks in one bounded batch and excludes authentication secrets", async () => {
   const { sqlite, db } = openDatabase();
   const snapshot = await store.readLibraryExportSnapshot(db, "2026-08-21T12:34:00.000Z");
@@ -128,6 +157,37 @@ test("export reads all requested blocks in one bounded batch and excludes authen
   assert.equal(Object.hasOwn(snapshot.teachers[0], "email"), false);
   assert.equal(JSON.stringify(snapshot).includes("teacher@example.test"), false);
   assert.equal(JSON.stringify(snapshot).includes("code_hmac"), false);
+  sqlite.close();
+});
+
+test("full Excel export excludes Librarika literature from every material-backed sheet", async () => {
+  const { sqlite, db } = openDatabase();
+  seedLiteratureRows(sqlite);
+
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM materials").get().n, 2);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM holdings").get().n, 2);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM loan_items").get().n, 2);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM class_loan_items").get().n, 3);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM class_loan_item_adjustments").get().n, 2);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM material_request_items").get().n, 2);
+
+  const snapshot = await store.readLibraryExportSnapshot(db, "2026-08-22T09:00:00.000Z");
+  assert.deepEqual(snapshot.materials.map((row) => row.id), ["CAT-0001"]);
+  assert.deepEqual(snapshot.holdings.map((row) => row.materialId), ["CAT-0001"]);
+  assert.deepEqual(snapshot.teacherLoans.map((row) => row.itemId), ["LI-1"]);
+  assert.deepEqual(snapshot.classLoans.map((row) => row.itemId).sort(), ["CLI-1", "CLI-REMOVED"]);
+  assert.deepEqual(snapshot.classLoanAdjustments.map((row) => row.adjustmentId), ["CLADJ-1"]);
+  assert.deepEqual(snapshot.materialRequests.map((row) => row.itemId), ["MRI-1"]);
+  assert.equal(snapshot.teachers.length, 1, "non-material teacher sheet must be preserved");
+  assert.equal(snapshot.classes.length, 1, "non-material class sheet must be preserved");
+
+  const workbook = generator.createLibraryExcelExport(snapshot);
+  const allXml = [...unzipStored(workbook.bytes).values()]
+    .map((bytes) => new TextDecoder().decode(bytes))
+    .join("\n");
+  assert.doesNotMatch(allXml, /CAT-0002|Роман Librarika|LOAN-LIT|CLI-LIT|CLADJ-LIT|MRI-LIT/u);
+  assert.match(allXml, /Учитель Тестовий/u);
+  assert.match(allXml, /5-А/u);
   sqlite.close();
 });
 

@@ -148,7 +148,7 @@ export default function TextbookCatalog() {
             <span><strong>Єдина бібліотека</strong><small>Міжнародний ліцей МАУП</small></span>
           </a>
           <nav className={styles.nav} aria-label="Головна навігація">
-            <a href={PUBLIC_CATALOG_URL}>Каталог <SiteIcon name="external" size={15} /></a>
+            <a href={PUBLIC_CATALOG_URL}>Каталог художньої літератури · Librarika <SiteIcon name="external" size={15} /></a>
             <a className={styles.navCurrent} href="/textbooks">Е-підручники</a>
             <a href="/visits">Графік</a>
             <a href="/teacher">Кабінет учителя</a>

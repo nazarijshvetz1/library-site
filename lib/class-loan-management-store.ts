@@ -180,6 +180,7 @@ export class ClassLoanManagementError extends Error {
   readonly code:
     | "class_loan_not_found"
     | "class_loan_alias_invalid"
+    | "class_loan_librarika_authoritative"
     | "class_loan_management_unavailable";
   readonly status: number;
 
@@ -191,6 +192,8 @@ export class ClassLoanManagementError extends Error {
       ? 404
       : code === "class_loan_alias_invalid"
         ? 409
+        : code === "class_loan_librarika_authoritative"
+          ? 410
         : 503;
   }
 }
@@ -227,6 +230,7 @@ export async function readClassLoanManagement(
     }
 
     const header = projectHeader(requestedClassLoanId, headerRow);
+    await assertEducationClassLoan(db, header.classLoanId);
     const queryLimit = historyLimit + 1;
     const [
       itemResult,
@@ -278,6 +282,35 @@ export async function readClassLoanManagement(
     throw new ClassLoanManagementError(
       "class_loan_management_unavailable",
       "Не вдалося завантажити керування видачею на клас.",
+    );
+  }
+}
+
+async function assertEducationClassLoan(
+  db: CatalogD1Database,
+  classLoanId: string,
+): Promise<void> {
+  const projection = await db.prepare(`
+    SELECT EXISTS(
+      SELECT 1 FROM sqlite_master
+      WHERE type = 'table' AND name = 'library_editions'
+    ) AS hasLiteratureProjection
+  `).first<Row>();
+  if (nonNegativeInteger(projection?.hasLiteratureProjection) !== 1) return;
+
+  const literature = await db.prepare(`
+    SELECT 1 AS found
+    FROM class_loan_items item
+    JOIN library_editions edition
+      ON edition.material_id = item.material_id
+     AND edition.fund = 'literature'
+    WHERE item.class_loan_id = ?
+    LIMIT 1
+  `).bind(classLoanId).first<Row>();
+  if (literature) {
+    throw new ClassLoanManagementError(
+      "class_loan_librarika_authoritative",
+      "Художню та наукову літературу потрібно переглядати й обслуговувати в Librarika.",
     );
   }
 }

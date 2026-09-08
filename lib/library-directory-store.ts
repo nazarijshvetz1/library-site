@@ -179,6 +179,15 @@ export async function listOpenLoans(
       SELECT id
       FROM loans
       WHERE status = 'open'
+      AND EXISTS (
+        SELECT 1 FROM loan_items selected_item
+        WHERE selected_item.loan_id = loans.id
+          AND selected_item.quantity_returned < selected_item.quantity_issued
+          AND NOT EXISTS (
+            SELECT 1 FROM library_editions e
+            WHERE e.material_id = selected_item.material_id AND e.fund = 'literature'
+          )
+      )
       ${teacherFilter}
       ORDER BY COALESCE(due_at, '9999-12-31') ASC, issued_at ASC, id ASC
       LIMIT ?
@@ -191,6 +200,10 @@ export async function listOpenLoans(
       ON cover.material_id = m.id AND cover.status = 'ready'
     JOIN locations loc ON loc.id = li.source_location_id
     WHERE li.quantity_returned < li.quantity_issued
+      AND NOT EXISTS (
+        SELECT 1 FROM library_editions e
+        WHERE e.material_id = li.material_id AND e.fund = 'literature'
+      )
     ORDER BY l.issued_at DESC, COALESCE(l.due_at, '9999-12-31') ASC,
       l.id ASC, li.created_at ASC, li.id ASC
   `).bind(...bindings).all();
@@ -288,6 +301,16 @@ export async function listOpenClassLoans(
       SELECT id
       FROM class_loans
       WHERE status = 'open'
+      AND EXISTS (
+        SELECT 1 FROM class_loan_items selected_item
+        WHERE selected_item.class_loan_id = class_loans.id
+          AND selected_item.lifecycle_status = 'active'
+          AND selected_item.quantity_returned < selected_item.quantity_issued
+          AND NOT EXISTS (
+            SELECT 1 FROM library_editions e
+            WHERE e.material_id = selected_item.material_id AND e.fund = 'literature'
+          )
+      )
       ${classFilter}
       ${teacherFilter}
       ORDER BY COALESCE(due_at, '9999-12-31') ASC, issued_at ASC, id ASC
@@ -304,6 +327,10 @@ export async function listOpenClassLoans(
       ON cover.material_id = m.id AND cover.status = 'ready'
     JOIN locations loc ON loc.id = cli.source_location_id
     WHERE cli.quantity_returned < cli.quantity_issued
+      AND NOT EXISTS (
+        SELECT 1 FROM library_editions e
+        WHERE e.material_id = cli.material_id AND e.fund = 'literature'
+      )
     ORDER BY COALESCE(cl.due_at, '9999-12-31') ASC, cl.issued_at ASC,
       cl.id ASC, cli.created_at ASC, cli.id ASC
   `).bind(...bindings).all();

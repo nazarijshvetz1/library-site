@@ -1,4 +1,5 @@
 import {processReaderTelegramMessage} from "./reader-telegram.ts";
+import {LIBRARIKA_CATALOG_URL} from "./librarika.ts";
 import type { ChatGPTUser } from "../app/chatgpt-auth.ts";
 import { getRuntimeBoolean, getRuntimeString } from "./runtime-env.ts";
 
@@ -30,7 +31,6 @@ const TELEGRAM_MAX_ATTEMPTS = 8;
 const TELEGRAM_DRAIN_LIMIT = 10;
 const TELEGRAM_API_TIMEOUT_MS = 6_000;
 const TELEGRAM_BOT_API = "https://api.telegram.org";
-const PUBLIC_CATALOG_URL = "/library";
 export const TELEGRAM_TEACHER_MENU_VERSION = 2;
 const TELEGRAM_TEACHER_MENU_OUTBOX_TYPE = "teacher_menu_refresh";
 const TELEGRAM_TEACHER_MENU_ENTITY = `menu-v${TELEGRAM_TEACHER_MENU_VERSION}`;
@@ -958,6 +958,13 @@ export async function drainTelegramOutbox(
   await db.batch([
     db.prepare(`
       UPDATE telegram_delivery_outbox
+      SET status='dead',lease_token=NULL,lease_expires_at=NULL,next_attempt_at=?,
+          last_error_code='pickup_reminders_withdrawn',last_error_message='Нагадування про підготовку та отримання вимкнено.',updated_at=?
+      WHERE type IN ('material_request_pickup_reminder','material_request_prepare_reminder')
+        AND status IN ('pending','processing','retry')
+    `).bind(now, now),
+    db.prepare(`
+      UPDATE telegram_delivery_outbox
       SET status='retry',lease_token=NULL,lease_expires_at=NULL,next_attempt_at=?,updated_at=?
       WHERE status='processing' AND lease_expires_at<=?
     `).bind(now, now, now),
@@ -980,6 +987,7 @@ export async function drainTelegramOutbox(
     JOIN telegram_connections c ON c.user_id=o.recipient_user_id AND c.status='active'
     JOIN users u ON u.id=o.recipient_user_id AND u.status='active'
     WHERE o.status IN ('pending','retry') AND o.next_attempt_at<=?
+      AND o.type NOT IN ('material_request_pickup_reminder','material_request_prepare_reminder')
       AND (o.expires_at IS NULL OR o.expires_at>?)
       AND ((o.type=? AND ?=1) OR (?=1 AND (c.notify_orders=1 OR c.notify_visits=1)))
       AND ((o.target_path GLOB '/librarian*' AND u.role IN ('admin','librarian'))
@@ -990,7 +998,7 @@ export async function drainTelegramOutbox(
         SELECT 1 FROM visit_teacher_credentials credential
         WHERE credential.teacher_user_id=u.id AND credential.status='active'
       ))
-      AND (o.type IN ('material_request_pickup_reminder','material_request_prepare_reminder') OR NOT EXISTS (
+      AND NOT EXISTS (
         SELECT 1 FROM telegram_delivery_outbox earlier
         WHERE earlier.recipient_user_id=o.recipient_user_id
           AND earlier.status IN ('pending','processing','retry')
@@ -1001,9 +1009,8 @@ export async function drainTelegramOutbox(
               earlier.created_at<o.created_at OR (earlier.created_at=o.created_at AND earlier.id<o.id)
             )
           ))
-      ))
-    ORDER BY CASE WHEN o.type IN ('material_request_pickup_reminder','material_request_prepare_reminder') THEN 0 ELSE 1 END,
-      o.next_attempt_at,o.created_at,o.id LIMIT ?
+      )
+    ORDER BY o.next_attempt_at,o.created_at,o.id LIMIT ?
   `).bind(
     now,
     now,
@@ -2349,7 +2356,6 @@ async function bestEffortTeacherOnboardingMenu(
 ): Promise<void> {
   try {
     const origin = siteOrigin ? trustedSiteOrigin(siteOrigin) : null;
-    const configuration = telegramConfiguration();
     const heading = invitedTeacherName
       ? `Персональне запрошення для «${safePlainText(invitedTeacherName, 120)}» підтверджено.`
       : "Вітаємо в «Єдиній бібліотеці»!";
@@ -2371,9 +2377,7 @@ async function bestEffortTeacherOnboardingMenu(
             ]),
         [{
           text: "📚 Переглянути каталог",
-          ...(configuration.miniAppEnabled
-            ? { web_app: { url: new URL("/reader/telegram?tab=catalog",origin).toString() } }
-            : { url: new URL(PUBLIC_CATALOG_URL,origin).toString() }),
+          url: LIBRARIKA_CATALOG_URL,
         }],
         [{ text: "📅 Переглянути графік", url: new URL("/visits", origin).toString() }],
       ],
@@ -2748,16 +2752,17 @@ function telegramRoleKeyboard(
   const keyboard: Array<Array<Record<string, unknown>>> = [];
   if (teacherCapability) {
     const buttons = [
-      ["👤 Кабінет учителя", "/teacher/telegram?tab=overview"],
-      ["✨ Містер Букінгем · ШІ", "/teacher/telegram?tab=assistant"],
-      ["📚 Каталог", miniAppEnabled ? "/reader/telegram?tab=catalog" : PUBLIC_CATALOG_URL],
-      ["🛒 Замовлення з фонду бібліотеки", "/teacher/telegram?tab=orders"],
-      ["➕ Запропонувати придбання", "/teacher/telegram?tab=acquisition"],
-      ["📅 Записатися / мої відвідування", "/teacher/telegram?tab=visits"],
-      ["📖 Мої посібники", "/teacher/telegram?tab=loans"],
-      ["🔔 Мої повідомлення", "/teacher/telegram?tab=notifications"],
+      {text:"👤 Кабінет учителя",miniPath:"/teacher/telegram?tab=overview"},
+      {text:"✨ Містер Букінгем · ШІ",miniPath:"/teacher/telegram?tab=assistant"},
+      {text:"📚 Каталог художньої літератури",miniPath:LIBRARIKA_CATALOG_URL,external:true},
+      {text:"🛒 Замовлення з фонду бібліотеки",miniPath:"/teacher/telegram?tab=orders"},
+      {text:"➕ Запропонувати придбання",miniPath:"/teacher/telegram?tab=acquisition"},
+      {text:"📅 Записатися / мої відвідування",miniPath:"/teacher/telegram?tab=visits"},
+      {text:"📖 Мої посібники",miniPath:"/teacher/telegram?tab=loans"},
+      {text:"🔔 Мої повідомлення",miniPath:"/teacher/telegram?tab=notifications"},
     ] as const;
-    keyboard.push(...buttons.map(([text, miniPath]) => {
+    keyboard.push(...buttons.map(({text,miniPath,...button}) => {
+      if("external" in button)return [{text,url:miniPath}];
       const path = miniAppEnabled ? miniPath : miniPath.replace("/teacher/telegram", "/teacher");
       const url = new URL(path, siteOrigin).toString();
       return [{ text, ...(miniAppEnabled ? { web_app: { url } } : { url }) }];

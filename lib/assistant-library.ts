@@ -46,7 +46,7 @@ export async function runAssistantLibraryTool(db: VisitD1Database & CatalogD1Dat
   }
   const now = kyivLocalNow();
   if (name === "librarian_reference") {
-    const [reference, facets, classes] = await Promise.all([readLibraryReferenceData(db), listCatalogMaterialFacets(db, undefined, "librarian"),
+    const [reference, facets, classes] = await Promise.all([readLibraryReferenceData(db), listCatalogMaterialFacets(db, undefined, "librarian", "education"),
       db.prepare("SELECT id,class_name AS name,grade,academic_year_id AS academicYearId,version FROM class_years WHERE status='active' ORDER BY grade,code LIMIT 200").all<Record<string, unknown>>()]);
     const words = normalizeCatalogSearchText(args.query).split(" ").filter(Boolean);
     const matches = (row: unknown) => words.every((word) => normalizeCatalogSearchText(JSON.stringify(row)).includes(word));
@@ -64,6 +64,8 @@ export async function runAssistantLibraryTool(db: VisitD1Database & CatalogD1Dat
   }
   if (name === "material_history") {
     const id = normalizeCatalogId(args.materialId); if (!id) throw new VisitScheduleError("invalid_material", 400, "Оберіть матеріал із пошуку.");
+    const material = await getCatalogMaterialDetail(db, id, "librarian", { includeArchived: true, fund: "education" });
+    if (!material) throw new VisitScheduleError("invalid_material", 404, "Матеріал не знайдено серед навчального фонду.");
     const history = await db.prepare(`SELECT * FROM (
       SELECT t.id,t.kind,t.occurred_at AS date,t.document_number AS document,l.name AS location,NULL AS className,
       i.quantity_delta AS quantityDelta,i.condition FROM inventory_transaction_lines i JOIN inventory_transactions t ON t.id=i.transaction_id
@@ -103,7 +105,7 @@ export async function runAssistantLibraryTool(db: VisitD1Database & CatalogD1Dat
   if (name === "material_details") {
     const id = normalizeCatalogId(args.materialId);
     if (!id) throw new VisitScheduleError("invalid_material", 400, "Оберіть матеріал із результатів пошуку.");
-    const item = await getCatalogMaterialDetail(db, id, context.role === "librarian" ? "librarian" : "public", { includeArchived: context.role === "librarian" });
+    const item = await getCatalogMaterialDetail(db, id, context.role === "librarian" ? "librarian" : "public", { includeArchived: context.role === "librarian", fund: "education" });
     if (!item) return { success: true, message: "Матеріал не знайдено серед доступних вам записів.", cards: [] };
     return { success: true, data: { ...item, checkedAt: new Date().toISOString() }, cards: [{ kind: "material", id: item.id, title: item.title,
       description: `${item.author || "Автор не зазначений"} · ${item.year ?? "Рік не зазначений"}`, image: item.archived ? undefined : item.thumbnailUrl,

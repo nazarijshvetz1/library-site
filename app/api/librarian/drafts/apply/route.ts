@@ -10,6 +10,7 @@ import {
   isSupportedDraftApplyKind,
   validateDraftApplyInput,
 } from "@/lib/draft-apply-validation";
+import { isLegacyMaterialDraftKind } from "@/lib/draft-validation";
 import {
   DraftConflictError,
   DraftLockedError,
@@ -95,6 +96,14 @@ export async function POST(request: Request) {
       404,
       "draft_not_found",
       "Чернетку не знайдено.",
+      access.writesEnabled,
+    );
+  }
+  if (isLegacyMaterialDraftKind(existing.kind)) {
+    return librarianError(
+      410,
+      "legacy_material_drafts_disabled",
+      "Старий запис фондових змін до Google Sheets вимкнено. Дані не змінено; виконайте дію у розділі «Фонд» із базою D1.",
       access.writesEnabled,
     );
   }

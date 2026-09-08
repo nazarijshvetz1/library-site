@@ -5,6 +5,8 @@ import { drainTelegramOutboxUntilIdle } from "../lib/telegram-delivery-runtime";
 import { expireAssistantCalls } from "../lib/assistant-store";
 import {runReaderMaintenance} from "../lib/reader-notifications";
 import {cleanReaderPhotos} from "../lib/reader-photo-cleanup";
+import {expireTemporaryLibrarikaMemberSyncRows} from "../lib/librarika-member-sync";
+import {isDailyMemberSyncCleanupTick,isFiveMinuteTick,recordScheduledHeartbeat,scheduledInstant,type ScheduledControllerLike} from "../lib/worker-schedule";
 
 interface AssetFetcher {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
@@ -81,18 +83,24 @@ const worker = {
       headers,
     });
   },
-  async scheduled(_controller: unknown, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(controller: ScheduledControllerLike, env: Env, ctx: ExecutionContext): Promise<void> {
+    const scheduledAt=scheduledInstant(controller);
+    ctx.waitUntil(recordScheduledHeartbeat(env.DB,scheduledAt).catch(()=>undefined));
     ctx.waitUntil(expireAssistantCalls(env.DB, env.OPENAI_API_KEY));
-    // Scheduled pickup reminders are deadline-sensitive, so drain them on every minute tick.
+    // General Telegram messages are deadline-sensitive, so drain them on every minute tick.
     ctx.waitUntil(drainTelegramOutboxUntilIdle(env.DB, {
       siteOrigin: "https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site",
       maxBatches: 1,
       batchLimit: 10,
     }));
     // The heavier reader and photo maintenance tasks remain on five-minute ticks.
-    if(new Date().getUTCMinutes()%5===0){
+    if(isFiveMinuteTick(scheduledAt)){
       ctx.waitUntil(runReaderMaintenance(env.DB).catch(()=>undefined));
       ctx.waitUntil(cleanReaderPhotos(env.DB,env.COVER_UPLOADS).catch(()=>undefined));
+    }
+    // Member exports can contain personal data, so stale staging rows are purged daily even if no librarian starts another sync.
+    if(isDailyMemberSyncCleanupTick(scheduledAt)){
+      ctx.waitUntil(expireTemporaryLibrarikaMemberSyncRows(env.DB).catch(()=>undefined));
     }
   },
 };

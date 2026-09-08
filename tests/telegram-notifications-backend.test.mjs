@@ -561,7 +561,7 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
     [
       "👤 Кабінет учителя",
       "✨ Містер Букінгем · ШІ",
-      "📚 Каталог",
+      "📚 Каталог художньої літератури",
       "🛒 Замовлення з фонду бібліотеки",
       "➕ Запропонувати придбання",
       "📅 Записатися / мої відвідування",
@@ -570,11 +570,11 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
     ],
   );
   assert.deepEqual(
-    teacherMessage.reply_markup.inline_keyboard.slice(0, 8).map((row) => row[0].web_app.url),
+    teacherMessage.reply_markup.inline_keyboard.slice(0, 8).map((row) => row[0].web_app?.url ?? row[0].url),
     [
       "https://library.example.test/teacher/telegram?tab=overview",
       "https://library.example.test/teacher/telegram?tab=assistant",
-      "https://library.example.test/reader/telegram?tab=catalog",
+      "https://librarylyceummaup.librarika.com/search",
       "https://library.example.test/teacher/telegram?tab=orders",
       "https://library.example.test/teacher/telegram?tab=acquisition",
       "https://library.example.test/teacher/telegram?tab=visits",
@@ -582,7 +582,7 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
       "https://library.example.test/teacher/telegram?tab=notifications",
     ],
   );
-  assert.equal(teacherMessage.reply_markup.inline_keyboard[1][0].url, undefined);
+  assert.equal(teacherMessage.reply_markup.inline_keyboard[2][0].web_app, undefined);
   assert.equal(teacherMessage.reply_markup.inline_keyboard[8][0].callback_data, "telegram-notifications:off");
   assert.equal(menuButton.menu_button.type, "web_app");
   assert.equal(menuButton.chat_id, 7001);
@@ -657,9 +657,9 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
   assert.equal(onboardingMessage.reply_markup.inline_keyboard[1][0].web_app.url,
     "https://library.example.test/teacher/telegram?mode=activate");
   assert.equal(onboardingMessage.reply_markup.inline_keyboard[2][0].text, "📚 Переглянути каталог");
-  assert.equal(onboardingMessage.reply_markup.inline_keyboard[2][0].web_app.url,
-    "https://library.example.test/reader/telegram?tab=catalog");
-  assert.equal(onboardingMessage.reply_markup.inline_keyboard[2][0].url, undefined);
+  assert.equal(onboardingMessage.reply_markup.inline_keyboard[2][0].url,
+    "https://librarylyceummaup.librarika.com/search");
+  assert.equal(onboardingMessage.reply_markup.inline_keyboard[2][0].web_app, undefined);
   assert.equal(onboardingMenu.menu_button.web_app.url, "https://library.example.test/teacher/telegram?tab=overview");
   assert.deepEqual(
     { ...teacher.sqlite.prepare(`SELECT kind,teacher_user_id,bound_telegram_user_id,bound_chat_id
@@ -766,8 +766,8 @@ test("connected menus preserve ordinary-link fallbacks when Telegram Mini App is
       "https://library.example.test",
     ), { outcome: "menu", duplicate: false });
     const teacherMenu = teacherBodies.find((body) => body.text).reply_markup.inline_keyboard;
-    assert.equal(teacherMenu[2][0].text, "📚 Каталог");
-    assert.equal(teacherMenu[2][0].url, "https://library.example.test/library");
+    assert.equal(teacherMenu[2][0].text, "📚 Каталог художньої літератури");
+    assert.equal(teacherMenu[2][0].url, "https://librarylyceummaup.librarika.com/search");
     assert.equal(teacherMenu[2][0].web_app, undefined);
     assert.equal(teacherMenu[3][0].text, "🛒 Замовлення з фонду бібліотеки");
     assert.equal(teacherMenu[3][0].url, "https://library.example.test/teacher?tab=orders");
@@ -890,8 +890,10 @@ test("verified Mini App login refreshes only the exact connected teacher menu", 
   assert.equal(message.reply_markup.inline_keyboard.length, 9);
   assert.equal(message.reply_markup.inline_keyboard[0][0].web_app.url,
     "https://library.example.test/teacher/telegram?tab=overview");
-  assert.equal(message.reply_markup.inline_keyboard[2][0].web_app.url,
-    "https://library.example.test/reader/telegram?tab=catalog");
+  assert.equal(message.reply_markup.inline_keyboard[2][0].url,
+    "https://librarylyceummaup.librarika.com/search");
+  assert.equal(message.reply_markup.inline_keyboard[2][0].web_app, undefined,
+    "the external Librarika catalog must not be launched as our Telegram Mini App");
   assert.equal(message.reply_markup.inline_keyboard[3][0].web_app.url,
     "https://library.example.test/teacher/telegram?tab=orders");
   assert.equal(message.reply_markup.inline_keyboard[8][0].callback_data, "telegram-notifications:off");
@@ -1540,7 +1542,7 @@ test("audited outbox event is deduplicated and delivered with a safe site link",
   context.sqlite.close();
 });
 
-test("a future reminder never blocks a later-created message that is already due", async () => {
+test("a withdrawn future pickup reminder is retired without blocking a later due message", async () => {
   const context = await queuedLibrarianContext();
   context.sqlite.prepare(`INSERT INTO telegram_delivery_outbox (
     id,recipient_user_id,dedupe_key,category,type,title,message,target_path,
@@ -1562,7 +1564,7 @@ test("a future reminder never blocks a later-created message that is already due
   assert.deepEqual(result, { attempted: 1, sent: 1, failed: 0 });
   assert.equal(delivered.length, 1);
   assert.match(delivered[0], /Новий запис/u);
-  assert.equal(context.sqlite.prepare("SELECT status FROM telegram_delivery_outbox WHERE id='TGO-FUTURE'").get().status, "pending");
+  assert.equal(context.sqlite.prepare("SELECT status FROM telegram_delivery_outbox WHERE id='TGO-FUTURE'").get().status, "dead");
   assert.equal(context.sqlite.prepare("SELECT status FROM telegram_delivery_outbox WHERE id!='TGO-FUTURE'").get().status, "sent");
   context.sqlite.close();
 });
@@ -1713,7 +1715,7 @@ test("429 is retried and 403 blocks the connection without losing the event", as
   blocked.sqlite.close();
 });
 
-test("a pickup reminder is never retried after its scheduled issue time", async () => {
+test("withdrawn pickup reminders are never delivered or retried", async () => {
   const context = await queuedLibrarianContext();
   context.sqlite.prepare(`UPDATE telegram_delivery_outbox
     SET type='material_request_prepare_reminder',expires_at='2026-08-22T10:05:00.000Z'
@@ -1730,17 +1732,17 @@ test("a pickup reminder is never retried after its scheduled issue time", async 
       });
     },
   });
-  assert.deepEqual(first, { attempted: 1, sent: 0, failed: 1 });
+  assert.deepEqual(first, { attempted: 0, sent: 0, failed: 0 });
   assert.deepEqual(
     { ...context.sqlite.prepare("SELECT status,last_error_code FROM telegram_delivery_outbox").get() },
-    { status: "dead", last_error_code: "reminder_expired" },
+    { status: "dead", last_error_code: "pickup_reminders_withdrawn" },
   );
   assert.deepEqual(await telegram.drainTelegramOutbox(context.db, {
     siteOrigin: "https://library.example.test",
     now: new Date("2026-08-22T10:10:00.000Z"),
     fetcher: async () => { fetches += 1; return telegramOk(); },
   }), { attempted: 0, sent: 0, failed: 0 });
-  assert.equal(fetches, 1);
+  assert.equal(fetches, 0);
   context.sqlite.close();
 });
 

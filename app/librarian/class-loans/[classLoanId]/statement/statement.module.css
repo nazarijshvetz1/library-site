@@ -1,4 +1,11 @@
 .page { min-height: 100vh; padding: 18px; background: #eef1ed; color: #173e2d; font-family: Inter, "Segoe UI", sans-serif; }
+.boundaryNotice { width: min(680px, 100%); margin: 10vh auto 0; padding: 34px; border: 1px solid #d7ded5; border-radius: 18px; background: #fff; box-shadow: 0 15px 42px rgba(17, 55, 35, .09); }
+.boundaryNotice > span { color: #8a762f; font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.boundaryNotice h1 { margin: 11px 0; font: 700 30px/1.15 Georgia, serif; }
+.boundaryNotice p { margin: 0; color: #607069; font-size: 13px; line-height: 1.7; }
+.boundaryNotice div { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 9px; }
+.boundaryNotice a { min-height: 42px; padding: 0 15px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #bdd0c0; border-radius: 10px; background: #fff; color: #174a31; font-size: 12px; font-weight: 750; text-decoration: none; }
+.boundaryNotice a:last-child { border-color: #185634; background: #185634; color: #fff; }
 .page :global(.statement-actions) { width: min(1050px, 100%); margin: 0 auto 12px; display: flex; flex-wrap: wrap; gap: 8px; }
 .page :global(.statement-actions) a,
 .page :global(.statement-actions) button { min-height: 42px; padding: 0 16px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #bdd0c0; border-radius: 10px; background: #fff; color: #174a31; font: 750 13px/1 Inter, "Segoe UI", sans-serif; cursor: pointer; text-decoration: none; }
@@ -130,6 +137,9 @@
 
 @media (max-width: 720px) {
   .page { padding: 8px; }
+  .boundaryNotice { margin-top: 7vh; padding: 24px 20px; }
+  .boundaryNotice h1 { font-size: 25px; }
+  .boundaryNotice div { display: grid; }
   .page :global(.statement-actions) { display: grid; grid-template-columns: 1fr 1fr; }
   .page :global(.statement-actions) a,
   .page :global(.statement-actions) button { min-width: 0; min-height: 44px; padding: 0 9px; text-align: center; }

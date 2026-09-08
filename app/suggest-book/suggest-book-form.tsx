@@ -138,7 +138,7 @@ export default function SuggestBookForm() {
           <span><strong>Єдина бібліотека</strong><small>Міжнародний ліцей МАУП</small></span>
         </a>
         <nav aria-label="Основна навігація">
-          <a href={PUBLIC_CATALOG_URL}>Каталог <SiteIcon name="external" size={17} /></a>
+          <a href={PUBLIC_CATALOG_URL}>Каталог художньої літератури · Librarika <SiteIcon name="external" size={17} /></a>
           <a href={TEACHER_CABINET_URL}>Кабінет учителя</a>
         </nav>
       </header>
@@ -241,7 +241,7 @@ export default function SuggestBookForm() {
 
       <footer className={styles.footer}>
         <span>Єдина бібліотека · Міжнародний ліцей МАУП</span>
-        <a href={PUBLIC_CATALOG_URL}>Повернутися до каталогу <SiteIcon name="external" size={17} /></a>
+        <a href={PUBLIC_CATALOG_URL}>До каталогу художньої літератури · Librarika <SiteIcon name="external" size={17} /></a>
       </footer>
     </div>
   );

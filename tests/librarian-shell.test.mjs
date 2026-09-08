@@ -1,9 +1,19 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { registerHooks } from "node:module";
 import test from "node:test";
 import ts from "typescript";
 
-import {
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier === "@/lib/librarika") {
+      return { url: new URL("../lib/librarika.ts", import.meta.url).href, shortCircuit: true };
+    }
+    return nextResolve(specifier, context);
+  },
+});
+
+const {
   LIBRARIAN_SECTIONS,
   LIBRARY_EMBLEM_URL,
   librarianLiteratureHref,
@@ -11,7 +21,7 @@ import {
   librarianTextbooksHref,
   librarianToolHref,
   librarianUtilityHref,
-} from "../app/librarian/_components/librarian-routes.ts";
+} = await import("../app/librarian/_components/librarian-routes.ts");
 
 const expectedWebRoutes = {
   home: "/librarian",
@@ -66,8 +76,8 @@ test("shared librarian route helper freezes web and Telegram Mini App destinatio
     assert.equal(librarianSectionHref(section, false), expectedWebRoutes[section]);
     assert.equal(librarianSectionHref(section, true), expectedTelegramRoutes[section]);
   }
-  assert.equal(librarianUtilityHref("publicCatalog", false), "https://nazarijshvetz1.github.io/library-site/");
-  assert.equal(librarianUtilityHref("publicCatalog", true), "https://nazarijshvetz1.github.io/library-site/");
+  assert.equal(librarianUtilityHref("publicCatalog", false), "https://librarylyceummaup.librarika.com/search");
+  assert.equal(librarianUtilityHref("publicCatalog", true), "https://librarylyceummaup.librarika.com/search");
   assert.equal(librarianUtilityHref("excelExport", false), "/librarian/reports");
   assert.equal(librarianUtilityHref("excelExport", true), null);
   assert.equal(librarianUtilityHref("excelImport", false), "/librarian/import");
@@ -111,7 +121,8 @@ test("LibrarianShell keeps the official emblem, full-page navigation, and access
   assert.match(source, /label: "Підручники й посібники"[\s\S]*?label: "Новий матеріал"[\s\S]*?label: "Е-підручники"/u);
   assert.doesNotMatch(source, /section: "fund", label: "Художня та наукова література"/u);
   assert.equal((source.match(/href=\{librarianLiteratureHref\(telegramMiniApp\)\}/gu) ?? []).length, 3);
-  assert.match(source, /Література <SiteIcon name="catalog"/u);
+  assert.match(source, /Librarika <SiteIcon name="catalog"/u);
+  assert.equal((source.match(/Librarika та читачі/gu) ?? []).length, 2);
   assert.match(source, /label: "Е-підручники"[\s\S]*?librarianTextbooksHref\(telegramMiniApp\)/u);
   assert.doesNotMatch(source, /telegramMiniApp \? \[\] : \[[\s\S]*?Е-підручники/u);
   assert.match(source, /function mergeSubsections/u);
@@ -151,13 +162,15 @@ test("LibrarianShell keeps the official emblem, full-page navigation, and access
   assert.match(workspaceCss, /\.resultCopy strong,[\s\S]*?\.selectedSummary strong \{[\s\S]*?white-space: normal;[\s\S]*?overflow-wrap: anywhere;/u);
 });
 
-test("literature is a separate librarian workspace instead of a Fund switch", async () => {
+test("Librarika integration and readers remain separate from the educational Fund", async () => {
   const [workspace, page] = await Promise.all([
     readFile(new URL("../app/librarian/literature/workspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/librarian/literature/page.tsx", import.meta.url), "utf8"),
   ]);
-  assert.match(workspace, /Кабінет бібліотекаря · Література/u);
+  assert.match(workspace, /Кабінет бібліотекаря · інтеграційний центр/u);
   assert.doesNotMatch(workspace, /className=\{s\.funds\}/u);
-  assert.match(workspace, /Каталог для читачів ↗/u);
-  assert.match(page, /Художня та наукова література · Кабінет бібліотекаря/u);
+  assert.match(workspace, /href=\{LIBRARIKA_CATALOG_URL\} target="_blank" rel="noopener noreferrer"/u);
+  assert.match(workspace, /Художня література · Librarika ↗/u);
+  assert.match(workspace, /Підручники · наш сайт ↗/u);
+  assert.match(page, /Librarika та читачі · Кабінет бібліотекаря/u);
 });

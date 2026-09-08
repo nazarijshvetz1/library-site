@@ -1,10 +1,62 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import {readerDatabase,publishReaderFixture} from './helpers/reader-database.mjs';
-const notifications=await import('../lib/reader-notifications.ts');
-const now='2026-09-06T08:00:00.000Z';
-function fixture(count=1){const db=readerDatabase();publishReaderFixture(db);db.sqlite.exec("UPDATE library_readers SET access_status='active'; INSERT INTO reader_profiles(reader_id,display_name,notify_loans,notify_loans_since,notify_books,notify_books_since,updated_at) VALUES('reader-a','Читач',1,'2026-09-06',1,'2026-09-06T07:00:00Z','2026-09-06'); INSERT INTO reader_telegram_connections(telegram_user_id,reader_id,chat_id,linked_at) VALUES('100','reader-a','100','2026-09-06'); INSERT INTO locations(id,name,type,status,created_at,updated_at) VALUES('loc','Бібліотека','library','active','2026-09-06','2026-09-06');");for(let i=0;i<count;i++){db.sqlite.prepare("INSERT INTO library_copies(id,edition_id,accession_no,location_id,registration,physical_state,created_at,updated_at) VALUES(?,'edition',?,'loc','registered','on_loan',?,?)").run('copy-'+i,String(i),now,now);db.sqlite.prepare("INSERT INTO reader_circulations(id,copy_id,reader_id,status,issued_at,due_at,accounting_mode,created_at,updated_at) VALUES(?,?,'reader-a','issued','2026-09-01','2026-09-09','native',?,?)").run('loan-'+i,'copy-'+i,now,now);}return db;}
-test('opt-in floor excludes past source debts and queue advances beyond the first twenty',async()=>{const db=fixture(26);try{db.sqlite.exec("UPDATE reader_circulations SET due_at='2026-09-05' WHERE id='loan-25'");await notifications.queueReaderNotifications(db,now);assert.equal(db.sqlite.prepare('SELECT count(*) n FROM reader_notification_outbox').get().n,20);await notifications.queueReaderNotifications(db,now);assert.equal(db.sqlite.prepare('SELECT count(*) n FROM reader_notification_outbox').get().n,25);await notifications.queueReaderNotifications(db,now);assert.equal(db.sqlite.prepare('SELECT count(*) n FROM reader_notification_outbox').get().n,25);assert.equal(db.sqlite.prepare("SELECT count(*) n FROM reader_notification_outbox WHERE circulation_id='loan-25'").get().n,0);}finally{db.sqlite.close();}});
-test('Kyiv consent day does not notify debts overdue before midnight consent',async()=>{const db=fixture();try{db.sqlite.exec("UPDATE reader_circulations SET due_at='2026-09-05'");await notifications.queueReaderNotifications(db,'2026-09-05T22:00:00.000Z');assert.equal(db.sqlite.prepare('SELECT count(*) n FROM reader_notification_outbox').get().n,0);assert.throws(()=>db.sqlite.exec("UPDATE reader_profiles SET notify_loans_since='2026-09-05T21:30:00Z'"),/CHECK/);}finally{db.sqlite.close();}});
-test('delivery rechecks current loan version and preferences instead of sending a stale reminder',async()=>{const db=fixture(2);try{await notifications.queueReaderNotifications(db,now);db.sqlite.exec("UPDATE reader_circulations SET version=version+1 WHERE id='loan-0'");let sent=0;const fetcher=async()=>{sent++;return Response.json({ok:true,result:{message_id:1}});};const result=await notifications.drainReaderNotifications(db,{botToken:'test-token',now,fetcher});assert.equal(result.cancelled,1);assert.equal(sent,1);assert.equal((await notifications.drainReaderNotifications(db,{botToken:'test-token',now,fetcher})).attempted,0);}finally{db.sqlite.close();}});
-test('rate limits retry but an ambiguous network delivery is not automatically duplicated',async()=>{const db=fixture();try{await notifications.queueReaderNotifications(db,now);await notifications.drainReaderNotifications(db,{botToken:'test-token',now,fetcher:async()=>{throw new Error('network unavailable');}});assert.equal(db.sqlite.prepare('SELECT status FROM reader_notification_outbox').get().status,'failed');await notifications.queueReaderNotifications(db,now);assert.equal((await notifications.drainReaderNotifications(db,{botToken:'test-token',now,fetcher:async()=>{throw new Error('must not send twice');}})).attempted,0);}finally{db.sqlite.close();}});
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import test from "node:test";
+import {resolve} from "node:path";
+import {pathToFileURL} from "node:url";
+
+const repo=process.cwd();
+const {readerDatabase}=await import(pathToFileURL(resolve(repo,"tests/helpers/reader-database.mjs")).href);
+const notifications=await import(pathToFileURL(resolve(repo,"lib/reader-notifications.ts")).href);
+const now="2026-09-08T08:00:00.000Z";
+
+function fixture(){
+  const db=readerDatabase();
+  db.sqlite.prepare("INSERT INTO reader_profiles(reader_id,display_name,notify_loans,notify_books,updated_at) VALUES('reader-a','Учень',1,1,?)").run(now);
+  db.sqlite.prepare("INSERT INTO reader_telegram_connections(telegram_user_id,reader_id,chat_id,status,linked_at) VALUES('100','reader-a','100','active',?)").run(now);
+  db.sqlite.prepare("INSERT INTO reader_sessions(token_hash,reader_id,access_version,expires_at,created_at) VALUES(?,'reader-a',1,'2099-01-01T00:00:00.000Z',?)").run("a".repeat(64),now);
+  for(const status of ["pending","processing","sent","failed","cancelled"]){
+    db.sqlite.prepare(`INSERT INTO reader_notification_outbox
+      (id,reader_id,edition_id,kind,due_date,status,next_attempt_at,lease_token,lease_until,created_at,last_error)
+      VALUES(?, 'reader-a','edition','book_available',?,?,?,?,?,?,?)`).run(
+        `notice-${status}`,now,status,now,status==="processing"?"lease":null,status==="processing"?"2099-01-01T00:00:00.000Z":null,now,status==="failed"?"historic_failure":null,
+      );
+  }
+  return db;
+}
+
+function rows(db){return db.sqlite.prepare("SELECT id,status,lease_token,lease_until,last_error FROM reader_notification_outbox ORDER BY id").all().map(row=>({...row}));}
+
+test("reader reminders remain suspended until verified Librarika circulation sync exists",async()=>{
+  const db=fixture();
+  try{
+    const profile={...db.sqlite.prepare("SELECT * FROM reader_profiles WHERE reader_id='reader-a'").get()};
+    const connection={...db.sqlite.prepare("SELECT * FROM reader_telegram_connections WHERE reader_id='reader-a'").get()};
+    const session={...db.sqlite.prepare("SELECT * FROM reader_sessions WHERE reader_id='reader-a'").get()};
+    const result=await notifications.runReaderMaintenance(db);
+    assert.deepEqual({...notifications.READER_NOTIFICATION_AUTOMATION_STATE},{enabled:false,mode:"suspended_pending_verified_librarika_circulation_sync",source:"librarika",reason:"librarika_circulation_sync_unverified"});
+    assert.equal(result.enabled,false);
+    const byId=Object.fromEntries(rows(db).map(row=>[row.id,row]));
+    for(const status of ["pending","processing"]){
+      assert.equal(byId[`notice-${status}`].status,"cancelled");
+      assert.equal(byId[`notice-${status}`].lease_token,null);
+      assert.equal(byId[`notice-${status}`].lease_until,null);
+      assert.equal(byId[`notice-${status}`].last_error,"librarika_circulation_sync_unverified");
+    }
+    assert.equal(byId["notice-sent"].status,"sent");
+    assert.equal(byId["notice-failed"].status,"failed");
+    assert.equal(byId["notice-failed"].last_error,"historic_failure");
+    assert.equal(byId["notice-cancelled"].status,"cancelled");
+    assert.deepEqual({...db.sqlite.prepare("SELECT * FROM reader_profiles WHERE reader_id='reader-a'").get()},profile);
+    assert.deepEqual({...db.sqlite.prepare("SELECT * FROM reader_telegram_connections WHERE reader_id='reader-a'").get()},connection);
+    assert.deepEqual({...db.sqlite.prepare("SELECT * FROM reader_sessions WHERE reader_id='reader-a'").get()},session);
+    const afterFirst=rows(db);
+    await notifications.runReaderMaintenance(db);
+    assert.deepEqual(rows(db),afterFirst,"maintenance is idempotent");
+  }finally{db.sqlite.close();}
+});
+
+test("suspended maintenance contains no local circulation, subscription, or Telegram delivery path",()=>{
+  const source=fs.readFileSync("lib/reader-notifications.ts","utf8");
+  assert.doesNotMatch(source,/reader_circulations|reader_book_subscriptions|telegramApiRequest|TELEGRAM_BOT_TOKEN/u);
+  assert.match(source,/status IN \('pending','processing'\)/u);
+});

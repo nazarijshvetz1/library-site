@@ -100,12 +100,16 @@ export default function AcquisitionWorkspace({ displayName, role = "librarian", 
   async function act(record: RequestRecord, action: string) {
     let approvedQuantity: number | null = null, orderedQuantity: number | null = null, targetMaterialId: string | null = null, text = "";
     if (action === "approve") approvedQuantity = promptNumber("Погоджена кількість", record.requestedQuantity, 1); else if (action === "order") orderedQuantity = promptNumber("Замовлена кількість", record.approvedQuantity ?? record.requestedQuantity, 1);
+    else if (action === "complete_in_librarika") {
+      if (!window.confirm("Підтвердити, що пропозицію вже опрацьовано в Librarika? Локальний фонд і залишки не змінюватимуться.")) return;
+      approvedQuantity = promptNumber("Кількість, опрацьована в Librarika", record.approvedQuantity ?? record.requestedQuantity, 1);
+    }
     else if (action === "request_clarification") text = window.prompt("Що потрібно уточнити у вчителя?")?.trim() ?? "";
     else if (action === "reject") text = window.prompt("Причина відхилення")?.trim() ?? "";
     else if (action === "link_material") targetMaterialId = window.prompt("CAT-ID створеного матеріалу")?.trim().toUpperCase() ?? null;
     else if (action === "cancel" && !window.confirm("Скасувати цю заявку?")) return;
-    if ((action === "approve" && approvedQuantity === null) || (action === "order" && orderedQuantity === null) || (["request_clarification","reject"].includes(action) && !text) || (action === "link_material" && !targetMaterialId)) return;
-    await sendAction(record, { action, approvedQuantity, orderedQuantity, targetMaterialId, receiptLineId: "", allocatedQuantity: null, message: text });
+    if ((action === "approve" && approvedQuantity === null) || (action === "order" && orderedQuantity === null) || (action === "complete_in_librarika" && approvedQuantity === null) || (["request_clarification","reject"].includes(action) && !text) || (action === "link_material" && !targetMaterialId)) return;
+    await sendAction(record, { action, approvedQuantity: action === "complete_in_librarika" ? null : approvedQuantity, orderedQuantity, targetMaterialId, receiptLineId: "", allocatedQuantity: action === "complete_in_librarika" ? approvedQuantity : null, message: text });
   }
   async function sendAction(record: RequestRecord, fields: Record<string, unknown>) {
     setBusy(true); setError(""); setNotice("");
@@ -281,8 +285,9 @@ function RequestCard({ record, busy, telegramMiniApp, onAction, onSend, onVisibi
       {["submitted","in_review","approved","planned"].includes(record.status) ? <button disabled={busy} onClick={() => void onAction(record,"request_clarification")}>Уточнити</button> : null}
       {record.status === "approved" ? <button disabled={busy} onClick={() => void onAction(record,"plan")}>Запланувати</button> : null}
       {["approved","planned","ordered"].includes(record.status) ? <button disabled={busy} onClick={() => void onAction(record,"order")}>Відзначити замовлення</button> : null}
-      {!record.materialId && ["approved","planned","ordered"].includes(record.status) ? <><a href={createHref}>Створити матеріал</a><button disabled={busy} onClick={() => void onAction(record,"link_material")}>Прив’язати CAT-ID</button></> : null}
-      {record.materialId && ["ordered","partially_received"].includes(record.status) ? <><a href={receiptHref}>Оформити надходження</a><button disabled={busy} onClick={() => setReceiptOpen((value) => !value)}>Зарахувати надходження</button></> : null}
+      {record.category === "educational" && !record.materialId && ["approved","planned","ordered"].includes(record.status) ? <><a href={createHref}>Створити матеріал</a><button disabled={busy} onClick={() => void onAction(record,"link_material")}>Прив’язати CAT-ID</button></> : null}
+      {record.category === "educational" && record.materialId && ["ordered","partially_received"].includes(record.status) ? <><a href={receiptHref}>Оформити надходження</a><button disabled={busy} onClick={() => setReceiptOpen((value) => !value)}>Зарахувати надходження</button></> : null}
+      {record.category === "literature" && ["approved","planned","ordered","partially_received"].includes(record.status) ? <button disabled={busy} onClick={() => void onAction(record,"complete_in_librarika")}>Позначити виконаною в Librarika</button> : null}
       {["submitted","in_review","clarification","approved","planned","ordered"].includes(record.status) ? <button className={styles.danger} disabled={busy} onClick={() => void onAction(record,"reject")}>Відхилити</button> : null}
       {["received", "rejected", "cancelled"].includes(record.status) ? <button disabled={busy} onClick={() => void onVisibility(record, !record.librarianHiddenAt)}><SiteIcon name={record.librarianHiddenAt ? "visible" : "hidden"} size={15} /> {record.librarianHiddenAt ? "Повернути" : "Приховати"}</button> : null}
     </div>

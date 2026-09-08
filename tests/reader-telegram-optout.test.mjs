@@ -65,7 +65,7 @@ for(const trigger of ['stop','button'])test(`linked teacher ${trigger} mutes rea
     assert.deepEqual({...db.sqlite.prepare("SELECT status,notify_orders,notify_visits FROM telegram_connections WHERE user_id='teacher'").get()},{status:'active',notify_orders:0,notify_visits:0});
     const stopped=profile(db),queue=queued(db);assert.equal((await deliver(db,payload)).duplicate,true);assert.deepEqual(profile(db),stopped);assert.deepEqual(queued(db),queue);
     for(const payload of [message(102,'/start'),callback(103,true)]){await deliver(db,payload);assert.deepEqual(profile(db),stopped,'legacy enable/start must not create reader consent');assert.deepEqual(queued(db),queue);}
-    await notifications.queueReaderNotifications(db,'2026-09-06T08:00:00.000Z');assert.deepEqual(queued(db),queue,'later maintenance must not requeue opted-out reader');
+    await notifications.runReaderMaintenance(db);assert.deepEqual(queued(db),queue,'later maintenance must not requeue opted-out reader');
   }finally{db.sqlite.close();}
 });
 
@@ -89,4 +89,3 @@ test('reader cancellation failure rolls back the teacher opt-out, consent change
     assert.deepEqual(profile(db),before);assert.deepEqual(queued(db),queue);assert.deepEqual({...db.sqlite.prepare("SELECT * FROM telegram_connections WHERE user_id='teacher'").get()},connection);assert.equal(db.sqlite.prepare("SELECT count(*) n FROM telegram_webhook_updates WHERE update_id='501'").get().n,0);
   }finally{db.sqlite.close();}
 });
-

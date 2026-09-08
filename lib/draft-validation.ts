@@ -17,6 +17,20 @@ export const DRAFT_KINDS = [
 
 export type DraftKind = (typeof DRAFT_KINDS)[number];
 
+export const LEGACY_MATERIAL_DRAFT_KINDS = [
+  "material.create",
+  "material.update",
+  "receipt.create",
+  "transfer.create",
+  "writeoff.create",
+  "revision.count",
+] as const satisfies readonly DraftKind[];
+
+export function isLegacyMaterialDraftKind(value: unknown): value is (typeof LEGACY_MATERIAL_DRAFT_KINDS)[number] {
+  return typeof value === "string"
+    && (LEGACY_MATERIAL_DRAFT_KINDS as readonly string[]).includes(value);
+}
+
 export const DRAFT_STATUSES = [
   "draft",
   "ready_for_review",

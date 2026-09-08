@@ -24,6 +24,7 @@ export type MaterialLinkInput = {
 
 export type MaterialUpdateInput = {
   requestId: string;
+  catalogScope: "education";
   expectedVersion: number;
   changes: {
     title?: string;
@@ -54,6 +55,7 @@ export type MaterialArchiveInput = {
 
 export type MaterialCreateInput = {
   requestId: string;
+  catalogScope: "education";
   title: string;
   rubric: string;
   publicationType: string | null;
@@ -234,12 +236,13 @@ export function validateMaterialCreateInput(
   const errors: Record<string, string> = {};
   if (!isRecord(input)) return invalid("body", "Очікуються дані нового матеріалу.");
   const allowed = [
-    "requestId", "title", "rubric", "publicationType", "subject",
+    "requestId", "catalogScope", "title", "rubric", "publicationType", "subject",
     "classFrom", "classTo", "author", "publicationYear", "isbn",
     "publisher", "notes", "links", "initialReceipt",
   ];
   assertExactKeys(input, allowed, errors);
   const requestId = readUuid(input.requestId, "requestId", errors);
+  const catalogScope = readEducationCatalogScope(input.catalogScope, "catalogScope", errors);
   const title = readRequiredText(input.title, "title", errors, 300);
   const rubric = readRequiredText(input.rubric, "rubric", errors, 160);
   const publicationType = readOptionalText(input.publicationType ?? null, "publicationType", errors, 160);
@@ -274,6 +277,7 @@ export function validateMaterialCreateInput(
   }
   return finish(errors, {
     requestId,
+    catalogScope,
     title,
     rubric,
     publicationType,
@@ -330,8 +334,9 @@ export function validateMaterialUpdateInput(
   if (!isRecord(input)) {
     return invalid("body", "Очікується об’єкт із даними матеріалу.");
   }
-  assertExactKeys(input, ["requestId", "expectedVersion", "changes"], errors);
+  assertExactKeys(input, ["requestId", "catalogScope", "expectedVersion", "changes"], errors);
   const requestId = readUuid(input.requestId, "requestId", errors);
+  const catalogScope = readEducationCatalogScope(input.catalogScope, "catalogScope", errors);
   const expectedVersion = readPositiveInteger(
     input.expectedVersion,
     "expectedVersion",
@@ -440,9 +445,21 @@ export function validateMaterialUpdateInput(
   }
   return finish(errors, {
     requestId,
+    catalogScope,
     expectedVersion,
     changes,
   });
+}
+
+function readEducationCatalogScope(
+  value: unknown,
+  field: string,
+  errors: Record<string, string>,
+): "education" {
+  if (value !== "education") {
+    errors[field] = "У внутрішньому фонді можна вести лише підручники та навчальні матеріали.";
+  }
+  return "education";
 }
 
 export function validateMaterialArchiveInput(

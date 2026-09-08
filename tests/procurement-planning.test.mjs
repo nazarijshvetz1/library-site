@@ -175,3 +175,38 @@ test("planning UI is reachable from acquisitions, reports and Telegram", () => {
   assert.match(printPage, /resolveD1LibrarianUser/u);
   assert.match(printPage, /readLatestProcurementPlanSnapshot/u);
 });
+
+test("planning catalog and writes exclude Librarika literature", () => {
+  const source = fs.readFileSync(path.join(root, "lib/procurement-planning-store.ts"), "utf8");
+  assert.match(source, /librarika_authoritative/u);
+  assert.match(source, /library_editions/u);
+  assert.match(source, /e\.fund='literature'/u);
+  assert.match(source, /INSERT INTO procurement_plan_resources[\s\S]*?WHERE \? IS NULL OR NOT EXISTS/u);
+  assert.match(source, /UPDATE procurement_plan_resources[\s\S]*?material_id IS NULL OR NOT EXISTS/u);
+  assert.match(source, /INSERT INTO procurement_plan_allocations[\s\S]*?e\.fund='literature'/u);
+  assert.match(source, /UPDATE procurement_plan_allocations[\s\S]*?e\.fund='literature'/u);
+  assert.match(source, /assertPlanContainsOnlyEducation\(db, planId\)/u);
+  assert.match(source, /UPDATE procurement_plans SET status='finalized'[\s\S]*?boundary_edition\.fund='literature'/u);
+});
+
+test("a legacy Librarika resource stays visible only for safe removal from a draft plan", async () => {
+  const { sqlite, db } = context();
+  let plan = await store.createProcurementPlan(db, librarian, { academicYearLabel: "2027/2028", title: "Старий план", defaultReserve: 0, notes: "" });
+  plan = await store.mutateProcurementPlan(db, librarian, plan.id, { action: "upsert_resource", materialId: "CAT-9001", category: "textbook", stockMode: "reusable", title: "Колишня локальна книга", subject: "", author: "", publisher: "", publicationYear: null, sourceUrl: "", notes: "", usableQuantityOverride: null, additionalIncomingQuantity: 0, sortOrder: 0 });
+  const legacyResourceId = plan.resources[0].id;
+  const legacyResourceTitle = plan.resources[0].title;
+  sqlite.prepare("INSERT INTO library_editions(id,material_id,fund,title,publication_state,created_at,updated_at) VALUES('LED-LEGACY-PLAN','CAT-9001','literature','Колишня локальна книга','published','2026-09-06','2026-09-06')").run();
+
+  plan = await store.readProcurementPlan(db, plan.id);
+  assert.deepEqual(plan.resources, []);
+  assert.deepEqual(plan.blockedResources, [{ id: legacyResourceId, title: legacyResourceTitle }]);
+  await assert.rejects(
+    store.mutateProcurementPlan(db, librarian, plan.id, { action: "set_status", status: "finalized", expectedVersion: plan.version }),
+    (error) => error instanceof store.ProcurementPlanningError && error.code === "librarika_authoritative" && error.status === 410,
+  );
+
+  plan = await store.mutateProcurementPlan(db, librarian, plan.id, { action: "remove_resource", id: legacyResourceId });
+  assert.deepEqual(plan.blockedResources, []);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM materials WHERE id='CAT-9001'").get().count, 1);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM library_editions WHERE id='LED-LEGACY-PLAN'").get().count, 1);
+});

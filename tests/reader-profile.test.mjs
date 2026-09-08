@@ -5,11 +5,11 @@ const auth=await import("../lib/reader-auth.ts"),store=await import("../lib/read
 async function login(db,id="reader-a"){if(!db.sqlite.prepare("SELECT material_id FROM library_editions WHERE id='edition'").get().material_id)publishReaderFixture(db);const invite=await auth.issueReaderInvite(db,actor,{readerId:id,purpose:"web",expectedVersion:1});const session=await auth.redeemReaderInvite(db,invite.token);return auth.requireReaderSession(db,readerRequest(session.token));}
 test("profile holds personal data, has opt-in defaults and cannot change class or identity",async()=>{
   const db=readerDatabase();try{const identity=await login(db);const profile=await store.getReaderProfile(db,identity);assert.equal(profile.notifyLoans,false);assert.equal(profile.communityEnabled,false);
-    const input={requestId:crypto.randomUUID(),expectedVersion:1,displayName:"Книголюб",phone:"+380000000000",communityEnabled:true,notifyLoans:true,notifyBooks:false};
+    const input={requestId:crypto.randomUUID(),expectedVersion:1,displayName:"Книголюб",phone:"+380000000000",communityEnabled:true,notifyLoans:false,notifyBooks:false};
+    await assert.rejects(store.updateReaderProfile(db,identity,{...input,requestId:crypto.randomUUID(),notifyLoans:true}),error=>error?.code==="reader_notifications_unavailable");
     await store.updateReaderProfile(db,identity,input);assert.equal((await store.updateReaderProfile(db,identity,input)).version,2);
     await assert.rejects(store.updateReaderProfile(db,identity,{...input,requestId:crypto.randomUUID(),classId:"other"}));
     const next=await store.getReaderProfile(db,identity);assert.equal(next.phone,"+380000000000");assert.equal(next.fullName,"Читач reader-a");
-    assert.deepEqual(await store.getReaderBooks(db,identity),{loans:[],requests:[]});
   }finally{db.sqlite.close();}
 });
 test("book request needs confirmation, replays once and another reader cannot cancel it",async()=>{

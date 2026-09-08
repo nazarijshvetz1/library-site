@@ -2,18 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readerDatabase,actor} from './helpers/reader-database.mjs';
 const editor=await import('../lib/library-editor.ts'),copies=await import('../lib/library-copy-store.ts');
-test('canonical edits synchronize the edition and a later description edit cannot restore stale titles',async()=>{
+test('the educational material editor cannot mutate a Librarika literature edition',async()=>{
  const db=readerDatabase();try{
   const {updateMaterialDirect}=await import('../lib/library-mutation-store.ts');
   const input={requestId:crypto.randomUUID(),title:'Стара назва',metadata:{author:'Старий автор',description:'Опис',isbn13:'9786170953858'},entityIds:[],published:true};
   const book=await editor.saveLibraryEdition(db,actor,input);
   db.sqlite.prepare("UPDATE library_editions SET source_json='{\"original\":true}' WHERE id=?").run(book.id);
-  await updateMaterialDirect({userId:'auth-admin',d1UserId:actor.id,email:actor.email},book.materialId,{requestId:crypto.randomUUID(),expectedVersion:1,changes:{title:'Виправлена назва',author:'Виправлений автор',isbn:null}},db);
+  await assert.rejects(
+   updateMaterialDirect({userId:'auth-admin',d1UserId:actor.id,email:actor.email},book.materialId,{requestId:crypto.randomUUID(),catalogScope:'education',expectedVersion:1,changes:{title:'Виправлена назва',author:'Виправлений автор',isbn:null}},db),
+   error=>error?.code==='librarika_authoritative'&&error?.status===410,
+  );
   const current=await editor.getLibrarianEdition(db,book.id);
-  assert.equal(current.title,'Виправлена назва');assert.equal(current.metadata.author,'Виправлений автор');assert.equal(current.version,2);
-  assert.equal(current.metadata.isbn13,'');assert.equal(current.metadata.isbn10,'');
-  await editor.saveLibraryEdition(db,actor,{...input,requestId:crypto.randomUUID(),id:book.id,expectedVersion:current.version,expectedMaterialVersion:current.material_version,title:current.title,metadata:{...current.metadata,description:'Новий опис'}});
-  assert.equal(db.sqlite.prepare('SELECT title FROM materials WHERE id=?').get(book.materialId).title,'Виправлена назва');
+  assert.equal(current.title,'Стара назва');assert.equal(current.metadata.author,'Старий автор');assert.equal(current.version,1);
+  assert.equal(current.metadata.isbn13,'9786170953858');
+  assert.equal(db.sqlite.prepare('SELECT title FROM materials WHERE id=?').get(book.materialId).title,'Стара назва');
   assert.equal(db.sqlite.prepare('SELECT source_json FROM library_editions WHERE id=?').get(book.id).source_json,'{"original":true}');
  }finally{db.sqlite.close();}
 });

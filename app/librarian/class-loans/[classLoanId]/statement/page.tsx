@@ -7,9 +7,11 @@ import { getLibrarianAccess } from "@/lib/librarian-access";
 import { readLibrarianTelegramUser } from "@/lib/librarian-telegram-auth";
 import type { VisitD1Database } from "@/lib/visit-schedule-store";
 import {
+  ClassIssueStatementError,
   readClassIssueStatement,
   type ClassIssueStatementDatabase,
 } from "@/lib/class-issue-statement-store";
+import { LIBRARIKA_CATALOG_URL } from "@/lib/librarika";
 import LibrarianAccessDenied from "../../../librarian-access-denied";
 import StatementActions from "./statement-actions";
 import styles from "./statement.module.css";
@@ -36,10 +38,35 @@ export default async function ClassIssueStatementPage({ params }: Props) {
     return <LibrarianAccessDenied title="Доступ до відомості не надано" signOutHref="/" />;
   }
 
-  const statement = await readClassIssueStatement(
-    env.DB as unknown as ClassIssueStatementDatabase,
-    classLoanId,
-  );
+  let statement;
+  try {
+    statement = await readClassIssueStatement(
+      env.DB as unknown as ClassIssueStatementDatabase,
+      classLoanId,
+    );
+  } catch (error) {
+    if (
+      error instanceof ClassIssueStatementError
+      && error.code === "statement_librarika_authoritative"
+    ) {
+      return (
+        <main className={styles.page}>
+          <section className={styles.boundaryNotice}>
+            <span>Чітке розділення систем</span>
+            <h1>Ця давня видача містить матеріали Librarika</h1>
+            <p>Через змішаний склад безпечну навчальну відомість тут не формуємо. {error.message} Початкові дані збережено.</p>
+            <div>
+              <a href="/librarian?tool=reports">Повернутися до звітів</a>
+              <a href={LIBRARIKA_CATALOG_URL} target="_blank" rel="noopener noreferrer">
+                Відкрити каталог Librarika
+              </a>
+            </div>
+          </section>
+        </main>
+      );
+    }
+    throw error;
+  }
   const copies = statement.lines.reduce((total, line) => total + line.quantityIssued, 0);
   return (
     <main className={styles.page}>

@@ -14,6 +14,7 @@ const REQUEST_ID = "123e4567-e89b-42d3-a456-426614174000";
 test("material edits accept public store links and reject unsafe overposting", () => {
   const valid = validation.validateMaterialUpdateInput({
     requestId: REQUEST_ID,
+    catalogScope: "education",
     expectedVersion: 3,
     changes: {
       title: "Математика — 5 клас",
@@ -35,6 +36,7 @@ test("material edits accept public store links and reject unsafe overposting", (
 
   const invalid = validation.validateMaterialUpdateInput({
     requestId: REQUEST_ID,
+    catalogScope: "education",
     expectedVersion: 3,
     changes: { title: "Назва", catalogNumber: 9999 },
   });
@@ -66,6 +68,7 @@ test("material links allow only HTTP(S) without embedded credentials", () => {
   for (const url of ["javascript:alert(1)", "file:///tmp/book.pdf", "https://a:b@example.com/book"]) {
     const result = validation.validateMaterialUpdateInput({
       requestId: REQUEST_ID,
+      catalogScope: "education",
       expectedVersion: 1,
       changes: {
         links: [
@@ -108,6 +111,7 @@ test("material ISBN validation checks the ISBN-10 and ISBN-13 control digit", ()
   for (const isbn of ["0-306-40615-2", "978-0-306-40615-7"]) {
     const result = validation.validateMaterialUpdateInput({
       requestId: REQUEST_ID,
+      catalogScope: "education",
       expectedVersion: 1,
       changes: { isbn },
     });
@@ -116,6 +120,7 @@ test("material ISBN validation checks the ISBN-10 and ISBN-13 control digit", ()
   for (const isbn of ["0-306-40615-3", "978-0-306-40615-8", "1234567890123", "2005000013027"]) {
     const result = validation.validateMaterialUpdateInput({
       requestId: REQUEST_ID,
+      catalogScope: "education",
       expectedVersion: 1,
       changes: { isbn },
     });
@@ -127,6 +132,7 @@ test("material ISBN validation checks the ISBN-10 and ISBN-13 control digit", ()
 test("new material and receipt validation share the direct stock contract", () => {
   const material = validation.validateMaterialCreateInput({
     requestId: REQUEST_ID,
+    catalogScope: "education",
     title: "Українська мова — 6 клас",
     rubric: "Підручники",
     publicationType: "Підручник",
@@ -151,6 +157,17 @@ test("new material and receipt validation share the direct stock contract", () =
   });
   assert.equal(material.ok, true);
   assert.equal(material.value.initialReceipt.quantity, 10);
+
+  for (const catalogScope of [undefined, "literature"]) {
+    const rejected = validation.validateMaterialCreateInput({
+      requestId: REQUEST_ID,
+      catalogScope,
+      title: "Художня книга",
+      rubric: "Художня література",
+    });
+    assert.equal(rejected.ok, false);
+    assert.ok(rejected.fieldErrors.catalogScope);
+  }
 
   const receipt = validation.validateReceiptCreateInput({
     requestId: REQUEST_ID,

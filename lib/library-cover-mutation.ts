@@ -109,6 +109,8 @@ type CoverRow = {
 
 type MutationActor = { id: string; email: string };
 
+const LIBRARIKA_MATERIAL_MESSAGE = "Художня та наукова література ведеться у Librarika. Локальну обкладинку для цієї картки змінювати не можна.";
+
 export class LibraryCoverMutationError extends Error {
   readonly code: string;
   readonly status: number;
@@ -226,6 +228,8 @@ export async function replaceMaterialCoverDirect(
     return resumeOrReplay(existing, requestHash, input, db, bucket, actor);
   }
 
+  await assertEducationalMaterial(db, input.materialId);
+
   const current = await readCurrentCover(db, input.materialId);
   if (!current) {
     throw new LibraryCoverMutationError(
@@ -261,6 +265,7 @@ export async function replaceMaterialCoverDirect(
 
   try {
     await db.batch([
+      educationalMaterialGuardStatement(db, input.materialId),
       db.prepare(`
         INSERT INTO mutation_commands (
           id, draft_id, kind, actor_user_id, status, target_type, target_id,
@@ -282,7 +287,12 @@ export async function replaceMaterialCoverDirect(
     ]);
   } catch (error) {
     const raced = await readCommand(db, input.requestId);
-    if (!raced) throw error;
+    if (!raced) {
+      if (isLibrarikaGuardError(error) || await isLibrarikaMaterial(db, input.materialId)) {
+        throw librarikaMaterialError(input.materialId);
+      }
+      throw error;
+    }
     return resumeOrReplay(raced, requestHash, input, db, bucket, actor);
   }
 
@@ -318,6 +328,7 @@ async function resumeOrReplay(
   if (command.status !== "processing") {
     throw invalidCommand();
   }
+  await assertEducationalMaterial(db, input.materialId);
   const plan = parseCoverPlan(command.result_json);
   if (
     plan.result.materialId !== input.materialId
@@ -364,6 +375,7 @@ async function finishCoverPlan(
   const completedJson = JSON.stringify(plan.result);
   try {
     await db.batch([
+      educationalMaterialGuardStatement(db, input.materialId),
       db.prepare(`
         INSERT INTO material_cover_assets (
           id, material_id, storage_provider, storage_key, external_url,
@@ -374,6 +386,10 @@ async function finishCoverPlan(
           ?, m.id, 'r2', ?, NULL, 'image/jpeg', ?, ?, ?, ?, 'ready', 1, ?, ?
         FROM materials m
         WHERE m.id = ? AND m.status = 'active' AND m.archived_at IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM library_editions e
+            WHERE e.material_id = m.id AND e.fund = 'literature'
+          )
         ON CONFLICT(material_id) DO UPDATE SET
           storage_provider = 'r2',
           storage_key = excluded.storage_key,
@@ -439,6 +455,22 @@ async function finishCoverPlan(
     const command = await readCommand(db, input.requestId);
     if (command?.status === "completed" && command.request_hash === requestHash) {
       return parseCompletedResult(command.result_json);
+    }
+    if (isLibrarikaGuardError(error) || await isLibrarikaMaterial(db, input.materialId)) {
+      await markCommandFailed(
+        db,
+        input.requestId,
+        "librarika_authoritative",
+        LIBRARIKA_MATERIAL_MESSAGE,
+      );
+      const cleanupSettled = await cleanupProvenUnusedObject(
+        bucket,
+        null,
+        input.requestId,
+        plan,
+      );
+      if (!cleanupSettled) throw cleanupPending();
+      throw librarikaMaterialError(input.materialId);
     }
     const current = await readCurrentCover(db, input.materialId);
     if (!current) {
@@ -626,8 +658,60 @@ async function readCurrentCover(
     FROM materials m
     LEFT JOIN material_cover_assets c ON c.material_id = m.id
     WHERE m.id = ? AND m.status = 'active' AND m.archived_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM library_editions e
+        WHERE e.material_id = m.id AND e.fund = 'literature'
+      )
     LIMIT 1
   `).bind(materialId).first<CoverRow>();
+}
+
+async function isLibrarikaMaterial(
+  db: CoverMutationDatabase,
+  materialId: string,
+): Promise<boolean> {
+  const row = await db.prepare(`
+    SELECT 1 AS found
+    FROM library_editions
+    WHERE material_id = ? AND fund = 'literature'
+    LIMIT 1
+  `).bind(materialId).first<{ found: number }>();
+  return Boolean(row);
+}
+
+async function assertEducationalMaterial(
+  db: CoverMutationDatabase,
+  materialId: string,
+): Promise<void> {
+  if (await isLibrarikaMaterial(db, materialId)) {
+    throw librarikaMaterialError(materialId);
+  }
+}
+
+function educationalMaterialGuardStatement(
+  db: CoverMutationDatabase,
+  materialId: string,
+): D1Statement {
+  return db.prepare(`
+    SELECT CASE WHEN NOT EXISTS (
+      SELECT 1 FROM library_editions
+      WHERE material_id = ? AND fund = 'literature'
+    ) THEN 1 ELSE json('librarika_authoritative') END
+  `).bind(materialId);
+}
+
+function isLibrarikaGuardError(error: unknown): boolean {
+  return (error instanceof Error ? error.message : String(error ?? ""))
+    .includes("librarika_authoritative");
+}
+
+function librarikaMaterialError(materialId: string): LibraryCoverMutationError {
+  return new LibraryCoverMutationError(
+    "librarika_authoritative",
+    410,
+    LIBRARIKA_MATERIAL_MESSAGE,
+    { materialId },
+  );
 }
 
 async function readCommand(

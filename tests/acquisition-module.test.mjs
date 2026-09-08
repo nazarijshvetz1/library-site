@@ -84,6 +84,42 @@ test("teacher proposal is idempotent and catalog snapshots are authoritative",as
   assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM audit_events WHERE entity_type='acquisition_request'").get().n,1);
 });
 
+test("literature proposals stay outside the local fund and complete only through Librarika",async()=>{
+  const {sqlite,db}=context();
+  const invalidCatalog=validation.validateAcquisitionCreateInput({
+    ...createInput(),category:"literature",sourceKind:"catalog",literatureKind:"fiction",subject:"",targetClass:"",
+  });
+  assert.equal(invalidCatalog.ok,false);
+  assert.match(invalidCatalog.fieldErrors.sourceKind,/Librarika/u);
+
+  const literatureInput={
+    ...createInput(),requestId:crypto.randomUUID(),category:"literature",sourceKind:"manual",literatureKind:"fiction",
+    materialId:null,title:"Книга для читання",author:"Письменник",publicationYear:2025,requestedQuantity:2,
+    sourceUrl:"https://librarylyceummaup.librarika.com/search",subject:"",targetClass:"",
+  };
+  let request=await store.createTeacherAcquisitionRequest(db,teacher,literatureInput);
+  request=await store.applyLibrarianAcquisitionAction(db,librarian,request.id,{mutationId:crypto.randomUUID(),expectedVersion:request.version,action:"approve",approvedQuantity:2,orderedQuantity:null,targetMaterialId:null,receiptLineId:"",allocatedQuantity:null,message:""});
+  await assert.rejects(()=>store.applyLibrarianAcquisitionAction(db,librarian,request.id,{mutationId:crypto.randomUUID(),expectedVersion:request.version,action:"link_material",approvedQuantity:null,orderedQuantity:null,targetMaterialId:"CAT-0001",receiptLineId:"",allocatedQuantity:null,message:""}),error=>error instanceof store.AcquisitionStoreError&&error.code==="librarika_authoritative");
+  request=await store.applyLibrarianAcquisitionAction(db,librarian,request.id,{mutationId:crypto.randomUUID(),expectedVersion:request.version,action:"complete_in_librarika",approvedQuantity:null,orderedQuantity:null,targetMaterialId:null,receiptLineId:"",allocatedQuantity:2,message:"Опрацьовано в Librarika"});
+  assert.equal(request.status,"received");
+  assert.equal(request.materialId,null);
+  assert.equal(request.orderedQuantity,2);
+  assert.equal(request.receivedQuantity,2);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM inventory_transactions").get().n,0);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM holdings").get().n,0);
+});
+
+test("Librarika literature cannot be selected through a crafted educational catalog request",async()=>{
+  const {sqlite,db}=context();
+  sqlite.prepare(`INSERT INTO library_editions (id,source_media_id,material_id,fund,title,public_metadata_json,source_json,publication_state,version,created_at,updated_at)
+    VALUES ('LED-1','media-1','CAT-0001','literature','Алгебра','{}','{}','published',1,'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z')`).run();
+  await assert.rejects(
+    ()=>store.createTeacherAcquisitionRequest(db,teacher,createInput()),
+    error=>error instanceof store.AcquisitionStoreError&&error.code==="librarika_authoritative"&&error.status===410,
+  );
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM acquisition_requests").get().n,0);
+});
+
 test("teacher proposal history searches, sorts and hides without deleting the librarian record",async()=>{
   const {sqlite,db}=context();
   const manual=(title,requestedQuantity)=>({...createInput(),requestId:crypto.randomUUID(),sourceKind:"manual",materialId:null,title,author:"Автор",requestedQuantity});

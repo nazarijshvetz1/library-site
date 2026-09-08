@@ -100,6 +100,8 @@ export type TextbookCandidate = {
 type Row = Record<string, unknown>;
 type Actor = { id: string; email: string };
 
+const LIBRARIKA_MATERIAL_MESSAGE = "Художня та наукова література ведеться у Librarika й не може бути додана до локальної полиці е-підручників.";
+
 export class TextbookCatalogError extends Error {
   readonly code: string;
   readonly status: number;
@@ -152,6 +154,10 @@ export async function listPublicTextbooks(
       AND ta.status = 'published'
       AND m.status = 'active'
       AND m.archived_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM library_editions e
+        WHERE e.material_id=m.id AND e.fund='literature'
+      )
       AND ml.kind = 'ebook'
       AND ml.is_public = 1
       AND ml.status = 'active'
@@ -292,6 +298,10 @@ export async function listManagedTextbooks(
     JOIN materials m ON m.id = ta.material_id
     LEFT JOIN material_cover_assets c ON c.material_id = m.id AND c.status = 'ready'
     WHERE ta.academic_year_id = ? AND ta.grade = ?
+      AND NOT EXISTS (
+        SELECT 1 FROM library_editions e
+        WHERE e.material_id=m.id AND e.fund='literature'
+      )
     ORDER BY ta.sort_order ASC, m.sort_title ASC, ta.id ASC
     LIMIT 1000
   `).bind(academicYear.id, input.grade).all<Row>();
@@ -377,6 +387,7 @@ export async function createTextbookAssignment(
     updatedAt: now,
   };
   const statements = [
+    educationalMaterialGuardStatement(db, input.materialId),
     insertCommandStatement(db, input.requestId, requestHash, actor.id, "textbook.assignment.create", id, now),
     db.prepare(`
       INSERT INTO textbook_assignments (
@@ -403,6 +414,7 @@ export async function createTextbookAssignment(
   } catch (error) {
     const completed = await replayCompletedCommand<ManagedTextbook>(db, input.requestId, requestHash);
     if (completed) return completed;
+    await assertEducationalMaterial(db, input.materialId);
     const message = error instanceof Error ? error.message : String(error ?? "");
     if (message.includes("idx_textbook_assignments_year_grade_material")) {
       throw new TextbookCatalogError("textbook_assignment_exists", 409, "Цей підручник уже є у списку обраного класу.");
@@ -519,6 +531,9 @@ export async function mutateTextbookAssignment(
   if (replay) return replay;
   const actor = await resolveActor(db, user);
   const before = await requireManagedTextbook(db, id);
+  if (before.source === "fund" && before.materialId) {
+    await assertEducationalMaterial(db, before.materialId);
+  }
   if (before.version !== input.expectedVersion) {
     throw new TextbookCatalogError("version_conflict", 409, "Список уже змінився. Оновіть сторінку й повторіть дію.");
   }
@@ -649,6 +664,9 @@ export async function mutateTextbookAssignment(
       WHERE id = ? AND version = ?
     `).bind(status, sortOrder, publishedAt, archivedAt, now, id, input.expectedVersion);
   const statements = [
+    ...(before.source === "fund" && before.materialId
+      ? [educationalMaterialGuardStatement(db, before.materialId)]
+      : []),
     insertCommandStatement(db, input.requestId, requestHash, actor.id, `${actionPrefix}.${input.action}`, id, now, entityType),
     update,
     auditStatement(
@@ -671,6 +689,9 @@ export async function mutateTextbookAssignment(
   } catch (error) {
     const completed = await replayCompletedCommand<ManagedTextbook>(db, input.requestId, requestHash);
     if (completed) return completed;
+    if (before.source === "fund" && before.materialId) {
+      await assertEducationalMaterial(db, before.materialId);
+    }
     const message = error instanceof Error ? error.message : String(error ?? "");
     if (message.includes("NOT NULL constraint failed: audit_events.entity_id")) {
       throw new TextbookCatalogError("version_conflict", 409, "Список уже змінився. Оновіть сторінку й повторіть дію.");
@@ -724,6 +745,10 @@ async function listCandidates(
     LEFT JOIN material_cover_assets c ON c.material_id = m.id AND c.status = 'ready'
     WHERE m.status = 'active'
       AND m.archived_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM library_editions e
+        WHERE e.material_id=m.id AND e.fund='literature'
+      )
       AND ${tokenPredicates}
     ORDER BY
       CASE
@@ -850,6 +875,10 @@ async function requireEligibleMaterial(
       m.class_to,
       m.status,
       m.archived_at,
+      EXISTS(
+        SELECT 1 FROM library_editions e
+        WHERE e.material_id=m.id AND e.fund='literature'
+      ) AS is_literature,
       (
         SELECT count(*) FROM material_links ml
         WHERE ml.material_id = m.id AND ml.kind = 'ebook'
@@ -877,6 +906,13 @@ async function requireEligibleMaterial(
     WHERE m.id = ? LIMIT 1
   `).bind(materialId).first<Row>();
   if (!row) throw new TextbookCatalogError("material_not_found", 404, "Матеріал не знайдено.");
+  if (Number(row.is_literature) === 1) {
+    throw new TextbookCatalogError(
+      "librarika_authoritative",
+      410,
+      LIBRARIKA_MATERIAL_MESSAGE,
+    );
+  }
   if (boundedText(row.status, 20) !== "active" || row.archived_at) {
     throw new TextbookCatalogError("textbook_not_eligible", 409, "Архівний матеріал не можна опублікувати.");
   }
@@ -901,6 +937,36 @@ async function requireEligibleMaterial(
     primaryResourceUrl: safeHttpsUrl(row.primary_resource_url),
     materialVersion: positiveInteger(row.material_version),
   };
+}
+
+async function assertEducationalMaterial(
+  db: TextbookDatabase,
+  materialId: string,
+): Promise<void> {
+  const row = await db.prepare(`
+    SELECT 1 AS found FROM library_editions
+    WHERE material_id=? AND fund='literature'
+    LIMIT 1
+  `).bind(materialId).first<{ found: number }>();
+  if (row) {
+    throw new TextbookCatalogError(
+      "librarika_authoritative",
+      410,
+      LIBRARIKA_MATERIAL_MESSAGE,
+    );
+  }
+}
+
+function educationalMaterialGuardStatement(
+  db: TextbookDatabase,
+  materialId: string,
+): D1Statement {
+  return db.prepare(`
+    SELECT CASE WHEN NOT EXISTS (
+      SELECT 1 FROM library_editions
+      WHERE material_id=? AND fund='literature'
+    ) THEN 1 ELSE json('librarika_authoritative') END
+  `).bind(materialId);
 }
 
 async function requireSingleActiveAcademicYear(db: TextbookDatabase): Promise<TextbookAcademicYear> {

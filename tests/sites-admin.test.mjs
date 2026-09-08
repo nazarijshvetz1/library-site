@@ -50,7 +50,9 @@ test("the hosted worker drains scheduled Telegram reminders every minute", async
     read("lib/telegram-delivery-runtime.ts"),
   ]);
   assert.match(viteConfig, /triggers:\s*\{\s*crons:\s*\["\* \* \* \* \*"\]\s*\}/u);
-  assert.match(worker, /async scheduled\(_controller: unknown, env: Env, ctx: ExecutionContext\)/u);
+  assert.match(worker, /async scheduled\(controller: ScheduledControllerLike, env: Env, ctx: ExecutionContext\)/u);
+  assert.match(worker, /const scheduledAt=scheduledInstant\(controller\)/u);
+  assert.match(worker, /recordScheduledHeartbeat\(env\.DB,scheduledAt\)/u);
   assert.match(worker, /ctx\.waitUntil\(drainTelegramOutboxUntilIdle\(env\.DB/u);
   assert.match(worker, /batchLimit:\s*10/u);
   assert.doesNotMatch(worker, /else\s+ctx\.waitUntil\(drainTelegramOutboxUntilIdle/u);

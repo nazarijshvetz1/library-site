@@ -405,6 +405,7 @@ test("direct material edit commits once, preserves history and rejects stale ver
   const { sqlite, d1 } = openDatabase();
   const input = {
     requestId: ids.material,
+    catalogScope: "education",
     expectedVersion: 1,
     changes: {
       title: "Нова назва",
@@ -502,6 +503,7 @@ test("direct material edit commits once, preserves history and rejects stale ver
       "CAT-0001",
       {
         requestId: "10000000-0000-4000-8000-000000000098",
+        catalogScope: "education",
         expectedVersion: 2,
         changes: { isbn: "9780306406157" },
       },
@@ -570,6 +572,7 @@ test("a material race returns a stable 409 conflict without a partial command", 
       "CAT-0001",
       {
         requestId: "10000000-0000-4000-8000-000000000012",
+        catalogScope: "education",
         expectedVersion: 1,
         changes: { title: "Моя зміна" },
       },
@@ -817,6 +820,7 @@ test("new material with initial receipt and later receipt commit without drafts"
   const { sqlite, d1 } = openDatabase();
   const createInput = {
     requestId: "10000000-0000-4000-8000-000000000020",
+    catalogScope: "education",
     title: "Новий підручник",
     rubric: "Підручники",
     publicationType: "Підручник",
@@ -839,6 +843,13 @@ test("new material with initial receipt and later receipt commit without drafts"
       notes: null,
     },
   };
+  await assert.rejects(
+    mutation.createMaterialDirect(actor, { ...createInput, catalogScope: "literature" }, d1),
+    (error) => error instanceof mutation.LibraryMutationError
+      && error.code === "librarika_authoritative"
+      && error.status === 410,
+  );
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM materials").get().count, 1);
   const created = await mutation.createMaterialDirect(actor, createInput, d1);
   const replay = await mutation.createMaterialDirect(actor, createInput, d1);
   assert.deepEqual(replay, created);
@@ -1346,6 +1357,84 @@ test("class issue and partial/full return are idempotent, chronological and bala
       FROM material_stock_totals WHERE material_id = 'CAT-0001'
     `).get()),
     { total_quantity: 5, library_quantity: 5, loaned_quantity: 0 },
+  );
+});
+
+test("Librarika materials reject local edits before and during the atomic batch", async () => {
+  const editionSql = `INSERT INTO library_editions (
+    id,source_media_id,material_id,fund,title,public_metadata_json,source_json,
+    source_row_sha256,import_run_id,publication_state,version,created_at,updated_at
+  ) VALUES (?, ?, 'CAT-0001', 'literature', 'Тестова книга', '{}', '{}', NULL, NULL, 'published', 1,
+    '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`;
+
+  const first = openDatabase();
+  first.sqlite.prepare(editionSql).run("LED-BLOCK-1", "media-block-1");
+  await assert.rejects(
+    mutation.updateMaterialDirect(actor, "CAT-0001", {requestId:"10000000-0000-4000-8000-000000000090",catalogScope:"literature",expectedVersion:1,changes:{title:"Хибна класифікація"}}, first.d1),
+    (error) => error instanceof mutation.LibraryMutationError && error.code === "librarika_authoritative" && error.status === 410,
+  );
+  await assert.rejects(
+    mutation.updateMaterialDirect(actor, "CAT-0001", {requestId:"10000000-0000-4000-8000-000000000091",catalogScope:"education",expectedVersion:1,changes:{title:"Заблокована зміна"}}, first.d1),
+    (error) => error instanceof mutation.LibraryMutationError && error.code === "librarika_authoritative" && error.status === 410,
+  );
+  assert.equal(first.sqlite.prepare("SELECT title FROM materials WHERE id='CAT-0001'").get().title,"Стара назва");
+  assert.equal(first.sqlite.prepare("SELECT COUNT(*) count FROM mutation_commands").get().count,0);
+
+  const raced = openDatabase();
+  raced.d1.beforeBatch = () => raced.sqlite.prepare(editionSql).run("LED-BLOCK-2", "media-block-2");
+  await assert.rejects(
+    mutation.updateMaterialDirect(actor, "CAT-0001", {requestId:"10000000-0000-4000-8000-000000000092",catalogScope:"education",expectedVersion:1,changes:{title:"Заблокована гонка"}}, raced.d1),
+    (error) => error instanceof mutation.LibraryMutationError && error.code === "librarika_authoritative" && error.status === 410,
+  );
+  assert.equal(raced.sqlite.prepare("SELECT title FROM materials WHERE id='CAT-0001'").get().title,"Стара назва");
+  assert.equal(raced.sqlite.prepare("SELECT COUNT(*) count FROM mutation_commands").get().count,0);
+});
+
+test("legacy class-loan details and statements never expose Librarika literature", async () => {
+  const { sqlite, d1 } = openDatabase();
+  seedActiveClassYear(sqlite);
+  const issued = await mutation.issueLoanToClass(actor, {
+    requestId: "23000000-0000-4000-8000-000000000091",
+    classYearId: "CY-2026-001",
+    expectedClassYearVersion: 1,
+    responsibleTeacherUserId: "USR-TCH",
+    issuedAt: "2026-09-10",
+    dueAt: "2027-06-30",
+    notes: "Давня видача до розділення каталогів",
+    items: [{
+      materialId: "CAT-0001",
+      sourceLocationId: "LOC-001",
+      condition: "unspecified",
+      quantity: 1,
+      expectedAvailableQuantity: 5,
+    }],
+  }, d1);
+  sqlite.prepare(`INSERT INTO library_editions (
+    id,source_media_id,material_id,fund,title,public_metadata_json,source_json,
+    source_row_sha256,import_run_id,publication_state,version,created_at,updated_at
+  ) VALUES ('LED-LEGACY-CLASS','99001','CAT-0001','literature','Стара назва','{}','{}',
+    NULL,NULL,'published',1,'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z')`).run();
+  const itemCount = sqlite.prepare("SELECT COUNT(*) AS count FROM class_loan_items WHERE class_loan_id=?").get(issued.classLoanId).count;
+
+  await assert.rejects(
+    management.readClassLoanManagement(d1, issued.classLoanId),
+    (error) => error instanceof management.ClassLoanManagementError
+      && error.code === "class_loan_librarika_authoritative"
+      && error.status === 410,
+  );
+  await assert.rejects(
+    statements.readClassIssueStatement(d1, issued.classLoanId),
+    (error) => error instanceof statements.ClassIssueStatementError
+      && error.code === "statement_librarika_authoritative"
+      && error.status === 410,
+  );
+  assert.equal(
+    (await statements.listClassIssueStatements(d1)).some((row) => row.classLoanId === issued.classLoanId),
+    false,
+  );
+  assert.equal(
+    sqlite.prepare("SELECT COUNT(*) AS count FROM class_loan_items WHERE class_loan_id=?").get(issued.classLoanId).count,
+    itemCount,
   );
 });
 

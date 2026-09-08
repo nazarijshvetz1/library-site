@@ -1,5 +1,22 @@
-import {env} from 'cloudflare:workers';
-import {coverBucket} from '@/lib/cover-storage';
-import type {ReaderDatabase} from '@/lib/reader-core';
-export const dynamic='force-dynamic';
-export async function GET(_request:Request,{params}:{params:Promise<{sha:string}>}){const {sha}=await params;if(!/^[0-9a-f]{64}$/.test(sha))return new Response(null,{status:404});const db=env.DB as unknown as ReaderDatabase,allowed=await db.prepare("SELECT 1 ok FROM library_editions e JOIN materials m ON m.id=e.material_id WHERE e.publication_state='published' AND m.status='active' AND json_extract(e.public_metadata_json,'$.coverSha256')=? LIMIT 1").bind(sha).first();if(!allowed)return new Response(null,{status:404});const file=await coverBucket()?.get('librarika-covers/'+sha);if(!file||file.customMetadata?.sha256!==sha||!['image/jpeg','image/png','image/webp'].includes(file.httpMetadata?.contentType||''))return new Response(null,{status:404});return new Response(file.body,{headers:{'Content-Type':file.httpMetadata!.contentType!,'Cache-Control':'public, max-age=3600','X-Content-Type-Options':'nosniff','Cross-Origin-Resource-Policy':'same-origin'}});}
+import { LIBRARIKA_CATALOG_URL } from "@/lib/librarika";
+
+export const dynamic = "force-dynamic";
+
+function retiredImportedCover(): Response {
+  return Response.json(
+    {
+      success: false,
+      error: "librarika_authoritative",
+      message: "Імпортовані обкладинки художньої та наукової літератури більше не публікуються локально.",
+      catalogUrl: LIBRARIKA_CATALOG_URL,
+    },
+    { status: 410, headers: { "Cache-Control": "no-store" } },
+  );
+}
+
+export const GET = retiredImportedCover;
+export const HEAD = retiredImportedCover;
+export const POST = retiredImportedCover;
+export const PUT = retiredImportedCover;
+export const PATCH = retiredImportedCover;
+export const DELETE = retiredImportedCover;

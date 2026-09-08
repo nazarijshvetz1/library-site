@@ -50,6 +50,7 @@ export async function GET(
       env.DB as unknown as CatalogD1Database,
       id,
       "librarian",
+      { fund: "education" },
     );
     if (!material) {
       return librarianError(

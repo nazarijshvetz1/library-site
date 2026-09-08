@@ -369,7 +369,7 @@ test("assistant close-all racing voice registration compensates the remote call 
 });
 
 test("assistant expiry releases concurrency but not daily quota; usage reads never consume conversations", async () => {
-  const { db } = await visitDatabase(); const actor = "teacher:expiry"; const now = new Date();
+  const { db } = await visitDatabase(); const actor = "teacher:expiry"; const now = new Date("2026-09-08T09:00:00.000Z");
   await assistant.createAssistantSession(db, actor, 2, now);
   await assistant.createAssistantSession(db, actor, 2, now);
   const later = new Date(now.getTime() + 600_001);

@@ -26,7 +26,7 @@ export async function GET(request: Request): Promise<Response> {
       : "Не вдалося завантажити відомості видачі.";
     const code = error instanceof ClassIssueStatementError ? error.code : "statement_unavailable";
     return librarianError(
-      code === "statement_not_found" ? 404 : 503,
+      error instanceof ClassIssueStatementError ? error.status : 503,
       code,
       message,
       authorization.value.access.writesEnabled,

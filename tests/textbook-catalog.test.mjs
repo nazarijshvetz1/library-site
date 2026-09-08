@@ -51,6 +51,8 @@ test("librarian textbook mutations use authorization, same-origin, bounded JSON,
   assert.match(store, /CASE WHEN changes\(\) = 1 THEN \? ELSE NULL END/u);
   assert.match(store, /textbook_link_required/u);
   assert.match(store, /requireResource: input\.publish/u);
+  assert.match(store, /librarika_authoritative/u);
+  assert.match(store, /educationalMaterialGuardStatement/u);
   assert.match(store, /input\.action === "restore"[\s\S]*?status = "draft"/u);
   assert.match(store, /Every active[\s\S]*fund card may therefore be assigned to a grade/u);
   assert.match(store, /publicationType: boundedText\(row\.publication_type/u);
@@ -84,7 +86,8 @@ test("librarian fund candidate search matches every token and keeps existing ass
   assert.match(candidateSearch, /const tokenBindings = tokens\.flatMap\(\(token\) => \[token, token\]\)/u);
   assert.match(candidateSearch, /\.bind\(\.\.\.tokenBindings, grade\)/u);
   assert.doesNotMatch(candidateSearch, /LIMIT 1000/u);
-  assert.doesNotMatch(candidateSearch, /NOT EXISTS/u);
+  assert.match(candidateSearch, /library_editions/u);
+  assert.match(candidateSearch, /e\.fund='literature'/u);
   assert.doesNotMatch(candidateSearch, /FROM textbook_assignments/u);
 
   const searchable = "cat 0610 історія україни 9 клас власов в";

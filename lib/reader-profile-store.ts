@@ -12,13 +12,14 @@ export async function getReaderProfile(db:ReaderDatabase,identity:ReaderIdentity
     WHERE r.id=?`).bind(identity.readerId).first();
   if(!row)readerFail("reader_profile_missing","Профіль ще не підготовлений. Зверніться до бібліотекаря.",409);
   return {id:row.id,fullName:row.full_name,memberNo:row.member_no,kind:row.kind,classLabel:row.class_label||row.source_group_label||"",classSource:row.class_label?"current":"imported",academicYear:row.academic_year||null,
-    displayName:row.display_name,phone:row.phone,photoUrl:row.photo_key?"/api/reader/photo?v="+row.version:null,communityEnabled:!!row.community_enabled,notifyLoans:!!row.notify_loans,notifyBooks:!!row.notify_books,version:Number(row.version),telegramConnected:row.telegram_status==="active",teacherLinked:identity.sessionKind==="teacher"};
+    displayName:row.display_name,phone:row.phone,photoUrl:row.photo_key?"/api/reader/photo?v="+row.version:null,communityEnabled:!!row.community_enabled,notifyLoans:false,notifyBooks:false,version:Number(row.version),telegramConnected:row.telegram_status==="active",teacherLinked:identity.sessionKind==="teacher"};
 }
 export async function updateReaderProfile(db:ReaderDatabase,identity:ReaderIdentity,input:{requestId:string;expectedVersion:number;displayName:string;phone:string;communityEnabled:boolean;notifyLoans:boolean;notifyBooks:boolean}){
   if(Object.keys(input).sort().join(",")!==["requestId","expectedVersion","displayName","phone","communityEnabled","notifyLoans","notifyBooks"].sort().join(","))readerFail("profile_fields","Ця форма не може змінювати ім’я, клас або права читача.");
   if(typeof input.displayName!=="string"||typeof input.phone!=="string"||![input.communityEnabled,input.notifyLoans,input.notifyBooks].every(value=>typeof value==="boolean")||!Number.isInteger(input.expectedVersion)||input.expectedVersion<1)readerFail("profile_invalid","Перевірте поля профілю.");
+  if(input.notifyLoans||input.notifyBooks)readerFail("reader_notifications_unavailable","Нагадування про Librarika-видачі ще не активовані: потрібне перевірене офіційне джерело строків повернення.",409);
   const displayName=input.displayName.normalize("NFKC").trim().replace(/\s+/g," "),phone=input.phone.trim();
-  if(displayName.length<2||displayName.length>50||/[<>\u0000-\u001f]/.test(displayName)||phone.length>30||(phone&&!/^\+?[0-9() .-]{7,30}$/.test(phone))||(phone&&(phone.replace(/\D/g,"").length<7||phone.replace(/\D/g,"").length>15)))readerFail("profile_invalid","Ім’я для спільноти: 2–50 символів; телефон — до 15 цифр. Телефон можна не вказувати.");
+  if(displayName.length<2||displayName.length>50||[...displayName].some(character=>character==="<"||character===">"||character.charCodeAt(0)<32)||phone.length>30||(phone&&!/^\+?[0-9() .-]{7,30}$/.test(phone))||(phone&&(phone.replace(/\D/g,"").length<7||phone.replace(/\D/g,"").length>15)))readerFail("profile_invalid","Ім’я для спільноти: 2–50 символів; телефон — до 15 цифр. Телефон можна не вказувати.");
   const replay=await readerReplay(db,identity,input.requestId,"profile",input);if(replay.replayed)return replay.replayed;
   const now=new Date().toISOString(),result={version:input.expectedVersion+1};
   const consentDay=new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Kyiv"}).format(new Date(now));

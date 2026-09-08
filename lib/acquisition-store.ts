@@ -109,6 +109,45 @@ export class AcquisitionStoreError extends Error {
   }
 }
 
+const LIBRARIKA_MATERIAL_MESSAGE = "Художня та наукова література ведеться у Librarika. Локальну картку не можна прив’язувати до внутрішнього обліку.";
+
+async function assertEducationalMaterials(
+  db: AcquisitionDatabase,
+  materialIds: string[],
+): Promise<void> {
+  const ids = [...new Set(materialIds.filter(Boolean))];
+  if (!ids.length) return;
+  const literature = await db.prepare(`
+    SELECT e.material_id
+    FROM json_each(?) requested
+    JOIN library_editions e ON e.material_id = CAST(requested.value AS TEXT)
+    WHERE e.fund = 'literature'
+    LIMIT 1
+  `).bind(JSON.stringify(ids)).first<{ material_id: string }>();
+  if (literature) {
+    throw new AcquisitionStoreError(
+      "librarika_authoritative",
+      410,
+      LIBRARIKA_MATERIAL_MESSAGE,
+      { materialId: literature.material_id },
+    );
+  }
+}
+
+function educationalMaterialsGuardStatement(
+  db: AcquisitionDatabase,
+  materialIds: string[],
+): D1Statement {
+  return db.prepare(`
+    SELECT CASE WHEN NOT EXISTS (
+      SELECT 1
+      FROM json_each(?) requested
+      JOIN library_editions e ON e.material_id = CAST(requested.value AS TEXT)
+      WHERE e.fund = 'literature'
+    ) THEN 1 ELSE json('librarika_authoritative') END
+  `).bind(JSON.stringify([...new Set(materialIds.filter(Boolean))]));
+}
+
 const ACTIVE_STATUSES: AcquisitionStatus[] = ["submitted", "in_review", "clarification", "approved", "planned", "ordered", "partially_received"];
 const TERMINAL_STATUSES: AcquisitionStatus[] = ["received", "rejected", "cancelled"];
 
@@ -252,7 +291,17 @@ export async function createTeacherAcquisitionRequest(
   const year = await requireActiveAcademicYear(db);
   let title = input.title, author = input.author, publicationYear = input.publicationYear;
   if (input.sourceKind === "catalog") {
-    const material = await db.prepare(`SELECT title,author,publication_year FROM materials WHERE id=? AND status='active' LIMIT 1`).bind(input.materialId).first<{ title: string; author: string; publication_year: number | null }>();
+    await assertEducationalMaterials(db, input.materialId ? [input.materialId] : []);
+    const material = await db.prepare(`
+      SELECT m.title,m.author,m.publication_year
+      FROM materials m
+      WHERE m.id=? AND m.status='active'
+        AND NOT EXISTS (
+          SELECT 1 FROM library_editions e
+          WHERE e.material_id=m.id AND e.fund='literature'
+        )
+      LIMIT 1
+    `).bind(input.materialId).first<{ title: string; author: string; publication_year: number | null }>();
     if (!material) throw new AcquisitionStoreError("material_not_found", 404, "Матеріал із каталогу не знайдено.");
     title = material.title; author = material.author || input.author; publicationYear = material.publication_year ?? input.publicationYear;
   }
@@ -267,7 +316,11 @@ export async function createTeacherAcquisitionRequest(
   const auditId = `AUD-${crypto.randomUUID()}`;
   const eventId = `AQE-${crypto.randomUUID()}`;
   const after = requestAuditSnapshot({ id, publicNumber, status: "submitted", title, author, requestedQuantity: input.requestedQuantity });
-  await db.batch([
+  const createStatements: D1Statement[] = [];
+  if (input.sourceKind === "catalog" && input.materialId) {
+    createStatements.push(educationalMaterialsGuardStatement(db, [input.materialId]));
+  }
+  createStatements.push(
     db.prepare(`INSERT INTO acquisition_requests (
       id,public_number,submission_key,submission_hash,requester_kind,teacher_user_id,requester_name,requester_class_year_id,requester_class_name,
       category,source_kind,literature_kind,material_id,title,author,publication_year,requested_quantity,approved_quantity,ordered_quantity,received_quantity,
@@ -287,7 +340,15 @@ export async function createTeacherAcquisitionRequest(
       message: `${teacher.fullName}: «${title}», ${input.requestedQuantity} прим.`, targetPath: "/librarian/acquisitions",
       entityType: "acquisition_request", entityId: id, createdAt: now,
     }),
-  ]);
+  );
+  try {
+    await db.batch(createStatements);
+  } catch (error) {
+    if (input.sourceKind === "catalog" && input.materialId) {
+      await assertEducationalMaterials(db, [input.materialId]);
+    }
+    throw error;
+  }
   return requireRequest(db, id);
 }
 
@@ -498,6 +559,7 @@ export async function applyLibrarianAcquisitionAction(
   const now = new Date().toISOString();
   const current = await requireRequest(db, requestId);
   if (current.version !== input.expectedVersion) throw conflict(current.version);
+  if (current.materialId) await assertEducationalMaterials(db, [current.materialId]);
   let next = current.status;
   let approved = current.approvedQuantity;
   let ordered = current.orderedQuantity;
@@ -525,14 +587,29 @@ export async function applyLibrarianAcquisitionAction(
     if (ordered < received) throw new AcquisitionStoreError("invalid_quantity", 400, "Замовлена кількість не може бути меншою за вже отриману.");
     next = received > 0 ? "partially_received" : "ordered"; timestamps.ordered = now;
   } else if (input.action === "link_material") {
+    if (current.category !== "educational") {
+      throw new AcquisitionStoreError("librarika_authoritative", 410, "Літературні пропозиції опрацьовуються у Librarika без локального CAT-ID.");
+    }
     allow(current.status, ["approved", "planned", "ordered", "partially_received"]);
-    const material = await db.prepare(`SELECT id FROM materials WHERE id=? AND status='active' LIMIT 1`).bind(input.targetMaterialId).first<{ id: string }>();
+    await assertEducationalMaterials(db, input.targetMaterialId ? [input.targetMaterialId] : []);
+    const material = await db.prepare(`
+      SELECT m.id FROM materials m
+      WHERE m.id=? AND m.status='active'
+        AND NOT EXISTS (
+          SELECT 1 FROM library_editions e
+          WHERE e.material_id=m.id AND e.fund='literature'
+        )
+      LIMIT 1
+    `).bind(input.targetMaterialId).first<{ id: string }>();
     if (!material) throw new AcquisitionStoreError("material_not_found", 404, "Матеріал із таким CAT-ID не знайдено.");
     if (current.receivedQuantity > 0 && material.id !== current.materialId) {
       throw new AcquisitionStoreError("material_change_after_receipt", 409, "Після прив’язування надходження матеріал заявки змінювати не можна.");
     }
     materialId = material.id;
   } else if (input.action === "link_receipt") {
+    if (current.category !== "educational") {
+      throw new AcquisitionStoreError("librarika_authoritative", 410, "Надходження літератури оформлюється у Librarika, а не в локальному фонді.");
+    }
     allow(current.status, ["ordered", "partially_received"]);
     if (!current.materialId) throw new AcquisitionStoreError("material_link_required", 409, "Спочатку створіть або прив’яжіть матеріал у каталозі.");
     const line = await db.prepare(`
@@ -554,6 +631,21 @@ export async function applyLibrarianAcquisitionAction(
     received += allocation;
     next = received === ordered ? "received" : "partially_received";
     if (next === "received") timestamps.received = now;
+  } else if (input.action === "complete_in_librarika") {
+    if (current.category !== "literature") {
+      throw new AcquisitionStoreError("action_not_allowed", 409, "Ця дія доступна лише для художньої та наукової літератури.");
+    }
+    allow(current.status, ["approved", "planned", "ordered", "partially_received"]);
+    const completedQuantity = input.allocatedQuantity ?? 0;
+    const cap = approved ?? current.requestedQuantity;
+    if (completedQuantity < 1 || completedQuantity > cap) {
+      throw new AcquisitionStoreError("invalid_quantity", 400, `Кількість має бути від 1 до ${cap}.`);
+    }
+    ordered = Math.max(ordered, completedQuantity);
+    received = completedQuantity;
+    materialId = null;
+    next = "received";
+    timestamps.received = now;
   } else if (input.action === "reject") {
     allow(current.status, ACTIVE_STATUSES.filter((status) => status !== "partially_received")); next = "rejected"; rejection = input.message; timestamps.rejected = now;
   } else if (input.action === "cancel") {
@@ -562,7 +654,10 @@ export async function applyLibrarianAcquisitionAction(
 
   const notificationId = current.teacherUserId ? `PN-${crypto.randomUUID()}` : null;
   const auditRequestId = input.mutationId;
-  const statements: D1Statement[] = [
+  const statements: D1Statement[] = [];
+  const updateResultIndex = materialId ? 1 : 0;
+  if (materialId) statements.push(educationalMaterialsGuardStatement(db, [materialId]));
+  statements.push(
     db.prepare(`UPDATE acquisition_requests SET status=?,approved_quantity=?,ordered_quantity=?,received_quantity=?,material_id=?,
       librarian_note=?,clarification_message=?,rejection_reason=?,reviewed_by_user_id=?,
       reviewed_at=COALESCE(?,reviewed_at),approved_at=COALESCE(?,approved_at),ordered_at=COALESCE(?,ordered_at),
@@ -571,7 +666,7 @@ export async function applyLibrarianAcquisitionAction(
       .bind(next, approved, ordered, received, materialId, input.message, clarification, rejection, actor.id,
         timestamps.reviewed, timestamps.approved, timestamps.ordered, timestamps.received, timestamps.rejected, timestamps.cancelled,
         now, requestId, input.expectedVersion),
-  ];
+  );
   if (input.action === "link_receipt") {
     statements.push(db.prepare(`INSERT INTO acquisition_receipt_allocations
       (id,request_id,inventory_transaction_line_id,allocated_quantity,actor_user_id,created_at)
@@ -617,6 +712,7 @@ export async function applyLibrarianAcquisitionAction(
   try {
     results = await db.batch(statements);
   } catch (error) {
+    if (materialId) await assertEducationalMaterials(db, [materialId]);
     if (constraintFailure(error)) {
       if (input.action === "link_receipt") {
         throw new AcquisitionStoreError("receipt_allocation_conflict", 409, "Надходження або його вільна кількість уже змінилися. Оновіть заявку.");
@@ -625,7 +721,7 @@ export async function applyLibrarianAcquisitionAction(
     }
     throw error;
   }
-  if (!number(results[0]?.meta?.changes)) throw conflict(current.version);
+  if (!number(results[updateResultIndex]?.meta?.changes)) throw conflict(current.version);
   return requireRequest(db, requestId);
 }
 
@@ -646,7 +742,15 @@ export async function previewAcquisitionImport(
   const classRows = await db.prepare(`SELECT id,class_name FROM class_years WHERE academic_year_id=? AND status='active' ORDER BY id LIMIT 1000`)
     .bind(year.id).all<{ id: string; class_name: string }>();
   const materialRows = materialIds.length
-    ? await db.prepare(`SELECT id FROM materials WHERE status='active' AND id IN (SELECT value FROM json_each(?)) LIMIT 500`)
+    ? await db.prepare(`
+        SELECT m.id FROM materials m
+        WHERE m.status='active' AND m.id IN (SELECT value FROM json_each(?))
+          AND NOT EXISTS (
+            SELECT 1 FROM library_editions e
+            WHERE e.material_id=m.id AND e.fund='literature'
+          )
+        LIMIT 500
+      `)
       .bind(JSON.stringify(materialIds)).all<{ id: string }>()
     : { results: [] };
   const duplicateRows = duplicateKeys.length
@@ -713,6 +817,12 @@ export async function commitAcquisitionImport(db: AcquisitionDatabase, user: Cha
   const batchId = `AIB-${input.importId}`;
   const newRows = preview.rows.filter((row) => !row.existingRequestId);
   const statements: D1Statement[] = [];
+  const importedMaterialIds = newRows
+    .map((row) => row.materialId)
+    .filter((value): value is string => Boolean(value));
+  if (importedMaterialIds.length) {
+    statements.push(educationalMaterialsGuardStatement(db, importedMaterialIds));
+  }
   statements.push(db.prepare(`INSERT INTO acquisition_import_batches (id,workbook_sha256,file_name,row_count,imported_count,status,result_json,created_by_user_id,created_at) VALUES (?,?,?,?,?,'completed',?,?,?)`)
     .bind(batchId, input.fileHash, input.fileName, input.rows.length, newRows.length, JSON.stringify(preview.totals), actor.id, now));
   newRows.forEach((row, index) => {
@@ -740,7 +850,14 @@ export async function commitAcquisitionImport(db: AcquisitionDatabase, user: Cha
         .bind(`AQE-${crypto.randomUUID()}`, id, actor.id, JSON.stringify({ sheet: row.sourceSheet, row: row.sourceRow, index }), now),
     );
   });
-  await db.batch(statements);
+  try {
+    await db.batch(statements);
+  } catch (error) {
+    if (importedMaterialIds.length) {
+      await assertEducationalMaterials(db, importedMaterialIds);
+    }
+    throw error;
+  }
   return { replayed: false, imported: newRows.length, batchId };
 }
 

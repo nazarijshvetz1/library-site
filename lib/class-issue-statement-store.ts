@@ -51,12 +51,24 @@ export type ClassIssueStatementSummary = {
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 
 export class ClassIssueStatementError extends Error {
-  readonly code: "statement_not_found" | "statement_invalid" | "statement_unavailable";
+  readonly code:
+    | "statement_not_found"
+    | "statement_invalid"
+    | "statement_librarika_authoritative"
+    | "statement_unavailable";
+  readonly status: number;
 
   constructor(code: ClassIssueStatementError["code"], message: string) {
     super(message);
     this.name = "ClassIssueStatementError";
     this.code = code;
+    this.status = code === "statement_not_found"
+      ? 404
+      : code === "statement_invalid"
+        ? 409
+        : code === "statement_librarika_authoritative"
+          ? 410
+          : 503;
   }
 }
 
@@ -83,6 +95,10 @@ export async function readClassIssueStatement(
     ? parseSnapshotHeader(text(row.snapshotJson))
     : null;
   const managementProjection = await hasManagementProjection(db);
+  const literatureProjection = await hasLiteratureProjection(db);
+  if (literatureProjection) {
+    await assertEducationClassLoan(db, text(row.classLoanId));
+  }
 
   let lineRows: Record<string, unknown>[];
   try {
@@ -145,8 +161,13 @@ export async function listClassIssueStatements(
   }
   try {
     const managementProjection = await hasManagementProjection(db);
+    const literatureProjection = await hasLiteratureProjection(db);
     const result = await db.prepare(
-      managementProjection ? LIST_SQL : PRE_MANAGEMENT_LIST_SQL,
+      literatureProjection
+        ? educationOnlyStatementListSql(managementProjection ? LIST_SQL : PRE_MANAGEMENT_LIST_SQL)
+        : managementProjection
+          ? LIST_SQL
+          : PRE_MANAGEMENT_LIST_SQL,
     ).bind(selectedId, selectedId).all<Record<string, unknown>>();
     return (result.results ?? []).map((row) => ({
       classLoanId: text(row.classLoanId),
@@ -160,9 +181,75 @@ export async function listClassIssueStatements(
       positionCount: integer(row.positionCount),
       copyCount: integer(row.copyCount),
     }));
-  } catch {
+  } catch (error) {
+    if (error instanceof ClassIssueStatementError) throw error;
     throw new ClassIssueStatementError("statement_unavailable", "Не вдалося завантажити історію відомостей.");
   }
+}
+
+async function hasLiteratureProjection(db: ClassIssueStatementDatabase): Promise<boolean> {
+  try {
+    const row = await db.prepare(`
+      SELECT EXISTS(
+        SELECT 1 FROM sqlite_master
+        WHERE type = 'table' AND name = 'library_editions'
+      ) AS hasLiteratureProjection
+    `).first<Record<string, unknown>>();
+    return integer(row?.hasLiteratureProjection) === 1;
+  } catch {
+    throw new ClassIssueStatementError(
+      "statement_unavailable",
+      "Не вдалося визначити межу каталогу відомості.",
+    );
+  }
+}
+
+async function assertEducationClassLoan(
+  db: ClassIssueStatementDatabase,
+  classLoanId: string,
+): Promise<void> {
+  let literature: Record<string, unknown> | null;
+  try {
+    literature = await db.prepare(`
+      SELECT 1 AS found
+      FROM class_loan_items item
+      JOIN library_editions edition
+        ON edition.material_id = item.material_id
+       AND edition.fund = 'literature'
+      WHERE item.class_loan_id = ?
+      LIMIT 1
+    `).bind(classLoanId).first<Record<string, unknown>>();
+  } catch {
+    throw new ClassIssueStatementError(
+      "statement_unavailable",
+      "Не вдалося перевірити склад відомості.",
+    );
+  }
+  if (literature) {
+    throw new ClassIssueStatementError(
+      "statement_librarika_authoritative",
+      "Художню та наукову літературу потрібно переглядати й обслуговувати в Librarika.",
+    );
+  }
+}
+
+function educationOnlyStatementListSql(sql: string): string {
+  const marker = "WHERE cl.merged_into_class_loan_id IS NULL";
+  if (!sql.includes(marker)) {
+    throw new ClassIssueStatementError(
+      "statement_unavailable",
+      "Не вдалося застосувати межу каталогу до відомостей.",
+    );
+  }
+  return sql.replace(marker, `${marker}
+    AND NOT EXISTS (
+      SELECT 1
+      FROM class_loan_items boundary_item
+      JOIN library_editions boundary_edition
+        ON boundary_edition.material_id = boundary_item.material_id
+       AND boundary_edition.fund = 'literature'
+      WHERE boundary_item.class_loan_id = cl.id
+    )`);
 }
 
 async function hasManagementProjection(db: ClassIssueStatementDatabase): Promise<boolean> {

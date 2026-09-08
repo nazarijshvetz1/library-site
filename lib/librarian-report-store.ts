@@ -100,6 +100,7 @@ const REPORT_QUERIES: Record<LibrarianReportKind, QueryDefinition[]> = {
       JOIN materials m ON m.id = li.material_id
       WHERE l.status = 'open' AND li.quantity_issued > li.quantity_returned
         AND substr(l.issued_at, 1, 10) BETWEEN ? AND ?
+        AND NOT EXISTS (SELECT 1 FROM library_editions e WHERE e.material_id=m.id AND e.fund='literature')
       ORDER BY COALESCE(l.due_at, '9999-12-31'), u.sort_name, m.sort_title
       LIMIT 20001`,
     },
@@ -132,6 +133,7 @@ const REPORT_QUERIES: Record<LibrarianReportKind, QueryDefinition[]> = {
       JOIN materials m ON m.id = cli.material_id
       WHERE cl.status = 'open' AND cli.quantity_issued > cli.quantity_returned
         AND substr(COALESCE(item_issue_dates.issuedAt, cl.issued_at), 1, 10) BETWEEN ? AND ?
+        AND NOT EXISTS (SELECT 1 FROM library_editions e WHERE e.material_id=m.id AND e.fund='literature')
       ORDER BY COALESCE(cl.due_at, '9999-12-31'), cy.grade, cy.code, m.sort_title
       LIMIT 20001`,
     },
@@ -169,6 +171,7 @@ const REPORT_QUERIES: Record<LibrarianReportKind, QueryDefinition[]> = {
     LEFT JOIN material_stock_totals mst ON mst.material_id = m.id
     WHERE substr(COALESCE(item_issue_dates.issuedAt, cl.issued_at), 1, 10) BETWEEN ? AND ?
       AND cl.status != 'cancelled'
+      AND NOT EXISTS (SELECT 1 FROM library_editions e WHERE e.material_id=m.id AND e.fund='literature')
     GROUP BY ay.label, cy.class_name, cy.grade, cy.code, curator.full_name,
       m.subject, m.title, m.author, m.publication_year, m.sort_title, m.id
     ORDER BY ay.label DESC, cy.grade, cy.code, m.subject, m.sort_title
@@ -188,6 +191,7 @@ const REPORT_QUERIES: Record<LibrarianReportKind, QueryDefinition[]> = {
       JOIN materials m ON m.id = itl.material_id
       JOIN locations location ON location.id = itl.location_id
       WHERE substr(it.occurred_at, 1, 10) BETWEEN ? AND ?
+        AND NOT EXISTS (SELECT 1 FROM library_editions e WHERE e.material_id=m.id AND e.fund='literature')
       ORDER BY it.occurred_at DESC, m.sort_title, location.sort_order
       LIMIT 20001`,
     },
@@ -216,6 +220,7 @@ const REPORT_QUERIES: Record<LibrarianReportKind, QueryDefinition[]> = {
       LEFT JOIN class_loan_item_adjustments adjustment
         ON adjustment.transaction_id = clt.id
       WHERE substr(clt.occurred_at, 1, 10) BETWEEN ? AND ?
+        AND NOT EXISTS (SELECT 1 FROM library_editions e WHERE e.material_id=m.id AND e.fund='literature')
       ORDER BY clt.occurred_at DESC, clt.created_at DESC, clt.id DESC,
         cy.grade, cy.code, m.sort_title, cltl.id
       LIMIT 20001`,
@@ -242,6 +247,7 @@ const REPORT_QUERIES: Record<LibrarianReportKind, QueryDefinition[]> = {
     FROM holdings h
     JOIN materials m ON m.id = h.material_id
     JOIN locations location ON location.id = h.location_id
+    WHERE NOT EXISTS (SELECT 1 FROM library_editions e WHERE e.material_id=m.id AND e.fund='literature')
     ORDER BY location.sort_order, location.name, m.subject, m.sort_title
     LIMIT 20001`,
   }],
@@ -296,16 +302,21 @@ const REPORT_QUERIES: Record<LibrarianReportKind, QueryDefinition[]> = {
       GROUP BY cltl.class_loan_item_id
     )
     SELECT
-      (SELECT COUNT(*) FROM materials WHERE status = 'active') AS activeMaterials,
-      (SELECT COALESCE(SUM(total_quantity), 0) FROM material_stock_totals) AS totalCopies,
+      (SELECT COUNT(*) FROM materials m WHERE m.status = 'active'
+        AND NOT EXISTS (SELECT 1 FROM library_editions e WHERE e.material_id=m.id AND e.fund='literature')) AS activeMaterials,
+      (SELECT COALESCE(SUM(mst.total_quantity), 0) FROM material_stock_totals mst
+        WHERE NOT EXISTS (SELECT 1 FROM library_editions e WHERE e.material_id=mst.material_id AND e.fund='literature')) AS totalCopies,
       (SELECT COALESCE(SUM(CASE WHEN itl.quantity_delta > 0 THEN itl.quantity_delta ELSE 0 END), 0)
        FROM inventory_transactions it JOIN inventory_transaction_lines itl ON itl.transaction_id = it.id, period p
-       WHERE it.kind IN ('receipt','import') AND substr(it.occurred_at, 1, 10) BETWEEN p.fromDate AND p.toDate) AS receivedCopies,
+       WHERE it.kind IN ('receipt','import') AND substr(it.occurred_at, 1, 10) BETWEEN p.fromDate AND p.toDate
+         AND NOT EXISTS (SELECT 1 FROM library_editions e WHERE e.material_id=itl.material_id AND e.fund='literature')) AS receivedCopies,
       (SELECT COALESCE(SUM(CASE WHEN itl.quantity_delta < 0 THEN -itl.quantity_delta ELSE 0 END), 0)
        FROM inventory_transactions it JOIN inventory_transaction_lines itl ON itl.transaction_id = it.id, period p
-       WHERE it.kind = 'writeoff' AND substr(it.occurred_at, 1, 10) BETWEEN p.fromDate AND p.toDate) AS writtenOffCopies,
+       WHERE it.kind = 'writeoff' AND substr(it.occurred_at, 1, 10) BETWEEN p.fromDate AND p.toDate
+         AND NOT EXISTS (SELECT 1 FROM library_editions e WHERE e.material_id=itl.material_id AND e.fund='literature')) AS writtenOffCopies,
       (SELECT COALESCE(SUM(li.quantity_issued), 0) FROM loans l JOIN loan_items li ON li.loan_id = l.id, period p
-       WHERE substr(l.issued_at, 1, 10) BETWEEN p.fromDate AND p.toDate) AS issuedToTeachers,
+       WHERE substr(l.issued_at, 1, 10) BETWEEN p.fromDate AND p.toDate
+         AND NOT EXISTS (SELECT 1 FROM library_editions e WHERE e.material_id=li.material_id AND e.fund='literature')) AS issuedToTeachers,
       (SELECT COALESCE(SUM(cli.quantity_issued), 0)
        FROM class_loans cl
        JOIN class_loan_items cli
@@ -315,7 +326,8 @@ const REPORT_QUERIES: Record<LibrarianReportKind, QueryDefinition[]> = {
        CROSS JOIN period p
        WHERE cl.status != 'cancelled'
          AND substr(COALESCE(item_issue_dates.issuedAt, cl.issued_at), 1, 10)
-           BETWEEN p.fromDate AND p.toDate) AS issuedToClasses,
+           BETWEEN p.fromDate AND p.toDate
+         AND NOT EXISTS (SELECT 1 FROM library_editions e WHERE e.material_id=cli.material_id AND e.fund='literature')) AS issuedToClasses,
       (SELECT COUNT(*) FROM visit_bookings vb, period p
        WHERE vb.visit_date BETWEEN p.fromDate AND p.toDate AND vb.status = 'active') AS activeVisitBookings,
       (SELECT COUNT(*) FROM visit_bookings vb, period p

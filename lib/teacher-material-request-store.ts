@@ -4,7 +4,6 @@ import { kyivToday } from "./visit-schedule-validation.ts";
 import {
   queueTelegramForLibrariansStatement,
   queueTelegramFromPortalNotificationStatement,
-  queueTelegramForUserStatement,
 } from "./telegram-outbox.ts";
 import type {
   MaterialRequestActionInput,
@@ -199,7 +198,8 @@ type RequestRow = {
 type MutationActor = { id: string; email: string };
 
 export const ACTIVE_MATERIAL_REQUEST_LIMIT = 20;
-const MATERIAL_REQUEST_REMINDER_LEAD_MS = 10 * 60_000;
+
+const LIBRARIKA_MATERIAL_MESSAGE = "Художня та наукова література ведеться у Librarika. Замовлення з фонду бібліотеки доступне лише для навчальних матеріалів.";
 
 export class TeacherMaterialRequestError extends Error {
   readonly code: string;
@@ -218,6 +218,50 @@ export class TeacherMaterialRequestError extends Error {
     this.status = status;
     this.details = details;
   }
+}
+
+function uniqueMaterialIds(materialIds: string[]): string[] {
+  return [...new Set(materialIds.filter(Boolean))];
+}
+
+async function assertEducationalMaterials(
+  db: TeacherMaterialRequestDatabase,
+  materialIds: string[],
+): Promise<void> {
+  const ids = uniqueMaterialIds(materialIds);
+  if (ids.length === 0) return;
+  const literature = await db.prepare(`
+    SELECT edition.material_id
+    FROM json_each(?) requested
+    JOIN library_editions edition
+      ON edition.material_id=CAST(requested.value AS TEXT)
+    WHERE edition.fund='literature'
+    LIMIT 1
+  `).bind(JSON.stringify(ids)).first<{ material_id: string }>();
+  if (literature) {
+    throw new TeacherMaterialRequestError(
+      "librarika_authoritative",
+      410,
+      LIBRARIKA_MATERIAL_MESSAGE,
+      { materialId: literature.material_id },
+    );
+  }
+}
+
+function educationalMaterialsGuardStatement(
+  db: TeacherMaterialRequestDatabase,
+  materialIds: string[],
+): D1Statement {
+  const ids = uniqueMaterialIds(materialIds);
+  return db.prepare(`
+    SELECT CASE WHEN NOT EXISTS (
+      SELECT 1
+      FROM json_each(?) requested
+      JOIN library_editions edition
+        ON edition.material_id=CAST(requested.value AS TEXT)
+      WHERE edition.fund='literature'
+    ) THEN 1 ELSE json('librarika_authoritative') END
+  `).bind(JSON.stringify(ids));
 }
 
 export async function listTeacherMaterialRequests(
@@ -337,6 +381,7 @@ export async function createTeacherMaterialRequest(
 
   const authNow = new Date().toISOString();
   await requireActiveTeacherPrincipal(db, teacher, authNow);
+  await assertEducationalMaterials(db, input.items.map((item) => item.materialId));
 
   const activeRequestCount = await countActiveMaterialRequests(db, teacher.teacherUserId);
   if (activeRequestCount >= ACTIVE_MATERIAL_REQUEST_LIMIT) {
@@ -451,6 +496,7 @@ export async function createTeacherMaterialRequest(
     })),
   };
   const statements: D1Statement[] = [
+    educationalMaterialsGuardStatement(db, snapshots.map((item) => item.materialId)),
     insertCommandStatement(
       db,
       input.requestId,
@@ -594,7 +640,8 @@ export async function createTeacherMaterialRequest(
       teacher.teacherUserId,
       requestHash,
       "material_request_conflict",
-    "Заявку не створено, бо дані каталогу змінилися. Оновіть каталог і спробуйте ще раз.",
+      "Заявку не створено, бо дані каталогу змінилися. Оновіть каталог і спробуйте ще раз.",
+      snapshots.map((item) => item.materialId),
     );
     return replayed ?? result;
   } catch (error) {
@@ -1462,6 +1509,8 @@ async function transitionMaterialRequest(
   input: Exclude<MaterialRequestActionInput, MaterialRequestReadyInput>,
   requestHash: string,
 ): Promise<Record<string, unknown>> {
+  const materialIds = current.items.map((item) => item.materialId);
+  await assertEducationalMaterials(db, materialIds);
   const allowed = input.action === "start_review"
     ? ["submitted"]
     : input.action === "reject"
@@ -1508,6 +1557,7 @@ async function transitionMaterialRequest(
       ? ["", input.reason, actor.id, now, now, current.id, current.version]
       : ["", actor.id, now, now, current.id, current.version];
   const statements: D1Statement[] = [
+    educationalMaterialsGuardStatement(db, materialIds),
     insertCommandStatement(
       db,
       input.requestId,
@@ -1626,6 +1676,7 @@ async function transitionMaterialRequest(
     requestHash,
     "request_version_conflict",
     "Заявка вже змінилася. Оновіть чергу.",
+    materialIds,
   );
   return replayed ?? result;
 }
@@ -1637,6 +1688,8 @@ async function readyMaterialRequest(
   input: MaterialRequestReadyInput,
   requestHash: string,
 ): Promise<Record<string, unknown>> {
+  const materialIds = current.items.map((item) => item.materialId);
+  await assertEducationalMaterials(db, materialIds);
   const scheduledIssueAt = input.scheduledIssueAt ?? null;
   if (!["submitted", "in_review", "ready", "partially_ready"].includes(current.status)) {
     throw new TeacherMaterialRequestError(
@@ -1799,16 +1852,6 @@ async function readyMaterialRequest(
   }
 
   const now = nowDate.toISOString();
-  const reminderIsImmediate = scheduledIssueAt
-    ? new Date(scheduledIssueAt).getTime() - nowDate.getTime() < MATERIAL_REQUEST_REMINDER_LEAD_MS
-    : false;
-  const reminderAt = scheduledIssueAt ? new Date(Math.max(
-    nowDate.getTime(),
-    new Date(scheduledIssueAt).getTime() - MATERIAL_REQUEST_REMINDER_LEAD_MS,
-  )).toISOString() : null;
-  const reminderDeadlineInFuture = scheduledIssueAt
-    ? new Date(scheduledIssueAt).getTime() > nowDate.getTime()
-    : false;
   const scheduledLabel = scheduledIssueAt ? formatKyivDateTime(scheduledIssueAt) : "без визначеного часу";
   const reservationRows = states.map((state) => ({
     id: `MRR-${crypto.randomUUID()}`,
@@ -1847,6 +1890,7 @@ async function readyMaterialRequest(
   const eventId = `MRE-${crypto.randomUUID()}`;
   const notificationId = `NTF-${crypto.randomUUID()}`;
   const statements: D1Statement[] = [
+    educationalMaterialsGuardStatement(db, materialIds),
     insertCommandStatement(
       db,
       input.requestId,
@@ -2006,47 +2050,7 @@ async function readyMaterialRequest(
     { status, version: current.version + 1, updatedAt: now },
     now,
   ));
-  if (reminderAt && scheduledIssueAt && reminderDeadlineInFuture) {
-    const approvedReminderItems = itemApprovals.filter((item) => item.approvedQuantity > 0);
-    const reminderItems = approvedReminderItems.slice(0, 3)
-      .map((item) => `${currentByItem.get(item.itemId)?.title ?? "Матеріал"} — ${item.approvedQuantity} прим.`)
-      .join("; ");
-    const reminderItemsSuffix = approvedReminderItems.length > 3
-      ? `; ще ${approvedReminderItems.length - 3} поз.`
-      : "";
-    statements.push(
-      queueTelegramForUserStatement(db, current.teacherUserId, {
-        dedupeKey: `material-request:${current.id}:pickup-reminder`,
-        auditRequestId: input.requestId,
-        category: "orders",
-        type: "material_request_pickup_reminder",
-        title: reminderIsImmediate ? "Незабаром — отримання матеріалів" : "За 10 хвилин — отримання матеріалів",
-        message: `Чекаємо вас ${scheduledLabel}. Місце отримання: ${pickup.name}.`,
-        targetPath: "/teacher?tab=orders&view=history",
-        entityType: "material_request",
-        entityId: current.id,
-        createdAt: now,
-        deliverAt: reminderAt,
-        expiresAt: scheduledIssueAt,
-      }),
-      queueTelegramForLibrariansStatement(db, {
-        dedupeKey: `material-request:${current.id}:prepare-reminder`,
-        auditRequestId: input.requestId,
-        category: "orders",
-        type: "material_request_prepare_reminder",
-        title: reminderIsImmediate ? "Підготуйте видачу зараз" : "Підготуйте видачу за 10 хвилин",
-        message: `${current.teacherName} · ${scheduledLabel} · ${pickup.name}. ${reminderItems}${reminderItemsSuffix}`,
-        targetPath: "/librarian/orders",
-        entityType: "material_request",
-        entityId: current.id,
-        createdAt: now,
-        deliverAt: reminderAt,
-        expiresAt: scheduledIssueAt,
-      }),
-    );
-  } else {
-    statements.push(cancelScheduledRequestRemindersStatement(db, current.id, now, "schedule_cleared"));
-  }
+  statements.push(cancelScheduledRequestRemindersStatement(db, current.id, now, "pickup_reminders_withdrawn"));
   statements.push(
     completeCommandStatement(db, input.requestId, result, now),
   );
@@ -2061,6 +2065,7 @@ async function readyMaterialRequest(
     requestHash,
     "reservation_stock_conflict",
     "Залишок або заявка змінилися. Оновіть чергу.",
+    materialIds,
   );
   return replayed ?? result;
 }
@@ -2072,6 +2077,8 @@ async function issueMaterialRequest(
   input: MaterialRequestIssueInput,
   requestHash: string,
 ): Promise<Record<string, unknown>> {
+  const materialIds = current.items.map((item) => item.materialId);
+  await assertEducationalMaterials(db, materialIds);
   if (current.status !== "ready" && current.status !== "partially_ready") {
     throw new TeacherMaterialRequestError(
       "invalid_request_transition",
@@ -2264,6 +2271,7 @@ async function issueMaterialRequest(
   const eventId = `MRE-${crypto.randomUUID()}`;
   const notificationId = `NTF-${crypto.randomUUID()}`;
   const statements: D1Statement[] = [
+    educationalMaterialsGuardStatement(db, materialIds),
     insertCommandStatement(
       db,
       input.requestId,
@@ -2605,6 +2613,7 @@ async function issueMaterialRequest(
     requestHash,
     "request_version_conflict",
     "Заявка вже змінилася. Оновіть чергу.",
+    materialIds,
   );
   return replayed ?? result;
 }
@@ -2694,21 +2703,6 @@ async function releaseMaterialRequest(
     releaseReason: input.reason,
     items: input.items,
   };
-  const scheduledIssueMs = current.scheduledIssueAt ? new Date(current.scheduledIssueAt).getTime() : Number.NaN;
-  const refreshedReminderAt = Number.isFinite(scheduledIssueMs)
-    && scheduledIssueMs - MATERIAL_REQUEST_REMINDER_LEAD_MS > new Date(now).getTime()
-    ? new Date(scheduledIssueMs - MATERIAL_REQUEST_REMINDER_LEAD_MS).toISOString()
-    : null;
-  const remainingReminderItems = current.items.map((item) => ({
-    title: item.title,
-    quantity: item.approvedQuantity - item.fulfilledQuantity - (releasedByItem.get(item.id) ?? 0),
-  })).filter((item) => item.quantity > 0);
-  const remainingReminderSummary = remainingReminderItems.slice(0, 3)
-    .map((item) => `${item.title} — ${item.quantity} прим.`)
-    .join("; ");
-  const remainingReminderSuffix = remainingReminderItems.length > 3
-    ? `; ще ${remainingReminderItems.length - 3} поз.`
-    : "";
   const eventId = `MRE-${crypto.randomUUID()}`;
   const notificationId = `NTF-${crypto.randomUUID()}`;
   const statements: D1Statement[] = [
@@ -2845,24 +2839,7 @@ async function releaseMaterialRequest(
       },
       now,
     ),
-    ...(status === "completed" || status === "cancelled"
-      ? [cancelScheduledRequestRemindersStatement(db, current.id, now, "request_closed")]
-      : refreshedReminderAt && current.scheduledIssueAt
-        ? [queueTelegramForLibrariansStatement(db, {
-          dedupeKey: `material-request:${current.id}:prepare-reminder`,
-          auditRequestId: input.requestId,
-          category: "orders",
-          type: "material_request_prepare_reminder",
-          title: "Підготуйте видачу за 10 хвилин",
-          message: `${current.teacherName} · ${formatKyivDateTime(current.scheduledIssueAt)} · ${current.pickupLocationName ?? "місце отримання не вказано"}. ${remainingReminderSummary}${remainingReminderSuffix}`,
-          targetPath: "/librarian/orders",
-          entityType: "material_request",
-          entityId: current.id,
-          createdAt: now,
-          deliverAt: refreshedReminderAt,
-          expiresAt: current.scheduledIssueAt,
-        })]
-        : []),
+    cancelScheduledRequestRemindersStatement(db, current.id, now, status === "completed" || status === "cancelled" ? "request_closed" : "pickup_reminders_withdrawn"),
     completeCommandStatement(db, input.requestId, result, now),
   ];
   const replayed = await executeIdempotentBatch<typeof result>(
@@ -3267,6 +3244,7 @@ async function executeIdempotentBatch<T>(
   requestHash: string,
   conflictCode: string,
   conflictMessage: string,
+  educationalMaterialIds: string[] = [],
 ): Promise<T | null> {
   try {
     await db.batch(statements);
@@ -3279,6 +3257,7 @@ async function executeIdempotentBatch<T>(
       requestHash,
     );
     if (replay) return replay;
+    await assertEducationalMaterials(db, educationalMaterialIds);
     const errorMessage = error instanceof Error ? error.message : String(error ?? "");
     if (errorMessage.includes("NOT NULL constraint failed: mutation_commands.actor_user_id")) {
       throw new TeacherMaterialRequestError(

@@ -40,6 +40,95 @@ type D1Binding = {
 
 export type LibraryD1Database = D1Binding;
 
+const LIBRARIKA_MATERIAL_MESSAGE = "Художня та наукова література ведеться у Librarika. Локальні фондові дії для цієї картки вимкнено.";
+
+function assertEducationCatalogScope(scope: unknown): asserts scope is "education" {
+  if (scope !== "education") {
+    throw new LibraryMutationError(
+      "librarika_authoritative",
+      410,
+      "У внутрішньому фонді можна створювати й редагувати лише підручники та навчальні матеріали. Художня й наукова література ведеться у Librarika.",
+    );
+  }
+}
+
+function uniqueMaterialIds(materialIds: string[]): string[] {
+  return [...new Set(materialIds.filter(Boolean))];
+}
+
+async function assertEducationalMaterials(
+  db: D1Binding,
+  materialIds: string[],
+): Promise<void> {
+  const ids = uniqueMaterialIds(materialIds);
+  if (ids.length === 0) return;
+  const literature = await db.prepare(`
+    SELECT e.material_id
+    FROM json_each(?) requested
+    JOIN library_editions e ON e.material_id = CAST(requested.value AS TEXT)
+    WHERE e.fund = 'literature'
+    LIMIT 1
+  `).bind(JSON.stringify(ids)).first<{ material_id: string }>();
+  if (literature) {
+    throw new LibraryMutationError(
+      "librarika_authoritative",
+      410,
+      LIBRARIKA_MATERIAL_MESSAGE,
+      { materialId: literature.material_id },
+    );
+  }
+}
+
+function educationalMaterialsGuardStatement(
+  db: D1Binding,
+  materialIds: string[],
+): D1Statement {
+  const ids = uniqueMaterialIds(materialIds);
+  return db.prepare(`
+    SELECT CASE WHEN NOT EXISTS (
+      SELECT 1
+      FROM json_each(?) requested
+      JOIN library_editions e ON e.material_id = CAST(requested.value AS TEXT)
+      WHERE e.fund = 'literature'
+    ) THEN 1 ELSE json('librarika_authoritative') END
+  `).bind(JSON.stringify(ids));
+}
+
+async function assertEducationalClassLoan(
+  db: D1Binding,
+  classLoanId: string,
+): Promise<void> {
+  const literature = await db.prepare(`
+    SELECT cli.material_id
+    FROM class_loan_items cli
+    JOIN library_editions e ON e.material_id = cli.material_id
+    WHERE cli.class_loan_id = ? AND e.fund = 'literature'
+    LIMIT 1
+  `).bind(classLoanId).first<{ material_id: string }>();
+  if (literature) {
+    throw new LibraryMutationError(
+      "librarika_authoritative",
+      410,
+      LIBRARIKA_MATERIAL_MESSAGE,
+      { materialId: literature.material_id },
+    );
+  }
+}
+
+function educationalClassLoanGuardStatement(
+  db: D1Binding,
+  classLoanId: string,
+): D1Statement {
+  return db.prepare(`
+    SELECT CASE WHEN NOT EXISTS (
+      SELECT 1
+      FROM class_loan_items cli
+      JOIN library_editions e ON e.material_id = cli.material_id
+      WHERE cli.class_loan_id = ? AND e.fund = 'literature'
+    ) THEN 1 ELSE json('librarika_authoritative') END
+  `).bind(classLoanId);
+}
+
 async function activeReservedQuantity(
   db: D1Binding,
   materialId: string,
@@ -256,6 +345,7 @@ export async function createMaterialDirect(
   input: MaterialCreateInput,
   providedDb?: LibraryD1Database,
 ): Promise<MaterialCreateResult> {
+  assertEducationCatalogScope(input.catalogScope);
   const db = database(providedDb);
   const actor = await resolveMutationActor(db, user);
   const requestHash = await mutationHash({
@@ -519,6 +609,7 @@ export async function receiveStockDirect(
     requestHash,
   );
   if (replay) return replay;
+  await assertEducationalMaterials(db, [input.materialId]);
   const material = await db.prepare(`
     SELECT id FROM materials
     WHERE id = ? AND status = 'active' AND archived_at IS NULL
@@ -557,6 +648,7 @@ export async function receiveStockDirect(
     transactionId,
   );
   const statements: D1Statement[] = [
+    educationalMaterialsGuardStatement(db, [input.materialId]),
     insertCommandStatement(
       db,
       input.requestId,
@@ -664,6 +756,7 @@ export async function receiveStockDirect(
     {
       code: "stock_quantity_conflict",
       message: "Залишок змінився під час надходження. Оновіть картку.",
+      librarikaMaterialIds: [input.materialId],
     },
   );
   return replayed ?? result;
@@ -675,6 +768,7 @@ export async function updateMaterialDirect(
   input: MaterialUpdateInput,
   providedDb?: LibraryD1Database,
 ): Promise<MaterialMutationResult> {
+  assertEducationCatalogScope(input.catalogScope);
   const db = database(providedDb);
   const actor = await resolveMutationActor(db, user);
   const requestHash = await mutationHash({
@@ -689,6 +783,7 @@ export async function updateMaterialDirect(
     requestHash,
   );
   if (replay) return replay;
+  await assertEducationalMaterials(db, [materialId]);
 
   const material = await db.prepare(`
     SELECT
@@ -799,6 +894,7 @@ export async function updateMaterialDirect(
   );
 
   const statements: D1Statement[] = [
+    educationalMaterialsGuardStatement(db, [materialId]),
     insertCommandStatement(
       db,
       input.requestId,
@@ -910,6 +1006,7 @@ export async function updateMaterialDirect(
     {
       code: "material_version_conflict",
       message: "Матеріал уже змінено в іншій вкладці. Оновіть картку.",
+      librarikaMaterialIds: [materialId],
     },
   );
   return replayed ?? result;
@@ -935,6 +1032,7 @@ export async function appendMaterialEbookLinkDirect(
     requestHash,
   );
   if (replay) return replay;
+  await assertEducationalMaterials(db, [materialId]);
 
   const material = await db.prepare(`
     SELECT
@@ -1006,6 +1104,7 @@ export async function appendMaterialEbookLinkDirect(
   const replayed = await executeIdempotentBatch<MaterialEbookLinkMutationResult>(
     db,
     [
+      educationalMaterialsGuardStatement(db, [materialId]),
       insertCommandStatement(
         db,
         input.requestId,
@@ -1071,6 +1170,7 @@ export async function appendMaterialEbookLinkDirect(
     {
       code: "material_version_conflict",
       message: "Картку вже змінено. Оновіть список і повторіть дію.",
+      librarikaMaterialIds: [materialId],
     },
   );
   return replayed ?? result;
@@ -1096,6 +1196,7 @@ export async function archiveMaterialDirect(
     requestHash,
   );
   if (replay) return replay;
+  await assertEducationalMaterials(db, [materialId]);
 
   const material = await db.prepare(`
     SELECT
@@ -1205,6 +1306,7 @@ export async function archiveMaterialDirect(
   };
 
   const statements: D1Statement[] = [
+    educationalMaterialsGuardStatement(db, [materialId]),
     insertCommandStatement(
       db,
       input.requestId,
@@ -1286,6 +1388,7 @@ export async function archiveMaterialDirect(
       {
         code: "material_archive_conflict",
         message: "Матеріал або його залишок змінилися під час видалення. Оновіть картку й перевірте залишок.",
+        librarikaMaterialIds: [materialId],
       },
     );
     return replayed ?? result;
@@ -1323,6 +1426,7 @@ export async function adjustHoldingToActualCount(
     requestHash,
   );
   if (replay) return replay;
+  await assertEducationalMaterials(db, [input.materialId]);
 
   const [material, location, holding] = await Promise.all([
     db.prepare(`
@@ -1400,6 +1504,7 @@ export async function adjustHoldingToActualCount(
     occurredAt: input.occurredAt,
   };
   const statements: D1Statement[] = [
+    educationalMaterialsGuardStatement(db, [input.materialId]),
     insertCommandStatement(
       db,
       input.requestId,
@@ -1623,6 +1728,7 @@ export async function adjustHoldingToActualCount(
     {
       code: "stock_quantity_conflict",
       message: "Залишок уже змінився. Оновіть картку матеріалу.",
+      librarikaMaterialIds: [input.materialId],
     },
   );
   return replayed ?? result;
@@ -1646,6 +1752,7 @@ export async function transferStockDirect(
     requestHash,
   );
   if (replay) return replay;
+  await assertEducationalMaterials(db, [input.materialId]);
 
   const [material, sourceLocation, destinationLocation, sourceHolding, destinationHolding] =
     await Promise.all([
@@ -1766,6 +1873,7 @@ export async function transferStockDirect(
     occurredAt: input.occurredAt,
   };
   const statements: D1Statement[] = [
+    educationalMaterialsGuardStatement(db, [input.materialId]),
     insertCommandStatement(
       db,
       input.requestId,
@@ -1989,6 +2097,7 @@ export async function transferStockDirect(
     {
       code: "stock_quantity_conflict",
       message: "Залишок змінився під час переміщення. Оновіть картку матеріалу.",
+      librarikaMaterialIds: [input.materialId],
     },
   );
   return replayed ?? result;
@@ -2012,6 +2121,7 @@ export async function writeOffStockDirect(
     requestHash,
   );
   if (replay) return replay;
+  await assertEducationalMaterials(db, [input.materialId]);
 
   const [material, location, holding] = await Promise.all([
     db.prepare(`
@@ -2093,6 +2203,7 @@ export async function writeOffStockDirect(
     occurredAt: input.occurredAt,
   };
   const statements: D1Statement[] = [
+    educationalMaterialsGuardStatement(db, [input.materialId]),
     insertCommandStatement(
       db,
       input.requestId,
@@ -2234,6 +2345,7 @@ export async function writeOffStockDirect(
     {
       code: "stock_quantity_conflict",
       message: "Залишок змінився під час списання. Оновіть картку матеріалу.",
+      librarikaMaterialIds: [input.materialId],
     },
   );
   return replayed ?? result;
@@ -2257,6 +2369,8 @@ export async function issueLoanToTeacher(
     requestHash,
   );
   if (replay) return replay;
+  const issueMaterialIds = input.items.map((item) => item.materialId);
+  await assertEducationalMaterials(db, issueMaterialIds);
 
   const teacher = await db.prepare(`
     SELECT u.id FROM users u
@@ -2343,6 +2457,7 @@ export async function issueLoanToTeacher(
     })),
   };
   const statements: D1Statement[] = [
+    educationalMaterialsGuardStatement(db, issueMaterialIds),
     insertCommandStatement(
       db,
       input.requestId,
@@ -2512,6 +2627,7 @@ export async function issueLoanToTeacher(
     {
       code: "stock_quantity_conflict",
       message: "Залишок змінився під час видачі. Оновіть форму.",
+      librarikaMaterialIds: issueMaterialIds,
     },
   );
   return replayed ?? result;
@@ -2632,6 +2748,8 @@ export async function returnLoanItems(
     });
   }
 
+  await assertEducationalMaterials(db, states.map((state) => state.materialId));
+
   const allItems = await db.prepare(`
     SELECT id, material_id, quantity_issued, quantity_returned
     FROM loan_items WHERE loan_id = ?
@@ -2692,6 +2810,7 @@ export async function returnLoanItems(
     });
   });
   const statements: D1Statement[] = [
+    educationalMaterialsGuardStatement(db, states.map((state) => state.materialId)),
     insertCommandStatement(
       db,
       input.requestId,
@@ -2883,6 +3002,7 @@ export async function returnLoanItems(
     {
       code: "loan_return_conflict",
       message: "Дані видачі або залишку вже змінилися. Оновіть повернення.",
+      librarikaMaterialIds: states.map((state) => state.materialId),
     },
   );
   return replayed ?? result;
@@ -2906,6 +3026,8 @@ export async function issueLoanToClass(
     requestHash,
   );
   if (replay) return replay;
+  const issueMaterialIds = input.items.map((item) => item.materialId);
+  await assertEducationalMaterials(db, issueMaterialIds);
 
   const classYear = await db.prepare(`
     SELECT
@@ -3223,6 +3345,7 @@ export async function issueLoanToClass(
     })),
   };
   const statements: D1Statement[] = [
+    educationalMaterialsGuardStatement(db, issueMaterialIds),
     insertCommandStatement(
       db,
       input.requestId,
@@ -3619,6 +3742,7 @@ export async function issueLoanToClass(
     {
       code: "stock_quantity_conflict",
       message: "Залишок або дані класу змінилися під час видачі. Оновіть форму.",
+      librarikaMaterialIds: issueMaterialIds,
       classify: classifyClassLoanIssueRace,
     },
   );
@@ -3829,6 +3953,8 @@ export async function returnClassLoanItems(
     };
   });
 
+  await assertEducationalMaterials(db, states.map((state) => state.materialId));
+
   const allItems = await db.prepare(`
     SELECT id, material_id, quantity_issued, quantity_returned
     FROM class_loan_items
@@ -3934,6 +4060,7 @@ export async function returnClassLoanItems(
   const newHoldingGroupCount = holdingGroupRows.length - existingHoldingGroupCount;
 
   const statements: D1Statement[] = [
+    educationalMaterialsGuardStatement(db, states.map((state) => state.materialId)),
     insertCommandStatement(
       db,
       input.requestId,
@@ -4247,6 +4374,7 @@ export async function returnClassLoanItems(
     {
       code: "class_loan_return_conflict",
       message: "Дані видачі або залишку вже змінилися. Оновіть повернення.",
+      librarikaMaterialIds: states.map((state) => state.materialId),
     },
   );
   return replayed ?? result;
@@ -4299,7 +4427,7 @@ export async function linkLegacyClassLoanItem(
     );
   }
   const candidate = await db.prepare(`
-    SELECT cli.id AS item_id, cli.version AS item_version,
+    SELECT cli.id AS item_id, cli.material_id, cli.version AS item_version,
       existing_link.statement_line_id AS existing_statement_line_id,
       line.id AS statement_line_id,
       line_link.class_loan_item_id AS linked_item_id
@@ -4318,6 +4446,7 @@ export async function linkLegacyClassLoanItem(
     loan.id,
   ).first<{
     item_id: string;
+    material_id: string;
     item_version: number;
     existing_statement_line_id: string | null;
     statement_line_id: string;
@@ -4330,6 +4459,7 @@ export async function linkLegacyClassLoanItem(
       "Позицію або рядок старої відомості не знайдено.",
     );
   }
+  await assertEducationalMaterials(db, [candidate.material_id]);
   if (Number(candidate.item_version) !== input.expectedItemVersion) {
     throw new LibraryMutationError(
       "class_loan_item_version_conflict",
@@ -4366,6 +4496,7 @@ export async function linkLegacyClassLoanItem(
     transactionId: null,
   };
   const statements: D1Statement[] = [
+    educationalMaterialsGuardStatement(db, [candidate.material_id]),
     insertCommandStatement(
       db,
       input.requestId,
@@ -4450,6 +4581,7 @@ export async function linkLegacyClassLoanItem(
     {
       code: "class_loan_legacy_link_conflict",
       message: "Позицію або рядок старої відомості вже змінили. Оновіть сторінку.",
+      librarikaMaterialIds: [candidate.material_id],
       classify: (error) => {
         const message = error instanceof Error ? error.message : String(error ?? "");
         return message.includes("class_loan_statement_item_links")
@@ -4569,6 +4701,7 @@ export async function adjustClassLoanItem(
       "Позицію підручника у цій відомості не знайдено.",
     );
   }
+  await assertEducationalMaterials(db, [item.material_id]);
   if (!item.statement_line_id) {
     throw new LibraryMutationError(
       "class_loan_item_needs_review",
@@ -4678,6 +4811,7 @@ export async function adjustClassLoanItem(
     transactionId,
   };
   const statements: D1Statement[] = [
+    educationalMaterialsGuardStatement(db, [item.material_id]),
     insertCommandStatement(
       db,
       input.requestId,
@@ -4953,6 +5087,7 @@ export async function adjustClassLoanItem(
     {
       code: "class_loan_adjustment_conflict",
       message: "Відомість, позицію або залишок уже змінено. Оновіть сторінку.",
+      librarikaMaterialIds: [item.material_id],
     },
   );
   return replayed ?? result;
@@ -4982,6 +5117,7 @@ export async function updateClassLoanMetadata(
     requestHash,
   );
   if (replay) return replay;
+  await assertEducationalClassLoan(db, loan.id);
   if (loan.status !== "open") {
     throw new LibraryMutationError(
       "class_loan_read_only",
@@ -5060,6 +5196,7 @@ export async function updateClassLoanMetadata(
     version: result.version,
   };
   const statements: D1Statement[] = [
+    educationalClassLoanGuardStatement(db, loan.id),
     insertCommandStatement(
       db,
       input.requestId,
@@ -5124,6 +5261,7 @@ export async function updateClassLoanMetadata(
     {
       code: "class_loan_metadata_conflict",
       message: "Дані відомості вже змінилися. Оновіть сторінку.",
+      librarikaClassLoanId: loan.id,
     },
   );
   return replayed ?? result;
@@ -5729,6 +5867,8 @@ async function executeIdempotentBatch<T>(
     code: string;
     message: string;
     classify?: (error: unknown) => { code: string; message: string } | null;
+    librarikaMaterialIds?: string[];
+    librarikaClassLoanId?: string;
   },
 ): Promise<T | null> {
   try {
@@ -5737,7 +5877,20 @@ async function executeIdempotentBatch<T>(
   } catch (error) {
     const replay = await replayCompletedCommand<T>(db, requestId, requestHash);
     if (replay) return replay;
+    if (conflict.librarikaMaterialIds) {
+      await assertEducationalMaterials(db, conflict.librarikaMaterialIds);
+    }
+    if (conflict.librarikaClassLoanId) {
+      await assertEducationalClassLoan(db, conflict.librarikaClassLoanId);
+    }
     const errorMessage = error instanceof Error ? error.message : String(error ?? "");
+    if (errorMessage.includes("librarika_authoritative")) {
+      throw new LibraryMutationError(
+        "librarika_authoritative",
+        410,
+        LIBRARIKA_MATERIAL_MESSAGE,
+      );
+    }
     if(errorMessage.includes("tracked_stock_conflict"))throw new LibraryMutationError("tracked_stock_conflict",409,"Ці книги обліковуються попримірниково. Відкрийте художню та наукову літературу й оберіть конкретний примірник.");
     if (errorMessage.includes("material_reserved_conflict")) {
       throw new LibraryMutationError(

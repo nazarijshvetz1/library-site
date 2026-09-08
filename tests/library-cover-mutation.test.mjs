@@ -234,6 +234,28 @@ test("direct cover replace writes immutable R2 bytes, one D1 version, audit and 
   assert.equal(sqlite.prepare("SELECT status FROM mutation_commands WHERE id = ?").get(request.requestId).status, "completed");
 });
 
+test("a Librarika material cannot receive a local cover before or during the atomic write", async () => {
+  const first = openDatabase();
+  first.sqlite.prepare("INSERT INTO library_editions(id,material_id,fund,publication_state) VALUES('LED-1','CAT-0001','literature','published')").run();
+  await assert.rejects(
+    coverMutation.replaceMaterialCoverDirect(actor, input({requestId:"20000000-0000-4000-8000-000000000021"}), first.d1, first.bucket),
+    (error) => error instanceof coverMutation.LibraryCoverMutationError && error.code === "librarika_authoritative" && error.status === 410,
+  );
+  assert.equal(first.bucket.putCount, 0);
+  assert.equal(first.sqlite.prepare("SELECT count(*) count FROM mutation_commands").get().count, 0);
+
+  const raced = openDatabase();
+  raced.d1.beforeBatch = (batchNumber, sqlite) => {
+    if (batchNumber === 1) sqlite.prepare("INSERT INTO library_editions(id,material_id,fund,publication_state) VALUES('LED-2','CAT-0001','literature','published')").run();
+  };
+  await assert.rejects(
+    coverMutation.replaceMaterialCoverDirect(actor, input({requestId:"20000000-0000-4000-8000-000000000022"}), raced.d1, raced.bucket),
+    (error) => error instanceof coverMutation.LibraryCoverMutationError && error.code === "librarika_authoritative" && error.status === 410,
+  );
+  assert.equal(raced.bucket.putCount, 0);
+  assert.equal(raced.sqlite.prepare("SELECT count(*) count FROM mutation_commands").get().count, 0);
+});
+
 test("response loss after the committed D1 batch replays the completed result", async () => {
   const { sqlite, d1, bucket } = openDatabase();
   d1.throwAfterBatch = 2;

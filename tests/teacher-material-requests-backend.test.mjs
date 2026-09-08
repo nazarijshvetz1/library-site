@@ -289,6 +289,22 @@ async function createRequest(context, quantity = 3) {
   });
 }
 
+function markSeedMaterialAsLiterature(sqlite) {
+  const now = "2026-09-08T12:00:00.000Z";
+  sqlite.prepare(`INSERT INTO library_editions (
+    id,source_media_id,material_id,fund,title,public_metadata_json,source_json,
+    source_row_sha256,import_run_id,publication_state,version,created_at,updated_at
+  ) VALUES ('ED-LITERATURE','legacy-literature','CAT-0001','literature',
+    'Алгебра 7 клас','{}','{}',NULL,NULL,'published',1,?,?)`).run(now, now);
+}
+
+function assertLibrarikaBoundary(error) {
+  return error instanceof store.TeacherMaterialRequestError
+    && error.code === "librarika_authoritative"
+    && error.status === 410
+    && error.details?.materialId === "CAT-0001";
+}
+
 test("frozen request, ready and notification payloads validate with exact keys", () => {
   assert.equal(validation.validateMaterialRequestCreateInput({
     requestId: commandId(),
@@ -463,6 +479,148 @@ test("teacher create is idempotent, bounded and returns the UI projection", asyn
   assert.deepEqual(listed, [first]);
 });
 
+test("crafted teacher requests cannot order Librarika literature before or during the atomic create", async () => {
+  for (const timing of ["preflight", "batch-race"]) {
+    const context = openDatabase();
+    const requestId = commandId();
+    if (timing === "preflight") markSeedMaterialAsLiterature(context.sqlite);
+    else context.db.beforeBatch = () => markSeedMaterialAsLiterature(context.sqlite);
+
+    await assert.rejects(
+      () => store.createTeacherMaterialRequest(context.db, teacher, {
+        requestId,
+        notes: null,
+        items: [{ materialId: "CAT-0001", quantity: 1 }],
+      }),
+      assertLibrarikaBoundary,
+      timing,
+    );
+    assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM material_requests").get().n, 0, timing);
+    assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM material_request_items").get().n, 0, timing);
+    assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM mutation_commands WHERE id=?").get(requestId).n, 0, timing);
+    context.sqlite.close();
+  }
+});
+
+test("legacy literature requests cannot transition, reserve or issue after the boundary is active", async () => {
+  const transitionContext = openDatabase();
+  const transitionRequest = await createRequest(transitionContext, 1);
+  markSeedMaterialAsLiterature(transitionContext.sqlite);
+  await assert.rejects(
+    () => store.applyLibrarianMaterialRequestAction(transitionContext.db, librarian, transitionRequest.id, {
+      requestId: commandId(), expectedVersion: transitionRequest.version, action: "start_review",
+    }),
+    assertLibrarikaBoundary,
+  );
+  assert.equal(transitionContext.sqlite.prepare("SELECT status FROM material_requests WHERE id=?").get(transitionRequest.id).status, "submitted");
+  transitionContext.sqlite.close();
+
+  const reserveContext = openDatabase();
+  const reserveRequest = await createRequest(reserveContext, 1);
+  markSeedMaterialAsLiterature(reserveContext.sqlite);
+  await assert.rejects(
+    () => store.applyLibrarianMaterialRequestAction(reserveContext.db, librarian, reserveRequest.id, {
+      requestId: commandId(), expectedVersion: reserveRequest.version, action: "ready",
+      pickupLocationId: "LOC-205", dueAt: null,
+      items: [{
+        itemId: reserveRequest.items[0].id, approvedQuantity: 1,
+        sourceLocationId: "LOC-LIB", condition: "good", expectedAvailableQuantity: 5,
+      }],
+    }),
+    assertLibrarikaBoundary,
+  );
+  assert.equal(reserveContext.sqlite.prepare("SELECT COUNT(*) AS n FROM material_request_reservations").get().n, 0);
+  reserveContext.sqlite.close();
+
+  const issueContext = openDatabase();
+  const issueRequest = await createRequest(issueContext, 1);
+  await store.applyLibrarianMaterialRequestAction(issueContext.db, librarian, issueRequest.id, {
+    requestId: commandId(), expectedVersion: issueRequest.version, action: "ready",
+    pickupLocationId: "LOC-205", dueAt: null,
+    items: [{
+      itemId: issueRequest.items[0].id, approvedQuantity: 1,
+      sourceLocationId: "LOC-LIB", condition: "good", expectedAvailableQuantity: 5,
+    }],
+  });
+  const prepared = await store.getMaterialRequest(issueContext.db, issueRequest.id);
+  markSeedMaterialAsLiterature(issueContext.sqlite);
+  await assert.rejects(
+    () => store.applyLibrarianMaterialRequestAction(issueContext.db, librarian, issueRequest.id, {
+      requestId: commandId(), expectedVersion: prepared.version, action: "issue",
+      issuedAt: "2026-09-08", dueAt: null,
+      items: [{ reservationId: prepared.items[0].reservations[0].id, quantity: 1 }],
+    }),
+    assertLibrarikaBoundary,
+  );
+  assert.equal(issueContext.sqlite.prepare("SELECT issued_quantity FROM material_request_reservations").get().issued_quantity, 0);
+  assert.equal(issueContext.sqlite.prepare("SELECT COUNT(*) AS n FROM loans").get().n, 0);
+  issueContext.sqlite.close();
+});
+
+test("atomic guards roll back transition, reserve and issue when a material becomes literature after preflight", async () => {
+  const transitionContext = openDatabase();
+  const transitionRequest = await createRequest(transitionContext, 1);
+  const transitionCommand = commandId();
+  transitionContext.db.beforeBatch = () => markSeedMaterialAsLiterature(transitionContext.sqlite);
+  await assert.rejects(
+    () => store.applyLibrarianMaterialRequestAction(transitionContext.db, librarian, transitionRequest.id, {
+      requestId: transitionCommand, expectedVersion: transitionRequest.version, action: "start_review",
+    }),
+    assertLibrarikaBoundary,
+  );
+  assert.equal(transitionContext.sqlite.prepare("SELECT status FROM material_requests WHERE id=?").get(transitionRequest.id).status, "submitted");
+  assert.equal(transitionContext.sqlite.prepare("SELECT COUNT(*) AS n FROM mutation_commands WHERE id=?").get(transitionCommand).n, 0);
+  transitionContext.sqlite.close();
+
+  const reserveContext = openDatabase();
+  const reserveRequest = await createRequest(reserveContext, 1);
+  const reserveCommand = commandId();
+  reserveContext.db.beforeBatch = () => markSeedMaterialAsLiterature(reserveContext.sqlite);
+  await assert.rejects(
+    () => store.applyLibrarianMaterialRequestAction(reserveContext.db, librarian, reserveRequest.id, {
+      requestId: reserveCommand, expectedVersion: reserveRequest.version, action: "ready",
+      pickupLocationId: "LOC-205", dueAt: null,
+      items: [{
+        itemId: reserveRequest.items[0].id, approvedQuantity: 1,
+        sourceLocationId: "LOC-LIB", condition: "good", expectedAvailableQuantity: 5,
+      }],
+    }),
+    assertLibrarikaBoundary,
+  );
+  assert.equal(reserveContext.sqlite.prepare("SELECT status FROM material_requests WHERE id=?").get(reserveRequest.id).status, "submitted");
+  assert.equal(reserveContext.sqlite.prepare("SELECT COUNT(*) AS n FROM material_request_reservations").get().n, 0);
+  assert.equal(reserveContext.sqlite.prepare("SELECT COUNT(*) AS n FROM mutation_commands WHERE id=?").get(reserveCommand).n, 0);
+  reserveContext.sqlite.close();
+
+  const issueContext = openDatabase();
+  const issueRequest = await createRequest(issueContext, 1);
+  await store.applyLibrarianMaterialRequestAction(issueContext.db, librarian, issueRequest.id, {
+    requestId: commandId(), expectedVersion: issueRequest.version, action: "ready",
+    pickupLocationId: "LOC-205", dueAt: null,
+    items: [{
+      itemId: issueRequest.items[0].id, approvedQuantity: 1,
+      sourceLocationId: "LOC-LIB", condition: "good", expectedAvailableQuantity: 5,
+    }],
+  });
+  const prepared = await store.getMaterialRequest(issueContext.db, issueRequest.id);
+  const issueCommand = commandId();
+  issueContext.db.beforeBatch = () => markSeedMaterialAsLiterature(issueContext.sqlite);
+  await assert.rejects(
+    () => store.applyLibrarianMaterialRequestAction(issueContext.db, librarian, issueRequest.id, {
+      requestId: issueCommand, expectedVersion: prepared.version, action: "issue",
+      issuedAt: "2026-09-08", dueAt: null,
+      items: [{ reservationId: prepared.items[0].reservations[0].id, quantity: 1 }],
+    }),
+    assertLibrarikaBoundary,
+  );
+  assert.equal(issueContext.sqlite.prepare("SELECT status FROM material_requests WHERE id=?").get(issueRequest.id).status, "ready");
+  assert.equal(issueContext.sqlite.prepare("SELECT issued_quantity FROM material_request_reservations").get().issued_quantity, 0);
+  assert.equal(issueContext.sqlite.prepare("SELECT COUNT(*) AS n FROM loans").get().n, 0);
+  assert.equal(issueContext.sqlite.prepare("SELECT quantity FROM holdings WHERE material_id='CAT-0001'").get().quantity, 5);
+  assert.equal(issueContext.sqlite.prepare("SELECT COUNT(*) AS n FROM mutation_commands WHERE id=?").get(issueCommand).n, 0);
+  issueContext.sqlite.close();
+});
+
 test("teacher create caps active requests and atomically reasserts the cap", async () => {
   const context = openDatabase();
   for (let index = 0; index < store.ACTIVE_MATERIAL_REQUEST_LIMIT; index += 1) {
@@ -595,7 +753,7 @@ test("ready reserves without a loan, then physical issue creates the loan atomic
   );
 });
 
-test("scheduled pickup queues exact ten-minute Telegram reminders and issue cancels them", async () => {
+test("scheduled pickup stores the exact time without preparation or pickup reminders", async () => {
   const context = openDatabase();
   const linkedAt = "2026-08-13T08:00:00.000Z";
   context.sqlite.prepare(`INSERT INTO telegram_connections (
@@ -625,34 +783,8 @@ test("scheduled pickup queues exact ten-minute Telegram reminders and issue canc
     { ...context.sqlite.prepare("SELECT scheduled_issue_at FROM material_requests WHERE id=?").get(request.id) },
     { scheduled_issue_at: scheduledIssueAt },
   );
-  const reminders = context.sqlite.prepare(`SELECT recipient_user_id,type,title,message,next_attempt_at,expires_at,status
-    FROM telegram_delivery_outbox
-    WHERE entity_id=? AND type IN ('material_request_pickup_reminder','material_request_prepare_reminder')
-    ORDER BY recipient_user_id`).all(request.id).map((row) => ({ ...row }));
-  assert.equal(reminders.length, 2);
-  assert.deepEqual(reminders.map((row) => row.recipient_user_id), ["USR-LIB", "USR-T1"]);
-  assert.deepEqual(reminders.map((row) => row.title), [
-    "Підготуйте видачу за 10 хвилин",
-    "За 10 хвилин — отримання матеріалів",
-  ]);
-  assert.equal(reminders.every((row) => row.next_attempt_at === "2099-01-01T09:50:00.000Z"), true);
-  assert.equal(reminders.every((row) => row.expires_at === scheduledIssueAt), true);
-  assert.equal(reminders.every((row) => row.status === "pending"), true);
-  assert.equal(reminders.every((row) => row.message.includes("Кабінет 205")), true);
-
-  await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
-    requestId: commandId(), expectedVersion: ready.version, action: "issue",
-    issuedAt: "2026-09-04", dueAt: null,
-    items: [{ reservationId: ready.reserved[0].reservationId, quantity: 2 }],
-  });
-  const cancelled = context.sqlite.prepare(`SELECT status,last_error_code
-    FROM telegram_delivery_outbox
-    WHERE entity_id=? AND type IN ('material_request_pickup_reminder','material_request_prepare_reminder')
-    ORDER BY recipient_user_id`).all(request.id).map((row) => ({ ...row }));
-  assert.deepEqual(cancelled, [
-    { status: "dead", last_error_code: "request_issued" },
-    { status: "dead", last_error_code: "request_issued" },
-  ]);
+  assert.equal(context.sqlite.prepare(`SELECT COUNT(*) AS n FROM telegram_delivery_outbox
+    WHERE entity_id=? AND type IN ('material_request_pickup_reminder','material_request_prepare_reminder')`).get(request.id).n, 0);
 });
 
 test("a current-minute pickup succeeds without queuing an already expired reminder", async () => {
@@ -674,7 +806,7 @@ test("a current-minute pickup succeeds without queuing an already expired remind
   context.sqlite.close();
 });
 
-test("a pickup less than ten minutes away queues immediate reminders for teacher and librarian", async () => {
+test("a nearby pickup also creates no preparation or pickup reminder", async () => {
   const context = openDatabase();
   const linkedAt = "2026-08-13T08:00:00.000Z";
   for (const [userId, telegramUserId, chatId] of [
@@ -689,8 +821,7 @@ test("a pickup less than ten minutes away queues immediate reminders for teacher
     );
   }
   const request = await createRequest(context, 1);
-  const beforeReady = Date.now();
-  const scheduledIssueAt = new Date(beforeReady + 5 * 60_000).toISOString();
+  const scheduledIssueAt = new Date(Date.now() + 5 * 60_000).toISOString();
   await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
     requestId: commandId(), expectedVersion: request.version, action: "ready",
     pickupLocationId: "LOC-205", scheduledIssueAt, dueAt: null,
@@ -699,20 +830,8 @@ test("a pickup less than ten minutes away queues immediate reminders for teacher
       sourceLocationId: "LOC-LIB", condition: "good", expectedAvailableQuantity: 5,
     }],
   });
-  const afterReady = Date.now();
-  const reminders = context.sqlite.prepare(`SELECT recipient_user_id,title,next_attempt_at,expires_at
-    FROM telegram_delivery_outbox
-    WHERE entity_id=? AND type IN ('material_request_pickup_reminder','material_request_prepare_reminder')
-    ORDER BY recipient_user_id`).all(request.id).map((row) => ({ ...row }));
-  assert.deepEqual(reminders.map((row) => row.title), [
-    "Підготуйте видачу зараз",
-    "Незабаром — отримання матеріалів",
-  ]);
-  assert.equal(reminders.every((row) => {
-    const due = Date.parse(row.next_attempt_at);
-    return due >= beforeReady && due <= afterReady + 1_000;
-  }), true);
-  assert.equal(reminders.every((row) => row.expires_at === scheduledIssueAt), true);
+  assert.equal(context.sqlite.prepare(`SELECT COUNT(*) AS n FROM telegram_delivery_outbox
+    WHERE entity_id=? AND type IN ('material_request_pickup_reminder','material_request_prepare_reminder')`).get(request.id).n, 0);
   context.sqlite.close();
 });
 
@@ -842,14 +961,8 @@ test("not-collected release frees stock without a loan and supports partial rele
   assert.equal(context.sqlite.prepare("SELECT quantity FROM holdings").get().quantity, 5);
   assert.equal(context.sqlite.prepare("SELECT reserved_quantity FROM material_stock_totals").get().reserved_quantity, 2);
   assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM loans").get().n, 0);
-  const refreshedReminder = context.sqlite.prepare(`
-    SELECT status,title,message,next_attempt_at FROM telegram_delivery_outbox
-    WHERE type='material_request_prepare_reminder'
-  `).get();
-  assert.equal(refreshedReminder.status, "pending");
-  assert.equal(refreshedReminder.title, "Підготуйте видачу за 10 хвилин");
-  assert.equal(refreshedReminder.next_attempt_at, "2099-01-01T09:50:00.000Z");
-  assert.match(refreshedReminder.message, /Алгебра[^—]*— 2 прим\./u);
+  assert.equal(context.sqlite.prepare(`SELECT COUNT(*) AS n FROM telegram_delivery_outbox
+    WHERE type IN ('material_request_pickup_reminder','material_request_prepare_reminder')`).get().n, 0);
 
   prepared = await store.getMaterialRequest(context.db, request.id);
   const released = await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
@@ -862,7 +975,7 @@ test("not-collected release frees stock without a loan and supports partial rele
   assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM inventory_transactions").get().n, 0);
 });
 
-test("partial release reminder counts only copies that still need preparation", async () => {
+test("partial release does not revive withdrawn preparation reminders", async () => {
   const context = openDatabase();
   const linkedAt = "2026-08-13T08:00:00.000Z";
   context.sqlite.prepare(`INSERT INTO telegram_connections (
@@ -893,14 +1006,8 @@ test("partial release reminder counts only copies that still need preparation", 
     reason: "Частину не забрали",
     items: [{ reservationId, quantity: 1 }],
   });
-  const reminder = context.sqlite.prepare(`
-    SELECT status,title,message,next_attempt_at FROM telegram_delivery_outbox
-    WHERE type='material_request_prepare_reminder'
-  `).get();
-  assert.equal(reminder.status, "pending");
-  assert.equal(reminder.title, "Підготуйте видачу за 10 хвилин");
-  assert.equal(reminder.next_attempt_at, "2099-01-01T09:50:00.000Z");
-  assert.match(reminder.message, /Алгебра[^—]*— 1 прим\./u);
+  assert.equal(context.sqlite.prepare(`SELECT COUNT(*) AS n FROM telegram_delivery_outbox
+    WHERE type IN ('material_request_pickup_reminder','material_request_prepare_reminder')`).get().n, 0);
 });
 
 test("physical issue loses atomically when its reserved source is deactivated", async () => {

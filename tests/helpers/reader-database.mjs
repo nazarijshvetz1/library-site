@@ -15,6 +15,9 @@ export function readerDatabase(){
   return db;
 }
 export const actor={id:"admin",email:"admin@example.test"};
+export function confirmLibrarikaBaseline(db){const now=new Date().toISOString(),suffix=crypto.randomUUID();db.sqlite.prepare(`INSERT INTO librarika_member_sync_runs
+  (id,request_id,source_sha256,expected_rows,state,is_full_baseline,actor_user_id,created_at,updated_at,applied_at)
+  VALUES(?,?,?,1,'applied',1,'admin',?,?,?)`).run(`LRK-SYNC-${suffix}`,suffix,"f".repeat(64),now,now,now);}
 export function publishReaderFixture(db){db.sqlite.exec("INSERT INTO materials(id,catalog_number,title,sort_title,search_text,created_at,updated_at) VALUES('CAT-3000',3000,'Книга','книга','книга','2026-09-06','2026-09-06'); UPDATE library_editions SET material_id='CAT-3000' WHERE id='edition';");}
 export function readerRequest(token,telegram=false){return new Request("https://library.example.test/api/reader/profile",{headers:{Cookie:`${telegram?"__Host-library_reader_telegram":"__Host-library_reader"}=${token}`,Referer:`https://library.example.test/reader${telegram?"/telegram":""}`}});}
 export const telegramIdentity=(user="100",hash="a")=>({telegramUserId:user,initDataHash:hash.repeat(64),authDate:Math.floor(Date.now()/1000),expiresAt:new Date(Date.now()+300000).toISOString()});

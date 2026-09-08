@@ -59,6 +59,7 @@ export type AcquisitionAction =
   | "order"
   | "link_material"
   | "link_receipt"
+  | "complete_in_librarika"
   | "reject"
   | "cancel";
 
@@ -204,6 +205,9 @@ export function validateAcquisitionActionInput(input: unknown): ValidationResult
     if (!receiptLineId) errors.receiptLineId = "Укажіть рядок фактичного надходження.";
     if (allocatedQuantity === null) errors.allocatedQuantity = "Укажіть кількість із надходження.";
   }
+  if (action === "complete_in_librarika" && allocatedQuantity === null) {
+    errors.allocatedQuantity = "Укажіть кількість, яку опрацьовано в Librarika.";
+  }
   return finish(errors, { mutationId, expectedVersion, action, approvedQuantity, orderedQuantity, targetMaterialId, receiptLineId, allocatedQuantity, message });
 }
 
@@ -323,8 +327,10 @@ function validateCategoryShape(
       if (!input.subject) errors[`${prefix}subject`] = "Укажіть предмет.";
       if (!input.targetClass) errors[`${prefix}targetClass`] = "Укажіть клас.";
     }
-  } else if (input.literatureKind === "none") {
-    errors[`${prefix}literatureKind`] = "Оберіть вид літератури.";
+  } else {
+    if (input.literatureKind === "none") errors[`${prefix}literatureKind`] = "Оберіть вид літератури.";
+    if (input.sourceKind !== "manual") errors[`${prefix}sourceKind`] = "Художня й наукова література ведеться в Librarika, тому пропозиція створюється без локального CAT-ID.";
+    if (input.materialId) errors[`${prefix}materialId`] = "Для літератури не використовується локальний CAT-ID.";
   }
   if (!optionalCatalogMetadata && !input.sourceUrl) {
     errors[`${prefix}sourceUrl`] = "Укажіть покликання на видання.";
@@ -369,7 +375,7 @@ function readLiteratureKind(value: unknown, field: string, errors: Record<string
 }
 
 function readAction(value: unknown, field: string, errors: Record<string, string>): AcquisitionAction {
-  const values: AcquisitionAction[] = ["start_review", "request_clarification", "approve", "plan", "order", "link_material", "link_receipt", "reject", "cancel"];
+  const values: AcquisitionAction[] = ["start_review", "request_clarification", "approve", "plan", "order", "link_material", "link_receipt", "complete_in_librarika", "reject", "cancel"];
   if (values.includes(value as AcquisitionAction)) return value as AcquisitionAction;
   errors[field] = "Оберіть підтримувану дію.";
   return "start_review";

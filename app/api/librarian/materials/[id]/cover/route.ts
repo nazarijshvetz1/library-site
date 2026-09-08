@@ -34,7 +34,7 @@ type RouteContext = { params: Promise<{ id: string }> };
 export async function GET(_request:Request,context:RouteContext):Promise<Response>{
  const authorization=await authorizeLibrarianApi();if(!authorization.ok)return authorization.response;
  try{
-  const {id}=await context.params,asset=await getCatalogCoverAsset(env.DB as unknown as CatalogD1Database,id,"librarian");
+  const {id}=await context.params,asset=await getCatalogCoverAsset(env.DB as unknown as CatalogD1Database,id,"librarian","education");
   const headers=new Headers({"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff","Cross-Origin-Resource-Policy":"same-origin"});
   if(!asset)return new Response(null,{status:404,headers});
   if(asset.externalUrl){headers.set("Location",asset.externalUrl);return new Response(null,{status:302,headers});}

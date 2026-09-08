@@ -104,6 +104,124 @@ export const libraryReaders = sqliteTable("library_readers", {
   check("library_reader_source_json",sql`json_valid(${table.sourceJson})`),
 ]);
 
+/** Idempotent numeric allocation. 26,000,001+ is reserved for readers created by this site. */
+export const readerNumberAllocations = sqliteTable("reader_number_allocations", {
+  ordinal: integer("ordinal").primaryKey({autoIncrement:true}),
+  requestId: text("request_id").notNull(),
+  readerId: text("reader_id").notNull(),
+  createdAt: text("created_at").notNull(),
+}, table => [
+  uniqueIndex("idx_reader_number_allocation_request").on(table.requestId),
+  uniqueIndex("idx_reader_number_allocation_reader").on(table.readerId),
+  check("reader_number_allocation_ordinal",sql`${table.ordinal}>0`),
+]);
+
+/** External account state is explicit; a local reader never implies successful Librarika creation. */
+export const readerPlatformLinks = sqliteTable("reader_platform_links", {
+  readerId: text("reader_id").notNull().references(() => libraryReaders.id,{onDelete:"restrict"}),
+  platform: text("platform").notNull(),
+  memberNo: text("member_no").notNull(),
+  externalMemberId: text("external_member_id"),
+  state: text("state").notNull().default("manual_required"),
+  desiredPayloadJson: text("desired_payload_json").notNull().default("{}"),
+  attempts: integer("attempts").notNull().default(0),
+  leaseToken: text("lease_token"),
+  leaseUntil: text("lease_until"),
+  lastAttemptAt: text("last_attempt_at"),
+  lastCheckedAt: text("last_checked_at"),
+  lastError: text("last_error"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, table => [
+  primaryKey({columns:[table.readerId,table.platform]}),
+  uniqueIndex("idx_reader_platform_external").on(table.platform,table.externalMemberId),
+  uniqueIndex("idx_reader_platform_member_number").on(table.platform,table.memberNo),
+  index("idx_reader_platform_queue").on(table.platform,table.state,table.updatedAt,table.readerId),
+  check("reader_platform_name",sql`${table.platform} in ('librarika')`),
+  check("reader_platform_state",sql`${table.state} in ('pending','processing','linked','conflict','manual_required','failed','disabled')`),
+  check("reader_platform_member_number",sql`length(trim(${table.memberNo}))>0 and length(${table.memberNo})<=50`),
+  check("reader_platform_linked_identity",sql`${table.state}!='linked' or ${table.externalMemberId} is not null`),
+  check("reader_platform_lease",sql`(${table.state}='processing' and ${table.leaseToken} is not null and ${table.leaseUntil} is not null) or (${table.state}!='processing' and ${table.leaseToken} is null and ${table.leaseUntil} is null)`),
+  check("reader_platform_attempts",sql`${table.attempts}>=0`),
+  check("reader_platform_payload",sql`json_valid(${table.desiredPayloadJson})`),
+]);
+
+export const librarikaMemberSyncRuns = sqliteTable("librarika_member_sync_runs", {
+  id: text("id").primaryKey(),
+  requestId: text("request_id").notNull(),
+  sourceSha256: text("source_sha256").notNull(),
+  expectedRows: integer("expected_rows").notNull(),
+  state: text("state").notNull().default("uploading"),
+  uploadRevision: integer("upload_revision").notNull().default(0),
+  isFullBaseline: integer("is_full_baseline",{mode:"boolean"}).notNull().default(false),
+  previewJson: text("preview_json"),
+  actorUserId: text("actor_user_id").notNull().references((): AnySQLiteColumn => users.id,{onDelete:"restrict"}),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  appliedAt: text("applied_at"),
+}, table => [
+  uniqueIndex("idx_librarika_member_sync_request").on(table.requestId),
+  uniqueIndex("idx_librarika_member_sync_dataset").on(table.actorUserId,table.sourceSha256).where(sql`${table.state} in ('uploading','previewed')`),
+  index("idx_librarika_member_sync_state").on(table.state,table.updatedAt),
+  check("librarika_member_sync_hash",sql`length(${table.sourceSha256})=64 and ${table.sourceSha256} not glob '*[^0-9a-f]*'`),
+  check("librarika_member_sync_rows",sql`${table.expectedRows}>0 and ${table.expectedRows}<=5000`),
+  check("librarika_member_sync_revision",sql`${table.uploadRevision}>=0`),
+  check("librarika_member_sync_baseline",sql`${table.isFullBaseline} in (0,1)`),
+  check("librarika_member_sync_state_check",sql`${table.state} in ('uploading','previewed','applied','failed')`),
+  check("librarika_member_sync_preview",sql`${table.previewJson} is null or json_valid(${table.previewJson})`),
+]);
+
+export const librarikaMemberSyncRows = sqliteTable("librarika_member_sync_rows", {
+  runId: text("run_id").notNull().references(() => librarikaMemberSyncRuns.id,{onDelete:"restrict"}),
+  sourceMemberId: text("source_member_id").notNull(),
+  memberNo: text("member_no").notNull(),
+  fullName: text("full_name").notNull(),
+  sortName: text("sort_name").notNull(),
+  memberGroup: text("member_group").notNull().default(""),
+  status: text("status").notNull(),
+  sourceJson: text("source_json").notNull(),
+  rowSha256: text("row_sha256").notNull(),
+  decision: text("decision").notNull().default("pending"),
+  conflictReason: text("conflict_reason"),
+  candidateReaderId: text("candidate_reader_id"),
+  candidateVersion: integer("candidate_version"),
+}, table => [
+  primaryKey({columns:[table.runId,table.sourceMemberId]}),
+  uniqueIndex("idx_librarika_member_sync_number").on(table.runId,table.memberNo),
+  check("librarika_member_sync_source_id",sql`length(${table.sourceMemberId})>0 and ${table.sourceMemberId} not glob '*[^0-9]*'`),
+  check("librarika_member_sync_member_no",sql`length(trim(${table.memberNo}))>0 and length(${table.memberNo})<=50`),
+  check("librarika_member_sync_name",sql`length(trim(${table.fullName}))>=3 and length(${table.fullName})<=180`),
+  check("librarika_member_sync_group",sql`length(${table.memberGroup})<=120`),
+  check("librarika_member_sync_status",sql`${table.status} in ('active','inactive')`),
+  check("librarika_member_sync_source_json",sql`json_valid(${table.sourceJson})`),
+  check("librarika_member_sync_row_hash",sql`length(${table.rowSha256})=64 and ${table.rowSha256} not glob '*[^0-9a-f]*'`),
+  check("librarika_member_sync_decision",sql`${table.decision} in ('pending','add','update','unchanged','conflict')`),
+  check("librarika_member_sync_conflict_reason",sql`(${table.decision}='conflict' and length(trim(${table.conflictReason}))>0) or (${table.decision}<>'conflict' and ${table.conflictReason} is null)`),
+  check("librarika_member_sync_candidate",sql`(${table.decision} in ('update','unchanged') and ${table.candidateReaderId} is not null and ${table.candidateVersion}>0) or (${table.decision} in ('pending','add') and ${table.candidateReaderId} is null and ${table.candidateVersion} is null) or (${table.decision}='conflict' and ((${table.candidateReaderId} is null and ${table.candidateVersion} is null) or (${table.candidateReaderId} is not null and ${table.candidateVersion}>0)))`),
+]);
+
+export const librarikaMemberSyncParts = sqliteTable("librarika_member_sync_parts", {
+  runId: text("run_id").notNull().references(() => librarikaMemberSyncRuns.id,{onDelete:"restrict"}),
+  partIndex: integer("part_index").notNull(),
+  partSha256: text("part_sha256").notNull(),
+  rowCount: integer("row_count").notNull(),
+  receivedAt: text("received_at").notNull(),
+}, table => [
+  primaryKey({columns:[table.runId,table.partIndex]}),
+  check("librarika_member_sync_part_index",sql`${table.partIndex}>=0 and ${table.partIndex}<200`),
+  check("librarika_member_sync_part_hash",sql`length(${table.partSha256})=64 and ${table.partSha256} not glob '*[^0-9a-f]*'`),
+  check("librarika_member_sync_part_rows",sql`${table.rowCount}>0 and ${table.rowCount}<=40`),
+]);
+
+/** Single-row operational proof that the hosted minute cron actually ran. */
+export const workerScheduleStatus = sqliteTable("worker_schedule_status", {
+  id: text("id").primaryKey(),
+  scheduledAt: text("scheduled_at").notNull(),
+  observedAt: text("observed_at").notNull(),
+}, table => [
+  check("worker_schedule_status_id",sql`${table.id}='minute'`),
+]);
+
 export const readerClassEnrollments = sqliteTable("reader_class_enrollments", {
   id:text("id").primaryKey(),
   readerId:text("reader_id").notNull().references(() => libraryReaders.id,{onDelete:"restrict"}),

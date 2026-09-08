@@ -1,5 +1,6 @@
 import {
   isDraftId,
+  isLegacyMaterialDraftKind,
   validateDraftActionInput,
   validateDraftInput,
 } from "@/lib/draft-validation";
@@ -89,6 +90,14 @@ export async function POST(request: Request) {
       "Перевірте поля чернетки.",
       access.writesEnabled,
       validated.fieldErrors,
+    );
+  }
+  if (isLegacyMaterialDraftKind(validated.value.kind)) {
+    return librarianError(
+      410,
+      "legacy_material_drafts_disabled",
+      "Старий канал матеріальних чернеток Google Sheets вимкнено. Скористайтеся діями у розділі «Фонд» — вони працюють безпосередньо з D1.",
+      access.writesEnabled,
     );
   }
 
@@ -200,9 +209,17 @@ export async function PATCH(request: Request) {
 
   try {
     const { id, revision, action } = validated.value;
+    const [current] = await listDrafts(user.userId, id);
+    if (!current) throw new DraftNotFoundError();
+    if (isLegacyMaterialDraftKind(current.kind) && action !== "cancel") {
+      return librarianError(
+        410,
+        "legacy_material_drafts_disabled",
+        "Цю стару матеріальну чернетку можна лише скасувати. Нові фондові дії виконуйте безпосередньо в D1.",
+        access.writesEnabled,
+      );
+    }
     if (action === "submit") {
-      const [current] = await listDrafts(user.userId, id);
-      if (!current) throw new DraftNotFoundError();
       const coverError = await validateCoverPhotoPayload(
         user.userId,
         current.payload,

@@ -2332,6 +2332,7 @@ function MaterialEditForm({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             requestId: crypto.randomUUID(),
+            catalogScope: "education",
             expectedVersion: detail.version,
             changes: {
               ...editDraftToChanges(draft),
@@ -2740,6 +2741,7 @@ function MaterialCreatePanel({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           requestId: crypto.randomUUID(),
+          catalogScope: "education",
           ...values,
           links: linkPayload(links),
           initialReceipt: withReceipt ? {

@@ -67,13 +67,16 @@ export async function prepareAssistantAction(db: Database, actorKey: string, ses
     if (Array.isArray(value)) { value.forEach(forbidReserved); return; }
     if (!value || typeof value !== "object") return;
     for (const [key, nested] of Object.entries(value)) {
-      if (/^(?:expected|requestId$|actor|confirmed|revision$|initialReceipt$|links$)/u.test(key)) throw new VisitScheduleError("invalid_action", 400, "Службові версії, залишки та підтвердження визначає сервер. Передайте лише зміни.");
+      if (/^(?:expected|requestId$|catalogScope$|actor|confirmed|revision$|initialReceipt$|links$)/u.test(key)) throw new VisitScheduleError("invalid_action", 400, "Службові версії, залишки та підтвердження визначає сервер. Передайте лише зміни.");
       forbidReserved(nested);
     }
   };
   forbidReserved(raw);
   const id = crypto.randomUUID();
   const payload: Record<string, unknown> = { ...raw, requestId: id };
+  if (kind === "material.create" || kind === "material.update") {
+    payload.catalogScope = "education";
+  }
   if (kind.startsWith("stock.") || kind.startsWith("loan.") || kind.startsWith("class.")) payload.notes = raw.notes ?? null;
   if (["stock.receive", "stock.transfer", "stock.writeoff"].includes(kind)) payload.documentNumber = raw.documentNumber ?? null;
   const references = await readLibraryReferenceData(db);
@@ -90,7 +93,7 @@ export async function prepareAssistantAction(db: Database, actorKey: string, ses
   const before: string[] = [];
   const material = async (value: unknown) => {
     const materialId = normalizeCatalogId(value);
-    const item = materialId ? await getCatalogMaterialDetail(db, materialId, "librarian") : null;
+    const item = materialId ? await getCatalogMaterialDetail(db, materialId, "librarian", { fund: "education" }) : null;
     if (!item) throw new VisitScheduleError("invalid_action", 404, "Матеріал не знайдено. Спершу виберіть його в результатах пошуку.");
     names.set(item.id, `${item.title} · ${item.author || "без автора"} · ${item.year ?? "без року"} (${item.id})`);
     return item;
@@ -166,7 +169,7 @@ const enumLabels: Record<string, string> = { good: "Добрий стан", worn
 const fieldLabel = (key: string) => labels[key] ?? key;
 function describe(value: Record<string, unknown>, names: Map<string, string>, prefix = ""): string[] {
   return Object.entries(value).flatMap(([key, item]) => {
-    if (["requestId", "expectedVersion", "expectedClassYearVersion", "expectedClassLoanId", "links", "initialReceipt"].includes(key)) return [];
+    if (["requestId", "catalogScope", "expectedVersion", "expectedClassYearVersion", "expectedClassLoanId", "links", "initialReceipt"].includes(key)) return [];
     if (item === null || item === "") return key === "dueAt" ? [`${prefix}${fieldLabel(key)}: строк не встановлено`] : [];
     if (Array.isArray(item)) return item.flatMap((row, i) => describe(record(row), names, `${i + 1}. `));
     if (typeof item === "object") return describe(record(item), names, prefix);
