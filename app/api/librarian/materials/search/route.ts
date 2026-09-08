@@ -26,6 +26,7 @@ export async function GET(request: Request): Promise<Response> {
       defaultLimit: DEFAULT_LIBRARIAN_SEARCH_LIMIT,
       maxLimit: MAX_LIBRARIAN_SEARCH_LIMIT,
       defaultFund: "education",
+      allowedFunds: ["education"],
     });
     const result = await listCatalogMaterials(
       env.DB as unknown as CatalogD1Database,

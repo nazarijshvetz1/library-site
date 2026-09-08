@@ -18,6 +18,9 @@ export async function GET(): Promise<Response> {
   try {
     const facets = await listCatalogMaterialFacets(
       env.DB as unknown as CatalogD1Database,
+      undefined,
+      "public",
+      "education",
     );
     return Response.json({
       schemaVersion: 2,

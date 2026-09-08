@@ -23,6 +23,7 @@ export async function GET(
       env.DB as unknown as CatalogD1Database,
       id,
       "public",
+      { fund: "education" },
     );
     if (!material) {
       return publicError(404, "material_not_found", "Матеріал не знайдено.");

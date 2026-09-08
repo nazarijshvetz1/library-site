@@ -33,9 +33,11 @@ export type CatalogD1Database = {
 };
 
 export type CatalogSort = "title" | "newest";
+export type CatalogListFund = "all" | "education";
+export type CatalogMaterialFund = CatalogListFund | "literature";
 
 export type CatalogListQuery = {
-  fund?: "all" | "education";
+  fund?: CatalogListFund;
   q: string;
   title: string;
   rubric: string;
@@ -216,7 +218,8 @@ export function parseCatalogListQuery(
   options: {
     defaultLimit?: number;
     maxLimit?: number;
-    defaultFund?: "all" | "education";
+    defaultFund?: CatalogListFund;
+    allowedFunds?: readonly CatalogListFund[];
   } = {},
 ): CatalogListQuery {
   const url = input instanceof URL ? input : new URL(input);
@@ -240,8 +243,17 @@ export function parseCatalogListQuery(
     "available",
   );
   const sort = parseSort(url.searchParams.get("sort"));
+  const rawFund = url.searchParams.get("fund");
+  const fund: CatalogListFund = rawFund === null || rawFund === ""
+    ? options.defaultFund || "all"
+    : rawFund === "education" || rawFund === "all"
+      ? rawFund
+      : invalidCatalogFund();
+  if (options.allowedFunds && !options.allowedFunds.some((allowed) => allowed === fund)) {
+    throw new CatalogQueryValidationError("fund", "Цей розділ каталогу недоступний.");
+  }
   const queryWithoutCursor: Omit<CatalogListQuery, "cursor"> = {
-    fund: url.searchParams.get("fund") === "education" ? "education" : url.searchParams.get("fund") === "all" ? "all" : options.defaultFund || "all",
+    fund,
     q,
     title,
     rubric,
@@ -291,19 +303,21 @@ export async function listCatalogRubrics(
   db: CatalogD1Database,
   limit = MAX_CATALOG_RUBRIC_OPTIONS,
   scope: "public" | "librarian" = "public",
+  fund: CatalogMaterialFund = scope === "public" ? "education" : "all",
 ): Promise<string[]> {
-  return listCatalogFacetValues(db, "rubric", 180, limit, scope);
+  return listCatalogFacetValues(db, "rubric", 180, limit, scope, fund);
 }
 
 export async function listCatalogMaterialFacets(
   db: CatalogD1Database,
   limit = MAX_CATALOG_FACET_OPTIONS,
   scope: "public" | "librarian" = "public",
+  fund: CatalogMaterialFund = scope === "public" ? "education" : "all",
 ): Promise<CatalogMaterialFacets> {
   const [rubrics, subjects, publicationTypes] = await Promise.all([
-    listCatalogFacetValues(db, "rubric", 180, limit, scope),
-    listCatalogFacetValues(db, "subject", 180, limit, scope),
-    listCatalogFacetValues(db, "publication_type", 120, limit, scope),
+    listCatalogFacetValues(db, "rubric", 180, limit, scope, fund),
+    listCatalogFacetValues(db, "subject", 180, limit, scope, fund),
+    listCatalogFacetValues(db, "publication_type", 120, limit, scope, fund),
   ]);
   return { rubrics, subjects, publicationTypes };
 }
@@ -312,13 +326,14 @@ export async function getCatalogMaterialDetail(
   db: CatalogD1Database,
   materialId: string,
   scope: "public" | "librarian",
-  options: { includeArchived?: boolean } = {},
+  options: { includeArchived?: boolean; fund?: CatalogMaterialFund } = {},
 ): Promise<CatalogDetail | null> {
   const id = normalizeCatalogId(materialId);
   if (!id) return null;
+  const fund = options.fund ?? (scope === "public" ? "education" : "all");
 
   const statements = [
-    db.prepare(detailMaterialSql(scope, scope === "librarian" && options.includeArchived === true)).bind(id),
+    db.prepare(detailMaterialSql(scope, scope === "librarian" && options.includeArchived === true, fund)).bind(id),
     db.prepare(detailLinksSql(scope)).bind(id),
     db.prepare(detailHoldingsSql(scope)).bind(id),
   ];
@@ -370,6 +385,7 @@ export async function getCatalogCoverAsset(
   db: CatalogD1Database,
   materialId: string,
   scope: "public" | "librarian" = "public",
+  fund: CatalogMaterialFund = scope === "public" ? "education" : "all",
 ): Promise<CatalogCoverAsset | null> {
   const id = normalizeCatalogId(materialId);
   if (!id) return null;
@@ -381,6 +397,7 @@ export async function getCatalogCoverAsset(
     WHERE c.material_id = ? AND c.status = 'ready'
       AND m.status = 'active' AND m.archived_at IS NULL
       ${scope === "public" ? "AND NOT EXISTS(SELECT 1 FROM library_editions le WHERE le.material_id=m.id AND le.publication_state!='published')" : ""}
+      ${catalogMaterialFundPredicate("m", fund)}
     LIMIT 1
   `).bind(id).first();
   if (!row) return null;
@@ -424,7 +441,7 @@ function buildCatalogListStatement(query: CatalogListQuery, useFts: boolean, inc
 } {
   const predicates = includeArchived ? ["1=1"] : ["m.status = 'active'", "m.archived_at IS NULL"];
   if(scope==="public")predicates.push("NOT EXISTS(SELECT 1 FROM library_editions le WHERE le.material_id=m.id AND le.publication_state!='published')");
-  if(query.fund === "education")predicates.push("NOT EXISTS(SELECT 1 FROM library_editions le WHERE le.material_id=m.id AND le.fund='literature')");
+  if(scope === "public" || query.fund === "education")predicates.push("NOT EXISTS(SELECT 1 FROM library_editions le WHERE le.material_id=m.id AND le.fund='literature')");
   const bindings: D1Value[] = [];
   const exactId = normalizeCatalogId(query.q);
   const exactIsbn = normalizeCatalogIsbn(query.q);
@@ -529,6 +546,10 @@ function buildCatalogListStatement(query: CatalogListQuery, useFts: boolean, inc
         m.class_from,
         m.class_to,
         m.publisher,
+        EXISTS(
+          SELECT 1 FROM library_editions cover_edition
+          WHERE cover_edition.material_id = m.id AND cover_edition.fund = 'literature'
+        ) AS is_literature,
         c.storage_provider AS cover_storage_provider,
         c.storage_key AS cover_storage_key,
         c.external_url AS cover_external_url,
@@ -554,7 +575,11 @@ function buildCatalogListStatement(query: CatalogListQuery, useFts: boolean, inc
   };
 }
 
-function detailMaterialSql(scope: "public" | "librarian", includeArchived = false): string {
+function detailMaterialSql(
+  scope: "public" | "librarian",
+  includeArchived = false,
+  fund: CatalogMaterialFund = "all",
+): string {
   return `
     SELECT
       m.id,
@@ -571,6 +596,10 @@ function detailMaterialSql(scope: "public" | "librarian", includeArchived = fals
       m.class_from,
       m.class_to,
       m.publisher,
+      EXISTS(
+        SELECT 1 FROM library_editions cover_edition
+        WHERE cover_edition.material_id = m.id AND cover_edition.fund = 'literature'
+      ) AS is_literature,
       ${scope === "librarian" ? "m.notes" : "NULL AS notes"},
       ${scope === "librarian" ? "m.version" : "NULL AS version"},
       c.storage_provider AS cover_storage_provider,
@@ -592,6 +621,7 @@ function detailMaterialSql(scope: "public" | "librarian", includeArchived = fals
       ON c.material_id = m.id AND c.status = 'ready'
     WHERE m.id = ? ${includeArchived ? "" : "AND m.status = 'active' AND m.archived_at IS NULL"}
       ${scope === "public" ? "AND NOT EXISTS(SELECT 1 FROM library_editions le WHERE le.material_id=m.id AND le.publication_state!='published')" : ""}
+      ${catalogMaterialFundPredicate("m", fund)}
     LIMIT 1
   `;
 }
@@ -772,6 +802,7 @@ async function listCatalogFacetValues(
   maximumLength: number,
   limit: number,
   scope: "public" | "librarian",
+  fund: CatalogMaterialFund,
 ): Promise<string[]> {
   const boundedLimit = Number.isInteger(limit)
     ? Math.max(1, Math.min(limit, MAX_CATALOG_FACET_OPTIONS))
@@ -782,6 +813,7 @@ async function listCatalogFacetValues(
     WHERE status = 'active' AND archived_at IS NULL
       AND TRIM(${column}) != ''
       ${scope === "public" ? "AND NOT EXISTS(SELECT 1 FROM library_editions le WHERE le.material_id=m.id AND le.publication_state!='published')" : ""}
+      ${catalogMaterialFundPredicate("m", fund)}
     ORDER BY value ASC
     LIMIT ?
   `).bind(boundedLimit).all();
@@ -791,6 +823,20 @@ async function listCatalogFacetValues(
   return [...new Set(values)].sort((left, right) =>
     left.localeCompare(right, "uk-UA", { sensitivity: "base" })
   );
+}
+
+function catalogMaterialFundPredicate(alias: string, fund: CatalogMaterialFund): string {
+  if (fund === "education") {
+    return `AND NOT EXISTS(SELECT 1 FROM library_editions le WHERE le.material_id=${alias}.id AND le.fund='literature')`;
+  }
+  if (fund === "literature") {
+    return `AND EXISTS(SELECT 1 FROM library_editions le WHERE le.material_id=${alias}.id AND le.fund='literature' AND le.publication_state='published')`;
+  }
+  return "";
+}
+
+function invalidCatalogFund(): never {
+  throw new CatalogQueryValidationError("fund", "Некоректний розділ каталогу.");
 }
 
 function coverUrlFromRow(row: Record<string, unknown>): string {
@@ -804,7 +850,10 @@ function coverUrlFromRow(row: Record<string, unknown>): string {
   const hash = /^[0-9a-f]{64}$/i.test(String(row.cover_sha256 ?? ""))
     ? `?v=${String(row.cover_sha256).slice(0, 12).toLowerCase()}`
     : "";
-  return `/api/catalog-v2/covers/${encodeURIComponent(id)}${hash}`;
+  const prefix = nonNegativeInteger(row.is_literature) > 0
+    ? "/api/library/material-covers"
+    : "/api/catalog-v2/covers";
+  return `${prefix}/${encodeURIComponent(id)}${hash}`;
 }
 
 async function executeBatch(

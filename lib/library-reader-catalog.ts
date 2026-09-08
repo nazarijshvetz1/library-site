@@ -1,7 +1,7 @@
 import {normalizeCatalogSearchText,getCatalogMaterialDetail,type CatalogD1Database} from "./catalog-d1.ts";
 import {readerFail,readerResource,type ReaderDatabase} from "./reader-core.ts";
 
-export const libraryCoverSql="CASE WHEN EXISTS(SELECT 1 FROM material_cover_assets ca WHERE ca.material_id=m.id AND ca.status='ready') THEN '/api/catalog-v2/covers/'||m.id WHEN coalesce(json_extract(e.public_metadata_json,'$.coverKind'),'')!='placeholder' AND length(json_extract(e.public_metadata_json,'$.coverSha256'))=64 THEN '/api/library/covers/'||json_extract(e.public_metadata_json,'$.coverSha256') ELSE json_extract(e.public_metadata_json,'$.coverUrl') END";
+export const libraryCoverSql="CASE WHEN EXISTS(SELECT 1 FROM material_cover_assets ca WHERE ca.material_id=m.id AND ca.status='ready') THEN CASE WHEN e.fund='literature' THEN '/api/library/material-covers/'||m.id ELSE '/api/catalog-v2/covers/'||m.id END WHEN coalesce(json_extract(e.public_metadata_json,'$.coverKind'),'')!='placeholder' AND length(json_extract(e.public_metadata_json,'$.coverSha256'))=64 THEN '/api/library/covers/'||json_extract(e.public_metadata_json,'$.coverSha256') ELSE json_extract(e.public_metadata_json,'$.coverUrl') END";
 
 export async function listReaderCatalog(db:ReaderDatabase,url:URL){
   const fund=url.searchParams.get("fund")||"literature",q=normalizeCatalogSearchText(url.searchParams.get("q")||"");

@@ -354,6 +354,38 @@ test("catalog facets return bounded, sorted values from active materials", async
   }
 });
 
+test("education scope excludes published literature from list, facets, detail and cover", async () => {
+  const { sqlite, db } = fixture();
+  try {
+    sqlite.exec("INSERT INTO library_editions(id,material_id,fund,publication_state) VALUES('edition-1','CAT-0001','literature','published')");
+    const query = parseCatalogListQuery(
+      "https://catalog.test/api/catalog-v2?fund=education&sort=title",
+      { defaultFund: "education", allowedFunds: ["education"] },
+    );
+    const result = await listCatalogMaterials(db, query);
+    assert.deepEqual(result.items.map((item) => item.id), ["CAT-0002", "CAT-0010"]);
+    assert.equal((await listCatalogMaterialFacets(db, undefined, "public", "education")).rubrics.includes("Підручники"), false);
+    assert.equal(await getCatalogMaterialDetail(db, "CAT-0001", "public", { fund: "education" }), null);
+    assert.equal(await getCatalogCoverAsset(db, "CAT-0001", "public", "education"), null);
+    const literature = await getCatalogMaterialDetail(db, "CAT-0001", "public", { fund: "literature" });
+    assert.equal(literature.thumbnailUrl, "/api/library/material-covers/CAT-0001?v=aaaaaaaaaaaa");
+    assert.ok(await getCatalogCoverAsset(db, "CAT-0001", "public", "literature"));
+    assert.throws(
+      () => parseCatalogListQuery(
+        "https://catalog.test/api/catalog-v2?fund=all",
+        { defaultFund: "education", allowedFunds: ["education"] },
+      ),
+      CatalogQueryValidationError,
+    );
+    assert.throws(
+      () => parseCatalogListQuery("https://catalog.test/api/catalog-v2?fund=fiction"),
+      CatalogQueryValidationError,
+    );
+  } finally {
+    sqlite.close();
+  }
+});
+
 test("cursor pagination is stable, scoped to filters and supports newest sorting", async () => {
   const { sqlite, db } = fixture();
   try {
@@ -609,27 +641,35 @@ test("cover asset lookup returns only safe ready R2 metadata", async () => {
   }
 });
 
-test("public routes are cacheable and librarian material routes require authorization", async () => {
-  const [publicList, publicFacets, publicDetail, cover, privateSearch, privateFacets, privateDetail] = await Promise.all([
+test("public routes are cacheable, fund-scoped and librarian material routes require authorization", async () => {
+  const [publicList, publicFacets, publicDetail, cover, literatureCover, coverHelper, privateSearch, privateFacets, privateDetail] = await Promise.all([
     read("app/api/catalog-v2/route.ts"),
     read("app/api/catalog-v2/facets/route.ts"),
     read("app/api/catalog-v2/[id]/route.ts"),
     read("app/api/catalog-v2/covers/[id]/route.ts"),
+    read("app/api/library/material-covers/[id]/route.ts"),
+    read("lib/public-catalog-cover.ts"),
     read("app/api/librarian/materials/search/route.ts"),
     read("app/api/librarian/materials/facets/route.ts"),
     read("app/api/librarian/materials/[id]/route.ts"),
   ]);
   assert.match(publicList, /stale-while-revalidate=300/);
   assert.match(publicList, /total: result\.total/u);
+  assert.match(publicList, /allowedFunds: \["education"\]/u);
   assert.match(publicFacets, /listCatalogMaterialFacets/u);
+  assert.match(publicFacets, /"public",\s*"education"/u);
   assert.match(publicFacets, /stale-while-revalidate=3600/u);
   assert.doesNotMatch(publicFacets, /authorizeLibrarianApi/u);
-  assert.match(publicDetail, /getCatalogMaterialDetail\([\s\S]*"public"/);
-  assert.match(cover, /COVER_UPLOADS\.get\(asset\.storageKey\)/);
-  assert.match(cover, /max-age=31536000, immutable/);
+  assert.match(publicDetail, /getCatalogMaterialDetail\([\s\S]*"public",\s*\{ fund: "education" \}/u);
+  assert.match(cover, /publicCatalogCoverResponse\([\s\S]*"education"/u);
+  assert.match(literatureCover, /publicCatalogCoverResponse\([\s\S]*"literature"/u);
+  assert.match(coverHelper, /COVER_UPLOADS\.get\(asset\.storageKey\)/);
+  assert.match(coverHelper, /max-age=31536000, immutable/);
   assert.match(privateSearch, /authorizeLibrarianApi\(\)/);
+  assert.match(privateSearch, /allowedFunds: \["education"\]/u);
   assert.match(privateFacets, /authorizeLibrarianApi\(\)/);
   assert.match(privateFacets, /listCatalogMaterialFacets/u);
+  assert.match(privateFacets, /"librarian",\s*"education"/u);
   assert.match(privateFacets, /\.\.\.facets/u);
   assert.match(privateDetail, /authorizeLibrarianApi\(\)/);
   assert.match(privateDetail, /getCatalogMaterialDetail\([\s\S]*"librarian"/);

@@ -14,7 +14,7 @@ export type LibrarianSection = (typeof LIBRARIAN_SECTIONS)[number];
 
 export type LibrarianUtility = "publicCatalog" | "excelExport" | "excelImport" | "telegram";
 
-export const PUBLIC_CATALOG_URL = "/library";
+export const PUBLIC_CATALOG_URL = "https://nazarijshvetz1.github.io/library-site/";
 export const LIBRARY_EMBLEM_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
 
 const WEB_SECTION_ROUTES: Record<LibrarianSection, string> = {

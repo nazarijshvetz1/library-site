@@ -12,7 +12,7 @@ export async function GET(
   return publicCatalogCoverResponse(
     request,
     id,
-    "education",
-    "/api/catalog-v2/covers",
+    "literature",
+    "/api/library/material-covers",
   );
 }

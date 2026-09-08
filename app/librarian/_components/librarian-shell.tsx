@@ -180,6 +180,9 @@ export default function LibrarianShell({
           <a href={publicCatalogHref ?? undefined} target="_blank" rel="noopener noreferrer">
             Публічний каталог <SiteIcon name="external" size={16} />
           </a>
+          <a href={librarianLiteratureHref(telegramMiniApp)}>
+            Література <SiteIcon name="catalog" size={16} />
+          </a>
           {excelExportHref ? <a href={excelExportHref}>Звіти <SiteIcon name="reports" size={16} /></a> : null}
           {excelImportHref ? <a href={excelImportHref}>Імпорт <SiteIcon name="import" size={16} /></a> : null}
           <a href={telegramHref ?? undefined} className={styles.telegramLink}>
@@ -252,6 +255,7 @@ export default function LibrarianShell({
           </nav>
           <nav className={styles.sidebarUtilities} aria-label="Службові посилання кабінету">
             <a href={publicCatalogHref ?? undefined} target="_blank" rel="noopener noreferrer">Публічний каталог <SiteIcon name="external" size={15} /></a>
+            <a href={librarianLiteratureHref(telegramMiniApp)}><SiteIcon name="catalog" size={15} /> Література</a>
             {excelExportHref ? <a href={excelExportHref}><SiteIcon name="reports" size={15} /> Звіти й документи</a> : null}
             {excelImportHref ? <a href={excelImportHref}><SiteIcon name="import" size={15} /> Імпорт з Excel</a> : null}
             <a href={telegramHref ?? undefined}><SiteIcon name="telegram" size={15} /> Telegram</a>
@@ -380,6 +384,7 @@ export default function LibrarianShell({
             </nav>
             <div className={styles.drawerUtilities}>
               <a href={publicCatalogHref ?? undefined} target="_blank" rel="noopener noreferrer">Публічний каталог <SiteIcon name="external" size={16} /></a>
+              <a href={librarianLiteratureHref(telegramMiniApp)}><SiteIcon name="catalog" size={16} /> Література</a>
               {excelExportHref ? <a href={excelExportHref}><SiteIcon name="reports" size={16} /> Звіти й документи</a> : null}
               {excelImportHref ? <a href={excelImportHref}><SiteIcon name="import" size={16} /> Імпорт з Excel</a> : null}
               <a href={telegramHref ?? undefined}><SiteIcon name="telegram" size={16} /> Telegram</a>
@@ -555,7 +560,6 @@ function standardLibrarianSubsections(telegramMiniApp: boolean): LibrarianSubsec
   const acquisitionsBase = librarianSectionHref("acquisitions", telegramMiniApp);
   return [
     { id: "catalog", section: "fund", label: "Підручники й посібники", hint: "Пошук і картка", icon: "catalog", href: librarianToolHref("catalog", telegramMiniApp) },
-    { id: "literature", section: "fund", label: "Художня та наукова література", hint: "Книги й читачі", icon: "catalog", href: librarianLiteratureHref(telegramMiniApp) },
     { id: "create", section: "fund", label: "Новий матеріал", hint: "Додати до фонду", icon: "new-material", href: librarianToolHref("create", telegramMiniApp) },
     { id: "textbooks", section: "fund", label: "Е-підручники", hint: "Список для учнів", icon: "textbooks", href: librarianTextbooksHref(telegramMiniApp) },
     { id: "issue", section: "circulation", label: "Видача вчителю", hint: "Оформити видачу", icon: "issue-teacher", href: librarianToolHref("issue", telegramMiniApp) },

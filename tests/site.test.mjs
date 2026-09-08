@@ -506,15 +506,17 @@ test("ships paginated public D1 sync with a GitHub Pages fallback", async () => 
 });
 
 test("keeps D1 catalog reads cross-origin while librarian APIs remain app-guarded", async () => {
-  const [listRoute, detailRoute, coverRoute, librarianRoute] = await Promise.all([
+  const [listRoute, detailRoute, coverRoute, coverHelper, librarianRoute] = await Promise.all([
     readFile(new URL("../app/api/catalog-v2/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/catalog-v2/[id]/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/catalog-v2/covers/[id]/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/public-catalog-cover.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/librarian/materials/search/route.ts", import.meta.url), "utf8"),
   ]);
   assert.match(listRoute, /"Access-Control-Allow-Origin": "\*"/);
   assert.match(detailRoute, /"Access-Control-Allow-Origin": "\*"/);
-  assert.match(coverRoute, /"Access-Control-Allow-Origin": "\*"/);
+  assert.match(coverRoute, /publicCatalogCoverResponse/);
+  assert.match(coverHelper, /"Access-Control-Allow-Origin": "\*"/);
   assert.match(librarianRoute, /authorizeLibrarianApi\(\)/);
 });
 
