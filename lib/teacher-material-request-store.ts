@@ -199,6 +199,7 @@ type RequestRow = {
 type MutationActor = { id: string; email: string };
 
 export const ACTIVE_MATERIAL_REQUEST_LIMIT = 20;
+const MATERIAL_REQUEST_REMINDER_LEAD_MS = 10 * 60_000;
 
 export class TeacherMaterialRequestError extends Error {
   readonly code: string;
@@ -1798,13 +1799,12 @@ async function readyMaterialRequest(
   }
 
   const now = nowDate.toISOString();
-  const reminderLeadMs = 5 * 60_000;
   const reminderIsImmediate = scheduledIssueAt
-    ? new Date(scheduledIssueAt).getTime() - nowDate.getTime() < reminderLeadMs
+    ? new Date(scheduledIssueAt).getTime() - nowDate.getTime() < MATERIAL_REQUEST_REMINDER_LEAD_MS
     : false;
   const reminderAt = scheduledIssueAt ? new Date(Math.max(
     nowDate.getTime(),
-    new Date(scheduledIssueAt).getTime() - reminderLeadMs,
+    new Date(scheduledIssueAt).getTime() - MATERIAL_REQUEST_REMINDER_LEAD_MS,
   )).toISOString() : null;
   const reminderDeadlineInFuture = scheduledIssueAt
     ? new Date(scheduledIssueAt).getTime() > nowDate.getTime()
@@ -2020,7 +2020,7 @@ async function readyMaterialRequest(
         auditRequestId: input.requestId,
         category: "orders",
         type: "material_request_pickup_reminder",
-        title: reminderIsImmediate ? "Незабаром — отримання матеріалів" : "За 5 хвилин — отримання матеріалів",
+        title: reminderIsImmediate ? "Незабаром — отримання матеріалів" : "За 10 хвилин — отримання матеріалів",
         message: `Чекаємо вас ${scheduledLabel}. Місце отримання: ${pickup.name}.`,
         targetPath: "/teacher?tab=orders&view=history",
         entityType: "material_request",
@@ -2034,7 +2034,7 @@ async function readyMaterialRequest(
         auditRequestId: input.requestId,
         category: "orders",
         type: "material_request_prepare_reminder",
-        title: reminderIsImmediate ? "Підготуйте видачу зараз" : "Підготуйте видачу за 5 хвилин",
+        title: reminderIsImmediate ? "Підготуйте видачу зараз" : "Підготуйте видачу за 10 хвилин",
         message: `${current.teacherName} · ${scheduledLabel} · ${pickup.name}. ${reminderItems}${reminderItemsSuffix}`,
         targetPath: "/librarian/orders",
         entityType: "material_request",
@@ -2696,8 +2696,8 @@ async function releaseMaterialRequest(
   };
   const scheduledIssueMs = current.scheduledIssueAt ? new Date(current.scheduledIssueAt).getTime() : Number.NaN;
   const refreshedReminderAt = Number.isFinite(scheduledIssueMs)
-    && scheduledIssueMs - 5 * 60_000 > new Date(now).getTime()
-    ? new Date(scheduledIssueMs - 5 * 60_000).toISOString()
+    && scheduledIssueMs - MATERIAL_REQUEST_REMINDER_LEAD_MS > new Date(now).getTime()
+    ? new Date(scheduledIssueMs - MATERIAL_REQUEST_REMINDER_LEAD_MS).toISOString()
     : null;
   const remainingReminderItems = current.items.map((item) => ({
     title: item.title,
@@ -2853,7 +2853,7 @@ async function releaseMaterialRequest(
           auditRequestId: input.requestId,
           category: "orders",
           type: "material_request_prepare_reminder",
-          title: "Підготуйте видачу за 5 хвилин",
+          title: "Підготуйте видачу за 10 хвилин",
           message: `${current.teacherName} · ${formatKyivDateTime(current.scheduledIssueAt)} · ${current.pickupLocationName ?? "місце отримання не вказано"}. ${remainingReminderSummary}${remainingReminderSuffix}`,
           targetPath: "/librarian/orders",
           entityType: "material_request",

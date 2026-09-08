@@ -595,7 +595,7 @@ test("ready reserves without a loan, then physical issue creates the loan atomic
   );
 });
 
-test("scheduled pickup queues exact five-minute Telegram reminders and issue cancels them", async () => {
+test("scheduled pickup queues exact ten-minute Telegram reminders and issue cancels them", async () => {
   const context = openDatabase();
   const linkedAt = "2026-08-13T08:00:00.000Z";
   context.sqlite.prepare(`INSERT INTO telegram_connections (
@@ -625,13 +625,17 @@ test("scheduled pickup queues exact five-minute Telegram reminders and issue can
     { ...context.sqlite.prepare("SELECT scheduled_issue_at FROM material_requests WHERE id=?").get(request.id) },
     { scheduled_issue_at: scheduledIssueAt },
   );
-  const reminders = context.sqlite.prepare(`SELECT recipient_user_id,type,message,next_attempt_at,expires_at,status
+  const reminders = context.sqlite.prepare(`SELECT recipient_user_id,type,title,message,next_attempt_at,expires_at,status
     FROM telegram_delivery_outbox
     WHERE entity_id=? AND type IN ('material_request_pickup_reminder','material_request_prepare_reminder')
     ORDER BY recipient_user_id`).all(request.id).map((row) => ({ ...row }));
   assert.equal(reminders.length, 2);
   assert.deepEqual(reminders.map((row) => row.recipient_user_id), ["USR-LIB", "USR-T1"]);
-  assert.equal(reminders.every((row) => row.next_attempt_at === "2099-01-01T09:55:00.000Z"), true);
+  assert.deepEqual(reminders.map((row) => row.title), [
+    "Підготуйте видачу за 10 хвилин",
+    "За 10 хвилин — отримання матеріалів",
+  ]);
+  assert.equal(reminders.every((row) => row.next_attempt_at === "2099-01-01T09:50:00.000Z"), true);
   assert.equal(reminders.every((row) => row.expires_at === scheduledIssueAt), true);
   assert.equal(reminders.every((row) => row.status === "pending"), true);
   assert.equal(reminders.every((row) => row.message.includes("Кабінет 205")), true);
@@ -667,6 +671,48 @@ test("a current-minute pickup succeeds without queuing an already expired remind
   assert.equal(context.sqlite.prepare(`SELECT COUNT(*) AS n FROM telegram_delivery_outbox
     WHERE entity_id=? AND type IN ('material_request_pickup_reminder','material_request_prepare_reminder')`
   ).get(request.id).n, 0);
+  context.sqlite.close();
+});
+
+test("a pickup less than ten minutes away queues immediate reminders for teacher and librarian", async () => {
+  const context = openDatabase();
+  const linkedAt = "2026-08-13T08:00:00.000Z";
+  for (const [userId, telegramUserId, chatId] of [
+    ["USR-T1", "TG-TEACHER-IMMEDIATE", "CHAT-TEACHER-IMMEDIATE"],
+    ["USR-LIB", "TG-LIBRARIAN-IMMEDIATE", "CHAT-LIBRARIAN-IMMEDIATE"],
+  ]) {
+    context.sqlite.prepare(`INSERT INTO telegram_connections (
+      user_id,telegram_user_id,chat_id,status,notify_orders,notify_visits,version,
+      menu_delivered_version,linked_at,created_at,updated_at
+    ) VALUES (?,?,?,'active',1,1,1,0,?,?,?)`).run(
+      userId, telegramUserId, chatId, linkedAt, linkedAt, linkedAt,
+    );
+  }
+  const request = await createRequest(context, 1);
+  const beforeReady = Date.now();
+  const scheduledIssueAt = new Date(beforeReady + 5 * 60_000).toISOString();
+  await store.applyLibrarianMaterialRequestAction(context.db, librarian, request.id, {
+    requestId: commandId(), expectedVersion: request.version, action: "ready",
+    pickupLocationId: "LOC-205", scheduledIssueAt, dueAt: null,
+    items: [{
+      itemId: request.items[0].id, approvedQuantity: 1,
+      sourceLocationId: "LOC-LIB", condition: "good", expectedAvailableQuantity: 5,
+    }],
+  });
+  const afterReady = Date.now();
+  const reminders = context.sqlite.prepare(`SELECT recipient_user_id,title,next_attempt_at,expires_at
+    FROM telegram_delivery_outbox
+    WHERE entity_id=? AND type IN ('material_request_pickup_reminder','material_request_prepare_reminder')
+    ORDER BY recipient_user_id`).all(request.id).map((row) => ({ ...row }));
+  assert.deepEqual(reminders.map((row) => row.title), [
+    "Підготуйте видачу зараз",
+    "Незабаром — отримання матеріалів",
+  ]);
+  assert.equal(reminders.every((row) => {
+    const due = Date.parse(row.next_attempt_at);
+    return due >= beforeReady && due <= afterReady + 1_000;
+  }), true);
+  assert.equal(reminders.every((row) => row.expires_at === scheduledIssueAt), true);
   context.sqlite.close();
 });
 
@@ -797,10 +843,12 @@ test("not-collected release frees stock without a loan and supports partial rele
   assert.equal(context.sqlite.prepare("SELECT reserved_quantity FROM material_stock_totals").get().reserved_quantity, 2);
   assert.equal(context.sqlite.prepare("SELECT COUNT(*) AS n FROM loans").get().n, 0);
   const refreshedReminder = context.sqlite.prepare(`
-    SELECT status,message FROM telegram_delivery_outbox
+    SELECT status,title,message,next_attempt_at FROM telegram_delivery_outbox
     WHERE type='material_request_prepare_reminder'
   `).get();
   assert.equal(refreshedReminder.status, "pending");
+  assert.equal(refreshedReminder.title, "Підготуйте видачу за 10 хвилин");
+  assert.equal(refreshedReminder.next_attempt_at, "2099-01-01T09:50:00.000Z");
   assert.match(refreshedReminder.message, /Алгебра[^—]*— 2 прим\./u);
 
   prepared = await store.getMaterialRequest(context.db, request.id);
@@ -846,10 +894,12 @@ test("partial release reminder counts only copies that still need preparation", 
     items: [{ reservationId, quantity: 1 }],
   });
   const reminder = context.sqlite.prepare(`
-    SELECT status,message FROM telegram_delivery_outbox
+    SELECT status,title,message,next_attempt_at FROM telegram_delivery_outbox
     WHERE type='material_request_prepare_reminder'
   `).get();
   assert.equal(reminder.status, "pending");
+  assert.equal(reminder.title, "Підготуйте видачу за 10 хвилин");
+  assert.equal(reminder.next_attempt_at, "2099-01-01T09:50:00.000Z");
   assert.match(reminder.message, /Алгебра[^—]*— 1 прим\./u);
 });
 

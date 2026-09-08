@@ -92,6 +92,7 @@ const migrations = [
   "0043_strong_blob.sql", "0044_demonic_rafael_vega.sql", "0045_harsh_molten_man.sql",
   "0046_flawless_dreaming_celestial.sql", "0047_oval_leo.sql", "0048_third_morlocks.sql",
   "0049_talented_colossus.sql",
+  "0050_precise_telegram_reminders.sql",
 ];
 
 async function database() {
@@ -111,6 +112,112 @@ async function database() {
     .run("USR-TEACHER", now, now);
   return { sqlite, db: new TestD1(sqlite), now };
 }
+
+test("0050 reschedules only active unsent five-minute pickup reminders", async () => {
+  const context = await database();
+  const farScheduledAt = "2099-01-01T10:00:00.000Z";
+  const farOldReminderAt = "2099-01-01T09:55:00.000Z";
+  context.sqlite.prepare(`INSERT INTO locations
+    (id,name,type,status,is_public,sort_order,created_at,updated_at)
+    VALUES ('LOC-MIGRATION','Місце міграції','library','active',1,0,?,?)`
+  ).run(context.now, context.now);
+  context.sqlite.prepare(`INSERT INTO material_requests
+    (id,teacher_user_id,status,pickup_location_id,scheduled_issue_at,submitted_at,ready_at,created_at,updated_at)
+    VALUES ('MRQ-MIGRATION','USR-TEACHER','ready','LOC-MIGRATION',?,?,?,?,?)`
+  ).run(farScheduledAt, context.now, context.now, context.now, context.now);
+  context.sqlite.prepare(`INSERT INTO material_requests
+    (id,teacher_user_id,status,scheduled_issue_at,submitted_at,cancelled_at,created_at,updated_at)
+    VALUES ('MRQ-MIGRATION-CLOSED','USR-TEACHER','cancelled',?,?,?,?,?)`
+  ).run(farScheduledAt, context.now, context.now, context.now, context.now);
+
+  const nearScheduledAt = new Date(Date.now() + 5 * 60_000).toISOString();
+  const nearOldReminderAt = new Date(Date.parse(nearScheduledAt) - 5 * 60_000).toISOString();
+  context.sqlite.prepare(`INSERT INTO material_requests
+    (id,teacher_user_id,status,pickup_location_id,scheduled_issue_at,submitted_at,ready_at,created_at,updated_at)
+    VALUES ('MRQ-MIGRATION-NEAR','USR-TEACHER','ready','LOC-MIGRATION',?,?,?,?,?)`
+  ).run(nearScheduledAt, context.now, context.now, context.now, context.now);
+
+  const insertOutbox = context.sqlite.prepare(`INSERT INTO telegram_delivery_outbox (
+    id,recipient_user_id,dedupe_key,category,type,title,message,target_path,
+    entity_type,entity_id,status,attempts,next_attempt_at,expires_at,sent_at,created_at,updated_at
+  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  insertOutbox.run(
+    "TGO-MIG-PICKUP", "USR-TEACHER", "migration-pickup", "orders",
+    "material_request_pickup_reminder", "За 5 хвилин — отримання матеріалів", "Повідомлення", "/teacher",
+    "material_request", "MRQ-MIGRATION", "pending", 0, farOldReminderAt, null, null, context.now, context.now,
+  );
+  insertOutbox.run(
+    "TGO-MIG-PREPARE", "USR-LIB", "migration-prepare", "orders",
+    "material_request_prepare_reminder", "Підготуйте видачу за 5 хвилин", "Повідомлення", "/librarian/orders",
+    "material_request", "MRQ-MIGRATION", "pending", 0, farOldReminderAt, farScheduledAt, null, context.now, context.now,
+  );
+  insertOutbox.run(
+    "TGO-MIG-NEAR", "USR-TEACHER", "migration-near", "orders",
+    "material_request_pickup_reminder", "За 5 хвилин — отримання матеріалів", "Повідомлення", "/teacher",
+    "material_request", "MRQ-MIGRATION-NEAR", "pending", 0, nearOldReminderAt, nearScheduledAt, null, context.now, context.now,
+  );
+  insertOutbox.run(
+    "TGO-MIG-RETRY", "USR-TEACHER", "migration-retry", "orders",
+    "material_request_pickup_reminder", "За 5 хвилин — отримання матеріалів", "Повідомлення", "/teacher",
+    "material_request", "MRQ-MIGRATION", "retry", 1, "2099-01-01T09:56:00.000Z", farScheduledAt, null, context.now, context.now,
+  );
+  insertOutbox.run(
+    "TGO-MIG-SENT", "USR-TEACHER", "migration-sent", "orders",
+    "material_request_pickup_reminder", "За 5 хвилин — отримання матеріалів", "Повідомлення", "/teacher",
+    "material_request", "MRQ-MIGRATION", "sent", 1, farOldReminderAt, farScheduledAt, context.now, context.now, context.now,
+  );
+  insertOutbox.run(
+    "TGO-MIG-OTHER", "USR-TEACHER", "migration-other", "orders",
+    "material_request_ready", "Замовлення підготовлено", "Повідомлення", "/teacher",
+    "material_request", "MRQ-MIGRATION", "pending", 0, farOldReminderAt, farScheduledAt, null, context.now, context.now,
+  );
+  insertOutbox.run(
+    "TGO-MIG-CLOSED", "USR-TEACHER", "migration-closed", "orders",
+    "material_request_pickup_reminder", "За 5 хвилин — отримання матеріалів", "Повідомлення", "/teacher",
+    "material_request", "MRQ-MIGRATION-CLOSED", "pending", 0, farOldReminderAt, farScheduledAt, null, context.now, context.now,
+  );
+
+  const beforeMigration = Date.now();
+  context.sqlite.exec(await readFile(new URL("../drizzle/0050_precise_telegram_reminders.sql", import.meta.url), "utf8"));
+  const afterMigration = Date.now();
+  assert.deepEqual(
+    context.sqlite.prepare(`SELECT id,title,next_attempt_at,expires_at FROM telegram_delivery_outbox
+      WHERE id IN ('TGO-MIG-PICKUP','TGO-MIG-PREPARE') ORDER BY id`).all().map((row) => ({ ...row })),
+    [
+      {
+        id: "TGO-MIG-PICKUP",
+        title: "За 10 хвилин — отримання матеріалів",
+        next_attempt_at: "2099-01-01T09:50:00.000Z",
+        expires_at: farScheduledAt,
+      },
+      {
+        id: "TGO-MIG-PREPARE",
+        title: "Підготуйте видачу за 10 хвилин",
+        next_attempt_at: "2099-01-01T09:50:00.000Z",
+        expires_at: farScheduledAt,
+      },
+    ],
+  );
+  const near = context.sqlite.prepare(`SELECT title,next_attempt_at,expires_at
+    FROM telegram_delivery_outbox WHERE id='TGO-MIG-NEAR'`).get();
+  assert.equal(near.title, "Незабаром — отримання матеріалів");
+  assert.ok(Date.parse(near.next_attempt_at) >= beforeMigration - 1_000);
+  assert.ok(Date.parse(near.next_attempt_at) <= afterMigration + 1_000);
+  assert.equal(near.expires_at, nearScheduledAt);
+  assert.deepEqual(
+    context.sqlite.prepare(`SELECT id,status,title,next_attempt_at FROM telegram_delivery_outbox
+      WHERE id IN ('TGO-MIG-RETRY','TGO-MIG-SENT','TGO-MIG-OTHER','TGO-MIG-CLOSED') ORDER BY id`)
+      .all().map((row) => ({ ...row })),
+    [
+      { id: "TGO-MIG-CLOSED", status: "pending", title: "За 5 хвилин — отримання матеріалів", next_attempt_at: farOldReminderAt },
+      { id: "TGO-MIG-OTHER", status: "pending", title: "Замовлення підготовлено", next_attempt_at: farOldReminderAt },
+      { id: "TGO-MIG-RETRY", status: "retry", title: "За 5 хвилин — отримання матеріалів", next_attempt_at: "2099-01-01T09:56:00.000Z" },
+      { id: "TGO-MIG-SENT", status: "sent", title: "За 5 хвилин — отримання матеріалів", next_attempt_at: farOldReminderAt },
+    ],
+  );
+  assert.deepEqual(context.sqlite.prepare("PRAGMA foreign_key_check").all(), []);
+  context.sqlite.close();
+});
 
 function addTeacherCredential(context, version = 1) {
   context.sqlite.prepare(`INSERT INTO visit_teacher_credentials (

@@ -52,6 +52,8 @@ test("the hosted worker drains scheduled Telegram reminders every minute", async
   assert.match(viteConfig, /triggers:\s*\{\s*crons:\s*\["\* \* \* \* \*"\]\s*\}/u);
   assert.match(worker, /async scheduled\(_controller: unknown, env: Env, ctx: ExecutionContext\)/u);
   assert.match(worker, /ctx\.waitUntil\(drainTelegramOutboxUntilIdle\(env\.DB/u);
+  assert.match(worker, /batchLimit:\s*10/u);
+  assert.doesNotMatch(worker, /else\s+ctx\.waitUntil\(drainTelegramOutboxUntilIdle/u);
   assert.match(worker, /siteOrigin:\s*"https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site"/u);
   assert.match(runtime, /export async function drainTelegramOutboxUntilIdle/u);
 });

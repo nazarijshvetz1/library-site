@@ -83,15 +83,17 @@ const worker = {
   },
   async scheduled(_controller: unknown, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(expireAssistantCalls(env.DB, env.OPENAI_API_KEY));
-    // waitUntil tasks share one D1 budget. Separate maintenance ticks and cap the old outbox batch.
+    // Scheduled pickup reminders are deadline-sensitive, so drain them on every minute tick.
+    ctx.waitUntil(drainTelegramOutboxUntilIdle(env.DB, {
+      siteOrigin: "https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site",
+      maxBatches: 1,
+      batchLimit: 10,
+    }));
+    // The heavier reader and photo maintenance tasks remain on five-minute ticks.
     if(new Date().getUTCMinutes()%5===0){
       ctx.waitUntil(runReaderMaintenance(env.DB).catch(()=>undefined));
       ctx.waitUntil(cleanReaderPhotos(env.DB,env.COVER_UPLOADS).catch(()=>undefined));
-    }else ctx.waitUntil(drainTelegramOutboxUntilIdle(env.DB, {
-      siteOrigin: "https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site",
-      maxBatches: 1,
-      batchLimit: 2,
-    }));
+    }
   },
 };
 
