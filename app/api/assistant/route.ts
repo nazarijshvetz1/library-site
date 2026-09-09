@@ -16,6 +16,7 @@ import { LibraryMutationError } from "@/lib/library-mutation-store";
 import { CatalogQueryValidationError } from "@/lib/catalog-d1";
 import type { ChatGPTUser } from "@/app/chatgpt-auth";
 import { assistantAudioInput } from "@/lib/assistant-audio";
+import { assistantModel } from "@/lib/assistant-models";
 import { confirmTeacherAssistantAction, teacherActionRow } from "@/lib/assistant-teacher-actions";
 import { parseAssistantCart } from "@/lib/teacher-cart";
 import { AcquisitionStoreError } from "@/lib/acquisition-store";
@@ -140,7 +141,7 @@ export async function POST(request: Request): Promise<Response> {
       const now = kyivLocalNow();
       const form = new FormData();
       form.set("sdp", body.value.sdp as string);
-      form.set("session", JSON.stringify({ type: "realtime", model: getRuntimeString("ASSISTANT_REALTIME_MODEL") || "gpt-realtime-mini",
+      form.set("session", JSON.stringify({ type: "realtime", model: assistantModel(role, "realtime", getRuntimeString),
         instructions: assistantInstructions(role, `${now.date} ${now.time}`), tools: assistantTools(role), max_output_tokens: 1000,
         audio: { input: assistantAudioInput(audioMode as "natural" | "noisy" | "manual", microphone as "speaker" | "headset"), output: { voice: ASSISTANT_VOICES[role] } },
       }));
@@ -183,7 +184,7 @@ export async function POST(request: Request): Promise<Response> {
         await requireAssistantSession(db, sessionId, principal.actorKey);
         const current = await authenticate(db, request, role); if (current instanceof Response) return current;
         await requireAssistantConsent(db, current.actorKey);
-        const response = await providerFetch("responses", JSON.stringify({ model: getRuntimeString("ASSISTANT_TEXT_MODEL") || "gpt-5.4-mini", store: false,
+        const response = await providerFetch("responses", JSON.stringify({ model: assistantModel(role, "text", getRuntimeString), store: false,
           instructions: assistantInstructions(role, `${now.date} ${now.time}`), input, tools: assistantTools(role).map((t) => ({ ...t, strict: false })),
           max_output_tokens: 1600, reasoning: { effort: "low" }, include: ["reasoning.encrypted_content"],
         }), key);

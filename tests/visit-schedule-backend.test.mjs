@@ -16,6 +16,7 @@ const assistant = { ...assistantStore, async createAssistantSession(db, actor, .
 } };
 const assistantLibrary = await import("../lib/assistant-library.ts");
 const assistantContract = await import("../lib/assistant-contract.ts");
+const assistantModels = await import("../lib/assistant-models.ts");
 
 test("assistant consent is durable, owner-scoped, versioned and costs no session quota", async () => {
   const { db, sqlite } = await visitDatabase();
@@ -90,6 +91,36 @@ test("assistant original male voices and speaking styles stay isolated by role",
   assert.deepEqual(assistantContract.assistantTools("teacher").map((t) => t.name), ["search_catalog", "material_details", "visit_schedule", "order_cart", "update_order_note", "update_order_cart", "my_visits", "my_profile", "my_acquisitions", "my_notifications", "teacher_action_schema", "prepare_teacher_action", "my_loans", "my_orders", "prepare_visit"]);
   const route = await readFile(new URL("../app/api/assistant/route.ts", import.meta.url), "utf8");
   assert.match(route, /output: \{ voice: ASSISTANT_VOICES\[role\] \}/);
+});
+
+test("Jarvis uses the strongest models while Buckingham keeps the existing economical pair", async () => {
+  const runtime = new Map([
+    ["ASSISTANT_TEXT_MODEL", "legacy-shared-text"],
+    ["ASSISTANT_REALTIME_MODEL", "legacy-shared-realtime"],
+  ]);
+  const readRuntimeString = (name) => runtime.get(name) ?? null;
+
+  assert.deepEqual(assistantModels.ASSISTANT_MODEL_DEFAULTS, {
+    teacher: { text: "gpt-5.4-mini", realtime: "gpt-realtime-mini" },
+    librarian: { text: "gpt-6-astra", realtime: "gpt-realtime-2.1" },
+  });
+  assert.equal(assistantModels.assistantModel("librarian", "text", readRuntimeString), "gpt-6-astra");
+  assert.equal(assistantModels.assistantModel("librarian", "realtime", readRuntimeString), "gpt-realtime-2.1");
+  assert.equal(assistantModels.assistantModel("teacher", "text", readRuntimeString), "legacy-shared-text");
+  assert.equal(assistantModels.assistantModel("teacher", "realtime", readRuntimeString), "legacy-shared-realtime");
+
+  runtime.set("ASSISTANT_LIBRARIAN_TEXT_MODEL", "librarian-text-override");
+  runtime.set("ASSISTANT_LIBRARIAN_REALTIME_MODEL", "librarian-realtime-override");
+  runtime.set("ASSISTANT_TEACHER_TEXT_MODEL", "teacher-text-override");
+  runtime.set("ASSISTANT_TEACHER_REALTIME_MODEL", "teacher-realtime-override");
+  assert.equal(assistantModels.assistantModel("librarian", "text", readRuntimeString), "librarian-text-override");
+  assert.equal(assistantModels.assistantModel("librarian", "realtime", readRuntimeString), "librarian-realtime-override");
+  assert.equal(assistantModels.assistantModel("teacher", "text", readRuntimeString), "teacher-text-override");
+  assert.equal(assistantModels.assistantModel("teacher", "realtime", readRuntimeString), "teacher-realtime-override");
+
+  const route = await readFile(new URL("../app/api/assistant/route.ts", import.meta.url), "utf8");
+  assert.match(route, /assistantModel\(role, "realtime", getRuntimeString\)/);
+  assert.match(route, /assistantModel\(role, "text", getRuntimeString\)/);
 });
 
 test("assistant registers voice calls before returning SDP and compensates storage failure", async () => {
