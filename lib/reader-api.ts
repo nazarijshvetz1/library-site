@@ -3,8 +3,9 @@ import {isSameOriginRequest} from "./request-origin.ts";
 import {readBoundedJson} from "./bounded-json.ts";
 import {ReaderError,readerFail,type ReaderDatabase} from "./reader-core.ts";
 import {teacherAuthPepper} from "./visit-teacher-auth.ts";
+import {VisitScheduleError} from "./visit-schedule-store.ts";
 export function readerJson(value:unknown,init:ResponseInit={}){const headers=new Headers(init.headers);headers.set("Cache-Control","private, no-store");headers.set("Content-Type","application/json; charset=utf-8");headers.set("X-Content-Type-Options","nosniff");return Response.json(value,{...init,headers});}
-export function readerApiError(error:unknown){if(error instanceof ReaderError)return readerJson({success:false,code:error.code,error:error.message},{status:error.status});return readerJson({success:false,code:"reader_unavailable",error:"Не вдалося виконати дію. Оновіть сторінку та спробуйте ще раз."},{status:503});}
+export function readerApiError(error:unknown){if(error instanceof ReaderError)return readerJson({success:false,code:error.code,error:error.message},{status:error.status});if(error instanceof VisitScheduleError&&(error.code==="telegram_init_data_invalid"||error.code==="telegram_init_data_expired"))return readerJson({success:false,code:error.code,error:error.message},{status:401});return readerJson({success:false,code:"reader_unavailable",error:"Не вдалося виконати дію. Оновіть сторінку та спробуйте ще раз."},{status:503});}
 export async function readerWriteBody(request:Request,limit=48000){
   if(!getRuntimeBoolean("LIBRARIAN_WRITES_ENABLED"))readerFail("writes_disabled","Запис тимчасово вимкнено адміністратором.",503);
   if(!isSameOriginRequest(request))readerFail("cross_origin_request","Запит має надійти з цього сайту.",403);
