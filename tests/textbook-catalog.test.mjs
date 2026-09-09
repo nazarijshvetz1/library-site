@@ -170,4 +170,10 @@ test("student and librarian UIs provide class selection, sorting, safe external 
   assert.match(telegramCabinet, /target === "textbooks"[\s\S]*?<TextbookManagementWorkspace[\s\S]*?telegramMiniApp/u);
   assert.match(telegramLaunch, /value === "textbooks"/u);
   assert.match(home, /href="\/textbooks"/u);
+  assert.match(publicUi, /import \{ PUBLIC_CATALOG_URL \} from "@\/lib\/public-catalog"/u);
+  assert.equal((publicUi.match(/href=\{PUBLIC_CATALOG_URL\}/gu) ?? []).length, 3);
+  assert.doesNotMatch(publicUi, /Каталог художньої літератури · Librarika/u);
+  assert.match(home, /import \{ PUBLIC_CATALOG_URL \} from "@\/lib\/public-catalog"/u);
+  assert.equal((home.match(/href=\{PUBLIC_CATALOG_URL\}/gu) ?? []).length, 2);
+  assert.match(home, /Публічний каталог навчальних матеріалів/u);
 });

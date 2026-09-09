@@ -1,5 +1,6 @@
 import {processReaderTelegramMessage} from "./reader-telegram.ts";
 import {LIBRARIKA_CATALOG_URL} from "./librarika.ts";
+import {PUBLIC_CATALOG_URL} from "./public-catalog.ts";
 import type { ChatGPTUser } from "../app/chatgpt-auth.ts";
 import { getRuntimeBoolean, getRuntimeString } from "./runtime-env.ts";
 
@@ -2356,6 +2357,7 @@ async function bestEffortTeacherOnboardingMenu(
 ): Promise<void> {
   try {
     const origin = siteOrigin ? trustedSiteOrigin(siteOrigin) : null;
+    const configuration = telegramConfiguration();
     const heading = invitedTeacherName
       ? `Персональне запрошення для «${safePlainText(invitedTeacherName, 120)}» підтверджено.`
       : "Вітаємо в «Єдиній бібліотеці»!";
@@ -2376,8 +2378,10 @@ async function bestEffortTeacherOnboardingMenu(
               [{ text: "✨ Активувати вперше", web_app: { url: new URL("/teacher/telegram?mode=activate", origin).toString() } }],
             ]),
         [{
-          text: "📚 Переглянути каталог",
-          url: LIBRARIKA_CATALOG_URL,
+          text: "📚 Публічний каталог",
+          ...(configuration.miniAppEnabled
+            ? { web_app: { url: PUBLIC_CATALOG_URL } }
+            : { url: PUBLIC_CATALOG_URL }),
         }],
         [{ text: "📅 Переглянути графік", url: new URL("/visits", origin).toString() }],
       ],

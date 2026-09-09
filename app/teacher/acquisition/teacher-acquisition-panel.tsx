@@ -193,7 +193,7 @@ export default function TeacherAcquisitionPanel() {
         <form className={styles.card} onSubmit={submit} aria-busy={busy}>
           <fieldset className={styles.segmented}><legend>Що потрібно?</legend>
             <label><input type="radio" name="category" checked={category === "educational"} onChange={() => setCategory("educational")} /> Дозамовити навчальні матеріали</label>
-            <label><input type="radio" name="category" checked={category === "literature"} onChange={() => { setCategory("literature"); changeSource("manual"); }} /> Запропонувати літературу</label>
+            <label><input type="radio" name="category" checked={category === "literature"} onChange={() => { setCategory("literature"); changeSource("manual"); }} /> Запропонувати художню і наукову літературу</label>
           </fieldset>
           {category === "educational" ? <fieldset className={styles.segmented}><legend>Чи є матеріал у каталозі?</legend>
             <label><input type="radio" name="source" checked={sourceKind === "catalog"} onChange={() => changeSource("catalog")} /> Є у каталозі</label>

@@ -6,8 +6,8 @@ import {
   getChatGPTUser,
 } from "./chatgpt-auth";
 import SiteIcon from "./_components/site-icon";
+import { PUBLIC_CATALOG_URL } from "@/lib/public-catalog";
 
-const PUBLIC_CATALOG_URL = "/library";
 const LOGO_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +29,7 @@ export default async function Home() {
         <div className="hero-actions" style={{ marginTop: 0 }}>
           <a className="nav-link" href="/textbooks">Е-підручники</a>
           <a className="nav-link" href={PUBLIC_CATALOG_URL}>
-            Каталог художньої літератури · Librarika
+            Публічний каталог
             <SiteIcon name="external" size={17} />
           </a>
         </div>
@@ -67,7 +67,7 @@ export default async function Home() {
               </a>
             )}
             <a className="button button-secondary" href={PUBLIC_CATALOG_URL}>
-              Каталог художньої літератури · Librarika
+              Публічний каталог навчальних матеріалів
             </a>
             <a className="button button-secondary" href="/textbooks">
               Е-підручники 1–11 класів

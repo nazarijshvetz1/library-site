@@ -74,6 +74,7 @@ import {
   writeVisitPendingIntent,
 } from "./visit-client";
 import { normalizeCoverPhotoForUpload } from "@/lib/cover-client";
+import { PUBLIC_CATALOG_URL } from "@/lib/public-catalog";
 import TeacherAcquisitionPanel from "@/app/teacher/acquisition/teacher-acquisition-panel";
 import {
   boundedTeacherOrderView,
@@ -86,7 +87,6 @@ import {
 import styles from "./visits.module.css";
 
 const LOGO_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
-const PUBLIC_CATALOG_URL = "/library";
 
 type Props = {
   initialDate: string;
@@ -1469,7 +1469,7 @@ function VisitBookingPanel({
             <div className={styles.teacherSidebarUtilities}>
               <a href={telegramMiniApp ? "/reader/telegram?tab=books" : "/reader?tab=books"}><SiteIcon name="catalog" size={18} /> Мої книги · Художня та наукова література</a>
               <button type="button" onClick={() => setSecurityOpen(true)} disabled={signingOut || submitting || Boolean(pending)}><SiteIcon name="security" size={18} /> Безпека і PIN</button>
-              <a href={PUBLIC_CATALOG_URL} target="_blank" rel="noreferrer"><SiteIcon name="external" size={18} /> Відкрити каталог</a>
+              <a href={PUBLIC_CATALOG_URL} target="_blank" rel="noreferrer"><SiteIcon name="external" size={18} /> Відкрити публічний каталог</a>
               <button type="button" className={styles.teacherSignOut} onClick={() => void onSignOut()} disabled={signingOut || submitting || Boolean(pending)}><SiteIcon name="logout" size={18} /> {signingOut ? "Виходимо…" : "Вийти"}</button>
             </div>
           </aside>
@@ -1617,7 +1617,7 @@ function VisitBookingPanel({
               <div className={styles.teacherMobileMenuUtilities}>
                 <a href={telegramMiniApp ? "/reader/telegram?tab=books" : "/reader?tab=books"}><SiteIcon name="catalog" size={18} /> Мої книги · Художня та наукова література</a>
                 <button type="button" onClick={() => { setMobileMenuOpen(false); setSecurityOpen(true); }} disabled={signingOut || submitting || Boolean(pending)}><SiteIcon name="security" size={18} /> Безпека і PIN</button>
-                <a href={PUBLIC_CATALOG_URL} target="_blank" rel="noreferrer"><SiteIcon name="external" size={18} /> Відкрити каталог</a>
+                <a href={PUBLIC_CATALOG_URL} target="_blank" rel="noreferrer"><SiteIcon name="external" size={18} /> Відкрити публічний каталог</a>
                 <button type="button" className={styles.teacherSignOut} onClick={() => void onSignOut()} disabled={signingOut || submitting || Boolean(pending)}><SiteIcon name="logout" size={18} /> Вийти з кабінету</button>
               </div>
             </section>

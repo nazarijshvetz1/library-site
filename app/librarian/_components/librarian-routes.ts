@@ -1,3 +1,5 @@
+import { PUBLIC_CATALOG_URL } from "@/lib/public-catalog";
+
 export const LIBRARIAN_SECTIONS = [
   "home",
   "fund",
@@ -14,7 +16,6 @@ export type LibrarianSection = (typeof LIBRARIAN_SECTIONS)[number];
 
 export type LibrarianUtility = "publicCatalog" | "excelExport" | "excelImport" | "telegram";
 
-export const PUBLIC_CATALOG_URL = LIBRARIKA_CATALOG_URL;
 export const LIBRARY_EMBLEM_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
 
 const WEB_SECTION_ROUTES: Record<LibrarianSection, string> = {
@@ -84,4 +85,3 @@ export function librarianUtilityHref(
     ? "/librarian/telegram/cabinet?target=teachers&tab=telegram"
     : "/librarian/teachers?tab=telegram";
 }
-import {LIBRARIKA_CATALOG_URL} from "@/lib/librarika";

@@ -210,6 +210,10 @@ test("authenticated teacher workflows use frozen routes and exact request fields
   assert.equal((workspace.match(/return "Запропонувати придбання"/gu) ?? []).length, 1);
   assert.doesNotMatch(acquisitionPanel, /acquisition-teacher-title|<h2[^>]*>Запропонувати придбання<\/h2>/u);
   assert.match(acquisitionPanel, /aria-label="Комплектування фонду"/u);
+  assert.match(acquisitionPanel, /> Запропонувати художню і наукову літературу<\/label>/u);
+  assert.doesNotMatch(acquisitionPanel, /> Запропонувати літературу<\/label>/u);
+  assert.match(workspace, /import \{ PUBLIC_CATALOG_URL \} from "@\/lib\/public-catalog"/u);
+  assert.equal((workspace.match(/href=\{PUBLIC_CATALOG_URL\}/gu) ?? []).length, 3);
   assert.match(css, /\.teacherPortalContent \.card\.overviewActionCard \{ min-height: 220px; padding-top: 72px; \}/u);
   assert.match(css, /\.securityDialog \.generatedCode \{ display: grid; grid-template-columns: minmax\(0,1fr\) auto;/u);
   assert.match(css, /\.securityDialog \.generatedCode input \{ min-height: 50px; height: 50px; flex: none; \}/u);

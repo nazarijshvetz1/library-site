@@ -210,10 +210,13 @@ test("acquisition interfaces expose catalog metadata, optional student fields an
   assert.match(teacherUi,/historyRequest = useRef\(0\)/u);assert.match(teacherUi,/requestId !== historyRequest\.current/u);
   assert.match(teacherUi,/action: hidden \? "hide" : "restore"/u);assert.match(teacherUi,/Бібліотекар і далі бачитиме цю пропозицію/u);
   assert.match(teacherUi,/Показати приховані/u);assert.match(teacherUi,/Приховати всі завершені/u);assert.match(teacherUi,/CollapsibleListSection/u);
+  assert.match(teacherUi,/> Запропонувати художню і наукову літературу<\/label>/u);assert.doesNotMatch(teacherUi,/> Запропонувати літературу<\/label>/u);
   assert.match(studentUi,/publicationYear:year\.trim\(\)\?Number\(year\):null/u);assert.match(studentUi,/requestedQuantity:quantity\.trim\(\)\?Number\(quantity\):null/u);
   assert.match(studentUi,/Автор <em>\*<\/em>[\s\S]*?name="author"[\s\S]*?required minLength=\{2\}/u);assert.doesNotMatch(studentUi,/Покликання на книгу \*<input/u);
   assert.match(studentUi,/Потрібні лише 4 поля/u);
   assert.match(studentUi,/library-logo\.png/u);assert.match(studentUi,/referenceKey/u);assert.match(studentUi,/Спробувати ще раз/u);
+  assert.match(studentUi,/href=\{PUBLIC_CATALOG_URL\} aria-label="Єдина бібліотека — відкрити публічний каталог"/u);
+  assert.equal((studentUi.match(/href=\{LIBRARIKA_CATALOG_URL\}/gu)??[]).length,2);
   assert.match(studentUi,/href="#suggestion-form"/u);assert.match(studentUi,/feedbackRef\.current\?\.focus\(\)/u);
   assert.match(studentUi,/Object\.values\(body\.fieldErrors \?\? \{\}\)\[0\] \|\| body\.error/u);
   assert.match(studentUi,/submissionRef = useRef/u);assert.match(studentUi,/fingerprint !== fingerprint/u);

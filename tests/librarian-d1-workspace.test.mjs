@@ -469,11 +469,12 @@ test("active D1 ISBN scanner keeps mobile camera access independent from native 
 });
 
 test("new librarian route renders D1 workspace inside the shared branded shell", async () => {
-  const [page, workspace, shell, routes, client, styles] = await Promise.all([
+  const [page, workspace, shell, routes, legacyWorkspace, client, styles] = await Promise.all([
     read("app/librarian/page.tsx"),
     read("app/librarian/d1-workspace.tsx"),
     read("app/librarian/_components/librarian-shell.tsx"),
     read("app/librarian/_components/librarian-routes.ts"),
+    read("app/librarian/workspace.tsx"),
     read("lib/librarian-d1-client.ts"),
     read("app/librarian/d1-workspace.module.css"),
   ]);
@@ -484,8 +485,11 @@ test("new librarian route renders D1 workspace inside the shared branded shell",
   assert.match(shell, /LIBRARY_EMBLEM_URL/u);
   assert.match(shell, /target="_blank"/u);
   assert.match(shell, /rel="noopener noreferrer"/u);
-  assert.match(routes, /PUBLIC_CATALOG_URL = LIBRARIKA_CATALOG_URL/u);
-  assert.match(routes, /import\s*\{\s*LIBRARIKA_CATALOG_URL\s*\}\s*from\s*"@\/lib\/librarika"/u);
+  assert.match(routes, /import\s*\{\s*PUBLIC_CATALOG_URL\s*\}\s*from\s*"@\/lib\/public-catalog"/u);
+  assert.doesNotMatch(routes, /LIBRARIKA_CATALOG_URL/u);
+  assert.match(legacyWorkspace, /import \{ PUBLIC_CATALOG_URL \} from "@\/lib\/public-catalog"/u);
+  assert.match(legacyWorkspace, /href=\{PUBLIC_CATALOG_URL\}>Каталог/u);
+  assert.doesNotMatch(legacyWorkspace, /const PUBLIC_CATALOG_URL = "\/library"/u);
   assert.doesNotMatch(
     workspace,
     /<Link href="\/" className=\{styles\.catalogLink\}>/u,

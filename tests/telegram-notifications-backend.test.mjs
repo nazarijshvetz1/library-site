@@ -656,10 +656,10 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
   assert.equal(onboardingMessage.reply_markup.inline_keyboard[1][0].text, "✨ Активувати вперше");
   assert.equal(onboardingMessage.reply_markup.inline_keyboard[1][0].web_app.url,
     "https://library.example.test/teacher/telegram?mode=activate");
-  assert.equal(onboardingMessage.reply_markup.inline_keyboard[2][0].text, "📚 Переглянути каталог");
-  assert.equal(onboardingMessage.reply_markup.inline_keyboard[2][0].url,
-    "https://librarylyceummaup.librarika.com/search");
-  assert.equal(onboardingMessage.reply_markup.inline_keyboard[2][0].web_app, undefined);
+  assert.equal(onboardingMessage.reply_markup.inline_keyboard[2][0].text, "📚 Публічний каталог");
+  assert.equal(onboardingMessage.reply_markup.inline_keyboard[2][0].web_app.url,
+    "https://nazarijshvetz1.github.io/library-site/");
+  assert.equal(onboardingMessage.reply_markup.inline_keyboard[2][0].url, undefined);
   assert.equal(onboardingMenu.menu_button.web_app.url, "https://library.example.test/teacher/telegram?tab=overview");
   assert.deepEqual(
     { ...teacher.sqlite.prepare(`SELECT kind,teacher_user_id,bound_telegram_user_id,bound_chat_id

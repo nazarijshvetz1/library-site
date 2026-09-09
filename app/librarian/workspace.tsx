@@ -20,6 +20,7 @@ import {
   refreshedDraftApplyOutcome,
 } from "@/lib/draft-apply-ui";
 import { normalizeCoverPhotoForUpload } from "@/lib/cover-client";
+import { PUBLIC_CATALOG_URL } from "@/lib/public-catalog";
 import {
   entityVersionIsCurrent,
   findEntityVersion,
@@ -177,7 +178,6 @@ declare global {
 
 const LOGO_URL =
   "https://nazarijshvetz1.github.io/library-site/library-logo.png";
-const PUBLIC_CATALOG_URL = "/library";
 
 const SCENARIOS: Array<{
   kind: DraftKind;

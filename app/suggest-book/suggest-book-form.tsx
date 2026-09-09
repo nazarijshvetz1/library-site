@@ -4,9 +4,10 @@
 
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import SiteIcon from "../_components/site-icon";
+import { LIBRARIKA_CATALOG_URL } from "@/lib/librarika";
+import { PUBLIC_CATALOG_URL } from "@/lib/public-catalog";
 import styles from "./suggest-book.module.css";
 
-const PUBLIC_CATALOG_URL = "/library";
 const TEACHER_CABINET_URL = "https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/teacher";
 const LOGO_URL = "https://nazarijshvetz1.github.io/library-site/library-logo.png";
 
@@ -138,7 +139,7 @@ export default function SuggestBookForm() {
           <span><strong>Єдина бібліотека</strong><small>Міжнародний ліцей МАУП</small></span>
         </a>
         <nav aria-label="Основна навігація">
-          <a href={PUBLIC_CATALOG_URL}>Каталог художньої літератури · Librarika <SiteIcon name="external" size={17} /></a>
+          <a href={LIBRARIKA_CATALOG_URL}>Каталог художньої літератури · Librarika <SiteIcon name="external" size={17} /></a>
           <a href={TEACHER_CABINET_URL}>Кабінет учителя</a>
         </nav>
       </header>
@@ -241,7 +242,7 @@ export default function SuggestBookForm() {
 
       <footer className={styles.footer}>
         <span>Єдина бібліотека · Міжнародний ліцей МАУП</span>
-        <a href={PUBLIC_CATALOG_URL}>До каталогу художньої літератури · Librarika <SiteIcon name="external" size={17} /></a>
+        <a href={LIBRARIKA_CATALOG_URL}>До каталогу художньої літератури · Librarika <SiteIcon name="external" size={17} /></a>
       </footer>
     </div>
   );

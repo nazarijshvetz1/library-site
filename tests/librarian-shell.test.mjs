@@ -9,6 +9,9 @@ registerHooks({
     if (specifier === "@/lib/librarika") {
       return { url: new URL("../lib/librarika.ts", import.meta.url).href, shortCircuit: true };
     }
+    if (specifier === "@/lib/public-catalog") {
+      return { url: new URL("../lib/public-catalog.ts", import.meta.url).href, shortCircuit: true };
+    }
     return nextResolve(specifier, context);
   },
 });
@@ -22,6 +25,8 @@ const {
   librarianToolHref,
   librarianUtilityHref,
 } = await import("../app/librarian/_components/librarian-routes.ts");
+const { PUBLIC_CATALOG_URL } = await import("../lib/public-catalog.ts");
+const { LIBRARIKA_CATALOG_URL } = await import("../lib/librarika.ts");
 
 const expectedWebRoutes = {
   home: "/librarian",
@@ -76,8 +81,10 @@ test("shared librarian route helper freezes web and Telegram Mini App destinatio
     assert.equal(librarianSectionHref(section, false), expectedWebRoutes[section]);
     assert.equal(librarianSectionHref(section, true), expectedTelegramRoutes[section]);
   }
-  assert.equal(librarianUtilityHref("publicCatalog", false), "https://librarylyceummaup.librarika.com/search");
-  assert.equal(librarianUtilityHref("publicCatalog", true), "https://librarylyceummaup.librarika.com/search");
+  assert.equal(PUBLIC_CATALOG_URL, "https://nazarijshvetz1.github.io/library-site/");
+  assert.notEqual(PUBLIC_CATALOG_URL, LIBRARIKA_CATALOG_URL);
+  assert.equal(librarianUtilityHref("publicCatalog", false), PUBLIC_CATALOG_URL);
+  assert.equal(librarianUtilityHref("publicCatalog", true), PUBLIC_CATALOG_URL);
   assert.equal(librarianUtilityHref("excelExport", false), "/librarian/reports");
   assert.equal(librarianUtilityHref("excelExport", true), null);
   assert.equal(librarianUtilityHref("excelImport", false), "/librarian/import");
@@ -90,6 +97,7 @@ test("shared librarian route helper freezes web and Telegram Mini App destinatio
   assert.equal(librarianTextbooksHref(true), "/librarian/telegram/cabinet?target=textbooks");
   assert.equal(librarianLiteratureHref(false), "/librarian/literature");
   assert.equal(librarianLiteratureHref(true), "/librarian/telegram/cabinet?target=literature");
+  assert.notEqual(librarianUtilityHref("publicCatalog", false), librarianLiteratureHref(false));
 });
 
 test("LibrarianShell keeps the official emblem, full-page navigation, and accessible mobile drawer", async () => {
@@ -103,6 +111,7 @@ test("LibrarianShell keeps the official emblem, full-page navigation, and access
   assert.match(source, /<img src=\{LIBRARY_EMBLEM_URL\}/u);
   assert.match(source, /<strong>Єдина бібліотека<\/strong>/u);
   assert.match(source, /<small>Міжнародний ліцей МАУП<\/small>/u);
+  assert.equal((source.match(/href=\{publicCatalogHref \?\? undefined\}/gu) ?? []).length, 3);
   assert.doesNotMatch(source, /next\/link|<Link\b|<svg\b/iu);
   assert.match(source, /aria-current=\{active \? "page" : undefined\}/u);
   assert.match(source, /aria-expanded=\{drawerOpen\}/u);
