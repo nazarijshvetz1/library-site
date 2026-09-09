@@ -561,7 +561,7 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
     [
       "👤 Кабінет учителя",
       "✨ Містер Букінгем · ШІ",
-      "📚 Каталог художньої літератури",
+      "📚 Каталог",
       "🛒 Замовлення з фонду бібліотеки",
       "➕ Запропонувати придбання",
       "📅 Записатися / мої відвідування",
@@ -574,7 +574,7 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
     [
       "https://library.example.test/teacher/telegram?tab=overview",
       "https://library.example.test/teacher/telegram?tab=assistant",
-      "https://librarylyceummaup.librarika.com/search",
+      "https://nazarijshvetz1.github.io/library-site/",
       "https://library.example.test/teacher/telegram?tab=orders",
       "https://library.example.test/teacher/telegram?tab=acquisition",
       "https://library.example.test/teacher/telegram?tab=visits",
@@ -582,7 +582,9 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
       "https://library.example.test/teacher/telegram?tab=notifications",
     ],
   );
-  assert.equal(teacherMessage.reply_markup.inline_keyboard[2][0].web_app, undefined);
+  assert.equal(teacherMessage.reply_markup.inline_keyboard[2][0].web_app.url,
+    "https://nazarijshvetz1.github.io/library-site/");
+  assert.equal(teacherMessage.reply_markup.inline_keyboard[2][0].url, undefined);
   assert.equal(teacherMessage.reply_markup.inline_keyboard[8][0].callback_data, "telegram-notifications:off");
   assert.equal(menuButton.menu_button.type, "web_app");
   assert.equal(menuButton.chat_id, 7001);
@@ -656,7 +658,7 @@ test("connected private chats receive role-aware menus and teacher Mini App butt
   assert.equal(onboardingMessage.reply_markup.inline_keyboard[1][0].text, "✨ Активувати вперше");
   assert.equal(onboardingMessage.reply_markup.inline_keyboard[1][0].web_app.url,
     "https://library.example.test/teacher/telegram?mode=activate");
-  assert.equal(onboardingMessage.reply_markup.inline_keyboard[2][0].text, "📚 Публічний каталог");
+  assert.equal(onboardingMessage.reply_markup.inline_keyboard[2][0].text, "📚 Каталог");
   assert.equal(onboardingMessage.reply_markup.inline_keyboard[2][0].web_app.url,
     "https://nazarijshvetz1.github.io/library-site/");
   assert.equal(onboardingMessage.reply_markup.inline_keyboard[2][0].url, undefined);
@@ -766,8 +768,8 @@ test("connected menus preserve ordinary-link fallbacks when Telegram Mini App is
       "https://library.example.test",
     ), { outcome: "menu", duplicate: false });
     const teacherMenu = teacherBodies.find((body) => body.text).reply_markup.inline_keyboard;
-    assert.equal(teacherMenu[2][0].text, "📚 Каталог художньої літератури");
-    assert.equal(teacherMenu[2][0].url, "https://librarylyceummaup.librarika.com/search");
+    assert.equal(teacherMenu[2][0].text, "📚 Каталог");
+    assert.equal(teacherMenu[2][0].url, "https://nazarijshvetz1.github.io/library-site/");
     assert.equal(teacherMenu[2][0].web_app, undefined);
     assert.equal(teacherMenu[3][0].text, "🛒 Замовлення з фонду бібліотеки");
     assert.equal(teacherMenu[3][0].url, "https://library.example.test/teacher?tab=orders");
@@ -890,10 +892,9 @@ test("verified Mini App login refreshes only the exact connected teacher menu", 
   assert.equal(message.reply_markup.inline_keyboard.length, 9);
   assert.equal(message.reply_markup.inline_keyboard[0][0].web_app.url,
     "https://library.example.test/teacher/telegram?tab=overview");
-  assert.equal(message.reply_markup.inline_keyboard[2][0].url,
-    "https://librarylyceummaup.librarika.com/search");
-  assert.equal(message.reply_markup.inline_keyboard[2][0].web_app, undefined,
-    "the external Librarika catalog must not be launched as our Telegram Mini App");
+  assert.equal(message.reply_markup.inline_keyboard[2][0].web_app.url,
+    "https://nazarijshvetz1.github.io/library-site/");
+  assert.equal(message.reply_markup.inline_keyboard[2][0].url, undefined);
   assert.equal(message.reply_markup.inline_keyboard[3][0].web_app.url,
     "https://library.example.test/teacher/telegram?tab=orders");
   assert.equal(message.reply_markup.inline_keyboard[8][0].callback_data, "telegram-notifications:off");

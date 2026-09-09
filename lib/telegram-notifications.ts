@@ -1,5 +1,4 @@
 import {processReaderTelegramMessage} from "./reader-telegram.ts";
-import {LIBRARIKA_CATALOG_URL} from "./librarika.ts";
 import {PUBLIC_CATALOG_URL} from "./public-catalog.ts";
 import type { ChatGPTUser } from "../app/chatgpt-auth.ts";
 import { getRuntimeBoolean, getRuntimeString } from "./runtime-env.ts";
@@ -2378,7 +2377,7 @@ async function bestEffortTeacherOnboardingMenu(
               [{ text: "✨ Активувати вперше", web_app: { url: new URL("/teacher/telegram?mode=activate", origin).toString() } }],
             ]),
         [{
-          text: "📚 Публічний каталог",
+          text: "📚 Каталог",
           ...(configuration.miniAppEnabled
             ? { web_app: { url: PUBLIC_CATALOG_URL } }
             : { url: PUBLIC_CATALOG_URL }),
@@ -2758,7 +2757,7 @@ function telegramRoleKeyboard(
     const buttons = [
       {text:"👤 Кабінет учителя",miniPath:"/teacher/telegram?tab=overview"},
       {text:"✨ Містер Букінгем · ШІ",miniPath:"/teacher/telegram?tab=assistant"},
-      {text:"📚 Каталог художньої літератури",miniPath:LIBRARIKA_CATALOG_URL,external:true},
+      {text:"📚 Каталог",miniPath:PUBLIC_CATALOG_URL},
       {text:"🛒 Замовлення з фонду бібліотеки",miniPath:"/teacher/telegram?tab=orders"},
       {text:"➕ Запропонувати придбання",miniPath:"/teacher/telegram?tab=acquisition"},
       {text:"📅 Записатися / мої відвідування",miniPath:"/teacher/telegram?tab=visits"},
