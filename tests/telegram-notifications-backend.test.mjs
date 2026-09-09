@@ -508,7 +508,7 @@ test("personal PIN-reset QR permits same-teacher Telegram rebind but rejects a T
 });
 
 test("connected private chats receive role-aware menus and teacher Mini App buttons", async () => {
-  assert.equal(telegram.TELEGRAM_TEACHER_MENU_VERSION, 2);
+  assert.equal(telegram.TELEGRAM_TEACHER_MENU_VERSION, 3);
   const teacher = await database();
   addTeacherCredential(teacher);
   teacher.sqlite.prepare(`INSERT INTO telegram_connections (
