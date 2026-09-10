@@ -3030,7 +3030,7 @@ function TeacherOrdersPanel({
         {catalogPage?.hasMore && catalogPage.nextCursor ? <button className={styles.loadMore} type="button" onClick={() => void loadCatalog(catalogPage.nextCursor ?? "")} disabled={loading || catalogLoadingMore}>{catalogLoadingMore ? "Завантажуємо…" : "Завантажити ще"}</button> : null}
       </div>
       {cartOpen ? <button className={styles.cartBackdrop} type="button" aria-label="Закрити кошик" onClick={() => setCartOpen(false)} /> : null}
-      <aside className={`${styles.card} ${styles.orderCart} ${cartOpen ? styles.orderCartOpen : ""}`} aria-labelledby="cart-title">
+      <aside id="teacher-order-cart" className={`${styles.card} ${styles.orderCart} ${cartOpen ? styles.orderCartOpen : ""}`} aria-labelledby="cart-title">
         <div className={styles.cardHeading}><div><span>Фінальний крок · перевірка</span><h2 id="cart-title">Кошик</h2></div><div className={styles.cartHeadingActions}><strong>{cartRows.length} поз. · {cartQuantity} прим.</strong><button className={styles.cartClose} type="button" onClick={() => setCartOpen(false)} aria-label="Закрити кошик">×</button></div></div>
         {cartRows.length ? <ul className={styles.cartList}>{cartRows.map(({ item, quantity }) => (
           <li key={item.id}>
@@ -3042,7 +3042,10 @@ function TeacherOrdersPanel({
         <label className={styles.portalSearch}>Примітка бібліотекарю
           <textarea maxLength={300} value={notes} onChange={(event) => setNotes(event.currentTarget.value)} placeholder="Необов’язково: для якого уроку або класу" disabled={submitting || Boolean(pending)} />
         </label>
-        <button className={styles.primary} type="button" onClick={submitOrder} disabled={!cartRows.length || submitting || Boolean(pending)}>{submitting ? "Оформлюємо…" : "Оформити замовлення"}</button>
+        <div className={styles.cartActions}>
+          <button className={styles.quiet} type="button" onClick={() => setCartOpen(false)} disabled={submitting || Boolean(pending)} aria-label="Закрити кошик і продовжити вибір матеріалів">Продовжити замовлення</button>
+          <button className={styles.primary} type="button" onClick={submitOrder} disabled={!cartRows.length || submitting || Boolean(pending)}>{submitting ? "Оформлюємо…" : "Оформити замовлення"}</button>
+        </div>
         <p className={styles.authHelp}>Фактичний залишок бібліотекар перевірить під час підготовки замовлення.</p>
       </aside>
       </div>
@@ -3065,7 +3068,7 @@ function TeacherOrdersPanel({
           <button className={styles.primary} type="button" onClick={() => { add(selectedDetail); setSelectedDetail(null); }} disabled={submitting || Boolean(pending) || selectedDetail.availableQuantity < 1 || (cart[selectedDetail.id]?.quantity ?? 0) >= selectedDetail.availableQuantity || cartRows.length >= 10 && !cart[selectedDetail.id]}>Додати до кошика</button>
         </section>
       </> : null}
-      <button className={styles.mobileCartBar} type="button" onClick={() => setCartOpen(true)} disabled={!cartRows.length} aria-expanded={cartOpen}>
+      <button className={styles.mobileCartBar} type="button" onClick={() => setCartOpen(true)} disabled={!cartRows.length} aria-expanded={cartOpen} aria-controls="teacher-order-cart">
         <span><SiteIcon name="orders" size={18} /><strong>Кошик · {cartRows.length}</strong><small>{cartQuantity} примірників</small></span><b>Продовжити замовлення</b>
       </button>
       </> : null}

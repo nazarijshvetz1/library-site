@@ -777,6 +777,8 @@
 .teacherPortalContent :is(.primary,.danger,.quiet,.loadMore,.pending button) { min-height: 36px; border-radius: var(--system-radius-sm); font-size: 12px; }
 .teacherPortalContent .orderLayout { grid-template-columns: minmax(0,1.6fr) minmax(286px,.62fr); gap: 12px; }
 .orderCart { position: sticky; top: 74px; }
+.cartActions { margin-top: 20px; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.cartActions :is(.primary,.quiet) { width: 100%; margin-top: 0; }
 .cartHeadingActions { display: flex; align-items: center; gap: 8px; }
 .cartClose,
 .mobileCartBar,
@@ -879,6 +881,7 @@
   }
   .teacherMobileNav button { min-height: 50px; border-radius: 10px; }
   .teacherPortalContent .orderLayout { grid-template-columns: 1fr; }
+  .cartActions { grid-template-columns: 1fr; }
   .orderCart {
     position: fixed!important;
     z-index: 82;

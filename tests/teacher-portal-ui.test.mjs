@@ -424,6 +424,11 @@ test("teacher orders and notifications page with the frozen opaque cursor", asyn
   assert.match(orders, /Фінальний крок · перевірка/u);
   assert.match(orders, /\{cartRows\.length\} поз\. · \{cartQuantity\} прим\./u);
   assert.match(orders, /submitting \? "Оформлюємо…" : "Оформити замовлення"/u);
+  assert.match(orders, /aria-label="Закрити кошик і продовжити вибір матеріалів">Продовжити замовлення<\/button>/u);
+  assert.match(orders, /aria-controls="teacher-order-cart"/u);
+  assert.equal(orders.match(/Продовжити замовлення/gu)?.length, 2);
+  assert.match(css, /\.cartActions \{[\s\S]*?grid-template-columns: repeat\(2,minmax\(0,1fr\)\);/u);
+  assert.match(css, /@media \(max-width: 840px\) \{[\s\S]*?\.cartActions \{ grid-template-columns: 1fr; \}/u);
   assert.match(orders, /<b>Продовжити замовлення<\/b>/u);
   assert.match(css, /\.cartToast\s*\{[\s\S]*?position: fixed;/u);
   assert.match(css, /\.cartLeaveReminder\s*\{[\s\S]*?width: min\(440px,100%\);/u);
