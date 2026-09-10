@@ -61,7 +61,7 @@ export async function cancelReaderBookRequest(db:ReaderDatabase,identity:ReaderI
 export async function saveReaderRating(db:ReaderDatabase,identity:ReaderIdentity,input:{requestId:string;editionId:string;rating:number;body:string;expectedVersion:number}){
   if(!Number.isInteger(input.rating)||input.rating<1||input.rating>5||typeof input.body!=="string"||input.body.length>4000||!Number.isInteger(input.expectedVersion)||input.expectedVersion<0)readerFail("rating_invalid","Оберіть від 1 до 5 зірок; відгук — до 4000 символів.");
   const replay=await readerReplay(db,identity,input.requestId,"rating",input);if(replay.replayed)return replay.replayed;
-  const now=new Date().toISOString(),result={version:input.expectedVersion+1,reviewState:input.body.trim()?"pending":"published"};
+  const now=new Date().toISOString(),result={version:input.expectedVersion+1,reviewState:"published"};
   const statement=input.expectedVersion===0?db.prepare(`INSERT INTO library_ratings(edition_id,reader_id,rating,body,review_state,version,created_at,updated_at)
     VALUES((SELECT e.id FROM library_editions e JOIN materials m ON m.id=e.material_id AND m.status='active' WHERE e.id=? AND e.publication_state='published'),?,?,?,?,1,?,?)`).bind(input.editionId,identity.readerId,input.rating,input.body.trim(),result.reviewState,now,now)
     :db.prepare(`UPDATE library_ratings SET rating=?,body=?,review_state=?,version=version+1,updated_at=? WHERE edition_id=? AND reader_id=? AND version=? AND EXISTS(SELECT 1 FROM library_editions e JOIN materials m ON m.id=e.material_id AND m.status='active' WHERE e.id=? AND e.publication_state='published')`).bind(input.rating,input.body.trim(),result.reviewState,now,input.editionId,identity.readerId,input.expectedVersion,input.editionId);

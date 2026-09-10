@@ -181,7 +181,7 @@ export default function LibrarianShell({
             Публічний каталог <SiteIcon name="external" size={16} />
           </a>
           <a href={librarianLiteratureHref(telegramMiniApp)}>
-            Librarika <SiteIcon name="catalog" size={16} />
+            Лібраріка <SiteIcon name="catalog" size={16} />
           </a>
           {excelExportHref ? <a href={excelExportHref}>Звіти <SiteIcon name="reports" size={16} /></a> : null}
           {excelImportHref ? <a href={excelImportHref}>Імпорт <SiteIcon name="import" size={16} /></a> : null}
@@ -255,7 +255,7 @@ export default function LibrarianShell({
           </nav>
           <nav className={styles.sidebarUtilities} aria-label="Службові посилання кабінету">
             <a href={publicCatalogHref ?? undefined} target="_blank" rel="noopener noreferrer">Публічний каталог <SiteIcon name="external" size={15} /></a>
-            <a href={librarianLiteratureHref(telegramMiniApp)}><SiteIcon name="catalog" size={15} /> Librarika та читачі</a>
+            <a href={librarianLiteratureHref(telegramMiniApp)}><SiteIcon name="catalog" size={15} /> Лібраріка</a>
             {excelExportHref ? <a href={excelExportHref}><SiteIcon name="reports" size={15} /> Звіти й документи</a> : null}
             {excelImportHref ? <a href={excelImportHref}><SiteIcon name="import" size={15} /> Імпорт з Excel</a> : null}
             <a href={telegramHref ?? undefined}><SiteIcon name="telegram" size={15} /> Telegram</a>
@@ -384,7 +384,7 @@ export default function LibrarianShell({
             </nav>
             <div className={styles.drawerUtilities}>
               <a href={publicCatalogHref ?? undefined} target="_blank" rel="noopener noreferrer">Публічний каталог <SiteIcon name="external" size={16} /></a>
-              <a href={librarianLiteratureHref(telegramMiniApp)}><SiteIcon name="catalog" size={16} /> Librarika та читачі</a>
+              <a href={librarianLiteratureHref(telegramMiniApp)}><SiteIcon name="catalog" size={16} /> Лібраріка</a>
               {excelExportHref ? <a href={excelExportHref}><SiteIcon name="reports" size={16} /> Звіти й документи</a> : null}
               {excelImportHref ? <a href={excelImportHref}><SiteIcon name="import" size={16} /> Імпорт з Excel</a> : null}
               <a href={telegramHref ?? undefined}><SiteIcon name="telegram" size={16} /> Telegram</a>

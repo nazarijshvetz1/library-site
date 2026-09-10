@@ -23,7 +23,7 @@ test("book request needs confirmation, replays once and another reader cannot ca
 });
 test("one reader rating per edition, review moderation and access race are enforced",async()=>{
   const db=readerDatabase();try{const identity=await login(db);await store.saveReaderRating(db,identity,{requestId:crypto.randomUUID(),editionId:"edition",rating:3,body:"Мій відгук",expectedVersion:0});
-    const rating=db.sqlite.prepare("SELECT rating,review_state FROM library_ratings").get();assert.equal(rating.rating,3);assert.equal(rating.review_state,"pending");
+    const rating=db.sqlite.prepare("SELECT rating,review_state FROM library_ratings").get();assert.equal(rating.rating,3);assert.equal(rating.review_state,"published");
     await assert.rejects(store.saveReaderRating(db,identity,{requestId:crypto.randomUUID(),editionId:"edition",rating:5,body:"Другий",expectedVersion:0}));
     db.beforeBatch=()=>db.sqlite.exec("UPDATE library_readers SET access_version=access_version+1 WHERE id='reader-a'");
     await assert.rejects(store.setReaderBookSubscription(db,identity,{requestId:crypto.randomUUID(),editionId:"edition",subscribed:true}));

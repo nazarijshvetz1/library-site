@@ -130,8 +130,8 @@ test("LibrarianShell keeps the official emblem, full-page navigation, and access
   assert.match(source, /label: "Підручники й посібники"[\s\S]*?label: "Новий матеріал"[\s\S]*?label: "Е-підручники"/u);
   assert.doesNotMatch(source, /section: "fund", label: "Художня та наукова література"/u);
   assert.equal((source.match(/href=\{librarianLiteratureHref\(telegramMiniApp\)\}/gu) ?? []).length, 3);
-  assert.match(source, /Librarika <SiteIcon name="catalog"/u);
-  assert.equal((source.match(/Librarika та читачі/gu) ?? []).length, 2);
+  assert.match(source, /Лібраріка <SiteIcon name="catalog"/u);
+  assert.equal((source.match(/Лібраріка/gu) ?? []).length, 3);
   assert.match(source, /label: "Е-підручники"[\s\S]*?librarianTextbooksHref\(telegramMiniApp\)/u);
   assert.doesNotMatch(source, /telegramMiniApp \? \[\] : \[[\s\S]*?Е-підручники/u);
   assert.match(source, /function mergeSubsections/u);
@@ -171,15 +171,4 @@ test("LibrarianShell keeps the official emblem, full-page navigation, and access
   assert.match(workspaceCss, /\.resultCopy strong,[\s\S]*?\.selectedSummary strong \{[\s\S]*?white-space: normal;[\s\S]*?overflow-wrap: anywhere;/u);
 });
 
-test("Librarika integration and readers remain separate from the educational Fund", async () => {
-  const [workspace, page] = await Promise.all([
-    readFile(new URL("../app/librarian/literature/workspace.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/librarian/literature/page.tsx", import.meta.url), "utf8"),
-  ]);
-  assert.match(workspace, /Кабінет бібліотекаря · інтеграційний центр/u);
-  assert.doesNotMatch(workspace, /className=\{s\.funds\}/u);
-  assert.match(workspace, /href=\{LIBRARIKA_CATALOG_URL\} target="_blank" rel="noopener noreferrer"/u);
-  assert.match(workspace, /Художня література · Librarika ↗/u);
-  assert.match(workspace, /Підручники · наш сайт ↗/u);
-  assert.match(page, /Librarika та читачі · Кабінет бібліотекаря/u);
-});
+// Native literature isolation is tested behaviorally in literature-admin.test.mjs.
