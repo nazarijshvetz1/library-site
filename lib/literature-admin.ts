@@ -1,3 +1,4 @@
+import { countryAliases, countryCode, countryLabel, LITERATURE_TITLE } from "./literature-labels.ts";
 import { normalizeCatalogSearchText } from "./catalog-d1.ts";
 const libraryCoverSql = "'/api/librarian/literature/image?kind=edition&id='||e.id||'&v='||e.version";
 import { beginLibraryCommand, finishLibraryCommand, libraryCommand } from "./library-copy-store.ts";
@@ -16,7 +17,7 @@ export function literatureDate(value: unknown) { const date = text(value, 10); i
 function pageInfo(url: URL) { const page = Number(url.searchParams.get("page") || 1); if (!Number.isInteger(page) || page < 1 || page > 10000) readerFail("page", "Невідома сторінка."); return { page, limit: 30, offset: (page - 1) * 30 }; }
 export async function assertLiterature(db: ReaderDatabase, id: unknown, kind: "edition" | "copy" | "loan" = "edition") {
   const query = kind === "edition" ? "SELECT e.id FROM library_editions e WHERE e.id=? AND e.fund='literature'" : kind === "copy" ? "SELECT e.id FROM library_copies c JOIN library_editions e ON e.id=c.edition_id WHERE c.id=? AND e.fund='literature'" : "SELECT e.id FROM reader_circulations l JOIN library_copies c ON c.id=l.copy_id JOIN library_editions e ON e.id=c.edition_id WHERE l.id=? AND e.fund='literature'";
-  if (!await db.prepare(query).bind(String(id || "")).first()) readerFail("literature_only", "Запис не належить до Лібраріки.", 404);
+  if (!await db.prepare(query).bind(String(id || "")).first()) readerFail("literature_only", "Запис не належить до каталогу художньої та наукової літератури.", 404);
 }
 // Relations are authoritative for linked authors/publishers; edits to a dictionary
 // immediately affect cards and ordering without changing educational materials.
@@ -28,10 +29,15 @@ const bookProjection = `e.id,e.title,e.version,e.material_id,e.publication_state
  (SELECT count(*) FROM library_copies c WHERE c.edition_id=e.id AND c.registration='registered' AND c.physical_state='on_shelf' AND NOT EXISTS(SELECT 1 FROM reader_circulations l WHERE l.copy_id=c.id AND l.status IN ('pending','reserved','issued','overdue'))) AS available`;
 export async function literatureBooks(db: ReaderDatabase, url: URL) {
   const { page, limit, offset } = pageInfo(url), q = text(url.searchParams.get("q") || "", 100), entity = url.searchParams.get("entity") || "";
-  const sort = url.searchParams.get("sort") || "title", order: Record<string, string> = { title: "e.title,e.id", author: `${linkedField("author")},e.title,e.id`, category: `${linkedField("genre")},e.title,e.id`, newest: "e.created_at DESC,e.id DESC" };
+  const sort = url.searchParams.get("sort") || "title", order: Record<string, string> = { title: "e.title,e.id", author: `${linkedField("author")},e.title,e.id`, category: `${linkedField("genre")},e.title,e.id`, publisher: `${linkedField("publisher")},e.title,e.id`, newest: "e.created_at DESC,e.id DESC" };
   if (!Object.hasOwn(order,sort)) readerFail("sort", "Невідоме сортування.");
-  const where = `e.fund='literature' AND e.publication_state${url.searchParams.get("archived") === "1" ? "=" : "!="}'archived' AND (?='' OR m.search_text LIKE ? ESCAPE '!' OR e.title LIKE ? ESCAPE '!' OR e.public_metadata_json LIKE ? ESCAPE '!' OR EXISTS(SELECT 1 FROM library_edition_entities x JOIN library_catalog_entities n ON n.id=x.entity_id WHERE x.edition_id=e.id AND ${foldedEntityName} LIKE ? ESCAPE '!')) AND (?='' OR EXISTS(SELECT 1 FROM library_edition_entities x WHERE x.edition_id=e.id AND x.entity_id=?))`;
+  let where = `e.fund='literature' AND e.publication_state${url.searchParams.get("archived") === "1" ? "=" : "!="}'archived' AND (?='' OR m.search_text LIKE ? ESCAPE '!' OR e.title LIKE ? ESCAPE '!' OR e.public_metadata_json LIKE ? ESCAPE '!' OR EXISTS(SELECT 1 FROM library_edition_entities x JOIN library_catalog_entities n ON n.id=x.entity_id WHERE x.edition_id=e.id AND ${foldedEntityName} LIKE ? ESCAPE '!')) AND (?='' OR EXISTS(SELECT 1 FROM library_edition_entities x WHERE x.edition_id=e.id AND x.entity_id=?))`;
   const bindings = [q, like(normalizeCatalogSearchText(q)), like(q), like(q), like(normalizeCatalogSearchText(q)), entity, entity];
+  for(const [param,kind,field] of [["author","author","author"],["category","genre","genre"],["publisher","publisher","publisher"],["tag","tag","tags"]]){
+    const value=text(url.searchParams.get(param)||"",300).toLocaleLowerCase("uk-UA");
+    if(value){const sql=Array.from("АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯ").reduce((q,ch)=>`replace(${q},'${ch}','${ch.toLowerCase()}')`,`lower(${linkedField(kind,field)})`);where+=` AND ${sql} LIKE ? ESCAPE '!'`;bindings.push(like(value));}
+  }
+  const country=text(url.searchParams.get("country")||"",100);if(country){where+=" AND EXISTS(SELECT 1 FROM library_edition_entities ce JOIN library_catalog_entities a ON a.id=ce.entity_id WHERE ce.edition_id=e.id AND a.kind='author' AND json_extract(a.public_metadata_json,'$.country') IN (SELECT value FROM json_each(?)))";bindings.push(JSON.stringify(countryAliases(country)));}
   const count = await db.prepare(`SELECT count(*) n FROM library_editions e LEFT JOIN materials m ON m.id=e.material_id WHERE ${where}`).bind(...bindings).first();
   const rows = await db.prepare(`SELECT ${bookProjection} FROM library_editions e LEFT JOIN materials m ON m.id=e.material_id WHERE ${where} ORDER BY ${order[sort]} LIMIT ? OFFSET ?`).bind(...bindings, limit, offset).all();
   return { items: (rows.results || []).map(row => ({ ...row, metadata: metadata(row) })), total: Number(count?.n || 0), page, pages: Math.ceil(Number(count?.n || 0) / limit) };
@@ -53,11 +59,12 @@ export async function literatureEntities(db: ReaderDatabase, url: URL) {
   return { items: (result.results || []).map(row => ({ ...row, metadata: metadata(row) })), total: Number(count?.n || 0), page, pages: Math.ceil(Number(count?.n || 0) / limit) };
 }
 export async function literatureOptions(db: ReaderDatabase) {
-  const [entities, locations, classes] = await Promise.all([
-    db.prepare("SELECT id,kind,name FROM library_catalog_entities WHERE COALESCE(json_extract(public_metadata_json,'$.archived'),0)=0 ORDER BY kind,name LIMIT 5000").all(),
+  const [entities, locations, classes, years] = await Promise.all([
+    db.prepare("SELECT id,kind,name,json_extract(public_metadata_json,'$.country') country FROM library_catalog_entities WHERE COALESCE(json_extract(public_metadata_json,'$.archived'),0)=0 ORDER BY kind,name LIMIT 5000").all(),
     db.prepare("SELECT id,name FROM locations WHERE status='active' AND type='library' ORDER BY sort_order,name").all(),
     db.prepare("SELECT c.id,c.class_name,a.label FROM class_years c JOIN academic_years a ON a.id=c.academic_year_id WHERE c.status IN ('active','planned') ORDER BY a.start_date DESC,c.grade,c.class_name").all(),
-  ]); return { entities: entities.results || [], locations: locations.results || [], classes: classes.results || [] };
+    db.prepare("SELECT DISTINCT json_extract(public_metadata_json,'$.year') year FROM library_editions WHERE fund='literature' AND publication_state!='archived' AND json_extract(public_metadata_json,'$.year') IS NOT NULL ORDER BY year DESC LIMIT 400").all(),
+  ]); return { entities: (entities.results || []).map(r=>({...r,countryCode:countryCode(r.country),countryLabel:countryLabel(r.country)})), locations: locations.results || [], classes: classes.results || [], years:(years.results||[]).map(r=>String(r.year)).filter(Boolean) };
 }
 const loanFrom = "reader_circulations l JOIN library_copies c ON c.id=l.copy_id JOIN library_editions e ON e.id=c.edition_id LEFT JOIN materials m ON m.id=e.material_id JOIN library_readers r ON r.id=l.reader_id";
 const loanProjection = `l.*,c.version copy_version,c.accession_no,c.copy_no,c.condition,c.location_id,e.id edition_id,e.title,${libraryCoverSql} cover_url,r.full_name,r.member_no,r.kind,r.version reader_version`;
@@ -173,5 +180,5 @@ export async function hideLiteratureReview(db: ReaderDatabase,actor: LibraryActo
 export async function literatureReaderExcel(db: ReaderDatabase,url:URL) {
   const id=text(url.searchParams.get("reader")||"",100),reader=await literatureReader(db,id),loans=await literatureLoans(db,url,true);
   const labels:Record<string,string>={issued:"Видано",overdue:"Прострочено",returned:"Повернуто",cancelled:"Скасовано",reserved:"Зарезервовано",pending:"Очікує"};
-  return createExcelWorkbookBytes([{name:"Книги читача",reportTitle:"Лібраріка · книги читача",metadata:[["Читач",String(reader.full_name)],["Читацький номер",String(reader.member_no)],["Клас / категорія",String(reader.class_name||reader.source_group_label||reader.kind)]],columns:[{header:"Назва",width:48},{header:"Номер примірника",width:22},{header:"Видано",width:15},{header:"До",width:15},{header:"Повернуто",width:15},{header:"Статус",width:20}],rows:loans.items.map(row=>[String(row.title),String(row.accession_no),String(row.issued_at||""),String(row.due_at||""),String(row.received_at||""),labels[String(row.display_status)]||String(row.display_status)])}],new Date().toISOString(),"Лібраріка · книги читача");
+  return createExcelWorkbookBytes([{name:"Книги читача",reportTitle:LITERATURE_TITLE+" · книги читача",metadata:[["Читач",String(reader.full_name)],["Читацький номер",String(reader.member_no)],["Клас / категорія",String(reader.class_name||reader.source_group_label||reader.kind)]],columns:[{header:"Назва",width:48},{header:"Номер примірника",width:22},{header:"Видано",width:15},{header:"До",width:15},{header:"Повернуто",width:15},{header:"Статус",width:20}],rows:loans.items.map(row=>[String(row.title),String(row.accession_no),String(row.issued_at||""),String(row.due_at||""),String(row.received_at||""),labels[String(row.display_status)]||String(row.display_status)])}],new Date().toISOString(),LITERATURE_TITLE+" · книги читача");
 }

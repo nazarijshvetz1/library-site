@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { authorizeLibrarianApi, isSameOriginRequest, librarianError, librarianJson } from "@/lib/librarian-api";
 import { readBoundedJson } from "@/lib/bounded-json";
 import { ReaderError, readerFail, type ReaderDatabase } from "@/lib/reader-core";
+import {literatureClassPlan,applyLiteratureClasses} from "@/lib/literature-class-alignment";
 import * as literature from "@/lib/literature-admin";
 import { saveLibraryEdition } from "@/lib/library-editor";
 import { issueReaderCopy, returnReaderCopy, changeReaderDueDate, registerLibraryCopy } from "@/lib/library-copy-store";
@@ -12,7 +13,8 @@ export async function GET(request: Request) {
   try {
     const db = env.DB as unknown as ReaderDatabase, url = new URL(request.url), view = url.searchParams.get("view") || "dashboard", id = url.searchParams.get("id") || "";
     if (view === "export") { const bytes = await literature.literatureReaderExcel(db,url); return new Response(bytes,{headers:{"Content-Type":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","Content-Disposition":"attachment; filename=reader-books.xlsx","Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"}}); }
-    const result = view === "dashboard" ? await literature.literatureDashboard(db,url)
+    if(view==="class_plan"&&auth.value.access.role!=="admin")readerFail("admin_required","Звірка класів доступна адміністратору.",403);
+    const result = view === "class_plan" ? await literatureClassPlan(db) : view === "dashboard" ? await literature.literatureDashboard(db,url)
       : view === "books" ? await literature.literatureBooks(db,url)
       : view === "book" ? await literature.literatureBook(db,id)
       : view === "readers" ? await literature.literatureReaders(db,url)
@@ -33,7 +35,7 @@ export async function POST(request: Request) {
     const body = await readBoundedJson(request,128000);
     if(!body.input || typeof body.input !== "object" || Array.isArray(body.input)) readerFail("input","Некоректна форма.");
     if(typeof (body.input as Record<string,unknown>).requestId!=="string")readerFail("request_id","Оновіть форму перед збереженням."); const input = body.input as Record<string,unknown> & {requestId:string}, db=env.DB as unknown as ReaderDatabase, actor={id:auth.value.user.d1UserId,email:auth.value.user.email||""}; let result:unknown;
-    if(body.action==="source_preview"||body.action==="source_apply"){if(auth.value.access.role!=="admin")readerFail("admin_required","Перенесення доступне адміністратору.",403);result=body.action==="source_preview"?await previewLiteratureSourceItem(db,input as Parameters<typeof previewLiteratureSourceItem>[1]):await applyLiteratureSourceItem(db,actor,input as Parameters<typeof applyLiteratureSourceItem>[2]);} else if(body.action==="edition_save") {
+    if(body.action==="class_assign"){if(auth.value.access.role!=="admin")readerFail("admin_required","Призначення доступне адміністратору.",403);result=await applyLiteratureClasses(db,actor,input as Parameters<typeof applyLiteratureClasses>[2]);} else if(body.action==="source_preview"||body.action==="source_apply"){if(auth.value.access.role!=="admin")readerFail("admin_required","Перенесення доступне адміністратору.",403);result=body.action==="source_preview"?await previewLiteratureSourceItem(db,input as Parameters<typeof previewLiteratureSourceItem>[1]):await applyLiteratureSourceItem(db,actor,input as Parameters<typeof applyLiteratureSourceItem>[2]);} else if(body.action==="edition_save") {
       if(input.id) await literature.assertLiterature(db,input.id);
       const meta=input.metadata as Record<string,unknown>|undefined;
       if(meta?.url && !literature.safeLiteratureUrl(String(meta.url))) readerFail("url","Перевірте URL книги.");

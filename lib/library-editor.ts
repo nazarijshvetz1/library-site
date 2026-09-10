@@ -1,3 +1,4 @@
+import {sha256Text} from "./librarika-import-plan.ts";
 import {normalizeCatalogSearchText} from "./catalog-d1.ts";
 import {normalizeIsbn} from "./isbn.ts";
 import {beginLibraryCommand,finishLibraryCommand,libraryCommand,rebuildReaderStock} from "./library-copy-store.ts";
@@ -8,17 +9,35 @@ const ENTITY_FIELDS=["biography","country","nickname","firstName","lastName","da
 type Metadata=Record<string,string>;
 function fields(value:unknown,allowed:readonly string[]):Metadata{if(!value||typeof value!=="object"||Array.isArray(value))readerFail("metadata_invalid","Перевірте дані картки.");const result:Metadata={};for(const[key,entry]of Object.entries(value)){if(!allowed.includes(key)||typeof entry!=="string"||entry.length>(["description","annotation","biography","publications","awards"].includes(key)?20000:1000)||/[\u0000-\u0008]/.test(entry))readerFail("metadata_invalid","Некоректне або завелике поле картки.");result[key]=entry.trim();}return result;}
 export async function getLibrarianEdition(db:ReaderDatabase,id:string){const row=await db.prepare("SELECT e.id,e.title,e.material_id,e.version,e.publication_state,e.public_metadata_json,m.version material_version,COALESCE((SELECT version FROM material_cover_assets ca WHERE ca.material_id=m.id),0) cover_version FROM library_editions e LEFT JOIN materials m ON m.id=e.material_id WHERE e.id=?").bind(id).first();if(!row)readerFail("edition_missing","Картку не знайдено.",404);const entities=await db.prepare("SELECT entity_id FROM library_edition_entities WHERE edition_id=? AND role IN ('author','publisher','genre','tag','series')").bind(id).all();return {...row,metadata:JSON.parse(String(row.public_metadata_json)),entityIds:(entities.results||[]).map(r=>r.entity_id)};}
-export async function saveLibraryEdition(db:ReaderDatabase,actor:LibraryActor,input:{requestId:string;id?:string;expectedVersion?:number;expectedMaterialVersion?:number;title:string;metadata:Metadata;entityIds:string[];published:boolean}){
+export async function saveLibraryEdition(db:ReaderDatabase,actor:LibraryActor,input:{requestId:string;id?:string;expectedVersion?:number;expectedMaterialVersion?:number;title:string;metadata:Metadata;entityIds:string[];entityNames?:Record<string,string[]>;published:boolean}){
   const patch=fields(input.metadata,EDITION_FIELDS);if(typeof input.title!=="string"||input.title.trim().length<1||input.title.length>500||typeof input.published!=="boolean"||!Array.isArray(input.entityIds)||input.entityIds.length>100||!input.entityIds.every(readerResource)||new Set(input.entityIds).size!==input.entityIds.length)readerFail("edition_fields","Перевірте назву, довідники й стан публікації.");
   const command=await libraryCommand(db,actor,input.requestId,"library.edition.save",input);if(command.replayed)return command.replayed;
+  const entityIds=[...input.entityIds],newEntities:{id:string;kind:string;name:string}[]=[];
+  if(input.entityNames){
+    if(typeof input.entityNames!=="object"||Array.isArray(input.entityNames))readerFail("entity_names","Перевірте довідники.");
+    const known=(await db.prepare("SELECT id,kind,name FROM library_catalog_entities WHERE COALESCE(json_extract(public_metadata_json,'$.archived'),0)=0 LIMIT 10000").all()).results||[];
+    for(const [kind,names]of Object.entries(input.entityNames)){
+      if(!["author","publisher","genre","tag","series"].includes(kind)||!Array.isArray(names)||names.length>20)readerFail("entity_names","Перевірте довідники.");
+      for(const raw of names){
+        if(typeof raw!=="string"||!raw.trim()||raw.length>300)readerFail("entity_names","Перевірте назву в довіднику.");
+        const name=raw.trim(),normalized=normalizeCatalogSearchText(name),matches=known.filter(r=>r.kind===kind&&normalizeCatalogSearchText(String(r.name))===normalized);
+        if(matches.length>1)readerFail("entity_ambiguous","Є кілька записів з такою назвою. Оберіть потрібний у підказці.",409);
+        let entityId=matches[0]?String(matches[0].id):"ENTITY-"+(await sha256Text(kind+":"+normalized)).slice(0,40);
+        if(!matches.length&&await db.prepare("SELECT id FROM library_catalog_entities WHERE id=?").bind(entityId).first())entityId="ENTITY-"+(await sha256Text(input.requestId+":"+kind+":"+normalized)).slice(0,40);
+        if(!entityIds.includes(entityId)){entityIds.push(entityId);if(!matches.length)newEntities.push({id:entityId,kind,name});}
+      }
+    }
+    if(entityIds.length>100)readerFail("entity_names","Забагато зв’язків із довідниками.");
+  }
   const existing=input.id?await db.prepare("SELECT e.material_id,e.version,e.public_metadata_json,m.version material_version FROM library_editions e JOIN materials m ON m.id=e.material_id WHERE e.id=? AND e.fund='literature' AND e.publication_state!='archived' AND m.status='active'").bind(input.id).first():null;
   if(input.id&&(!existing||existing.version!==input.expectedVersion||existing.material_version!==input.expectedMaterialVersion))readerFail("edition_changed","Картку змінено або її облік ще не активовано. Оновіть дані.",409);
   const metadata={...(existing?JSON.parse(String(existing.public_metadata_json)):{}),...patch},id=input.id||"ED-"+crypto.randomUUID(),title=input.title.trim(),now=new Date().toISOString();
   const isbn=normalizeIsbn(String(metadata.isbn13||metadata.isbn||""))||"",year=/^\d{4}$/.test(metadata.year||"")?Number(metadata.year):null;
   const number=existing?null:Number((await db.prepare("SELECT COALESCE(MAX(catalog_number),0) n FROM materials").first())?.n||0)+1,materialId=existing?String(existing.material_id):"CAT-"+String(number).padStart(4,"0");
-  const result={id,materialId,version:existing?Number(existing.version)+1:1,materialVersion:existing?Number(existing.material_version)+1:1},entityJson=JSON.stringify(input.entityIds);
+  const result={id,materialId,version:existing?Number(existing.version)+1:1,materialVersion:existing?Number(existing.material_version)+1:1},entityJson=JSON.stringify(entityIds);
   const statements=[beginLibraryCommand(db,actor,input.requestId,"library.edition.save",command.hash,id,now),
-    db.prepare("SELECT CASE WHEN (SELECT COUNT(*) FROM library_catalog_entities WHERE id IN (SELECT value FROM json_each(?)) AND kind IN ('author','publisher','genre','tag','series'))=? THEN 1 ELSE json('entity_changed') END").bind(entityJson,input.entityIds.length),
+    ...newEntities.flatMap(n=>[db.prepare("INSERT INTO library_catalog_entities(id,kind,name,slug,public_metadata_json) VALUES(?,?,?,?, '{}') ON CONFLICT(id) DO NOTHING").bind(n.id,n.kind,n.name,n.id),db.prepare("SELECT CASE WHEN EXISTS(SELECT 1 FROM library_catalog_entities WHERE id=? AND kind=? AND name=? AND COALESCE(json_extract(public_metadata_json,'$.archived'),0)=0) THEN 1 ELSE json('entity_changed') END").bind(n.id,n.kind,n.name)]),
+    db.prepare("SELECT CASE WHEN (SELECT COUNT(*) FROM library_catalog_entities WHERE id IN (SELECT value FROM json_each(?)) AND kind IN ('author','publisher','genre','tag','series') AND COALESCE(json_extract(public_metadata_json,'$.archived'),0)=0)=? THEN 1 ELSE json('entity_changed') END").bind(entityJson,entityIds.length),
     db.prepare("SELECT CASE WHEN ?='' OR NOT EXISTS(SELECT 1 FROM materials m JOIN library_editions e ON e.material_id=m.id AND e.fund='literature' WHERE m.isbn_normalized=? AND m.id!=? AND m.status='active') THEN 1 ELSE json('duplicate_isbn') END").bind(isbn,isbn,materialId)];
   const search=normalizeCatalogSearchText([title,metadata.author,metadata.publisher,metadata.genre,metadata.isbn,metadata.isbn13].join(" "));
   if(existing)statements.push(db.prepare("DELETE FROM materials_fts WHERE rowid=(SELECT rowid FROM materials WHERE id=?)").bind(materialId),db.prepare("UPDATE materials SET title=?,sort_title=?,search_text=?,author=?,publisher=?,publication_year=?,isbn=?,isbn_normalized=?,rubric=?,version=version+1,updated_at=? WHERE id=? AND version=? AND status='active'").bind(title,normalizeCatalogSearchText(title),search,String(metadata.author||""),String(metadata.publisher||""),year,String(metadata.isbn13||metadata.isbn||""),isbn,String(metadata.genre||""),now,materialId,Number(input.expectedMaterialVersion)),requireChanged(db,1),db.prepare("UPDATE library_editions SET title=?,public_metadata_json=?,publication_state=?,version=version+1,updated_at=? WHERE id=? AND version=?").bind(title,JSON.stringify(metadata),input.published?"published":"draft",now,id,Number(input.expectedVersion)),requireChanged(db,1));

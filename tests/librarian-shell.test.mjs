@@ -130,8 +130,8 @@ test("LibrarianShell keeps the official emblem, full-page navigation, and access
   assert.match(source, /label: "Підручники й посібники"[\s\S]*?label: "Новий матеріал"[\s\S]*?label: "Е-підручники"/u);
   assert.doesNotMatch(source, /section: "fund", label: "Художня та наукова література"/u);
   assert.equal((source.match(/href=\{librarianLiteratureHref\(telegramMiniApp\)\}/gu) ?? []).length, 3);
-  assert.match(source, /Лібраріка <SiteIcon name="catalog"/u);
-  assert.equal((source.match(/Лібраріка/gu) ?? []).length, 3);
+  assert.match(source, /Художня та наукова література <SiteIcon name="catalog"/u);
+  assert.equal((source.match(/>\s*Художня та наукова література/gu) ?? []).length, 3);
   assert.match(source, /label: "Е-підручники"[\s\S]*?librarianTextbooksHref\(telegramMiniApp\)/u);
   assert.doesNotMatch(source, /telegramMiniApp \? \[\] : \[[\s\S]*?Е-підручники/u);
   assert.match(source, /function mergeSubsections/u);

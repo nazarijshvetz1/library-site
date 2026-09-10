@@ -35,6 +35,22 @@
   color-scheme: light;
 }
 
+/* Shared disclosure and native-dialog defaults, including mobile WebViews. */
+dialog { margin: auto; }
+html:has(dialog[open]) { overflow: hidden; scrollbar-gutter: stable; }
+summary { list-style: none; cursor: pointer; }
+summary::-webkit-details-marker { display: none; }
+summary::marker { content: ""; }
+summary:not(:has(svg)) { display: flex; align-items: center; gap: 8px; }
+summary:not(:has(svg))::before {
+  content: ""; display: inline-block; flex: 0 0 24px; width: 24px; height: 24px;
+  border-radius: 7px; background: #e8f0e7 center / 16px 16px no-repeat;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='m7 4 6 6-6 6' stroke='%23245039' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  transition: transform .16s ease;
+}
+details[open] > summary:not(:has(svg))::before { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { summary::before { transition: none !important; } }
+
 /* Deep library-green filter rail, matched to the catalog hero. */
 .catalog-section .filters {
   color: #f7fbf5;
