@@ -31,3 +31,47 @@
 @media(max-width:370px){.bookGrid{grid-template-columns:1fr}.bookCard>.bookLink{flex-direction:row}.filterGrid{grid-template-columns:1fr}.brand img{display:none}}
 .layout{min-height:calc(100dvh - var(--literature-header-height,84px))}
 .sidebar{top:var(--literature-header-height,84px);height:calc(100dvh - var(--literature-header-height,84px));overflow-y:auto}
+
+/* Viewport-safe literature navigation, editors and circulation wizard. */
+.dialog[open]{display:flex;flex-direction:column;overflow:hidden;scrollbar-gutter:auto}
+.dialog>header{position:relative;flex-shrink:0}.dialogBody{overflow:auto;min-height:0;overscroll-behavior:contain}
+.dialog input[hidden]{display:none}.dialogBody>*{max-width:100%}
+.suggestions{position:fixed;margin:0;z-index:50;overscroll-behavior:contain}
+.mobileCatalog{display:none!important}.catalogFilters{margin:8px 0 10px;padding:8px 10px;border:1px solid #d7e1d8;border-radius:9px;background:#fffefa}
+.catalogFilters summary,.cardMore summary{cursor:pointer;font-size:14px;font-weight:600;min-height:32px}
+.catalogFilters .filterGrid{margin:8px 0 0}.filterBadge{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:7px 10px;background:#e4eedb;border-radius:8px}
+.resultCount{font-size:14px;margin:8px 0!important}.cardMore{margin-top:0}.cardMore .actions{margin:5px 0}.cardMetadata .textButton{font-size:14px;font-weight:500;padding:0}
+.entityPage>h2{margin:16px 0 12px}.entityPage>.panelHeading{margin-top:12px}.entityPage .details{background:#fffefa;border:1px solid #d7e1d8;border-radius:12px;padding:5px 14px}
+.coverActions{display:grid;gap:4px;flex-shrink:0;max-width:145px}.coverButton{display:block;border:0;background:transparent;padding:0;border-radius:6px}
+.coverActions>.textButton{text-align:center;font-size:13px}.cropLayout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start}
+.cropPreview{background:#e5eadd;border-radius:10px;padding:8px;display:flex;align-items:center;justify-content:center;min-height:180px}
+.cropPreview canvas{display:block;width:auto;max-width:100%;height:auto;max-height:44dvh;object-fit:contain}
+.cropControls{display:grid;gap:9px}.cropControls input[type=range]{padding:0;min-height:32px;accent-color:#24583a}
+.wizard{min-width:0}.steps{list-style:none;display:flex;gap:5px;flex-wrap:wrap;padding:8px 10px;margin:0 0 10px;background:#eaf0e3;border-radius:8px;font-size:14px;color:#637363}
+.steps li[aria-current=step]{font-weight:750;color:#194a31}.backStep{display:inline-flex;gap:6px;align-items:center;background:none;border:0;color:#194a31;min-height:36px;padding:4px 0;margin-bottom:6px}
+.wizardStep{min-height:0}.wizardResults{display:grid;gap:6px;max-height:38dvh;overflow:auto;overscroll-behavior:contain;margin:8px 0}
+.wizardResults:empty{display:none}.wizardResults>button{display:flex;align-items:center;gap:10px;text-align:left;min-width:0;width:100%;padding:9px;border:1px solid #d3dfcc;background:#fffefa;border-radius:8px;color:inherit}
+.wizardResults>button>span:last-child{min-width:0;overflow-wrap:anywhere}.wizardResults .selected{background:#e5eedc;border-color:#42774a}
+.chosenReader{background:#edf2e8;border-radius:7px;padding:7px 10px;font-size:14px}.issueSummary{display:grid;gap:10px;margin-bottom:12px}.issueSummary .bookHero{margin-bottom:0}.issueSummary h3{font-size:21px}
+.wizardFooter{border-top:1px solid #dce5d5;padding-top:10px}.wizard .pager{padding:5px 0}
+.shell,.main,.dialogBody{overflow-wrap:anywhere}.newBooks{flex-wrap:wrap;overflow:visible}.newBooks .bookLink{min-width:90px}
+@media(min-width:761px){.cardMore:not([open])>.cardMetadata,.cardMore:not([open])>.actions{display:block}.cardMore summary{display:none}.cardMore>.cardMetadata{display:grid!important}.cardMore>.actions{display:flex!important}}
+@media(max-width:760px){
+ .header{min-height:66px;padding:6px 8px;gap:5px}.brand img{width:30px;height:30px}.brand strong{font-size:17px}.brand strong>span{font-size:11px;max-width:220px}.brand small{font-size:9px}
+ .heading{margin-bottom:6px}.heading .eyebrow{display:none}.heading h1{font-size:25px}.heading .actions button{font-size:11px;padding:6px;min-height:36px}
+ .main{padding:8px 8px calc(15px + env(safe-area-inset-bottom))}.mobileCatalog{display:grid!important;font-size:12px!important;margin:5px 0}.mobileCatalog select{min-height:40px}
+ .tabs{display:none}.toolbar{gap:6px;margin:7px 0}.toolbar>.search{flex-basis:100%}.toolbar>label{min-width:100px}.toolbar>button{font-size:12px;padding:7px}
+ .catalogFilters{padding:5px 9px;margin:6px 0}.catalogFilters summary{min-height:28px}.catalogFilters .filterGrid{grid-template-columns:1fr}
+ .bookGrid{grid-template-columns:1fr;gap:7px}.bookCard{display:grid;grid-template-columns:minmax(0,1fr) auto;padding:10px;gap:3px 8px}
+ .bookCard>.bookLink{grid-column:1/-1;flex-direction:row;align-items:center;gap:12px}.bookCard .cover{width:52px;height:74px}.bookCard strong{font-size:19px}
+ .bookCard>.stock{grid-column:1/-1;margin:3px 0 0 64px!important}.bookCard>.cardMore{grid-column:1/-1;margin-left:64px}
+ .cardMore summary{font-size:13px;min-height:28px}.cardMetadata>div{display:grid;grid-template-columns:82px minmax(0,1fr)}
+ .coverActions{max-width:86px}.bookHero .actions{gap:5px}.bookHero{flex-wrap:wrap}.bookHero>div:last-child{flex:1;min-width:160px}
+ .cropLayout{grid-template-columns:1fr;gap:10px}.cropPreview{min-height:120px}.cropPreview canvas{max-height:27dvh}.cropControls{grid-template-columns:1fr 1fr;gap:8px}.cropControls>.actions{grid-column:1/-1}
+ .dialog>header h2{font-size:21px}.dialogBody{padding:10px}.steps{font-size:12px;gap:3px;padding:7px}.wizardResults{max-height:34dvh}
+ .issueSummary .bookHero{flex-wrap:nowrap}.issueSummary .bookHero>div{min-width:0}.issueSummary .formGrid{gap:8px}
+ .period{flex-wrap:wrap}.period label{min-width:0}.entityPage>.panelHeading{align-items:flex-start}.entityPage>.panelHeading h2{font-size:25px}
+ .newBooks .bookLink{min-width:calc(33% - 10px);max-width:calc(33% - 6px)}.newBooks .cover{width:55px;height:78px}.newBooks strong{font-size:12px}
+}
+
+@media(max-width:370px){.brand img{display:block;width:26px;height:26px}.brand strong{font-size:16px}.brand strong>span{font-size:10px}.brand small{font-size:9px}}

@@ -329,6 +329,7 @@ export const readerProfiles=sqliteTable("reader_profiles",{
   // Loan consent floor is a Europe/Kyiv YYYY-MM-DD calendar day, not a UTC timestamp.
   notifyLoansSince:text("notify_loans_since"),notifyBooksSince:text("notify_books_since"),
   version:integer("version").notNull().default(1),updatedAt:text("updated_at").notNull(),
+ subjectPosition:text("subject_position").notNull().default(""),
 },t=>[check("reader_profile_flags",sql`${t.communityEnabled} in (0,1) and ${t.notifyLoans} in (0,1) and ${t.notifyBooks} in (0,1)`),check("reader_profile_version",sql`${t.version}>0`)]);
 
 export const readerInvites=sqliteTable("reader_invites",{

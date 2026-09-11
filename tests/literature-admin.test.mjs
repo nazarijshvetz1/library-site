@@ -6,6 +6,44 @@ const request=fields=>({requestId:crypto.randomUUID(),...fields});
 const source=await import('../lib/literature-source-refresh.ts');
 const url=query=>new URL('https://local.test/?'+query);
 
+test('author and coauthor pages are role-aware, live and deduplicated',async()=>{
+ const {db,book}=await fixture();try{
+ const a=await admin.saveLiteratureEntity(db,actor,request({kind:'author',name:'Співавтор',metadata:{country:'UA'}})),p=await admin.saveLiteratureEntity(db,actor,request({kind:'publisher',name:'Видавець',metadata:{city:'Київ',email:'books@example.test'}}));
+ for(const role of ['author','coauthor'])db.sqlite.prepare('INSERT INTO library_edition_entities VALUES(?,?,?)').run(book.id,a.id,role);
+ db.sqlite.prepare('INSERT INTO library_edition_entities VALUES(?,?,?)').run(book.id,p.id,'publisher');
+ assert.equal((await admin.literatureBooks(db,url('entity='+a.id))).total,1);
+ assert.equal((await admin.literatureEntities(db,url('kind=author&id='+a.id))).items[0].books,1);
+ assert.equal((await admin.literatureBook(db,book.id)).metadata.author,'Співавтор');
+ db.sqlite.prepare("DELETE FROM library_edition_entities WHERE edition_id=? AND entity_id=? AND role='author'").run(book.id,a.id);
+ assert.equal((await admin.literatureBooks(db,url('entity='+a.id))).total,1);
+ await editor.saveLibraryEdition(db,actor,request({id:book.id,expectedVersion:1,expectedMaterialVersion:1,title:'Змінена книга',metadata:{},entityIds:[p.id],published:true}));
+ assert.equal((await admin.literatureBooks(db,url('entity='+a.id))).items[0].title,'Змінена книга');
+ assert.equal((await admin.literatureEntity(db,p.id)).metadata.city,'Київ');
+ db.sqlite.prepare("UPDATE library_edition_entities SET role='editor' WHERE edition_id=? AND entity_id=?").run(book.id,a.id);
+ assert.equal((await admin.literatureBooks(db,url('entity='+a.id))).total,0);assert.equal((await admin.literatureBooks(db,url('country=UA'))).total,0);
+ }finally{db.sqlite.close();}
+});
+test('publisher source fields are recovered without overriding edits or losing source',async()=>{
+ const {literatureEntityMetadata}=await import('../lib/literature-entity-metadata.ts');
+ const source=JSON.stringify([{csvRows:[{Email:'a@example.test',Phone:'+380001',Website:'http://example.test',Address:'Київ'}]}]);
+ const row={kind:'publisher',version:1,public_metadata_json:'{"website":""}',source_json:source};
+ assert.equal(literatureEntityMetadata(row).email,'a@example.test');assert.equal(literatureEntityMetadata(row).website,'http://example.test');assert.equal(row.source_json,source);
+ assert.equal(literatureEntityMetadata({...row,version:2,public_metadata_json:'{"address":"Львів","email":""}'}).address,'Львів');
+ assert.equal(literatureEntityMetadata({...row,version:2,public_metadata_json:'{"email":""}'}).email,'');
+ assert.equal(literatureEntityMetadata({...row,source_json:JSON.stringify([{csvRows:[{Email:'a@example.test'},{Email:'b@example.test'}]}])}).email,undefined);
+});
+test('review details follow reader profile and subjects without changing review or enabling access',async()=>{
+ const {db,book}=await fixture();try{
+ const r=await admin.saveLiteratureReader(db,actor,request({fullName:'Учитель Тестовий',kind:'teacher',phone:'',subjectPosition:'Математика'}));
+ db.sqlite.prepare("INSERT INTO library_ratings(edition_id,reader_id,rating,body,created_at,updated_at) VALUES(?,?,5,'Відгук','2026-09-12','2026-09-12')").run(book.id,r.id);
+ let review=(await admin.literatureReviews(db,url(''))).items[0];assert.equal(review.reader_kind,'teacher');assert.equal(review.subject_position,'Математика');
+ await admin.saveLiteratureReader(db,actor,request({id:r.id,expectedVersion:1,fullName:'Учитель Тестовий',kind:'teacher',phone:'',subjectPosition:'Фізика'}));
+ review=(await admin.literatureReviews(db,url(''))).items[0];assert.equal(review.subject_position,'Фізика');assert.equal(review.version,1);assert.equal(review.profile_version,2);
+ await admin.saveLiteratureReader(db,actor,request({id:r.id,expectedVersion:2,fullName:'Учитель Тестовий',kind:'teacher',phone:''}));
+ assert.equal((await admin.literatureReader(db,r.id)).subject_position,'Фізика');assert.equal((await admin.literatureReader(db,r.id)).access_status,'inactive');
+ }finally{db.sqlite.close();}
+});
+
 test('inline name reused after a dictionary rename creates the intended new entity',async()=>{
  const {db}=await fixture();try{
   const first=await editor.saveLibraryEdition(db,actor,request({title:'Перша',metadata:{},entityIds:[],entityNames:{author:['Автор А']},published:true}));

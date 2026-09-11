@@ -20,6 +20,7 @@ export async function GET(request: Request) {
       : view === "readers" ? await literature.literatureReaders(db,url)
       : view === "reader" ? await literature.literatureReader(db,id)
       : view === "loans" ? await literature.literatureLoans(db,url)
+      : view === "entity" ? await literature.literatureEntity(db,id)
       : view === "entities" ? await literature.literatureEntities(db,url)
       : view === "options" ? await literature.literatureOptions(db)
       : view === "reviews" ? await literature.literatureReviews(db,url)

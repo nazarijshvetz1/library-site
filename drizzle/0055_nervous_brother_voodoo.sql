@@ -1,0 +1,1 @@
+ALTER TABLE `reader_profiles` ADD `subject_position` text DEFAULT '' NOT NULL;

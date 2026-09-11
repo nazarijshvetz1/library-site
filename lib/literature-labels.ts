@@ -1,4 +1,4 @@
-export const LITERATURE_TITLE = 'Єдина бібліотека. Художня та наукова література';
+export const LITERATURE_TITLE = 'Єдина бібліотека Художня та наукова література';
 export const LYCEUM_NAME = 'Міжнародний ліцей МАУП';
 const alpha3: Record<string,string> = {AUT:'AT',AUS:'AU',BEL:'BE',BTN:'BT',CAN:'CA',CHE:'CH',CHN:'CN',CZE:'CZ',DEU:'DE',DNK:'DK',DZA:'DZ',ESP:'ES',FIN:'FI',FRA:'FR',GBR:'GB',GRC:'GR',IRL:'IE',ITA:'IT',JPN:'JP',PRK:'KP',LBN:'LB',LKA:'LK',LVA:'LV',MEX:'MX',NLD:'NL',NOR:'NO',NPL:'NP',POL:'PL',SWE:'SE',UKR:'UA',USA:'US',NZL:'NZ',IND:'IN',BRA:'BR',ARG:'AR',KOR:'KR',UK:'GB'};
 const uk = new Intl.DisplayNames(['uk'],{type:'region'});
