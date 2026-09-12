@@ -22,6 +22,7 @@ export async function GET(request: Request) {
       : view === "loans" ? await literature.literatureLoans(db,url)
       : view === "entity" ? await literature.literatureEntity(db,id)
       : view === "entities" ? await literature.literatureEntities(db,url)
+      : view === "choices" ? await literature.literatureChoices(db,url)
       : view === "options" ? await literature.literatureOptions(db)
       : view === "reviews" ? await literature.literatureReviews(db,url)
       : readerFail("view","Невідомий розділ.");

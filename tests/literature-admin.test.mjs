@@ -88,3 +88,32 @@ test('dictionary rename immediately changes book fields, search and ordering',as
 test('education IDs are rejected and duplicate ISBN across independent funds is allowed',async()=>{const db=readerDatabase();try{db.sqlite.exec("INSERT INTO materials(id,catalog_number,title,sort_title,search_text,isbn_normalized,status,created_at,updated_at) VALUES('CAT-9000',9000,'Підручник','підручник','підручник','9786170953858','active','2026-09-01','2026-09-01'); INSERT INTO library_editions(id,material_id,fund,title,publication_state,created_at,updated_at) VALUES('education','CAT-9000','education','Підручник','published','2026-09-01','2026-09-01');");const before=db.sqlite.prepare("SELECT * FROM materials WHERE id='CAT-9000'").get();await assert.rejects(admin.literatureBook(db,'education'),e=>e.code==='literature_only');await assert.rejects(admin.archiveLiteratureRecord(db,actor,request({kind:'edition',id:'education',expectedVersion:1})),e=>e.code==='literature_only');await assert.rejects(editor.saveLibraryEdition(db,actor,request({id:'education',expectedVersion:1,expectedMaterialVersion:1,title:'Зміна',metadata:{},entityIds:[],published:true})));await editor.saveLibraryEdition(db,actor,request({title:'Хрестоматія окремого фонду',metadata:{isbn13:'9786170953858'},entityIds:[],published:true}));assert.deepEqual(db.sqlite.prepare("SELECT * FROM materials WHERE id='CAT-9000'").get(),before);assert.ok(!(await admin.literatureBooks(db,url(''))).items.some(x=>x.id==='education'));}finally{db.sqlite.close();}});
 test('reservation and return concurrency cannot silently change stock',async()=>{const {db,copy}=await fixture();try{const input=request({copyId:copy.id,expectedCopyVersion:1,readerId:'reader-a',expectedReaderVersion:1,issuedAt:'2026-09-01',dueAt:'2026-09-08'});const reservation=await admin.reserveLiteratureCopy(db,actor,input);assert.equal((await admin.reserveLiteratureCopy(db,actor,input)).id,reservation.id);await assert.rejects(admin.reserveLiteratureCopy(db,actor,{...input,requestId:crypto.randomUUID()}));await admin.cancelLiteratureReservation(db,actor,request({id:reservation.id,expectedVersion:1}));assert.equal(db.sqlite.prepare('SELECT quantity FROM holdings').get().quantity,1);assert.equal((await admin.literatureBook(db,copy.editionId)).available,1);}finally{db.sqlite.close();}});
 test('invalid dates and inherited sort keys are rejected before querying',async()=>{const db=readerDatabase();try{assert.throws(()=>admin.literatureDate('2026-02-30'));await assert.rejects(admin.literatureBooks(db,url('sort=toString')),e=>e.code==='sort');await assert.rejects(admin.literatureLoans(db,url('sort=constructor')),e=>e.code==='loan_filter');await assert.rejects(admin.literatureDashboard(db,url('from=2024-01-01&to=2026-09-11')),e=>e.code==='period');}finally{db.sqlite.close();}});
+test('relation choices page beyond first twelve and return actual reader IDs',async()=>{
+ const {db}=await fixture();try{
+  const found=await admin.literatureChoices(db,url('kind=reader&q=reader-a'));assert.equal(found.total,1);assert.equal(found.items[0].id,'reader-a');
+  for(let i=0;i<35;i++)await admin.saveLiteratureEntity(db,actor,request({kind:'tag',name:'Тестовий тег '+String(i).padStart(2,'0'),metadata:{}}));
+  const first=await admin.literatureChoices(db,url('kind=tag')),second=await admin.literatureChoices(db,url('kind=tag&page=2'));assert.equal(first.items.length,30);assert.equal(second.items.length,5);assert.equal(new Set([...first.items,...second.items].map(x=>x.id)).size,35);
+ }finally{db.sqlite.close();}
+});
+test('catalog relation filters use exact IDs and combine independently',async()=>{
+ const {db,book}=await fixture();try{
+  const a=await admin.saveLiteratureEntity(db,actor,request({kind:'author',name:'Автор А',metadata:{}})),other=await admin.saveLiteratureEntity(db,actor,request({kind:'author',name:'Автор А',metadata:{}})),p=await admin.saveLiteratureEntity(db,actor,request({kind:'publisher',name:'Видавець',metadata:{}}));
+  db.sqlite.prepare('INSERT INTO library_edition_entities VALUES(?,?,?)').run(book.id,a.id,'coauthor');db.sqlite.prepare('INSERT INTO library_edition_entities VALUES(?,?,?)').run(book.id,p.id,'publisher');
+  assert.equal((await admin.literatureBooks(db,url('authorId='+a.id+'&publisherId='+p.id))).total,1);assert.equal((await admin.literatureBooks(db,url('authorId='+other.id))).total,0);
+  db.sqlite.prepare("UPDATE library_edition_entities SET role='editor' WHERE entity_id=?").run(a.id);assert.equal((await admin.literatureBooks(db,url('authorId='+a.id))).total,0);
+ }finally{db.sqlite.close();}
+});
+test('book reviews use edition identity even when titles are identical',async()=>{
+ const {db,book}=await fixture();try{
+  const other=await editor.saveLibraryEdition(db,actor,request({title:'Книга для перевірки',metadata:{},entityIds:[],published:true}));
+  for(const [id,body]of [[book.id,'Цільовий відгук'],[other.id,'Інше видання']])db.sqlite.prepare("INSERT INTO library_ratings(edition_id,reader_id,rating,body,created_at,updated_at) VALUES(?,'reader-a',5,?,'2026-09-12','2026-09-12')").run(id,body);
+  const result=await admin.literatureReviews(db,url('edition='+book.id));assert.equal(result.total,1);assert.equal(result.items[0].body,'Цільовий відгук');
+  db.sqlite.prepare("UPDATE library_ratings SET review_state='hidden' WHERE edition_id=?").run(book.id);assert.equal((await admin.literatureReviews(db,url('edition='+book.id))).total,0);
+ }finally{db.sqlite.close();}
+});
+test('dashboard supplies ten newest literature editions',async()=>{
+ const {db}=await fixture();try{
+  for(let i=0;i<12;i++)await editor.saveLibraryEdition(db,actor,request({title:'Надходження '+i,metadata:{},entityIds:[],published:true}));
+  const dashboard=await admin.literatureDashboard(db,url('')),books=await admin.literatureBooks(db,url('sort=newest'));assert.equal(dashboard.newBooks.length,10);assert.deepEqual(dashboard.newBooks.map(x=>x.id),books.items.slice(0,10).map(x=>x.id));
+ }finally{db.sqlite.close();}
+});
