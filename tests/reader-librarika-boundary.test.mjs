@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import {LIBRARIKA_CATALOG_URL,librarikaBookUrl} from "../lib/librarika.ts";
 
-test("student portal exposes one external fiction catalogue and no local textbook catalogue",()=>{
+test("student portal exposes the independent literature cabinet and no textbook catalogue",()=>{
   const portal=fs.readFileSync("app/reader/reader-portal.tsx","utf8");
   assert.equal(LIBRARIKA_CATALOG_URL,"https://librarylyceummaup.librarika.com/search");
-  assert.match(portal,/Каталог художньої літератури/u);
-  assert.match(portal,/LIBRARIKA_CATALOG_URL/u);
+  assert.match(portal,/ReaderWorkspace/u);
+  assert.doesNotMatch(portal,/LIBRARIKA_CATALOG_URL/u);
   assert.doesNotMatch(portal,/ReaderCatalog|catalog-panel|Е-підручники/u);
   assert.doesNotMatch(portal,/BookDialog|EntityDialog/u);
 });
@@ -23,7 +23,7 @@ test("legacy book links can only resolve to a fixed numeric Librarika destinatio
   assert.doesNotMatch(route,/sourceUrl|public_metadata_json/u);
 });
 
-test("local reader circulation, reservation, rating and subscription API is fully retired",()=>{
+test("legacy reader book API remains retired while cabinet has its own authenticated route",()=>{
   const route=fs.readFileSync("app/api/reader/books/route.ts","utf8");
   for(const method of ["GET","POST","PUT","PATCH","DELETE"])assert.match(route,new RegExp(`export const ${method}=retiredReaderBooks`));
   assert.match(route,/status:410/u);
@@ -34,7 +34,8 @@ test("local reader circulation, reservation, rating and subscription API is full
   assert.doesNotMatch(panel,/readerFetch|ReaderLoan|reader_circulations/u);
   const bot=fs.readFileSync("lib/reader-telegram.ts","utf8");
   assert.doesNotMatch(bot,/reader_circulations/u);
-  assert.match(bot,/перевірена проєкція/u);
+  assert.match(bot,/Мої видачі/u);
+  const cabinet=fs.readFileSync("app/api/reader/cabinet/route.ts","utf8");assert.match(cabinet,/requireReaderSession/u);assert.match(cabinet,/assertReaderEdition/u);
 });
 
 test("the retired local fiction catalog cannot be called directly",()=>{

@@ -1,5 +1,4 @@
 import {sha256Text} from "./librarika-import-plan.ts";
-import {LIBRARIKA_CATALOG_URL} from "./librarika.ts";
 import {readerBatch,requireChanged,type ReaderDatabase} from "./reader-core.ts";
 
 type Message={chatId:string;telegramUserId:string;chatType:string;text:string};
@@ -29,23 +28,23 @@ export async function processReaderTelegramMessage(db:ReaderDatabase,input:{mess
       db.prepare("UPDATE reader_invites SET revoked_at=? WHERE reader_id=? AND revoked_at IS NULL AND consumed_at IS NULL").bind(now,String(connection.reader_id)));
   }
   await readerBatch(db,statements);
-  let reply="Єдина бібліотека ліцею\nКаталог художньої та наукової літератури відкривається у Librarika. Для особистого кабінету попросіть бібліотекаря про персональне запрошення.",path="/reader/telegram";
-  if(old)reply="Ваш Telegram уже приєднаний до кабінету вчителя або бібліотекаря. Учитель відкриває читацький кабінет після звірки квитка бібліотекарем; повторна реєстрація не потрібна.";
+  let reply="Єдина бібліотека ліцею\nХудожні та наукові книги, бронювання і читацька спільнота — у вашому особистому кабінеті. Для першого входу учня попросіть бібліотекаря про персональне QR-запрошення.",path="/reader/telegram";
+  if(old)reply="Ваш Telegram уже приєднаний до кабінету вчителя або бібліотекаря. Для активного вчителя читацький профіль зв’язується з чинним кабінетом; повторна реєстрація не потрібна. Неоднозначні збіги імен перевіряє бібліотекар.";
   else if(invite){
     const hash=await sha256Text(invite[1]);
     const valid=await db.prepare("SELECT 1 ok FROM reader_invites i JOIN library_readers r ON r.id=i.reader_id WHERE i.token_hash=? AND i.purpose='telegram' AND i.expires_at>? AND i.consumed_at IS NULL AND i.revoked_at IS NULL AND i.access_version=r.access_version AND r.status='active' AND r.access_status!='blocked' AND r.linked_teacher_user_id IS NULL").bind(hash,now).first();
     if(valid){reply="Персональне запрошення до бібліотеки. Відкрийте кабінет і перевірте, що вказане ім’я — ваше. Приєднання відбудеться лише після вашого підтвердження.";path+="#invite="+invite[1];}
     else reply="Запрошення недійсне або вже використане. Попросіть бібліотекаря про нове персональне запрошення.";
   }else if(connection){
-    reply=command==="stop"?"Налаштування сповіщень скинуто. Автоматичні нагадування про Librarika-видачі ще не активні; актуальні строки перевіряйте у Librarika.":command==="disconnect"?"Telegram від’єднано, попередні читацькі сеанси завершено. Дані у Librarika не змінено. Для нового приєднання потрібне персональне запрошення.":command==="catalog"?"Каталог художньої та наукової літератури, резервування, оцінки й відгуки відкриваються у Librarika.":"Ваш читацький кабінет: профіль, QR-доступ і читацька спільнота. Каталог, видачі, строки повернення, резервування, оцінки та відгуки ведуться у Librarika.";
+    reply=command==="stop"?"Налаштування сповіщень скинуто. Актуальні строки — у «Мої видачі» читацького кабінету.":command==="disconnect"?"Telegram від’єднано, попередні читацькі сеанси завершено. Історію видач у бібліотеці збережено. Для нового приєднання потрібне персональне запрошення.":command==="catalog"?"Каталог художньої та наукової літератури: оберіть книгу, подайте заявку на бронювання або напишіть відгук.":"Ваш читацький кабінет: каталог, власні видачі, бронювання, відгуки, спільнота та обліковий запис.";
     if(command==="books"){
-      reply="Актуальні книги на руках, строки повернення та історія доступні у вашому обліковому записі Librarika. Їхня перевірена проєкція на нашому сайті ще не під’єднана, тому Telegram не показує старі локальні записи як поточні.";
+      reply="Книги на руках, строки повернення та статуси заявок — у «Мої видачі».";
     }
-    if(command==="notifications")reply="Автоматичні нагадування про повернення Librarika-книг ще не активовані: спершу потрібне перевірене офіційне джерело актуальних видач і строків. /stop скидає збережені налаштування сповіщень.";
-    if(["books","profile"].includes(command))path+="?tab="+command;
+    if(command==="notifications")reply="Строки повернення доступні в читацькому кабінеті. Автоматичні нагадування окремо налаштовує бібліотекар; цей кабінет сам їх не активує. /stop скидає збережені налаштування сповіщень.";
+    if(["books","profile","catalog"].includes(command))path+="?tab="+command;
   }
   const url=new URL(path,input.siteOrigin).toString();
-  const keyboard=command==="catalog"?[[{text:"Відкрити каталог Librarika",url:LIBRARIKA_CATALOG_URL}],[{text:"Відкрити читацький кабінет",web_app:{url}}]]:[[{text:"Відкрити читацький кабінет",web_app:{url}}],[{text:"Каталог художньої літератури",url:LIBRARIKA_CATALOG_URL}]];
+  const keyboard=[[{text:"Відкрити читацький кабінет",web_app:{url}}],[{text:"Каталог",web_app:{url:new URL("/reader/telegram?tab=catalog",input.siteOrigin).toString()}}]];
   try{await send({chat_id:message.chatId,text:reply,link_preview_options:{is_disabled:true},reply_markup:{inline_keyboard:keyboard}});}catch{/* State and receipt are committed; another command can safely redisplay the menu. */}
   return {outcome,duplicate:false};
 }

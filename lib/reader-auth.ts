@@ -1,7 +1,8 @@
+import {ensureTeacherReader} from "./reader-teacher-link.ts";
 import {requireVisitTeacherSession} from "./visit-teacher-auth.ts";
 import {sha256Text} from "./librarika-import-plan.ts";
 import type {TelegramMiniAppIdentity} from "./telegram-mini-app-auth.ts";
-import {opaqueToken,readerBatch,readerFail,requireChanged,type ReaderDatabase,type ReaderIdentity,type LibraryActor} from "./reader-core.ts";
+import {ReaderError,opaqueToken,readerBatch,readerFail,requireChanged,type ReaderDatabase,type ReaderIdentity,type LibraryActor} from "./reader-core.ts";
 
 export const READER_COOKIE="__Host-library_reader",READER_TELEGRAM_COOKIE="__Host-library_reader_telegram";
 const SESSION_SECONDS=12*60*60;
@@ -26,9 +27,9 @@ export async function requireReaderSession(db:ReaderDatabase,request:Request):Pr
   if((request.headers.get("cookie")||"").includes("__Host-visit_teacher")){
     try{
       const teacher=await requireVisitTeacherSession(db,request);
-      const row=await db.prepare("SELECT id,access_version FROM library_readers WHERE linked_teacher_user_id=? AND kind!='student' AND status='active' AND access_status='active'").bind(teacher.teacherUserId).first();
+      const row=await ensureTeacherReader(db,teacher.teacherUserId);
       if(row)return scopedReader(request,{readerId:String(row.id),accessVersion:Number(row.access_version),tokenHash:teacher.tokenHash,sessionKind:"teacher"});
-    }catch{/* Reader access does not weaken teacher PIN setup or session validation. */}
+    }catch(error){if(error instanceof ReaderError)throw error;/* Reader access does not weaken teacher PIN setup or session validation. */}
   }
   readerFail("reader_auth_required","Увійдіть через Telegram або персональне запрошення бібліотекаря.",401);
 }

@@ -323,7 +323,7 @@ export const libraryHistoricalReviews = sqliteTable("library_historical_reviews"
 // Reader identity is isolated from staff privileges and never created by CSV import.
 export const readerProfiles=sqliteTable("reader_profiles",{
   readerId:text("reader_id").primaryKey().references(()=>libraryReaders.id,{onDelete:"restrict"}),
-  displayName:text("display_name").notNull().default("Читач"),phone:text("phone").notNull().default(""),
+  displayName:text("display_name").notNull().default("Читач"),phone:text("phone").notNull().default(""),email:text("email").notNull().default(""),
   photoKey:text("photo_key"),photoMime:text("photo_mime"),communityEnabled:integer("community_enabled").notNull().default(0),
   notifyLoans:integer("notify_loans").notNull().default(0),notifyBooks:integer("notify_books").notNull().default(0),
   // Loan consent floor is a Europe/Kyiv YYYY-MM-DD calendar day, not a UTC timestamp.

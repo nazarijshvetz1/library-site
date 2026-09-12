@@ -18,14 +18,24 @@ export function useDraftState<T>(key:string,initial:T|(()=>T)):[T,Dispatch<SetSt
 export function clearLiteratureDraft(key:string){drafts.delete(key);}
 export function useDraftStatus(){return useContext(DraftContext);}
 function scrollState(){const positions:Record<string,number>={},expanded:Record<string,boolean>={};document.querySelectorAll<HTMLElement>('[data-scroll-key]').forEach(e=>positions[e.dataset.scrollKey!]=e.scrollTop);document.querySelectorAll<HTMLDetailsElement>('details[data-context-key]').forEach(e=>expanded[e.dataset.contextKey!]=e.open);return {scroll:window.scrollY,positions,expanded};}
-function restoreScroll(e:Entry){const apply=()=>{window.scrollTo({top:e.scroll,behavior:'instant'});document.querySelectorAll<HTMLElement>('[data-scroll-key]').forEach(n=>{if(n.dataset.scrollKey! in e.positions)n.scrollTop=e.positions[n.dataset.scrollKey!];});document.querySelectorAll<HTMLDetailsElement>('details[data-context-key]').forEach(n=>{if(n.dataset.contextKey! in e.expanded)n.open=e.expanded[n.dataset.contextKey!];});};requestAnimationFrame(apply);const observer=new MutationObserver(apply);observer.observe(document.body,{childList:true,subtree:true});setTimeout(()=>{observer.disconnect();apply();},900);}
+function restoreScroll(e:Entry){
+ let stopped=false;
+ const apply=()=>{if(stopped)return;window.scrollTo({top:e.scroll,behavior:'instant'});document.querySelectorAll<HTMLElement>('[data-scroll-key]').forEach(n=>{if(n.dataset.scrollKey! in e.positions)n.scrollTop=e.positions[n.dataset.scrollKey!];});document.querySelectorAll<HTMLDetailsElement>('details[data-context-key]').forEach(n=>{if(n.dataset.contextKey! in e.expanded)n.open=e.expanded[n.dataset.contextKey!];});};
+ const frame=requestAnimationFrame(apply),observer=new MutationObserver(apply);
+ const stop=()=>{stopped=true;cancelAnimationFrame(frame);clearTimeout(timer);observer.disconnect();window.removeEventListener('wheel',stop);window.removeEventListener('touchstart',stop);window.removeEventListener('pointerdown',stop);window.removeEventListener('keydown',key);};
+ const key=(event:KeyboardEvent)=>{if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key))stop();};
+ const timer=setTimeout(()=>{apply();stop();},900);
+ observer.observe(document.body,{childList:true,subtree:true});
+ window.addEventListener('wheel',stop,{passive:true});window.addEventListener('touchstart',stop,{passive:true});window.addEventListener('pointerdown',stop,{passive:true});window.addEventListener('keydown',key);
+ return stop;
+}
 export function LiteratureNavigation({children}:{children:ReactNode}){
- const state=useRef({get:()=>({} as Snapshot),restore:(_:Snapshot)=>{},fallback:()=>{},layers:[] as Layer[],entries:new Map<number,Entry>(),current:0,session:'',moving:false,allow:false,undo:false});
+ const state=useRef({get:()=>({} as Snapshot),restore:(_:Snapshot)=>{},fallback:()=>{},layers:[] as Layer[],entries:new Map<number,Entry>(),current:0,session:'',moving:false,allow:false,undo:false,stopRestore:()=>{}});
  const [confirm,setConfirm]=useState<null|(()=>void)>(null),confirmRef=useRef<HTMLDialogElement>(null);
  const nav=useRef<Nav|null>(null);
  if(!nav.current){
   const save=()=>{const n=state.current,e:Entry={index:n.current,route:n.get(),layers:n.layers.map(l=>l.id),...scrollState()};n.entries.set(n.current,e);window.history.replaceState({...window.history.state,literature:{session:n.session,index:n.current}},'');return e;};
-  const push=(url:string)=>{const n=state.current;save();n.current++;window.history.pushState({...window.history.state,literature:{session:n.session,index:n.current}},'',url);save();};
+  const push=(url:string)=>{const n=state.current;n.stopRestore();n.moving=false;save();n.current++;window.history.pushState({...window.history.state,literature:{session:n.session,index:n.current}},'',url);save();};
   nav.current={bind(get,restore){state.current.get=get;state.current.restore=restore;return()=>{};},update(){if(state.current.session&&!state.current.moving)save();},push,back(){const n=state.current,top=n.layers.at(-1);if(top?.busy())return;if(top?.back?.())return;if(n.current>0)window.history.back();else if(top){top.close();if(top.routed)n.fallback();}else n.fallback();},complete(){const n=state.current;if(n.current>0){n.allow=true;history.back();}else n.layers.at(-1)?.close();},hasBack(){return state.current.current>0;},fallback(fn){state.current.fallback=fn;return()=>{};},layer(layer){const n=state.current;if(!layer.routed)push(window.location.href);n.layers.push(layer);save();return()=>{n.layers=n.layers.filter(x=>x.id!==layer.id);if(!n.moving)save();};}};
  }
  useEffect(()=>{const n=state.current;n.session=crypto.randomUUID();n.current=0;const oldRestoration=history.scrollRestoration;history.scrollRestoration='manual';nav.current!.update();
@@ -33,10 +43,10 @@ export function LiteratureNavigation({children}:{children:ReactNode}){
    const closing=n.layers.filter(l=>!target.layers.includes(l.id)),delta=target.index-n.current;
    if(!n.allow&&delta<0&&closing.at(-1)?.back?.()){n.undo=true;n.moving=true;history.go(-delta);return;}
    if(!n.allow&&closing.some(l=>l.busy()||l.dirty())){n.undo=true;n.moving=true;history.go(-delta);if(!closing.some(l=>l.busy()))setConfirm(()=>()=>{n.allow=true;history.go(delta);});return;}
-   n.allow=false;n.moving=true;n.current=target.index;for(const l of [...closing].reverse())l.close();n.layers=n.layers.filter(l=>target.layers.includes(l.id));n.restore(target.route);restoreScroll(target);setTimeout(()=>{n.moving=false;nav.current!.update();},1000);
+   n.allow=false;n.moving=true;n.current=target.index;for(const l of [...closing].reverse())l.close();n.layers=n.layers.filter(l=>target.layers.includes(l.id));n.restore(target.route);n.stopRestore();n.stopRestore=restoreScroll(target);requestAnimationFrame(()=>{n.moving=false;nav.current!.update();});
   };
   const unload=(e:BeforeUnloadEvent)=>{if(n.layers.some(l=>l.dirty())){e.preventDefault();e.returnValue='';}};
-  window.addEventListener('popstate',pop);window.addEventListener('beforeunload',unload);return()=>{window.removeEventListener('popstate',pop);window.removeEventListener('beforeunload',unload);history.scrollRestoration=oldRestoration;};
+  window.addEventListener('popstate',pop);window.addEventListener('beforeunload',unload);return()=>{window.removeEventListener('popstate',pop);window.removeEventListener('beforeunload',unload);n.stopRestore();history.scrollRestoration=oldRestoration;};
  },[]);
  useEffect(()=>{if(confirm)confirmRef.current?.showModal();},[confirm]);
  return <Navigation.Provider value={nav.current}>{children}{confirm&&<dialog ref={confirmRef} className={s.dialog} aria-label="Незбережені зміни" onCancel={e=>{e.preventDefault();setConfirm(null);}}><header><h2>Зберегти введені дані?</h2></header><div className={s.dialogBody}><p>Зміни ще не збережені в бібліотеці. Чернетка залишиться доступною в цій вкладці, коли знову відкриєте форму.</p><div className={s.actions}><button type="button" className={s.primary} onClick={()=>setConfirm(null)}>Продовжити редагування</button><button type="button" className={s.secondary} onClick={()=>{const go=confirm;setConfirm(null);go();}}>Назад зі збереженням чернетки</button></div></div></dialog>}</Navigation.Provider>;

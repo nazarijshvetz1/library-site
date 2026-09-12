@@ -1,0 +1,4 @@
+import {env} from 'cloudflare:workers';import {requireReaderSession} from '@/lib/reader-auth';import {readerApiError,readerJson,readerWriteBody} from '@/lib/reader-api';import {readerFail,type ReaderDatabase} from '@/lib/reader-core';import {readerFeed,saveFeedContent} from '@/lib/reader-feed';
+export const dynamic='force-dynamic';
+export async function GET(request:Request){try{const db=env.DB as unknown as ReaderDatabase;return readerJson({success:true,result:await readerFeed(db,await requireReaderSession(db,request),new URL(request.url))});}catch(e){return readerApiError(e);}}
+export async function POST(request:Request){try{const db=env.DB as unknown as ReaderDatabase,who=await requireReaderSession(db,request),body=await readerWriteBody(request);if(!body.input||typeof body.input!=='object')readerFail('input','Перевірте форму.');return readerJson({success:true,result:await saveFeedContent(db,who,body.input)});}catch(e){return readerApiError(e);}}

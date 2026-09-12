@@ -1,3 +1,4 @@
+import {ensureTeacherReader} from "@/lib/reader-teacher-link";
 import {env} from "cloudflare:workers";
 import {createReaderTelegramSession,logoutReader,previewReaderInvite,readerSessionCookie,readerTelegramRequest,redeemReaderInvite,requireReaderSession} from "@/lib/reader-auth";
 import {getReaderProfile} from "@/lib/reader-profile-store";
@@ -21,7 +22,7 @@ export async function POST(request:Request){try{
       const teacher=await db.prepare("SELECT 1 ok FROM telegram_connections WHERE telegram_user_id=? AND status='active'").bind(identity.telegramUserId).first();
       if(teacher){const session=await createVisitTeacherTelegramSession(db,request,{telegramUserId:identity.telegramUserId,initDataHash:identity.initDataHash,authDate:identity.authDate,receiptExpiresAt:identity.expiresAt});
         if(session.kind==="activation"||session.identity.mustChangePin)readerFail("teacher_activation","Спочатку завершіть вхід у кабінеті вчителя.",401);
-        const linked=await db.prepare("SELECT 1 ok FROM library_readers WHERE linked_teacher_user_id=? AND kind!='student' AND status='active' AND access_status='active'").bind(session.identity.teacherUserId).first();
+        const linked=await ensureTeacherReader(db,session.identity.teacherUserId);
         if(!linked)readerFail("teacher_reader_link","Бібліотекар ще має звірити й приєднати ваш читацький квиток до кабінету вчителя.",409);
         const headers=new Headers();headers.append("Set-Cookie",readerSessionCookie("",true));if(session.token)headers.append("Set-Cookie",telegramTeacherSessionCookie(session.token));return readerJson({success:true,expiresAt:session.identity.expiresAt},{headers});
       }
