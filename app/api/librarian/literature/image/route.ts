@@ -1,3 +1,4 @@
+import {readerPhotoAsset,requireIndependentReaderProfile} from '@/lib/reader-teacher-directory';
 import { env } from "cloudflare:workers";
 import { authorizeLibrarianApi,isSameOriginRequest,librarianJson,librarianError } from "@/lib/librarian-api";
 import { coverBucket } from "@/lib/cover-storage";
@@ -8,7 +9,8 @@ import { ReaderError,readerBatch,readerFail,requireChanged,type ReaderDatabase }
 export const dynamic="force-dynamic";
 const headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff","Cross-Origin-Resource-Policy":"same-origin"};
 export async function GET(request:Request){const auth=await authorizeLibrarianApi();if(!auth.ok)return auth.response;try{const url=new URL(request.url),id=url.searchParams.get("id")||"",kind=url.searchParams.get("kind")||"edition",db=env.DB as unknown as ReaderDatabase;
- const row=kind==="reader"?await db.prepare("SELECT p.photo_key storage_key,p.photo_mime mime_type,NULL external_url,NULL metadata FROM reader_profiles p WHERE p.reader_id=?").bind(id).first():await db.prepare("SELECT c.storage_key,c.mime_type,c.external_url,e.public_metadata_json metadata FROM library_editions e LEFT JOIN material_cover_assets c ON c.material_id=e.material_id AND c.status='ready' WHERE e.id=? AND e.fund='literature'").bind(id).first();
+ if(kind==="reader"){const asset=await readerPhotoAsset(db,id);if(!asset)return new Response(null,{status:404,headers});const image=await coverBucket()?.get(asset.storageKey);return image?new Response(image.body,{headers:{...headers,"Content-Type":asset.mimeType}}):new Response(null,{status:404,headers});}
+ const row=await db.prepare("SELECT c.storage_key,c.mime_type,c.external_url,e.public_metadata_json metadata FROM library_editions e LEFT JOIN material_cover_assets c ON c.material_id=e.material_id AND c.status='ready' WHERE e.id=? AND e.fund='literature'").bind(id).first();
  if(!row)return new Response(null,{status:404,headers});let key=String(row.storage_key||""),mime=String(row.mime_type||"image/jpeg");
  if(kind!=="reader"){const meta=JSON.parse(String(row.metadata||"{}"));if(meta.literatureCoverKey){key=String(meta.literatureCoverKey);mime=String(meta.literatureCoverMime||"image/jpeg");}else if(!key&&/^[a-f0-9]{64}$/.test(String(meta.coverSha256||""))&&meta.coverKind!=="placeholder")key="librarika-covers/"+meta.coverSha256;}
  if(!key&&row.external_url){try{const external=new URL(String(row.external_url));if(external.protocol==="https:"&&!external.username&&!external.password)return new Response(null,{status:302,headers:{...headers,Location:external.href}});}catch{}}if(!key)return new Response(null,{status:404,headers});if(kind==="reader"&&!key.startsWith("reader-photos/"+id+"/"))return new Response(null,{status:404,headers});
@@ -18,6 +20,7 @@ export async function POST(request:Request){const auth=await authorizeLibrarianA
  try{const input=await readBoundedJson(request,6000000),id=String(input.id||""),kind=String(input.kind),expected=Number(input.expectedVersion),db=env.DB as unknown as ReaderDatabase,actor={id:auth.value.user.d1UserId,email:auth.value.user.email||""};
  if(!["edition","reader"].includes(kind)||!/^[A-Za-z0-9_-]{1,100}$/.test(id)||!Number.isInteger(expected)||expected<1||typeof input.base64!=="string")readerFail("image","Перевірте фото та картку.");
  const command=await libraryCommand(db,actor,String(input.requestId),"literature.image",input);if(command.replayed)return librarianJson({success:true,result:command.replayed});
+ if(kind==="reader")await requireIndependentReaderProfile(db,id);
  const bytes=Uint8Array.from(atob(input.base64),c=>c.charCodeAt(0));const detected=detectCoverImage(bytes);if(!detected||bytes.length>4000000)readerFail("image","Фото має бути JPG, PNG або WebP до 4 МБ.");
  const target=kind==="edition"?await db.prepare("SELECT id FROM library_editions WHERE id=? AND version=? AND fund='literature'").bind(id,expected).first():await db.prepare("SELECT id FROM library_readers WHERE id=? AND version=?").bind(id,expected).first();if(!target)readerFail("changed","Картку змінено. Відкрийте її знову.",409);
  const digest=await crypto.subtle.digest("SHA-256",bytes),hash=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,"0")).join(""),key=kind==="reader"?`reader-photos/${id}/${hash}.${detected.extension}`:`literature-covers/${id}/${hash}.${detected.extension}`,bucket=coverBucket();if(!bucket)readerFail("storage","Сховище фото недоступне.",503);

@@ -1,3 +1,4 @@
+import {readerDirectoryFieldsSql,readerFullNameSql,readerSortNameSql,readerSearchNameSql,readerHasPhotoSql,readerPhotoVersionSql,readerPhotoUpdatedSql,readerSubjectSql,requireIndependentReaderProfile} from './reader-teacher-directory.ts';
 import {literatureEntityMetadata} from "./literature-entity-metadata.ts";
 import { countryAliases, countryCode, countryLabel, LITERATURE_TITLE } from "./literature-labels.ts";
 import { normalizeCatalogSearchText } from "./catalog-d1.ts";
@@ -72,13 +73,13 @@ export async function literatureOptions(db: ReaderDatabase) {
   ]); return { entities: (entities.results || []).map(r=>({...r,countryCode:countryCode(r.country),countryLabel:countryLabel(r.country)})), locations: locations.results || [], classes: classes.results || [], years:(years.results||[]).map(r=>String(r.year)).filter(Boolean) };
 }
 const loanFrom = "reader_circulations l JOIN library_copies c ON c.id=l.copy_id JOIN library_editions e ON e.id=c.edition_id LEFT JOIN materials m ON m.id=e.material_id JOIN library_readers r ON r.id=l.reader_id";
-const loanProjection = `l.*,c.version copy_version,c.accession_no,c.copy_no,c.condition,c.location_id,e.id edition_id,e.title,${libraryCoverSql} cover_url,r.full_name,r.member_no,r.kind,r.version reader_version`;
+const loanProjection = `l.*,c.version copy_version,c.accession_no,c.copy_no,c.condition,c.location_id,e.id edition_id,e.title,${libraryCoverSql} cover_url,${readerFullNameSql} full_name,r.member_no,r.kind,r.version reader_version`;
 export async function literatureLoans(db: ReaderDatabase, url: URL, exportAll = false) {
   const { page, limit, offset } = pageInfo(url), q = normalizeCatalogSearchText(text(url.searchParams.get("q") || "", 100)), reader = url.searchParams.get("reader") || "", status = url.searchParams.get("status") || "all", today = literatureToday();
   const sort = url.searchParams.get("sort") || "due", direction = url.searchParams.get("direction") === "desc" ? "DESC" : "ASC";
-  const sorting: Record<string,string> = { reader: "r.sort_name", issued: "l.issued_at", due: "l.due_at", returned: "l.received_at", created: "l.created_at" };
+  const sorting: Record<string,string> = { reader: readerSortNameSql, issued: "l.issued_at", due: "l.due_at", returned: "l.received_at", created: "l.created_at" };
   if (!Object.hasOwn(sorting,sort) || !["all", "issued", "overdue", "returned", "pending", "reserved", "cancelled"].includes(status)) readerFail("loan_filter", "Перевірте фільтри видач.");
-  const conditions = ["e.fund='literature'", "(?='' OR l.reader_id=?)", "(?='' OR r.sort_name LIKE ? ESCAPE '!' OR m.search_text LIKE ? ESCAPE '!')"], values: (string|number)[] = [reader, reader, q, like(q), like(q)];
+  const conditions = ["e.fund='literature'", "(?='' OR l.reader_id=?)", `(?='' OR ${readerSearchNameSql} LIKE ? ESCAPE '!' OR m.search_text LIKE ? ESCAPE '!')`], values: (string|number)[] = [reader, reader, q, like(q), like(q)];
   if (status === "overdue") { conditions.push(`l.status IN ${activeLoans} AND substr(l.due_at,1,10)<?`); values.push(today); }
   else if (status === "issued") conditions.push(`l.status IN ${activeLoans}`);
   else if (status !== "all") { conditions.push("l.status=?"); values.push(status); }
@@ -90,20 +91,20 @@ export async function literatureLoans(db: ReaderDatabase, url: URL, exportAll = 
 }
 export async function literatureReaders(db: ReaderDatabase, url: URL) {
   const { page, limit, offset } = pageInfo(url), q = normalizeCatalogSearchText(text(url.searchParams.get("q") || "", 100)), classId = url.searchParams.get("class") || "", kind = url.searchParams.get("kind") || "", inactive = url.searchParams.get("archived") === "1";
-  const where = `r.status=? AND (?='' OR r.sort_name LIKE ? ESCAPE '!' OR r.member_no LIKE ? ESCAPE '!') AND (?='' OR ce.class_year_id=?) AND (?='' OR r.kind=?)`;
+  const where = `r.status=? AND (?='' OR ${readerSearchNameSql} LIKE ? ESCAPE '!' OR r.member_no LIKE ? ESCAPE '!') AND (?='' OR ce.class_year_id=?) AND (?='' OR r.kind=?)`;
   const from = "library_readers r LEFT JOIN reader_profiles p ON p.reader_id=r.id LEFT JOIN reader_class_enrollments ce ON ce.reader_id=r.id AND ce.ended_at IS NULL LEFT JOIN class_years cy ON cy.id=ce.class_year_id";
   const bindings = [inactive ? "inactive" : "active", q, like(q), like(text(url.searchParams.get("q")||"",100).trim()), classId, classId, kind, kind];
   const count = await db.prepare(`SELECT count(*) n FROM ${from} WHERE ${where}`).bind(...bindings).first();
-  const rows = await db.prepare(`SELECT r.id,r.full_name,r.member_no,r.kind,r.status,r.version,r.access_status,r.source_group_label,r.linked_teacher_user_id,p.phone,p.display_name,CASE WHEN r.linked_teacher_user_id IS NOT NULL THEN COALESCE((SELECT tp.subject_position FROM teacher_profiles tp WHERE tp.teacher_user_id=r.linked_teacher_user_id),'') ELSE COALESCE(p.subject_position,'') END subject_position,COALESCE(p.version,0) profile_version,p.photo_key IS NOT NULL has_photo,cy.class_name,ce.class_year_id,
+  const rows = await db.prepare(`SELECT r.id,${readerFullNameSql} full_name,r.member_no,r.kind,r.status,r.version,r.access_status,r.source_group_label,r.linked_teacher_user_id,${readerDirectoryFieldsSql},p.display_name,cy.class_name,ce.class_year_id,
 (SELECT json_group_array(json_object('id',e.id,'title',e.title,'version',e.version,'overdue',CASE WHEN substr(l.due_at,1,10)<? THEN 1 ELSE 0 END)) FROM reader_circulations l JOIN library_copies c ON c.id=l.copy_id JOIN library_editions e ON e.id=c.edition_id WHERE l.reader_id=r.id AND l.status IN ('issued','overdue') AND e.fund='literature') active_books,
     CASE WHEN r.linked_teacher_user_id IS NOT NULL THEN (SELECT status FROM telegram_connections WHERE user_id=r.linked_teacher_user_id) ELSE (SELECT status FROM reader_telegram_connections WHERE reader_id=r.id) END telegram_status,
     (SELECT COUNT(*) FROM reader_circulations l JOIN library_copies c ON c.id=l.copy_id JOIN library_editions e ON e.id=c.edition_id WHERE l.reader_id=r.id AND l.status IN ${activeLoans} AND e.fund='literature') loan_count,
     (SELECT COUNT(*) FROM reader_circulations l JOIN library_copies c ON c.id=l.copy_id JOIN library_editions e ON e.id=c.edition_id WHERE l.reader_id=r.id AND l.status IN ${activeLoans} AND e.fund='literature' AND substr(l.due_at,1,10)<?) overdue_count
-    FROM ${from} WHERE ${where} ORDER BY r.sort_name,r.id LIMIT ? OFFSET ?`).bind(literatureToday(),literatureToday(), ...bindings, limit, offset).all();
+    FROM ${from} WHERE ${where} ORDER BY ${readerSortNameSql},r.id LIMIT ? OFFSET ?`).bind(literatureToday(),literatureToday(), ...bindings, limit, offset).all();
   return { items: rows.results || [], total: Number(count?.n || 0), page, pages: Math.ceil(Number(count?.n || 0) / limit) };
 }
 export async function literatureReader(db: ReaderDatabase, id: string) {
-  const row = await db.prepare(`SELECT r.id,r.member_no,r.full_name,r.kind,r.status,r.version,r.access_status,r.linked_teacher_user_id,r.source_group_label,p.phone,p.email,CASE WHEN r.linked_teacher_user_id IS NOT NULL THEN COALESCE((SELECT tp.subject_position FROM teacher_profiles tp WHERE tp.teacher_user_id=r.linked_teacher_user_id),'') ELSE COALESCE(p.subject_position,'') END subject_position,COALESCE(p.version,0) profile_version,p.photo_key IS NOT NULL has_photo,p.display_name,ce.class_year_id,cy.class_name,
+  const row = await db.prepare(`SELECT r.id,r.member_no,${readerFullNameSql} full_name,r.kind,r.status,r.version,r.access_status,r.linked_teacher_user_id,r.source_group_label,${readerDirectoryFieldsSql},p.email,p.display_name,ce.class_year_id,cy.class_name,
     CASE WHEN r.linked_teacher_user_id IS NOT NULL THEN (SELECT status FROM telegram_connections WHERE user_id=r.linked_teacher_user_id) ELSE (SELECT status FROM reader_telegram_connections WHERE reader_id=r.id) END telegram_status
     FROM library_readers r LEFT JOIN reader_profiles p ON p.reader_id=r.id LEFT JOIN reader_class_enrollments ce ON ce.reader_id=r.id AND ce.ended_at IS NULL LEFT JOIN class_years cy ON cy.id=ce.class_year_id WHERE r.id=?`).bind(id).first();
   if (!row) readerFail("reader_missing", "Читача не знайдено.", 404); return row;
@@ -126,6 +127,7 @@ export async function saveLiteratureReader(db: ReaderDatabase, actor: LibraryAct
   const name = text(input.fullName,180).replace(/\s+/g," "), kind = text(input.kind,20), phone = text(input.phone || "",30), classId = text(input.classYearId || "",100), id = input.id ? text(input.id,100) : "READER-"+crypto.randomUUID();
   if (name.length < 3 || !["student","teacher","staff","other","unclassified"].includes(kind) || kind !== "student" && classId || phone && !/^\+?[0-9() .-]{7,30}$/.test(phone)) readerFail("reader_fields", "Перевірте ПІБ, категорію, клас і телефон.");
   const command = await libraryCommand(db,actor,input.requestId,"literature.reader.save",input); if(command.replayed) return command.replayed;
+  if(input.id)await requireIndependentReaderProfile(db,id);
   const now = new Date().toISOString(), result = { id, version: input.id ? version(input.expectedVersion)+1 : 1 };
   const statements = [beginLibraryCommand(db,actor,input.requestId,"literature.reader.save",command.hash,id,now,"library_reader")];
   if (input.id) statements.push(db.prepare("UPDATE library_readers SET full_name=?,sort_name=?,kind=?,source_group_label=?,version=version+1,updated_at=? WHERE id=? AND version=? AND (linked_teacher_user_id IS NULL OR kind=?)").bind(name,normalizeCatalogSearchText(name),kind,text(input.groupLabel || "",120),now,id,version(input.expectedVersion),kind),requireChanged(db,1));
@@ -176,8 +178,8 @@ export async function archiveLiteratureRecord(db: ReaderDatabase, actor: Library
 }
 export async function literatureReviews(db: ReaderDatabase, url: URL) {
   const {page,limit,offset}=pageInfo(url);
-  const query=`SELECT 'reader' origin,x.edition_id||':'||x.reader_id id,x.edition_id,x.reader_id,x.rating,x.body,x.review_state status,x.version,x.updated_at date,e.title,${libraryCoverSql} cover_url,r.full_name author_name,p.photo_key IS NOT NULL has_photo,r.kind reader_kind,(SELECT cy.class_name FROM reader_class_enrollments ce JOIN class_years cy ON cy.id=ce.class_year_id WHERE ce.reader_id=r.id AND ce.ended_at IS NULL) class_name,CASE WHEN r.linked_teacher_user_id IS NOT NULL THEN COALESCE((SELECT tp.subject_position FROM teacher_profiles tp WHERE tp.teacher_user_id=r.linked_teacher_user_id),'') ELSE COALESCE(p.subject_position,'') END subject_position,COALESCE(p.version,0) profile_version FROM library_ratings x JOIN library_editions e ON e.id=x.edition_id LEFT JOIN materials m ON m.id=e.material_id JOIN library_readers r ON r.id=x.reader_id LEFT JOIN reader_profiles p ON p.reader_id=r.id WHERE e.fund='literature' AND x.body!='' AND x.review_state!='hidden'
-  UNION ALL SELECT 'source',x.id,x.edition_id,NULL,x.rating,x.body,x.publication_state,1,x.source_date_display,e.title,${libraryCoverSql},COALESCE(json_extract(x.source_json,'$.name'),json_extract(x.source_json,'$.author'),'Читач Librarika'),0,NULL,NULL,'',0 FROM library_historical_reviews x JOIN library_editions e ON e.id=x.edition_id LEFT JOIN materials m ON m.id=e.material_id WHERE e.fund='literature' AND x.publication_state!='hidden'`;
+  const query=`SELECT 'reader' origin,x.edition_id||':'||x.reader_id id,x.edition_id,x.reader_id,x.rating,x.body,x.review_state status,x.version,x.updated_at date,e.title,${libraryCoverSql} cover_url,${readerFullNameSql} author_name,${readerHasPhotoSql} has_photo,r.kind reader_kind,(SELECT cy.class_name FROM reader_class_enrollments ce JOIN class_years cy ON cy.id=ce.class_year_id WHERE ce.reader_id=r.id AND ce.ended_at IS NULL) class_name,${readerSubjectSql} subject_position,${readerPhotoVersionSql} profile_version,${readerPhotoUpdatedSql} photo_updated_at FROM library_ratings x JOIN library_editions e ON e.id=x.edition_id LEFT JOIN materials m ON m.id=e.material_id JOIN library_readers r ON r.id=x.reader_id LEFT JOIN reader_profiles p ON p.reader_id=r.id WHERE e.fund='literature' AND x.body!='' AND x.review_state!='hidden'
+  UNION ALL SELECT 'source',x.id,x.edition_id,NULL,x.rating,x.body,x.publication_state,1,x.source_date_display,e.title,${libraryCoverSql},COALESCE(json_extract(x.source_json,'$.name'),json_extract(x.source_json,'$.author'),'Читач Librarika'),0,NULL,NULL,'',0,NULL FROM library_historical_reviews x JOIN library_editions e ON e.id=x.edition_id LEFT JOIN materials m ON m.id=e.material_id WHERE e.fund='literature' AND x.publication_state!='hidden'`;
   const edition=text(url.searchParams.get("edition")||"",120);if(edition)await assertLiterature(db,edition);const where=" WHERE (?='' OR edition_id=?)";const count=await db.prepare(`SELECT COUNT(*) n FROM (${query})${where}`).bind(edition,edition).first(),rows=await db.prepare(`SELECT * FROM (${query})${where} ORDER BY date DESC,id LIMIT ? OFFSET ?`).bind(edition,edition,limit,offset).all();return {items:rows.results||[],total:Number(count?.n||0),page,pages:Math.ceil(Number(count?.n||0)/limit)};
 }
 export async function hideLiteratureReview(db: ReaderDatabase,actor: LibraryActor,input:Input) {

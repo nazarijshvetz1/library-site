@@ -1,3 +1,4 @@
+import {readerDirectoryFieldsSql,readerFullNameSql,readerSortNameSql,readerSearchNameSql,requireIndependentReaderProfile} from './reader-teacher-directory.ts';
 import {libraryCoverSql} from "./library-reader-catalog.ts";
 import {normalizeCatalogSearchText} from "./catalog-d1.ts";
 import {beginLibraryCommand,finishLibraryCommand,libraryCommand} from "./library-copy-store.ts";
@@ -7,12 +8,12 @@ const generatedOrdinal=(value:string)=>/^[0-9]+$/.test(value)&&Number(value)>GEN
 
 export async function listLibraryReaders(db:ReaderDatabase,url:URL){
   const query=normalizeCatalogSearchText(url.searchParams.get("q")||"");if(query.length>100)readerFail("reader_search","Скоротіть пошуковий запит.");
-  const rows=await db.prepare(`SELECT r.id,r.full_name,r.member_no,r.kind,r.status,r.access_status,r.version,r.source_group_label,r.linked_teacher_user_id,
-    cy.class_name,ce.class_year_id,p.phone,p.display_name,p.photo_key IS NOT NULL AS has_photo,
-    (SELECT status FROM reader_telegram_connections WHERE reader_id=r.id) AS telegram_status,
+  const rows=await db.prepare(`SELECT r.id,${readerFullNameSql} full_name,r.member_no,r.kind,r.status,r.access_status,r.version,r.source_group_label,r.linked_teacher_user_id,
+    cy.class_name,ce.class_year_id,${readerDirectoryFieldsSql},p.display_name,
+    CASE WHEN r.linked_teacher_user_id IS NOT NULL THEN (SELECT status FROM telegram_connections WHERE user_id=r.linked_teacher_user_id) ELSE (SELECT status FROM reader_telegram_connections WHERE reader_id=r.id) END AS telegram_status,
     COALESCE((SELECT state FROM reader_platform_links WHERE reader_id=r.id AND platform='librarika'),CASE WHEN r.source_member_id IS NOT NULL THEN 'linked' ELSE 'not_queued' END) AS librarika_status
     FROM library_readers r LEFT JOIN reader_profiles p ON p.reader_id=r.id LEFT JOIN reader_class_enrollments ce ON ce.reader_id=r.id AND ce.ended_at IS NULL LEFT JOIN class_years cy ON cy.id=ce.class_year_id
-    WHERE (?='' OR r.sort_name LIKE ? ESCAPE '!' OR r.member_no LIKE ? ESCAPE '!') ORDER BY r.sort_name,r.id LIMIT 600`).bind(query,"%"+query.replace(/[!%_]/g,v=>"!"+v)+"%","%"+query.replace(/[!%_]/g,v=>"!"+v)+"%").all();return rows.results||[];
+    WHERE (?='' OR ${readerSearchNameSql} LIKE ? ESCAPE '!' OR r.member_no LIKE ? ESCAPE '!') ORDER BY ${readerSortNameSql},r.id LIMIT 600`).bind(query,"%"+query.replace(/[!%_]/g,v=>"!"+v)+"%","%"+query.replace(/[!%_]/g,v=>"!"+v)+"%").all();return rows.results||[];
 }
 export async function libraryReaderOptions(db:ReaderDatabase){const results=await db.batch([
   db.prepare("SELECT c.id,c.class_name,a.label AS year_label FROM class_years c JOIN academic_years a ON a.id=c.academic_year_id WHERE c.status IN ('active','planned') ORDER BY a.start_date DESC,c.grade,c.class_name"),
@@ -27,6 +28,7 @@ export async function saveLibraryReader(db:ReaderDatabase,actor:LibraryActor,inp
   if(!input.id&&!await db.prepare("SELECT 1 ok FROM librarika_member_sync_runs WHERE state='applied' AND is_full_baseline=1 LIMIT 1").first())readerFail("reader_baseline_required","Спочатку синхронізуйте й окремо підтвердьте повний CSV Members із Librarika. Це захищає від повторення вже зайнятого читацького номера.",409);
   if(!input.id&&requestedMemberNo&&generatedOrdinal(requestedMemberNo)!==null)readerFail("reader_number_reserved","Цей числовий діапазон створює сайт. Для автоматичного номера залиште поле порожнім.",409);
   if(input.id){
+    await requireIndependentReaderProfile(db,input.id);
     const existing=await db.prepare(`SELECT r.member_no,r.source_member_id,
       (SELECT state FROM reader_platform_links WHERE reader_id=r.id AND platform='librarika') AS librarika_state
       FROM library_readers r WHERE r.id=?`).bind(input.id).first();
