@@ -1,0 +1,33 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {DatabaseSync} from 'node:sqlite';
+import './helpers/reader-database.mjs';
+import {Miniflare} from 'miniflare';
+const messages=await import('../lib/reader-messages.ts');
+const copies=await import('../lib/library-copy-store.ts');
+const editor=await import('../lib/library-editor.ts');
+test('0059 preserves old proposals and native daily digest runs on actual workerd D1',async()=>{
+ const sqlite=new DatabaseSync(':memory:');
+ for(const file of fs.readdirSync('drizzle').filter(name=>/^\d{4}_.*\.sql$/.test(name)&&Number(name.slice(0,4))<=58).sort())sqlite.exec(fs.readFileSync('drizzle/'+file,'utf8'));
+ const schema=sqlite.prepare("SELECT type,name,sql FROM sqlite_schema WHERE sql IS NOT NULL AND name NOT GLOB 'sqlite_*'").all();sqlite.close();
+ const mf=new Miniflare({modules:true,script:"export default {fetch(){return new Response('reader notification test')}}",compatibilityDate:'2026-05-22',d1Databases:['DB']});
+ try{const db=await mf.getD1Database('DB');
+ for(const type of ['table','index','view','trigger'])for(const item of schema.filter(x=>x.type===type&&!/^materials_fts_/.test(x.name)))await db.prepare(item.sql).run();
+ await db.prepare("INSERT INTO users(id,full_name,sort_name,email,role,status,created_at,updated_at) VALUES('admin','Admin','admin','admin@example.test','admin','active','2026-09-06','2026-09-06')").run();
+ await db.prepare("INSERT INTO library_readers(id,member_no,full_name,sort_name,kind,status,access_status,created_at,updated_at) VALUES('reader','1','Читач','читач','student','active','active','2026-09-06','2026-09-06')").run();
+ for(const status of ['submitted','received','rejected'])await db.prepare("INSERT INTO reader_literature_proposals(id,reader_id,title,author,note,status,reply,created_at,updated_at) VALUES(?,'reader','Пропозиція','Автор','Примітка',?,'Стара відповідь','2026-09-06','2026-09-06')").bind(status,status).run();
+ const before=(await db.prepare("SELECT id,status,reply,version,title FROM reader_literature_proposals ORDER BY id").all()).results;
+ for(const part of fs.readFileSync('drizzle/0059_reader_messages_and_proposals.sql','utf8').split('--> statement-breakpoint'))if(part.trim())await db.prepare(part.trim()).run();
+ assert.deepEqual((await db.prepare("SELECT id,status,reply,version,title FROM reader_literature_proposals ORDER BY id").all()).results,before);
+ await db.prepare("INSERT INTO locations(id,name,type,status,created_at,updated_at) VALUES('loc','Бібліотека','library','active','2026-09-06','2026-09-06')").run();
+ const actor={id:'admin',email:'admin@example.test'},input=v=>({requestId:crypto.randomUUID(),...v}),book=await editor.saveLibraryEdition(db,actor,input({title:'Книга',metadata:{author:'Автор'},entityIds:[],published:true}));
+ const copy=await copies.registerLibraryCopy(db,actor,input({editionId:book.id,expectedEditionVersion:1,accessionNo:'001',copyNo:'1',locationId:'loc',condition:'good'}));
+ await copies.issueReaderCopy(db,actor,input({copyId:copy.id,expectedCopyVersion:1,readerId:'reader',expectedReaderVersion:1,issuedAt:'2026-09-06',dueAt:'2026-09-13',confirmation:'ISSUE_THIS_COPY'}));
+ await db.prepare("INSERT INTO reader_profiles(reader_id,notify_loans,updated_at) VALUES('reader',1,'2026-09-06')").run();
+ await db.prepare("INSERT INTO reader_telegram_connections(reader_id,telegram_user_id,chat_id,status,linked_at) VALUES('reader','100','100','active','2026-09-06')").run();
+ const now=new Date('2026-09-13T07:00:00Z');await messages.generateReaderMessages(db,now);await messages.generateReaderMessages(db,now);
+ let sent=0;await messages.deliverReaderMessages(db,{now,send:async()=>sent++});await messages.deliverReaderMessages(db,{now,send:async()=>sent++});assert.equal(sent,1);
+ assert.equal((await db.prepare("SELECT count(*) n FROM reader_messages").first()).n,1);assert.equal((await db.prepare('PRAGMA foreign_key_check').all()).results.length,0);
+ }finally{await mf.dispose();}
+});

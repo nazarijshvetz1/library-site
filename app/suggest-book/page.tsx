@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import SuggestBookForm from "./suggest-book-form";
+import {redirect} from "next/navigation";
 
 const publicCatalogUrl = "https://nazarijshvetz1.github.io/library-site/";
 
@@ -7,12 +7,12 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Запропонувати книгу бібліотеці",
-  description: "Запропонуйте видання для фонду Єдиної бібліотеки. Потрібні лише клас, ім’я, назва та автор книги.",
+  description: "Запропонуйте видання для фонду Єдиної бібліотеки. Ім’я підтягується з кабінету читача, статус доступний в активності.",
   robots: { index: true, follow: true },
   alternates: { canonical: "https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/suggest-book" },
   openGraph: {
     title: "Запропонувати книгу — Єдина бібліотека",
-    description: "Відкрита форма пропозицій учнів для бібліотеки Міжнародного ліцею МАУП.",
+    description: "Особисті пропозиції читачів для бібліотеки Міжнародного ліцею МАУП.",
     type: "website",
     images: [{ url: `${publicCatalogUrl}og.png`, width: 1200, height: 630, alt: "Єдина бібліотека Міжнародного ліцею МАУП" }],
   },
@@ -25,5 +25,5 @@ export const metadata: Metadata = {
 };
 
 export default function SuggestBookPage() {
-  return <SuggestBookForm />;
+  redirect("/reader?tab=activity&action=propose");
 }

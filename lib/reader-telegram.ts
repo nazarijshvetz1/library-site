@@ -4,9 +4,10 @@ import {readerBatch,requireChanged,type ReaderDatabase} from "./reader-core.ts";
 type Message={chatId:string;telegramUserId:string;chatType:string;text:string};
 type Send=(body:Record<string,unknown>)=>Promise<unknown>;
 /** Uses the existing, secret-verified webhook and bot. An invitation never authenticates from /start alone. */
-export async function processReaderTelegramMessage(db:ReaderDatabase,input:{message:Message;updateId:string;payloadHash:string;siteOrigin:string;send:Send}){
+export async function processReaderTelegramMessage(db:ReaderDatabase,input:{message:Message;updateId:string;payloadHash:string;siteOrigin:string;miniAppEnabled?:boolean;send:Send}){
   const {message,updateId,payloadHash,send}=input;
   if(message.chatType!=="private"||message.chatId!==message.telegramUserId)return null;
+  if(/^\/start(?:@[A-Za-z0-9_]+)?\s+teacher$/.test(message.text.trim()))return null;
   const text=message.text.trim(),invite=text.match(/^\/start(?:@[A-Za-z0-9_]+)?\s+ra_([a-f0-9]{48})$/),readerStart=/^\/start(?:@[A-Za-z0-9_]+)?\s+reader$/.test(text);
   const old=await db.prepare("SELECT 1 ok FROM telegram_connections WHERE (telegram_user_id=? OR chat_id=?) AND status='active'").bind(message.telegramUserId,message.chatId).first();
   if(old&&!invite&&!readerStart)return null;
@@ -27,8 +28,9 @@ export async function processReaderTelegramMessage(db:ReaderDatabase,input:{mess
       db.prepare("UPDATE reader_sessions SET revoked_at=? WHERE reader_id=? AND revoked_at IS NULL").bind(now,String(connection.reader_id)),
       db.prepare("UPDATE reader_invites SET revoked_at=? WHERE reader_id=? AND revoked_at IS NULL AND consumed_at IS NULL").bind(now,String(connection.reader_id)));
   }
+  if(connection&&(command==="stop"||command==="disconnect"))statements.push(db.prepare("UPDATE reader_messages SET delivery_status='disabled',lease_token=NULL,lease_until=NULL,last_error='notifications_disabled' WHERE reader_id=? AND delivery_status IN ('pending','retry','processing')").bind(String(connection.reader_id)));
   await readerBatch(db,statements);
-  let reply="Єдина бібліотека ліцею\nХудожні та наукові книги, бронювання і читацька спільнота — у вашому особистому кабінеті. Для першого входу учня попросіть бібліотекаря про персональне QR-запрошення.",path="/reader/telegram";
+  let reply="Єдина бібліотека ліцею\nХудожні та наукові книги, бронювання і читацька спільнота — у вашому особистому кабінеті. Для першого входу оберіть «Активувати вперше» та введіть одноразовий код бібліотекаря. Код і PIN вводьте лише у захищеному вікні.",path="/reader/telegram";
   if(old)reply="Ваш Telegram уже приєднаний до кабінету вчителя або бібліотекаря. Для активного вчителя читацький профіль зв’язується з чинним кабінетом; повторна реєстрація не потрібна. Неоднозначні збіги імен перевіряє бібліотекар.";
   else if(invite){
     const hash=await sha256Text(invite[1]);
@@ -36,15 +38,30 @@ export async function processReaderTelegramMessage(db:ReaderDatabase,input:{mess
     if(valid){reply="Персональне запрошення до бібліотеки. Відкрийте кабінет і перевірте, що вказане ім’я — ваше. Приєднання відбудеться лише після вашого підтвердження.";path+="#invite="+invite[1];}
     else reply="Запрошення недійсне або вже використане. Попросіть бібліотекаря про нове персональне запрошення.";
   }else if(connection){
-    reply=command==="stop"?"Налаштування сповіщень скинуто. Актуальні строки — у «Мої видачі» читацького кабінету.":command==="disconnect"?"Telegram від’єднано, попередні читацькі сеанси завершено. Історію видач у бібліотеці збережено. Для нового приєднання потрібне персональне запрошення.":command==="catalog"?"Каталог художньої та наукової літератури: оберіть книгу, подайте заявку на бронювання або напишіть відгук.":"Ваш читацький кабінет: каталог, власні видачі, бронювання, відгуки, спільнота та обліковий запис.";
+    reply=command==="stop"?"Налаштування сповіщень скинуто. Актуальні строки — у «Мої видачі» читацького кабінету.":command==="disconnect"?"Telegram від’єднано, попередні читацькі сеанси завершено. Історію видач у бібліотеці збережено. Для нового приєднання увійдіть зі своїм PIN.":command==="catalog"?"Каталог художньої та наукової літератури: оберіть книгу, подайте заявку на бронювання або напишіть відгук.":"Ваш читацький кабінет: каталог, власні видачі, бронювання, відгуки, спільнота та обліковий запис.";
     if(command==="books"){
       reply="Книги на руках, строки повернення та статуси заявок — у «Мої видачі».";
     }
-    if(command==="notifications")reply="Строки повернення доступні в читацькому кабінеті. Автоматичні нагадування окремо налаштовує бібліотекар; цей кабінет сам їх не активує. /stop скидає збережені налаштування сповіщень.";
+    if(command==="notifications")reply="Строки повернення доступні в читацькому кабінеті. Нагадування про повернення з’являються в кабінеті о 10:00 за Києвом. Надсилання в Telegram вмикається в обліковому записі. /stop вимикає сповіщення бота.";
     if(["books","profile","catalog"].includes(command))path+="?tab="+command;
   }
   const url=new URL(path,input.siteOrigin).toString();
-  const keyboard=[[{text:"Відкрити читацький кабінет",web_app:{url}}],[{text:"Каталог",web_app:{url:new URL("/reader/telegram?tab=catalog",input.siteOrigin).toString()}}]];
+  const web=(text:string,path:string)=>({text,...(input.miniAppEnabled!==false?{web_app:{url:new URL(path,input.siteOrigin).toString()}}:{url:new URL(path.replace("/reader/telegram","/reader"),input.siteOrigin).toString()})});
+  const keyboard=invite?[[web("Підтвердити свій профіль",path)]]:(connection&&command!=="disconnect")||old?readerTelegramKeyboard(input.siteOrigin,input.miniAppEnabled!==false):[
+    [web("🔑 Увійти","/reader/telegram?mode=login")],
+    [web("✨ Активувати вперше","/reader/telegram?mode=activate")],
+    [web("📚 Переглянути каталог","/reader/catalog?telegram=1")],
+  ];
+  keyboard.push([web("↩️ Змінити кабінет","/telegram/cabinets")]);
   try{await send({chat_id:message.chatId,text:reply,link_preview_options:{is_disabled:true},reply_markup:{inline_keyboard:keyboard}});}catch{/* State and receipt are committed; another command can safely redisplay the menu. */}
   return {outcome,duplicate:false};
+}
+export function readerTelegramKeyboard(origin:string,miniAppEnabled=true){
+ const button=(label:string,tab:string)=>({text:label,...(miniAppEnabled?{web_app:{url:new URL('/reader/telegram?tab='+tab,origin).toString()}}:{url:new URL('/reader?tab='+tab,origin).toString()})});
+ return [
+ [button('🏠 Головна','home'),button('📚 Каталог','catalog')],
+ [button('📖 Мої видачі','books'),button('💬 Спільнота','community')],
+ [button('🕘 Активність','activity'),button('👤 Обліковий запис','profile')],
+ [button('➕ Запропонувати книгу','activity&action=propose')],
+ ];
 }

@@ -1,4 +1,5 @@
 import {processReaderTelegramMessage} from "./reader-telegram.ts";
+import {processCabinetSelection} from './telegram-cabinets.ts';
 import {PUBLIC_CATALOG_URL} from "./public-catalog.ts";
 import type { ChatGPTUser } from "../app/chatgpt-auth.ts";
 import { getRuntimeBoolean, getRuntimeString } from "./runtime-env.ts";
@@ -31,7 +32,7 @@ const TELEGRAM_MAX_ATTEMPTS = 8;
 const TELEGRAM_DRAIN_LIMIT = 10;
 const TELEGRAM_API_TIMEOUT_MS = 6_000;
 const TELEGRAM_BOT_API = "https://api.telegram.org";
-export const TELEGRAM_TEACHER_MENU_VERSION = 3;
+export const TELEGRAM_TEACHER_MENU_VERSION = 4;
 const TELEGRAM_TEACHER_MENU_OUTBOX_TYPE = "teacher_menu_refresh";
 const TELEGRAM_TEACHER_MENU_ENTITY = `menu-v${TELEGRAM_TEACHER_MENU_VERSION}`;
 
@@ -1232,10 +1233,15 @@ export async function processTelegramWebhookUpdate(
   }
   const privateMessage = update.message;
   if(siteOrigin){
-    const readerResult=await processReaderTelegramMessage(db,{message:privateMessage,updateId:update.updateId,payloadHash,siteOrigin:trustedSiteOrigin(siteOrigin),send:body=>telegramApiRequest(configuration.botToken,"sendMessage",body,fetcher)});
+    const selected=await processCabinetSelection(db,{message:privateMessage,updateId:update.updateId,payloadHash,origin:trustedSiteOrigin(siteOrigin),botUsername:configuration.botUsername,miniAppEnabled:configuration.miniAppEnabled,send:body=>telegramApiRequest(configuration.botToken,"sendMessage",body,fetcher)});
+    await bestEffortChatMenuButton(configuration.botToken,privateMessage.chatId,configuration.miniAppEnabled?{text:"Кабінети",url:new URL('/telegram/cabinets',trustedSiteOrigin(siteOrigin)).toString()}:null,fetcher);
+    if(selected)return selected;
+  }
+  if(siteOrigin){
+    const readerResult=await processReaderTelegramMessage(db,{message:privateMessage,updateId:update.updateId,payloadHash,siteOrigin:trustedSiteOrigin(siteOrigin),miniAppEnabled:configuration.miniAppEnabled,send:body=>telegramApiRequest(configuration.botToken,"sendMessage",body,fetcher)});
     if(readerResult)return readerResult;
   }
-  const command = telegramCommand(privateMessage.text);
+  const command = telegramCommand(/^\/start(?:@[A-Za-z0-9_]+)?\s+teacher$/.test(privateMessage.text.trim())?'/start':privateMessage.text);
   if (siteOrigin && command.kind !== "other") {
     await bestEffortRefreshWebhookSubscriptions(configuration, siteOrigin, fetcher);
   }
@@ -2756,6 +2762,7 @@ function telegramRoleKeyboard(
   if (teacherCapability) {
     const buttons = [
       {text:"👤 Кабінет учителя",miniPath:"/teacher/telegram?tab=overview"},
+      {text:"📚 Художня та наукова література",miniPath:"/reader/telegram?tab=home"},
       {text:"✨ Містер Букінгем · ШІ",miniPath:"/teacher/telegram?tab=assistant"},
       {text:"📚 Каталог",miniPath:PUBLIC_CATALOG_URL},
       {text:"🛒 Замовлення з фонду бібліотеки",miniPath:"/teacher/telegram?tab=orders"},
@@ -2766,7 +2773,7 @@ function telegramRoleKeyboard(
     ] as const;
     keyboard.push(...buttons.map(({text,miniPath,...button}) => {
       if("external" in button)return [{text,url:miniPath}];
-      const path = miniAppEnabled ? miniPath : miniPath.replace("/teacher/telegram", "/teacher");
+      const path = miniAppEnabled ? miniPath : miniPath.replace("/teacher/telegram", "/teacher").replace('/reader/telegram','/reader');
       const url = new URL(path, siteOrigin).toString();
       return [{ text, ...(miniAppEnabled ? { web_app: { url } } : { url }) }];
     }));
@@ -2784,6 +2791,7 @@ function telegramRoleKeyboard(
       return [{ text, ...(miniAppEnabled ? { web_app: { url } } : { url }) }];
     }));
   }
+  keyboard.push([{text:'↩️ Змінити кабінет',...(miniAppEnabled?{web_app:{url:new URL('/telegram/cabinets',siteOrigin).toString()}}:{url:new URL('/telegram/cabinets',siteOrigin).toString()})}]);
   keyboard.push([{
     text: notificationsOn ? "🔕 Вимкнути сповіщення" : "🔔 Увімкнути сповіщення",
     callback_data: notificationsOn ? "telegram-notifications:off" : "telegram-notifications:on",
@@ -2797,13 +2805,13 @@ async function bestEffortChatMenuButton(
   miniApp: { text: string; url: string } | null,
   fetcher: TelegramFetcher,
 ): Promise<void> {
-  const numericChatId = Number(chatId);
+    const numericChatId = Number(chatId);
   if (!Number.isSafeInteger(numericChatId)) return;
   try {
     await telegramApiRequest(botToken, "setChatMenuButton", {
       chat_id: numericChatId,
       menu_button: miniApp
-        ? { type: "web_app", text: miniApp.text, web_app: { url: miniApp.url } }
+        ? { type: "web_app", text: 'Кабінети', web_app: { url: new URL('/telegram/cabinets',miniApp.url).toString() } }
         : { type: "commands" },
     }, fetcher);
   } catch {

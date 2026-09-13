@@ -1,4 +1,34 @@
 import {normalizeCatalogSearchText} from "./catalog-d1.ts";
+
+/** PIN proof and Telegram binding are committed together; no partial activation. */
+export async function authenticateReaderTelegramWithPin(db:ReaderDatabase,request:Request,input:{loginId:string;code:string;mode:'login'|'activate';pin?:string;pinConfirm?:string;notifyLoans:boolean},telegram:import('./telegram-mini-app-auth.ts').TelegramMiniAppIdentity){
+ const loginId=String(input.loginId||'').trim(),code=pin(input.code),nowDate=new Date(),now=nowDate.toISOString(),rate=await scopes(request,loginId),limits=[rate.ip,rate.pair,rate.reader];
+ if(await blocked(db,limits,nowDate))readerFail('reader_rate_limit','Забагато спроб входу. Спробуйте пізніше.',429);
+ if(!['login','activate'].includes(input.mode)||typeof input.notifyLoans!=='boolean')readerFail('reader_login_mode','Оберіть вхід або першу активацію.');
+ const activating=input.mode==='activate',chosen=activating?pin(input.pin):code;
+ if(activating&&(!chosen||chosen!==pin(input.pinConfirm)))readerFail('reader_pin','Введіть однаковий новий PIN у двох полях.');
+ const credential=/^[0-9a-f]{32}$/u.test(loginId)?await credentialByLogin(db,loginId):null;
+ const presented=await hmacHex(`${activating?'reader-temp':'reader-pin'}:${credential?.reader_id||'unknown'}:${code||''}`);
+ if(!code||!credential||credential.reader_status!=='active'||credential.kind!=='student'||credential.linked_teacher_user_id||credential.access_status!=='active'||credential.credential_status!=='active'||Boolean(credential.must_change_pin)!==activating||(credential.locked_until&&credential.locked_until>now)||(activating&&(!credential.code_expires_at||credential.code_expires_at<=now))||!constantTimeHexEqual(presented,credential.code_hmac||'')){
+  await failed(db,limits,credential,presented,nowDate);readerFail('invalid_reader_credentials','Перевірте обраного учня, код і спосіб входу. Для тимчасового коду оберіть «Активувати вперше».',401);
+ }
+ const readerId=credential.reader_id,guard=rateGuard(rate,nowDate),token=opaqueToken(),hash=await sha256Text(token),expiresAt=new Date(nowDate.getTime()+SESSION_TTL_MS).toISOString(),newHash=activating?await hmacHex(`reader-pin:${readerId}:${chosen}`):presented;
+ const statements=[
+  db.prepare(`SELECT CASE WHEN EXISTS(SELECT 1 FROM library_readers r JOIN reader_credentials c ON c.reader_id=r.id WHERE r.id=? AND r.version=? AND r.access_version=? AND r.status='active' AND r.access_status='active' AND r.kind='student' AND r.linked_teacher_user_id IS NULL AND c.version=? AND c.code_hmac=? AND c.must_change_pin=? AND c.status='active' AND (c.locked_until IS NULL OR c.locked_until<=?) AND (?=0 OR c.code_expires_at>?) AND ${guard.sql}) THEN 1 ELSE json('reader_auth_changed') END`).bind(readerId,credential.reader_version,credential.access_version,credential.credential_version,presented,Number(activating),now,Number(activating),now,...guard.bindings),
+  db.prepare(`SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM telegram_connections WHERE telegram_user_id=? AND status='active') AND NOT EXISTS(SELECT 1 FROM reader_telegram_connections WHERE (telegram_user_id=? AND reader_id!=?) OR (reader_id=? AND (status='blocked' OR (status='active' AND telegram_user_id!=?)))) THEN 1 ELSE json('telegram_owner_conflict') END`).bind(telegram.telegramUserId,telegram.telegramUserId,readerId,readerId,telegram.telegramUserId),
+  db.prepare(`INSERT INTO reader_telegram_receipts(init_data_hash,telegram_user_id,reader_id,expires_at,created_at) VALUES(?,?,(SELECT ? WHERE NOT EXISTS(SELECT 1 FROM telegram_mini_app_auth_receipts WHERE init_data_hash=?) AND NOT EXISTS(SELECT 1 FROM telegram_librarian_sessions WHERE init_data_hash=?)),?,?)`).bind(telegram.initDataHash,telegram.telegramUserId,readerId,telegram.initDataHash,telegram.initDataHash,telegram.expiresAt,now),
+  db.prepare(`INSERT INTO reader_telegram_connections(telegram_user_id,reader_id,chat_id,status,version,linked_at) VALUES(?,?,?,'active',1,?) ON CONFLICT(reader_id) DO UPDATE SET telegram_user_id=excluded.telegram_user_id,chat_id=excluded.chat_id,status='active',version=reader_telegram_connections.version+1,linked_at=excluded.linked_at,disabled_at=NULL WHERE reader_telegram_connections.status='disabled' OR (reader_telegram_connections.status='active' AND reader_telegram_connections.telegram_user_id=excluded.telegram_user_id)`).bind(telegram.telegramUserId,readerId,telegram.telegramUserId,now),requireChanged(db,1),
+  db.prepare('UPDATE reader_credentials SET code_hmac=?,must_change_pin=0,code_expires_at=NULL,version=version+?,failed_attempts=0,failure_window_started_at=NULL,locked_until=NULL,last_login_at=?,updated_at=? WHERE reader_id=? AND version=?').bind(newHash,Number(activating),now,now,readerId,credential.credential_version),requireChanged(db,1),
+  db.prepare("UPDATE reader_sessions SET revoked_at=? WHERE reader_id=? AND revoked_at IS NULL AND (telegram_user_id IS NOT NULL OR ?=1)").bind(now,readerId,Number(activating)),
+ ];
+ if(activating)statements.push(db.prepare("UPDATE reader_pin_setup_grants SET revoked_at=? WHERE reader_id=? AND consumed_at IS NULL AND revoked_at IS NULL").bind(now,readerId),db.prepare("UPDATE reader_invites SET revoked_at=? WHERE reader_id=? AND consumed_at IS NULL AND revoked_at IS NULL").bind(now,readerId));
+ statements.push(db.prepare("INSERT INTO reader_profiles(reader_id,display_name,updated_at) VALUES(?,'Читач',?) ON CONFLICT(reader_id) DO NOTHING").bind(readerId,now),
+ db.prepare("UPDATE reader_profiles SET notify_loans=?,notify_loans_since=CASE WHEN ?=1 THEN coalesce(notify_loans_since,?) ELSE NULL END,version=version+1,updated_at=? WHERE reader_id=?").bind(Number(input.notifyLoans),Number(input.notifyLoans),now.slice(0,10),now,readerId),
+ db.prepare("INSERT INTO reader_sessions(token_hash,reader_id,access_version,credential_version,telegram_user_id,created_at,expires_at) VALUES(?,?,?,?,?,?,?)").bind(hash,readerId,credential.access_version,credential.credential_version+Number(activating),telegram.telegramUserId,now,expiresAt),
+ db.prepare("DELETE FROM reader_auth_limits WHERE scope_hash IN (?,?)").bind(rate.pair.hash,rate.reader.hash),cleanupLimits(db,nowDate));
+ await readerBatch(db,statements);return {token,expiresAt};
+}
+
 import {sha256Text} from "./librarika-import-plan.ts";
 import {opaqueToken,readerBatch,readerFail,requireChanged,type LibraryActor,type ReaderDatabase} from "./reader-core.ts";
 import {teacherAuthPepper} from "./visit-teacher-auth.ts";

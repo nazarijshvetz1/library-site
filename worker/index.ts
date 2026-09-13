@@ -1,3 +1,4 @@
+import {runNativeReaderNotifications} from '../lib/reader-messages';
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
@@ -54,7 +55,7 @@ const worker = {
 
     const response = await handler.fetch(request, env, ctx);
     const headers = new Headers(response.headers);
-    const isTelegramMiniApp = url.pathname === "/teacher/telegram"
+    const isTelegramMiniApp = url.pathname === "/telegram/cabinets" || url.pathname === "/reader/catalog" || url.pathname === "/teacher/telegram"
       || url.pathname.startsWith("/teacher/telegram/")
       || url.pathname === "/librarian/telegram"
       || url.pathname.startsWith("/librarian/telegram/")
@@ -85,6 +86,7 @@ const worker = {
   },
   async scheduled(controller: ScheduledControllerLike, env: Env, ctx: ExecutionContext): Promise<void> {
     const scheduledAt=scheduledInstant(controller);
+    ctx.waitUntil(runNativeReaderNotifications(env.DB,scheduledAt).catch(()=>console.error("reader_notifications_failed")));
     ctx.waitUntil(recordScheduledHeartbeat(env.DB,scheduledAt).catch(()=>undefined));
     ctx.waitUntil(expireAssistantCalls(env.DB, env.OPENAI_API_KEY));
     // General Telegram messages are deadline-sensitive, so drain them on every minute tick.

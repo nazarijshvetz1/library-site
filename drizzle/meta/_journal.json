@@ -414,6 +414,13 @@
       "when": 1789272583158,
       "tag": "0058_outgoing_synch",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1789301276842,
+      "tag": "0059_reader_messages_and_proposals",
+      "breakpoints": true
     }
   ]
 }
