@@ -4,7 +4,7 @@ import {Building2,Camera,ChevronRight,FolderTree,LibraryBig,Search,Tags,UserRoun
 import {telephoneHref} from '@/lib/telephone';
 import {readerDate,readerFetch,type ReaderProfile} from './reader-types';
 import ReaderScanner from './reader-scanner';
-import {BookRow,Feedback,Modal,Pager,PublicationLine,Suggest,useCabinetData,type Row,type Page} from './cabinet-controls';
+import {BookPublicMeta,BookRow,Feedback,Modal,Pager,PublicationLine,Suggest,useCabinetData,type Row,type Page} from './cabinet-controls';
 import {DraftScope,useDraftState,useLiteratureNavigation} from '../librarian/literature/literature-navigation';
 import LiteraturePhotoEditor,{type PreparedPhoto} from '../librarian/literature/photo-editor';
 import s from './cabinet.module.css';
@@ -65,7 +65,7 @@ function CatalogContents({state,setState,epoch,onBook,onPropose,scanCode,onScanD
   <details className={s.details}><summary>Знайти за штрих-кодом</summary><ReaderScanner className={s.secondary} label="Сканувати код" onDetected={code=>void findCode(code)}/><form className={s.actions} onSubmit={event=>{event.preventDefault();void findCode(manual);}}><label className={s.field}>Код з етикетки<input value={manual} onChange={event=>setManual(event.target.value)} maxLength={500}/></label><button className={s.secondary} disabled={!manual.trim()}>Знайти за кодом</button></form></details>
   <Feedback state={remote}/>{scan&&<button className={s.textButton} onClick={()=>setScan(null)}>Повернутися до всього каталогу</button>}{scanError&&<p role="alert" className={s.error}>{scanError}</p>}
   <p className={s.muted}>{scan?`Знайдено за кодом: ${scan.length}`:`Знайдено ${remote.data?.total??'…'} видань`}</p>
-  <div className={s.stack}>{(scan||remote.data?.items||[]).map(book=><BookRow key={book.id} book={book} onBook={onBook} onEntity={onEntity}><PublicationLine book={book} onEntity={onEntity}/><span className={s.badge}>{book.available?`Доступно: ${book.available}`:'Можна подати заявку'}</span><details className={s.details}><summary>Докладніше</summary><div className={s.chips}>{book.entities.filter((entity:Row)=>browseItems.some(item=>item.kind===entity.kind)).map((entity:Row)=><button key={entity.id+entity.role} onClick={()=>onEntity(entity)}>{entity.name}</button>)}</div></details></BookRow>)}</div>
+  <div className={`${s.stack} ${s.catalogCards}`}>{(scan||remote.data?.items||[]).map(book=><BookRow key={book.id} book={book} onBook={onBook} onEntity={onEntity}><PublicationLine book={book} onEntity={onEntity}/><BookPublicMeta book={book}/><span className={s.badge}>{book.available?`Доступно: ${book.available}`:'Можна подати заявку'}</span><details className={s.details}><summary>Докладніше</summary><div className={s.chips}>{book.entities.filter((entity:Row)=>browseItems.some(item=>item.kind===entity.kind)).map((entity:Row)=><button key={entity.id+entity.role} onClick={()=>onEntity(entity)}>{entity.name}</button>)}</div></details></BookRow>)}</div>
   {remote.data&&!remote.loading&&!(scan||remote.data.items).length&&<p className={s.empty}>Книжок за цим запитом немає. Спробуй іншу назву або скинь фільтри.</p>}
   {!scan&&<Pager data={remote.data} onPage={page=>update({page})}/>}<button className={s.secondary} style={{marginTop:20,width:'100%'}} onClick={onPropose}><Plus size={18}/>Запропонувати книгу бібліотеці</button>
  </>;

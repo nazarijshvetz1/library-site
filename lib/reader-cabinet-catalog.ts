@@ -5,7 +5,6 @@ import {readerFail,readerResource,type ReaderDatabase} from './reader-core.ts';
 
 export const cabinetCover="'/api/reader/cover?id='||e.id||'&v='||e.version";
 const fold=(column:string)=>[...'АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯЫЭЪЁ'].reduce((sql,c)=>`replace(${sql},'${c}','${c.toLowerCase()}')`,`lower(${column})`);
-const searchFold=(column:string)=>`replace(replace(replace(replace(replace(replace(${fold(column)},'’',''''),char(96),''''),'-',' '),'–',' '),'—',' '),'‑',' ')`;
 const visible="e.fund='literature' AND e.publication_state='published' AND (m.id IS NULL OR m.status='active')";
 const from='library_editions e LEFT JOIN materials m ON m.id=e.material_id';
 const relationMatch="((n.kind='author' AND x.role IN ('author','coauthor')) OR (n.kind!='author' AND x.role=n.kind))";
@@ -13,7 +12,9 @@ const relatedRelationMatch="((n.kind='author' AND rx.role IN ('author','coauthor
 const kinds=['genre','author','publisher','tag','series'] as const;
 type EntityKind=(typeof kinds)[number];
 const relations=`(SELECT json_group_array(json_object('id',n.id,'kind',n.kind,'name',n.name,'role',x.role,'count',(SELECT count(DISTINCT related.id) FROM library_edition_entities rx JOIN library_editions related ON related.id=rx.edition_id LEFT JOIN materials rm ON rm.id=related.material_id WHERE rx.entity_id=n.id AND ${relatedRelationMatch} AND related.fund='literature' AND related.publication_state='published' AND (rm.id IS NULL OR rm.status='active')))) FROM library_edition_entities x JOIN library_catalog_entities n ON n.id=x.entity_id WHERE x.edition_id=e.id AND ${relationMatch})`;
-const projection=`e.id,e.title,${cabinetCover} cover_url,json_extract(e.public_metadata_json,'$.author') author,json_extract(e.public_metadata_json,'$.publisher') publisher,json_extract(e.public_metadata_json,'$.year') year,coalesce(json_extract(e.public_metadata_json,'$.type'),'Книга') type,${relations} relations_json,
+const projection=`e.id,e.title,${cabinetCover} cover_url,json_extract(e.public_metadata_json,'$.author') author,json_extract(e.public_metadata_json,'$.publisher') publisher,json_extract(e.public_metadata_json,'$.year') year,coalesce(json_extract(e.public_metadata_json,'$.type'),'Книга') type,json_extract(e.public_metadata_json,'$.pages') pages_value,
+ coalesce((SELECT ml.url FROM material_links ml WHERE ml.material_id=e.material_id AND ml.is_public=1 AND ml.status='active' ORDER BY ml.sort_order,ml.id LIMIT 1),json_extract(e.public_metadata_json,'$.url')) website_value,
+ coalesce((SELECT ml.label FROM material_links ml WHERE ml.material_id=e.material_id AND ml.is_public=1 AND ml.status='active' ORDER BY ml.sort_order,ml.id LIMIT 1),'Сайт книги') website_label,${relations} relations_json,
  (SELECT count(*) FROM library_copies c WHERE c.edition_id=e.id AND c.registration='registered' AND c.physical_state!='withdrawn') total,
  (SELECT count(*) FROM library_copies c WHERE c.edition_id=e.id AND c.registration='registered' AND c.physical_state='on_shelf' AND NOT EXISTS(SELECT 1 FROM reader_circulations l WHERE l.copy_id=c.id AND l.status IN ('pending','reserved','issued','overdue'))) available`;
 
@@ -22,15 +23,20 @@ function isReaderRelation(entity:any){return (kinds as readonly string[]).includ
 function kind(value:string):EntityKind{if(!(kinds as readonly string[]).includes(value))readerFail('filter','Невідомий довідник.');return value as EntityKind;}
 function page(value:string|null){const result=Number(value||1);if(!Number.isInteger(result)||result<1||result>10000)readerFail('page','Некоректна сторінка.');return result;}
 function like(value:string){return '%'+value.replace(/[!%_]/g,v=>'!'+v)+'%';}
+function searchTerms(value:string){return value.split(/[\s']+/u).filter(Boolean).slice(0,12);}
+function foldedTerms(column:string,terms:string[]){return terms.map(()=>`${fold(column)} LIKE ? ESCAPE '!'`).join(' AND ');}
+function publicPageCount(value:unknown){const pages=Number(String(value??'').trim());return Number.isInteger(pages)&&pages>0&&pages<=100000?pages:null;}
+function publicWebsite(value:unknown){try{const url=new URL(String(value??'').trim());return ['http:','https:'].includes(url.protocol)&&url.hostname&&!url.username&&!url.password?url.href:'';}catch{return '';}}
 
 export function cabinetCard(row:Record<string,unknown>){
- const {relations_json,...rest}=row,unique=new Map<string,any>();
+ const {relations_json,pages_value,website_value,website_label,...rest}=row,unique=new Map<string,any>();
  for(const entity of parseRelations(relations_json).filter(isReaderRelation)){
   const previous=unique.get(entity.id);
   if(!previous||entity.role==='author')unique.set(entity.id,entity);
  }
  const entities=[...unique.values()];
- return {...rest,entities,author:entities.filter(x=>x.kind==='author').map(x=>x.name).join(', ')||row.author||'',publisher:entities.filter(x=>x.kind==='publisher').map(x=>x.name).join(', ')||row.publisher||''};
+ const websiteUrl=publicWebsite(website_value);
+ return {...rest,entities,author:entities.filter(x=>x.kind==='author').map(x=>x.name).join(', ')||row.author||'',publisher:entities.filter(x=>x.kind==='publisher').map(x=>x.name).join(', ')||row.publisher||'',pages:publicPageCount(pages_value),websiteUrl,websiteLabel:websiteUrl?String(website_label||'Сайт книги').trim().slice(0,120):''};
 }
 
 export async function assertReaderEdition(db:ReaderDatabase,id:unknown){if(typeof id!=='string'||!readerResource(id)||!await db.prepare(`SELECT e.id FROM ${from} WHERE e.id=? AND ${visible}`).bind(id).first())readerFail('book_missing','Книга недоступна в художній бібліотеці.',404);return id;}
@@ -39,7 +45,8 @@ export async function cabinetCatalog(db:ReaderDatabase,url:URL){
  const raw=(url.searchParams.get('q')||'').trim(),q=normalizeCatalogSearchText(raw),currentPage=page(url.searchParams.get('page')),sort=url.searchParams.get('sort')||'title';
  if(q.length>100||!['title','newest'].includes(sort))readerFail('catalog_query','Перевірте параметри пошуку.');
  const where=[visible],bind:(string|number)[]=[];
- if(q){where.push(`(m.search_text LIKE ? ESCAPE '!' OR ${searchFold('e.title')} LIKE ? ESCAPE '!' OR EXISTS(SELECT 1 FROM library_edition_entities sx JOIN library_catalog_entities sn ON sn.id=sx.entity_id WHERE sx.edition_id=e.id AND sn.kind='author' AND sx.role IN ('author','coauthor') AND ${searchFold('sn.name')} LIKE ? ESCAPE '!'))`);bind.push(like(q),like(q),like(q));}
+ // materials.search_text is normalized when a card is saved; keeping this predicate shallow also keeps it compatible with Cloudflare D1.
+ if(q){where.push(`(m.search_text LIKE ? ESCAPE '!' OR e.title LIKE ? ESCAPE '!' OR EXISTS(SELECT 1 FROM library_edition_entities sx JOIN library_catalog_entities sn ON sn.id=sx.entity_id WHERE sx.edition_id=e.id AND sn.kind='author' AND sx.role IN ('author','coauthor') AND sn.name LIKE ? ESCAPE '!'))`);bind.push(like(q),like(raw),like(raw));}
  for(const entityKind of kinds){const id=url.searchParams.get(entityKind);if(id){if(!readerResource(id))readerFail('filter','Некоректний фільтр.');where.push(`EXISTS(SELECT 1 FROM library_edition_entities x JOIN library_catalog_entities n ON n.id=x.entity_id WHERE x.edition_id=e.id AND x.entity_id=? AND n.kind=? AND ${relationMatch})`);bind.push(id,entityKind);}}
  const w=where.join(' AND '),total=Number((await db.prepare(`SELECT count(*) n FROM ${from} WHERE ${w}`).bind(...bind).first())?.n||0);
  const rows=await db.prepare(`SELECT ${projection} FROM ${from} WHERE ${w} ORDER BY ${sort==='newest'?'e.created_at DESC,e.id DESC':'coalesce(m.sort_title,e.title),e.id'} LIMIT 20 OFFSET ?`).bind(...bind,(currentPage-1)*20).all();
@@ -47,11 +54,11 @@ export async function cabinetCatalog(db:ReaderDatabase,url:URL){
 }
 
 export async function cabinetFacets(db:ReaderDatabase,url:URL){
- const entityKind=kind(url.searchParams.get('kind')||'genre'),q=normalizeCatalogSearchText(url.searchParams.get('q')||''),currentPage=page(url.searchParams.get('page'));
+ const entityKind=kind(url.searchParams.get('kind')||'genre'),raw=(url.searchParams.get('q')||'').trim(),q=normalizeCatalogSearchText(raw),currentPage=page(url.searchParams.get('page'));
  if(q.length>100)readerFail('filter','Перевірте пошук.');
  // Suggestions stay quiet on an empty focus. Explicit directory browsing has its own endpoint.
  if(!q)return {items:[],more:false};
- const rows=await db.prepare(`SELECT n.id,n.kind,n.name,count(DISTINCT e.id) count FROM library_catalog_entities n JOIN library_edition_entities x ON x.entity_id=n.id JOIN library_editions e ON e.id=x.edition_id LEFT JOIN materials m ON m.id=e.material_id WHERE ${visible} AND n.kind=? AND ${relationMatch} AND COALESCE(json_extract(n.public_metadata_json,'$.archived'),0)=0 AND ${searchFold('n.name')} LIKE ? ESCAPE '!' GROUP BY n.id ORDER BY ${fold('n.name')},n.id LIMIT 21 OFFSET ?`).bind(entityKind,like(q),(currentPage-1)*20).all();
+ const terms=searchTerms(q),rows=await db.prepare(`SELECT n.id,n.kind,n.name,count(DISTINCT e.id) count FROM library_catalog_entities n JOIN library_edition_entities x ON x.entity_id=n.id JOIN library_editions e ON e.id=x.edition_id LEFT JOIN materials m ON m.id=e.material_id WHERE ${visible} AND n.kind=? AND ${relationMatch} AND COALESCE(json_extract(n.public_metadata_json,'$.archived'),0)=0 AND ${foldedTerms('n.name',terms)} GROUP BY n.id ORDER BY ${fold('n.name')},n.id LIMIT 21 OFFSET ?`).bind(entityKind,...terms.map(like),(currentPage-1)*20).all();
  return {items:(rows.results||[]).slice(0,20),more:(rows.results||[]).length>20};
 }
 
@@ -59,8 +66,8 @@ export async function cabinetEntities(db:ReaderDatabase,url:URL){
  const entityKind=kind(url.searchParams.get('kind')||'genre'),raw=(url.searchParams.get('q')||'').trim(),q=normalizeCatalogSearchText(raw),currentPage=page(url.searchParams.get('page'));
  if(q.length>100)readerFail('filter','Перевірте пошук.');
  const linked=`EXISTS(SELECT 1 FROM library_edition_entities x JOIN library_editions e ON e.id=x.edition_id LEFT JOIN materials m ON m.id=e.material_id WHERE x.entity_id=n.id AND ${relationMatch} AND ${visible})`;
- const where=`n.kind=? AND COALESCE(json_extract(n.public_metadata_json,'$.archived'),0)=0 AND ${linked}${q?` AND ${searchFold('n.name')} LIKE ? ESCAPE '!'`:''}`;
- const bindings=q?[entityKind,like(q)]:[entityKind];
+ const terms=searchTerms(q),where=`n.kind=? AND COALESCE(json_extract(n.public_metadata_json,'$.archived'),0)=0 AND ${linked}${q?` AND ${foldedTerms('n.name',terms)}`:''}`;
+ const bindings=q?[entityKind,...terms.map(like)]:[entityKind];
  const total=Number((await db.prepare(`SELECT count(*) n FROM library_catalog_entities n WHERE ${where}`).bind(...bindings).first())?.n||0);
  const rows=await db.prepare(`SELECT n.id,n.kind,n.name,(SELECT count(DISTINCT e.id) FROM library_edition_entities x JOIN library_editions e ON e.id=x.edition_id LEFT JOIN materials m ON m.id=e.material_id WHERE x.entity_id=n.id AND ${relationMatch} AND ${visible}) count FROM library_catalog_entities n WHERE ${where} ORDER BY ${fold('n.name')},n.id LIMIT 30 OFFSET ?`).bind(...bindings,(currentPage-1)*30).all();
  return {items:rows.results||[],total,page:currentPage,pages:Math.ceil(total/30)};

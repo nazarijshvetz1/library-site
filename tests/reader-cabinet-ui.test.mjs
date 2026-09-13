@@ -8,6 +8,7 @@ const controls=read('app/reader/cabinet-controls.tsx');
 const workspace=read('app/reader/reader-workspace.tsx');
 const book=read('app/reader/cabinet-book.tsx');
 const css=read('app/reader/cabinet.module.css');
+const catalogBackend=read('lib/reader-cabinet-catalog.ts');
 
 test('reader home uses compact mobile-only scopes without shrinking every form action',()=>{
  assert.match(panels,/homeGreeting/u);assert.match(panels,/homeMetrics/u);assert.match(panels,/homeActions/u);
@@ -34,4 +35,12 @@ test('account suggests canonical full name, remains editable and presents a dedi
  assert.match(panels,/profile\.displayName\.trim\(\)==='Читач'\?profile\.fullName/u);
  assert.match(panels,/Ім’я у спільноті/u);assert.match(panels,/maxLength=\{180\}/u);assert.match(panels,/logoutButton/u);
  assert.match(css,/\.logoutButton\{[^}]*color:#922f29[^}]*background:#fbe8e2/u);
+});
+
+test('reader catalog is dense, shows public book facts, and community search suggestions identify books visually',()=>{
+ assert.match(controls,/function BookPublicMeta/u);assert.match(controls,/book\.pages/u);assert.match(controls,/book\.websiteUrl/u);
+ assert.match(controls,/kind==='book'\?s\.bookSuggestion/u);assert.match(controls,/Автор не вказаний/u);assert.match(controls,/<Cover book=\{row\}/u);
+ assert.match(panels,/catalogCards/u);assert.match(panels,/<BookPublicMeta book=\{book\}/u);
+ assert.match(css,/\.homeGreeting>img\{width:72px;height:72px/u);assert.match(css,/\.catalogCards\{gap:8px\}/u);assert.match(css,/\.suggestions \.bookSuggestion/u);
+ assert.match(catalogBackend,/m\.search_text LIKE/u);assert.doesNotMatch(catalogBackend,/searchFold/u);
 });
