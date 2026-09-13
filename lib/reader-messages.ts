@@ -25,20 +25,24 @@ export async function generateReaderMessages(db:ReaderDatabase,nowDate=new Date(
  const local=kyivLocalNow(nowDate);if(local.time<'10:00')return;
  const now=nowDate.toISOString();
  await db.batch([db.prepare(`INSERT INTO reader_messages(id,reader_id,dedupe_key,kind,day,title,body,payload_json,target_tab,created_at,next_attempt_at)
- SELECT lower(hex(randomblob(16))),r.id,'loans:'||r.id||':'||?,'loan_digest',?,'Час повернути книги','Перевірте строки повернення у «Мої видачі».','{}','books',?,?
+ SELECT lower(hex(randomblob(16))),r.id,'loans:'||r.id||':'||?,'loan_digest',?,'Час повернути книги','Перевірте строки повернення у «Історія читання».','{}','books',?,?
  FROM ${source} WHERE ${due} GROUP BY r.id ON CONFLICT(dedupe_key) DO NOTHING`).bind(local.date,local.date,now,now,local.date)]);
 }
-export async function readerInbox(db:ReaderDatabase,who:ReaderIdentity){
- const rows=await db.prepare("SELECT id,kind,day,title,body,payload_json,target_tab,read_at,created_at,delivery_status FROM reader_messages WHERE reader_id=? ORDER BY created_at DESC,id DESC LIMIT 20").bind(who.readerId).all();
- const items:Record<string,any>[]=[];let newestLoan=false;
- for(const row of rows.results||[]){
-  if(row.kind==='loan_digest'){
-   if(newestLoan)continue;newestLoan=true;
-   const loans=await currentDueLoans(db,who.readerId,kyivLocalNow().date);
-   items.push({...row,body:loans.length?digestBody(loans,kyivLocalNow().date):'Усі книги з цього нагадування повернуті або строк подовжено.',resolved:!loans.length,loans});
-  }else items.push(row);
- }
- return {items,unread:items.filter(row=>!row.read_at&&!row.resolved).length};
+const inboxVisible=`(rm.kind!='community' OR EXISTS(SELECT 1 FROM reader_feed_comments c JOIN reader_feed_posts fp ON fp.id=c.post_id JOIN reader_profiles cp ON cp.reader_id=c.reader_id JOIN reader_profiles owner ON owner.reader_id=rm.reader_id WHERE c.id=json_extract(rm.payload_json,'$.commentId') AND fp.id=json_extract(rm.payload_json,'$.postId') AND c.status='visible' AND fp.status='visible' AND cp.community_enabled=1 AND owner.community_enabled=1 AND NOT EXISTS(SELECT 1 FROM reader_blocks b WHERE (b.reader_id=rm.reader_id AND b.blocked_reader_id IN (c.reader_id,fp.reader_id)) OR (b.blocked_reader_id=rm.reader_id AND b.reader_id IN (c.reader_id,fp.reader_id))))) AND (rm.kind!='loan_digest' OR NOT EXISTS(SELECT 1 FROM reader_messages newer WHERE newer.reader_id=rm.reader_id AND newer.kind='loan_digest' AND (newer.created_at>rm.created_at OR (newer.created_at=rm.created_at AND newer.id>rm.id))))`;
+export async function readerInbox(db:ReaderDatabase,who:ReaderIdentity,u=new URL('https://local/')){
+ const category=u.searchParams.get('category')||'all',page=Number(u.searchParams.get('page')||1);
+ if(!['all','library','community','account'].includes(category)||!Number.isInteger(page)||page<1||page>10000)readerFail('messages','Перевірте фільтр сповіщень.');
+ const filter=category==='library'?" AND rm.kind IN ('loan_digest','proposal','request','circulation')":category==='all'?'':" AND rm.kind='"+category+"'";
+ const day=kyivLocalNow().date,loans=await currentDueLoans(db,who.readerId,day);
+ const base="rm.reader_id=? AND "+inboxVisible;
+ const total=Number((await db.prepare("SELECT count(*) n FROM reader_messages rm WHERE "+base+filter).bind(who.readerId).first())?.n||0);
+ const unread=Number((await db.prepare("SELECT count(*) n FROM reader_messages rm WHERE "+base+" AND rm.read_at IS NULL"+(!loans.length?" AND rm.kind!='loan_digest'":'')).bind(who.readerId).first())?.n||0);
+ const rows=await db.prepare(`SELECT rm.id,rm.kind,rm.day,rm.title,rm.body,rm.payload_json,rm.target_tab,rm.read_at,rm.created_at,rm.delivery_status,
+ CASE WHEN e.publication_state='published' AND e.fund='literature' THEN e.id END edition_id,CASE WHEN e.publication_state='published' AND e.fund='literature' THEN e.title END book_title,
+ CASE WHEN e.publication_state='published' AND e.fund='literature' THEN '/api/reader/cover?id='||e.id||'&v='||e.version END cover_url
+ FROM reader_messages rm LEFT JOIN library_editions e ON e.id=coalesce(json_extract(rm.payload_json,'$.editionId'),(SELECT proposal.edition_id FROM reader_literature_proposals proposal WHERE proposal.id=json_extract(rm.payload_json,'$.proposalId'))) WHERE ${base+filter} ORDER BY rm.created_at DESC,rm.id DESC LIMIT 20 OFFSET ?`).bind(who.readerId,(page-1)*20).all();
+ const items=(rows.results||[]).map(row=>{const payload=JSON.parse(String(row.payload_json||'{}'));return {...row,payload,category:['community','account'].includes(String(row.kind))?row.kind:'library',...(row.kind==='loan_digest'?{body:loans.length?digestBody(loans,day):'Усі книги з цього нагадування повернуті або строк подовжено.',resolved:!loans.length,loans,edition_id:loans[0]?.edition_id,book_title:loans[0]?.title,cover_url:loans[0]?'/api/reader/cover?id='+encodeURIComponent(loans[0].edition_id):null}:{})};});
+ return {items,unread,total,page,pages:Math.ceil(total/20)};
 }
 export async function markReaderMessage(db:ReaderDatabase,who:ReaderIdentity,id:unknown){
  if(typeof id!=='string'||id.length>100)readerFail('message','Повідомлення не знайдено.');
@@ -46,11 +50,11 @@ export async function markReaderMessage(db:ReaderDatabase,who:ReaderIdentity,id:
  return {id};
 }
 async function recipient(db:ReaderDatabase,readerId:string){
- return db.prepare(`SELECT r.id,p.notify_loans,
+ return db.prepare(`SELECT r.id,(p.telegram_disconnected_at IS NULL) notify_loans,
  CASE WHEN r.linked_teacher_user_id IS NULL THEN rc.chat_id ELSE tc.chat_id END chat_id,
  CASE WHEN r.linked_teacher_user_id IS NULL THEN rc.status ELSE tc.status END connection_status,
  CASE WHEN r.linked_teacher_user_id IS NULL THEN rc.version ELSE tc.version END connection_version,
- CASE WHEN r.linked_teacher_user_id IS NULL THEN 1 ELSE coalesce(tc.notify_orders,0)+coalesce(tc.notify_visits,0) END bot_enabled
+ 1 bot_enabled
  FROM library_readers r LEFT JOIN reader_profiles p ON p.reader_id=r.id
  LEFT JOIN reader_telegram_connections rc ON rc.reader_id=r.id
  LEFT JOIN telegram_connections tc ON tc.user_id=r.linked_teacher_user_id
@@ -96,7 +100,7 @@ export async function deliverReaderMessages(db:ReaderDatabase,options:{now?:Date
   try{
    const message=String(row.title)+'\n\n'+body.slice(0,3400)+'\n\nСтатус оновлюється в кабінеті читача.';
    if(options.send)await options.send(String(to.chat_id),message,String(row.target_tab));
-   else await telegramApiRequest(token!,'sendMessage',{chat_id:String(to.chat_id),text:message,link_preview_options:{is_disabled:true},reply_markup:{inline_keyboard:[[{text:row.target_tab==='books'?'📖 Мої видачі':'🕘 Мої пропозиції',web_app:{url:siteOrigin+'/reader/telegram?tab='+row.target_tab}}]]}},fetch);
+   else await telegramApiRequest(token!,'sendMessage',{chat_id:String(to.chat_id),text:message,link_preview_options:{is_disabled:true},reply_markup:{inline_keyboard:[[{text:row.target_tab==='books'?'📖 Історія читання':'🕘 Мої пропозиції',web_app:{url:siteOrigin+'/reader/telegram?tab='+row.target_tab}}]]}},fetch);
    await db.batch([db.prepare("UPDATE reader_messages SET delivery_status='sent',sent_at=?,lease_token=NULL,lease_until=NULL,last_error=NULL WHERE id=? AND lease_token=?").bind(now,String(row.id),lease)]);sent++;
   }catch(error){
    const code=error instanceof TelegramIntegrationError?error.code:'telegram_network_error';

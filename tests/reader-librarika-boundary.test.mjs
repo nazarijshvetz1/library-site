@@ -34,7 +34,7 @@ test("legacy reader book API remains retired while cabinet has its own authentic
   assert.doesNotMatch(panel,/readerFetch|ReaderLoan|reader_circulations/u);
   const bot=fs.readFileSync("lib/reader-telegram.ts","utf8");
   assert.doesNotMatch(bot,/reader_circulations/u);
-  assert.match(bot,/Мої видачі/u);
+  assert.match(bot,/Історія читання/u);
   const cabinet=fs.readFileSync("app/api/reader/cabinet/route.ts","utf8");assert.match(cabinet,/requireReaderSession/u);assert.match(cabinet,/assertReaderEdition/u);
 });
 

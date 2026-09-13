@@ -22,8 +22,8 @@ test('10:00 Kyiv, due day and daily overdue digest are unique; site inbox is ind
  const {db,who}=await fixture();try{
   await messages.generateReaderMessages(db,at('2026-09-13','06:59:00'));assert.equal(row(db),undefined);
   await messages.generateReaderMessages(db,at());await messages.generateReaderMessages(db,at());
-  assert.equal(db.sqlite.prepare('SELECT count(*) n FROM reader_messages').get().n,1);
-  assert.equal((await messages.readerInbox(db,who)).items.length,1);assert.equal((await messages.readerInbox(db,{...who,readerId:'reader-b'})).items.length,0);
+  assert.equal(db.sqlite.prepare('SELECT count(*) n FROM reader_messages WHERE kind=\'loan_digest\'').get().n,1);
+  assert.equal((await messages.readerInbox(db,who)).items.filter(x=>x.kind==='loan_digest').length,1);assert.equal((await messages.readerInbox(db,{...who,readerId:'reader-b'})).items.length,0);
   await messages.markReaderMessage(db,{...who,readerId:'reader-b'},row(db).id);assert.equal(row(db).read_at,null);
   let sends=0;await messages.deliverReaderMessages(db,{now:at(),send:async()=>sends++});await messages.deliverReaderMessages(db,{now:at(),send:async()=>sends++});assert.equal(sends,1);
   await messages.generateReaderMessages(db,at('2026-09-14'));await messages.deliverReaderMessages(db,{now:at('2026-09-14'),send:async()=>sends++});assert.equal(sends,2);
@@ -31,9 +31,9 @@ test('10:00 Kyiv, due day and daily overdue digest are unique; site inbox is ind
 });
 test('winter Kyiv schedule remains 10:00 and not fixed UTC',async()=>{const {db}=await fixture();try{await messages.generateReaderMessages(db,at('2026-12-01','07:59:00'));assert.equal(row(db),undefined);await messages.generateReaderMessages(db,at('2026-12-01','08:00:00'));assert.equal(row(db).day,'2026-12-01');}finally{db.sqlite.close();}});
 test('Telegram outage recovers automatically, while site notice and explicit mute are preserved',async()=>{const {db,who}=await fixture();try{
- await messages.generateReaderMessages(db,at());await messages.deliverReaderMessages(db,{now:at()});assert.equal(row(db).delivery_status,'unavailable');assert.equal((await messages.readerInbox(db,who)).items.length,1);
+ await messages.generateReaderMessages(db,at());await messages.deliverReaderMessages(db,{now:at()});assert.equal(row(db).delivery_status,'unavailable');assert.equal((await messages.readerInbox(db,who)).items.filter(x=>x.kind==='loan_digest').length,1);
  let sent=0;await messages.deliverReaderMessages(db,{now:at('2026-09-13','07:06:00'),send:async()=>sent++});assert.equal(sent,1);
- db.sqlite.exec("UPDATE reader_profiles SET notify_loans=0");await messages.generateReaderMessages(db,at('2026-09-14'));await messages.deliverReaderMessages(db,{now:at('2026-09-14'),send:async()=>sent++});assert.equal(sent,1);assert.equal(row(db).delivery_status,'disabled');
+ db.sqlite.exec("UPDATE reader_profiles SET notify_loans=0,telegram_disconnected_at='2026-09-13T07:06:00Z'");await messages.generateReaderMessages(db,at('2026-09-14'));await messages.deliverReaderMessages(db,{now:at('2026-09-14'),send:async()=>sent++});assert.equal(sent,1);assert.equal(row(db).delivery_status,'disabled');
  }finally{db.sqlite.close();}});
 test('return immediately before claim never sends stale notice',async()=>{const {db,loans}=await fixture();try{
  await messages.generateReaderMessages(db,at());const prepare=db.prepare.bind(db);let done=false,sends=0;
@@ -47,7 +47,7 @@ test('return during transport does not duplicate the daily digest',async()=>{con
 test('extension cancels pending reminder and uses actual due date',async()=>{const {db,loans}=await fixture();try{
  await messages.generateReaderMessages(db,at());const l=db.sqlite.prepare('SELECT version FROM reader_circulations WHERE id=?').get(loans[0].id);
  await copies.changeReaderDueDate(db,actor,input({circulationId:loans[0].id,expectedVersion:l.version,dueAt:'2026-09-20'}));
- let sends=0;await messages.deliverReaderMessages(db,{now:at(),send:async()=>sends++});assert.equal(sends,0);await messages.generateReaderMessages(db,at('2026-09-14'));assert.equal(db.sqlite.prepare('SELECT count(*) n FROM reader_messages').get().n,1);
+ let sends=0;await messages.deliverReaderMessages(db,{now:at(),send:async()=>sends++});assert.equal(sends,0);await messages.generateReaderMessages(db,at('2026-09-14'));assert.equal(db.sqlite.prepare('SELECT count(*) n FROM reader_messages WHERE kind=\'loan_digest\'').get().n,1);
  }finally{db.sqlite.close();}});
 test('429 honors retry_after and ambiguous network is not resent',async()=>{const {db}=await fixture();try{
  await messages.generateReaderMessages(db,at());let sends=0;
@@ -67,7 +67,7 @@ test('proposal four stages, edition link, private history, replay and version gu
  await copies.registerLibraryCopy(db,actor,input({editionId:book.id,expectedEditionVersion:1,accessionNo:'NEW',copyNo:'1',locationId:'LOC',condition:'good'}));
  await feed.moderateCabinet(db,actor,input({kind:'proposal',id:proposal.id,expectedVersion:3,status:'available',reply:'Приходь',editionId:book.id}));
  const activity=await cabinet.cabinetActivity(db,who,new URL('https://local/?kind=proposals'));assert.equal(activity.items[0].status,'available');assert.equal(activity.items[0].edition_id,book.id);assert.equal(JSON.parse(activity.items[0].history_json).length,4);
- assert.equal((await cabinet.cabinetActivity(db,{...who,readerId:'reader-b'},new URL('https://local/?kind=proposals'))).total,0);assert.equal((await feed.cabinetModeration(db,new URL('https://local/?section=notifications'))).total,4);
+ assert.equal((await cabinet.cabinetActivity(db,{...who,readerId:'reader-b'},new URL('https://local/?kind=proposals'))).total,0);assert.equal((await feed.cabinetModeration(db,new URL('https://local/?section=notifications'))).total,5);
  }finally{db.sqlite.close();}});
 test('public book excludes reviews, readers and service metadata',async()=>{const {db,book}=await fixture(0);try{const detail=await catalog.cabinetPublicBook(db,book.id);assert.equal(detail.annotation,'Опис книги');for(const key of ['reviews','source_json','isbn13','reader_id','phone','email'])assert.equal(Object.hasOwn(detail,key),false);db.sqlite.prepare("UPDATE library_editions SET fund='education' WHERE id=?").run(book.id);await assert.rejects(catalog.cabinetPublicBook(db,book.id));}finally{db.sqlite.close();}});
 test('student Telegram activation and repeat PIN linking are atomic and replay protected',async()=>{const db=readerDatabase();try{

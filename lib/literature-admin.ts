@@ -74,20 +74,26 @@ export async function literatureOptions(db: ReaderDatabase) {
 }
 const loanFrom = "reader_circulations l JOIN library_copies c ON c.id=l.copy_id JOIN library_editions e ON e.id=c.edition_id LEFT JOIN materials m ON m.id=e.material_id JOIN library_readers r ON r.id=l.reader_id";
 const loanProjection = `l.*,c.version copy_version,c.accession_no,c.copy_no,c.condition,c.location_id,e.id edition_id,e.title,${libraryCoverSql} cover_url,${readerFullNameSql} full_name,r.member_no,r.kind,r.version reader_version`;
-export async function literatureLoans(db: ReaderDatabase, url: URL, exportAll = false) {
-  const { page, limit, offset } = pageInfo(url), q = normalizeCatalogSearchText(text(url.searchParams.get("q") || "", 100)), reader = url.searchParams.get("reader") || "", status = url.searchParams.get("status") || "all", today = literatureToday();
-  const sort = url.searchParams.get("sort") || "due", direction = url.searchParams.get("direction") === "desc" ? "DESC" : "ASC";
-  const sorting: Record<string,string> = { reader: readerSortNameSql, issued: "l.issued_at", due: "l.due_at", returned: "l.received_at", created: "l.created_at" };
-  if (!Object.hasOwn(sorting,sort) || !["all", "issued", "overdue", "returned", "pending", "reserved", "cancelled"].includes(status)) readerFail("loan_filter", "Перевірте фільтри видач.");
-  const conditions = ["e.fund='literature'", "(?='' OR l.reader_id=?)", `(?='' OR ${readerSearchNameSql} LIKE ? ESCAPE '!' OR m.search_text LIKE ? ESCAPE '!')`], values: (string|number)[] = [reader, reader, q, like(q), like(q)];
-  if (status === "overdue") { conditions.push(`l.status IN ${activeLoans} AND substr(l.due_at,1,10)<?`); values.push(today); }
-  else if (status === "issued") conditions.push(`l.status IN ${activeLoans}`);
-  else if (status !== "all") { conditions.push("l.status=?"); values.push(status); }
-  for (const [param, op] of [["from", ">="], ["to", "<="]]) { const date = url.searchParams.get(param); if (date) { conditions.push(`substr(COALESCE(l.issued_at,l.created_at),1,10)${op}?`); values.push(literatureDate(date)); } }
-  const where = conditions.join(" AND "), count = await db.prepare(`SELECT count(*) n FROM ${loanFrom} WHERE ${where}`).bind(...values).first();
-  if (exportAll && Number(count?.n) > 10000) readerFail("export_limit", "Звузьте період експорту до 10 000 видач.");
-  const rows = await db.prepare(`SELECT ${loanProjection} FROM ${loanFrom} WHERE ${where} ORDER BY ${sorting[sort]} ${direction},l.id LIMIT ? OFFSET ?`).bind(...values, exportAll ? 10000 : limit, exportAll ? 0 : offset).all();
-  return { items: (rows.results || []).map((row):Row => ({ ...row, display_status: ["issued","overdue"].includes(String(row.status)) ? row.due_at && String(row.due_at).slice(0,10) < today ? "overdue" : "issued" : row.status })), total: Number(count?.n || 0), page, pages: Math.ceil(Number(count?.n || 0) / limit) };
+export async function literatureLoans(db:ReaderDatabase,url:URL,exportAll=false){
+ const {page,limit,offset}=pageInfo(url),q=normalizeCatalogSearchText(text(url.searchParams.get('q')||'',100)),reader=url.searchParams.get('reader')||'',status=url.searchParams.get('status')||'all',today=literatureToday();
+ const sort=url.searchParams.get('sort')||'due',direction=url.searchParams.get('direction')==='desc'?'DESC':'ASC',sorting:Record<string,string>={reader:'sort_name',issued:'coalesce(issued_at,created_at)',due:'coalesce(due_at,created_at)',returned:'received_at',created:'created_at'};
+ if(!Object.hasOwn(sorting,sort)||!['all','issued','overdue','returned','pending','reserved','cancelled'].includes(status))readerFail('loan_filter','Перевірте фільтри видач.');
+ const combined=`WITH combined AS (
+ SELECT 'circulation' record_kind,l.id,l.copy_id,l.reader_id,l.status,l.issued_at,l.due_at,l.received_at,l.accounting_mode,l.version,l.created_at,l.updated_at,c.version copy_version,c.accession_no,c.copy_no,c.condition,c.location_id,e.id edition_id,e.title,${libraryCoverSql} cover_url,${readerFullNameSql} full_name,${readerSortNameSql} sort_name,${readerSearchNameSql} reader_search,m.search_text,r.member_no,r.kind,r.version reader_version
+ FROM ${loanFrom} WHERE e.fund='literature'
+ UNION ALL SELECT 'request',q.id,NULL,q.reader_id,q.status,NULL,NULL,NULL,'native',q.version,q.created_at,q.updated_at,NULL,'','','',NULL,e.id,e.title,${libraryCoverSql},${readerFullNameSql},${readerSortNameSql},${readerSearchNameSql},m.search_text,r.member_no,r.kind,r.version
+ FROM reader_book_requests q JOIN library_editions e ON e.id=q.edition_id LEFT JOIN materials m ON m.id=e.material_id JOIN library_readers r ON r.id=q.reader_id
+ WHERE q.status IN ('requested','ready') AND q.fulfilled_circulation_id IS NULL AND e.fund='literature')`;
+ const conditions=["(?='' OR reader_id=?)","(?='' OR reader_search LIKE ? ESCAPE '!' OR search_text LIKE ? ESCAPE '!')"],values:(string|number)[]=[reader,reader,q,like(q),like(q)];
+ if(status==='overdue'){conditions.push("status IN ('issued','overdue') AND substr(due_at,1,10)<?");values.push(today);}
+ else if(status==='issued')conditions.push("status IN ('issued','overdue')");
+ else if(status==='reserved')conditions.push("(status='reserved' OR record_kind='request')");
+ else if(status!=='all'){conditions.push('status=?');values.push(status);}
+ for(const [param,op] of [['from','>='],['to','<=']]){const date=url.searchParams.get(param);if(date){conditions.push(`substr(coalesce(issued_at,created_at),1,10)${op}?`);values.push(literatureDate(date));}}
+ const where=conditions.join(' AND '),count=await db.prepare(combined+' SELECT count(*) n FROM combined WHERE '+where).bind(...values).first(),total=Number(count?.n||0);
+ if(exportAll&&total>10000)readerFail('export_limit','Звузьте період експорту до 10 000 видач.');
+ const rows=await db.prepare(combined+` SELECT * FROM combined WHERE ${where} ORDER BY ${sorting[sort]} ${direction},record_kind,id LIMIT ? OFFSET ?`).bind(...values,exportAll?10000:limit,exportAll?0:offset).all();
+ return {items:(rows.results||[]).map((row):Row=>({...row,display_status:['issued','overdue'].includes(String(row.status))?row.due_at&&String(row.due_at).slice(0,10)<today?'overdue':'issued':row.status})),total,page,pages:Math.ceil(total/limit)};
 }
 export async function literatureReaders(db: ReaderDatabase, url: URL) {
   const { page, limit, offset } = pageInfo(url), q = normalizeCatalogSearchText(text(url.searchParams.get("q") || "", 100)), classId = url.searchParams.get("class") || "", kind = url.searchParams.get("kind") || "", inactive = url.searchParams.get("archived") === "1";

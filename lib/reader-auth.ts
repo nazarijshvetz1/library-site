@@ -1,3 +1,4 @@
+import {readerEvent} from './reader-events.ts';
 import {ensureTeacherReader} from "./reader-teacher-link.ts";
 import {requireVisitTeacherSession} from "./visit-teacher-auth.ts";
 import {sha256Text} from "./librarika-import-plan.ts";
@@ -75,6 +76,7 @@ export async function redeemReaderInvite(db:ReaderDatabase,token:string,telegram
   }
   statements.push(db.prepare("UPDATE library_readers SET access_status='active',version=version+1,updated_at=? WHERE id=? AND access_version=?").bind(now,readerId,Number(invite.access_version)),requireChanged(db,1));
   statements.push(db.prepare("INSERT INTO reader_profiles(reader_id,display_name,updated_at) VALUES(?,'Читач',?) ON CONFLICT(reader_id) DO NOTHING").bind(readerId,now));
+  statements.push(readerEvent(db,{readerId,key:"telegram-invite:"+hash,kind:"account",title:"Telegram приєднано",body:"Нагадування про повернення та статуси пропозицій надходитимуть автоматично.",tab:"profile"},now),db.prepare("UPDATE reader_profiles SET telegram_disconnected_at=NULL,notify_loans=1,notify_loans_since=coalesce(notify_loans_since,?),updated_at=? WHERE reader_id=?").bind(now.slice(0,10),now,readerId));
   statements.push(pruneSessions(db,readerId,now),db.prepare("INSERT INTO reader_sessions(token_hash,reader_id,access_version,telegram_user_id,created_at,expires_at) VALUES(?,?,?,?,?,?)").bind(sessionHash,readerId,Number(invite.access_version),telegram?.telegramUserId||null,now,expiresAt));
   await readerBatch(db,statements);
   return {token:session,expiresAt};

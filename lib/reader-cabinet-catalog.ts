@@ -12,7 +12,8 @@ const relatedRelationMatch="((n.kind='author' AND rx.role IN ('author','coauthor
 const kinds=['genre','author','publisher','tag','series'] as const;
 type EntityKind=(typeof kinds)[number];
 const relations=`(SELECT json_group_array(json_object('id',n.id,'kind',n.kind,'name',n.name,'role',x.role,'count',(SELECT count(DISTINCT related.id) FROM library_edition_entities rx JOIN library_editions related ON related.id=rx.edition_id LEFT JOIN materials rm ON rm.id=related.material_id WHERE rx.entity_id=n.id AND ${relatedRelationMatch} AND related.fund='literature' AND related.publication_state='published' AND (rm.id IS NULL OR rm.status='active')))) FROM library_edition_entities x JOIN library_catalog_entities n ON n.id=x.entity_id WHERE x.edition_id=e.id AND ${relationMatch})`;
-const projection=`e.id,e.title,${cabinetCover} cover_url,json_extract(e.public_metadata_json,'$.author') author,json_extract(e.public_metadata_json,'$.publisher') publisher,json_extract(e.public_metadata_json,'$.year') year,coalesce(json_extract(e.public_metadata_json,'$.type'),'Книга') type,json_extract(e.public_metadata_json,'$.pages') pages_value,
+const popularity="(SELECT count(*) FROM reader_circulations pl JOIN library_copies pc ON pc.id=pl.copy_id WHERE pc.edition_id=e.id AND pl.accounting_mode='native' AND pl.status IN ('issued','overdue','returned') AND pl.issued_at IS NOT NULL)";
+const projection=`e.id,e.title,${popularity} issue_count,${cabinetCover} cover_url,json_extract(e.public_metadata_json,'$.author') author,json_extract(e.public_metadata_json,'$.publisher') publisher,json_extract(e.public_metadata_json,'$.year') year,coalesce(json_extract(e.public_metadata_json,'$.type'),'Книга') type,json_extract(e.public_metadata_json,'$.pages') pages_value,
  coalesce((SELECT ml.url FROM material_links ml WHERE ml.material_id=e.material_id AND ml.is_public=1 AND ml.status='active' ORDER BY ml.sort_order,ml.id LIMIT 1),json_extract(e.public_metadata_json,'$.url')) website_value,
  coalesce((SELECT ml.label FROM material_links ml WHERE ml.material_id=e.material_id AND ml.is_public=1 AND ml.status='active' ORDER BY ml.sort_order,ml.id LIMIT 1),'Сайт книги') website_label,${relations} relations_json,
  (SELECT count(*) FROM library_copies c WHERE c.edition_id=e.id AND c.registration='registered' AND c.physical_state!='withdrawn') total,
@@ -36,20 +37,28 @@ export function cabinetCard(row:Record<string,unknown>){
  }
  const entities=[...unique.values()];
  const websiteUrl=publicWebsite(website_value);
- return {...rest,entities,author:entities.filter(x=>x.kind==='author').map(x=>x.name).join(', ')||row.author||'',publisher:entities.filter(x=>x.kind==='publisher').map(x=>x.name).join(', ')||row.publisher||'',pages:publicPageCount(pages_value),websiteUrl,websiteLabel:websiteUrl?String(website_label||'Сайт книги').trim().slice(0,120):''};
+ return {...rest,year:row.year,entities,author:entities.filter(x=>x.kind==='author').map(x=>x.name).join(', ')||row.author||'',publisher:entities.filter(x=>x.kind==='publisher').map(x=>x.name).join(', ')||row.publisher||'',pages:publicPageCount(pages_value),websiteUrl,websiteLabel:websiteUrl?String(website_label||'Сайт книги').trim().slice(0,120):''};
 }
 
+/** Hydrate all list cards in one bounded query; keep loan/post IDs distinct from edition IDs. */
+export async function attachCabinetCards(db:ReaderDatabase,rows:Record<string,unknown>[]){
+ const ids=[...new Set(rows.map(row=>row.edition_id).filter((id):id is string=>typeof id==='string'))];if(!ids.length)return rows;
+ const result=await db.prepare(`SELECT ${projection} FROM ${from} WHERE e.id IN (${ids.map(()=>'?').join(',')}) AND ${visible}`).bind(...ids).all();
+ const cards=new Map((result.results||[]).map(row=>[row.id,cabinetCard(row)]));
+ return rows.map(row=>{const card=cards.get(row.edition_id);return card?{...row,author:card.author,publisher:card.publisher,year:card.year,pages:card.pages,entities:card.entities}:row;});
+}
 export async function assertReaderEdition(db:ReaderDatabase,id:unknown){if(typeof id!=='string'||!readerResource(id)||!await db.prepare(`SELECT e.id FROM ${from} WHERE e.id=? AND ${visible}`).bind(id).first())readerFail('book_missing','Книга недоступна в художній бібліотеці.',404);return id;}
 
 export async function cabinetCatalog(db:ReaderDatabase,url:URL){
  const raw=(url.searchParams.get('q')||'').trim(),q=normalizeCatalogSearchText(raw),currentPage=page(url.searchParams.get('page')),sort=url.searchParams.get('sort')||'title';
- if(q.length>100||!['title','newest'].includes(sort))readerFail('catalog_query','Перевірте параметри пошуку.');
+ if(q.length>100||!['title','newest','popular'].includes(sort))readerFail('catalog_query','Перевірте параметри пошуку.');
  const where=[visible],bind:(string|number)[]=[];
  // materials.search_text is normalized when a card is saved; keeping this predicate shallow also keeps it compatible with Cloudflare D1.
- if(q){where.push(`(m.search_text LIKE ? ESCAPE '!' OR e.title LIKE ? ESCAPE '!' OR EXISTS(SELECT 1 FROM library_edition_entities sx JOIN library_catalog_entities sn ON sn.id=sx.entity_id WHERE sx.edition_id=e.id AND sn.kind='author' AND sx.role IN ('author','coauthor') AND sn.name LIKE ? ESCAPE '!'))`);bind.push(like(q),like(raw),like(raw));}
+ if(q){where.push(`(m.search_text LIKE ? ESCAPE '!' OR e.title LIKE ? ESCAPE '!' OR EXISTS(SELECT 1 FROM library_edition_entities sx JOIN library_catalog_entities sn ON sn.id=sx.entity_id WHERE sx.edition_id=e.id AND ((sn.kind='author' AND sx.role IN ('author','coauthor')) OR (sn.kind='genre' AND sx.role='genre')) AND ${foldedTerms('sn.name',searchTerms(q))}))`);bind.push(like(q),like(raw),...searchTerms(q).map(like));}
  for(const entityKind of kinds){const id=url.searchParams.get(entityKind);if(id){if(!readerResource(id))readerFail('filter','Некоректний фільтр.');where.push(`EXISTS(SELECT 1 FROM library_edition_entities x JOIN library_catalog_entities n ON n.id=x.entity_id WHERE x.edition_id=e.id AND x.entity_id=? AND n.kind=? AND ${relationMatch})`);bind.push(id,entityKind);}}
+ if(sort==='popular')where.push(`${popularity}>0`);
  const w=where.join(' AND '),total=Number((await db.prepare(`SELECT count(*) n FROM ${from} WHERE ${w}`).bind(...bind).first())?.n||0);
- const rows=await db.prepare(`SELECT ${projection} FROM ${from} WHERE ${w} ORDER BY ${sort==='newest'?'e.created_at DESC,e.id DESC':'coalesce(m.sort_title,e.title),e.id'} LIMIT 20 OFFSET ?`).bind(...bind,(currentPage-1)*20).all();
+ const rows=await db.prepare(`SELECT ${projection} FROM ${from} WHERE ${w} ORDER BY ${sort==='newest'?'e.created_at DESC,e.id DESC':sort==='popular'?'issue_count DESC,coalesce(m.sort_title,e.title),e.id':'coalesce(m.sort_title,e.title),e.id'} LIMIT 20 OFFSET ?`).bind(...bind,(currentPage-1)*20).all();
  return {items:(rows.results||[]).map(cabinetCard),total,page:currentPage,pages:Math.ceil(total/20)};
 }
 

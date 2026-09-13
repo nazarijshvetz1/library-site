@@ -7,6 +7,7 @@ import {Miniflare} from 'miniflare';
 const messages=await import('../lib/reader-messages.ts');
 const copies=await import('../lib/library-copy-store.ts');
 const editor=await import('../lib/library-editor.ts');
+const catalog=await import('../lib/reader-cabinet-catalog.ts');
 test('0059 preserves old proposals and native daily digest runs on actual workerd D1',async()=>{
  const sqlite=new DatabaseSync(':memory:');
  for(const file of fs.readdirSync('drizzle').filter(name=>/^\d{4}_.*\.sql$/.test(name)&&Number(name.slice(0,4))<=58).sort())sqlite.exec(fs.readFileSync('drizzle/'+file,'utf8'));
@@ -20,14 +21,20 @@ test('0059 preserves old proposals and native daily digest runs on actual worker
  const before=(await db.prepare("SELECT id,status,reply,version,title FROM reader_literature_proposals ORDER BY id").all()).results;
  for(const part of fs.readFileSync('drizzle/0059_reader_messages_and_proposals.sql','utf8').split('--> statement-breakpoint'))if(part.trim())await db.prepare(part.trim()).run();
  assert.deepEqual((await db.prepare("SELECT id,status,reply,version,title FROM reader_literature_proposals ORDER BY id").all()).results,before);
+ await db.prepare("INSERT INTO reader_messages(id,reader_id,dedupe_key,kind,day,title,body,payload_json,target_tab,delivery_status,attempts,next_attempt_at,lease_token,lease_until,read_at,sent_at,last_error,created_at) VALUES('old-message','reader','old-message','proposal','2026-09-06','Стара подія','Текст','{}','activity','processing',2,'2099-01-01','lease','2099-01-01','2026-09-07','2026-09-07','timeout','2026-09-06')").run();
+ const oldMessage=await db.prepare("SELECT * FROM reader_messages WHERE id='old-message'").first();
+ for(const part of fs.readFileSync('drizzle/0060_long_banshee.sql','utf8').split('--> statement-breakpoint'))if(part.trim())await db.prepare(part.trim()).run();
+ assert.deepEqual(await db.prepare("SELECT * FROM reader_messages WHERE id=\'old-message\'").first(),oldMessage);
  await db.prepare("INSERT INTO locations(id,name,type,status,created_at,updated_at) VALUES('loc','Бібліотека','library','active','2026-09-06','2026-09-06')").run();
- const actor={id:'admin',email:'admin@example.test'},input=v=>({requestId:crypto.randomUUID(),...v}),book=await editor.saveLibraryEdition(db,actor,input({title:'Книга',metadata:{author:'Автор'},entityIds:[],published:true}));
+ const actor={id:'admin',email:'admin@example.test'},input=v=>({requestId:crypto.randomUUID(),...v}),book=await editor.saveLibraryEdition(db,actor,input({title:'Книга',metadata:{author:'Автор'},entityIds:[],entityNames:{genre:['Науково-популярна']},published:true}));
+ for(const q of ['Науково-популярна','науково популярна'])assert.equal((await catalog.cabinetCatalog(db,new URL('https://local/?q='+encodeURIComponent(q)))).total,1);
  const copy=await copies.registerLibraryCopy(db,actor,input({editionId:book.id,expectedEditionVersion:1,accessionNo:'001',copyNo:'1',locationId:'loc',condition:'good'}));
  await copies.issueReaderCopy(db,actor,input({copyId:copy.id,expectedCopyVersion:1,readerId:'reader',expectedReaderVersion:1,issuedAt:'2026-09-06',dueAt:'2026-09-13',confirmation:'ISSUE_THIS_COPY'}));
  await db.prepare("INSERT INTO reader_profiles(reader_id,notify_loans,updated_at) VALUES('reader',1,'2026-09-06')").run();
  await db.prepare("INSERT INTO reader_telegram_connections(reader_id,telegram_user_id,chat_id,status,linked_at) VALUES('reader','100','100','active','2026-09-06')").run();
  const now=new Date('2026-09-13T07:00:00Z');await messages.generateReaderMessages(db,now);await messages.generateReaderMessages(db,now);
+ assert.equal((await catalog.cabinetCatalog(db,new URL('https://local/?sort=popular'))).items[0].issue_count,1);
  let sent=0;await messages.deliverReaderMessages(db,{now,send:async()=>sent++});await messages.deliverReaderMessages(db,{now,send:async()=>sent++});assert.equal(sent,1);
- assert.equal((await db.prepare("SELECT count(*) n FROM reader_messages").first()).n,1);assert.equal((await db.prepare('PRAGMA foreign_key_check').all()).results.length,0);
+ assert.equal((await db.prepare("SELECT count(*) n FROM reader_messages WHERE kind='loan_digest'").first()).n,1);assert.equal((await db.prepare('PRAGMA foreign_key_check').all()).results.length,0);
  }finally{await mf.dispose();}
 });

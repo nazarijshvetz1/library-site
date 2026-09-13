@@ -20,17 +20,16 @@ export async function processReaderTelegramMessage(db:ReaderDatabase,input:{mess
   const statements=[db.prepare("INSERT INTO telegram_webhook_updates(update_id,payload_hash,outcome,processed_at) VALUES(?,?,?,?)").bind(updateId,payloadHash,outcome,now)];
   if(connection&&(command==="stop"||command==="disconnect")){
     statements.push(db.prepare("SELECT CASE WHEN EXISTS(SELECT 1 FROM reader_telegram_connections c JOIN library_readers r ON r.id=c.reader_id WHERE c.reader_id=? AND c.telegram_user_id=? AND c.chat_id=? AND c.version=? AND c.status='active' AND r.access_version=? AND r.access_status='active') THEN 1 ELSE json('reader_connection_changed') END").bind(String(connection.reader_id),message.telegramUserId,message.chatId,Number(connection.version),Number(connection.access_version)),
-      db.prepare("UPDATE reader_profiles SET notify_loans=0,notify_books=0,version=version+1,updated_at=? WHERE reader_id=?").bind(now,String(connection.reader_id)),
+      db.prepare("UPDATE reader_profiles SET telegram_disconnected_at=?,notify_loans=0,notify_books=0,version=version+1,updated_at=? WHERE reader_id=?").bind(now,now,String(connection.reader_id)),
       db.prepare("UPDATE reader_notification_outbox SET status='cancelled',lease_token=NULL,lease_until=NULL WHERE reader_id=? AND status IN ('pending','processing')").bind(String(connection.reader_id)));
     if(command==="disconnect")statements.push(
       db.prepare("UPDATE reader_telegram_connections SET status='disabled',version=version+1,disabled_at=? WHERE reader_id=? AND version=?").bind(now,String(connection.reader_id),Number(connection.version)),requireChanged(db,1),
-      db.prepare("UPDATE library_readers SET access_version=access_version+1,version=version+1,updated_at=? WHERE id=? AND access_version=?").bind(now,String(connection.reader_id),Number(connection.access_version)),requireChanged(db,1),
-      db.prepare("UPDATE reader_sessions SET revoked_at=? WHERE reader_id=? AND revoked_at IS NULL").bind(now,String(connection.reader_id)),
+      db.prepare("UPDATE reader_sessions SET revoked_at=? WHERE reader_id=? AND telegram_user_id IS NOT NULL AND revoked_at IS NULL").bind(now,String(connection.reader_id)),
       db.prepare("UPDATE reader_invites SET revoked_at=? WHERE reader_id=? AND revoked_at IS NULL AND consumed_at IS NULL").bind(now,String(connection.reader_id)));
   }
-  if(connection&&(command==="stop"||command==="disconnect"))statements.push(db.prepare("UPDATE reader_messages SET delivery_status='disabled',lease_token=NULL,lease_until=NULL,last_error='notifications_disabled' WHERE reader_id=? AND delivery_status IN ('pending','retry','processing')").bind(String(connection.reader_id)));
+  if(connection&&(command==="stop"||command==="disconnect"))statements.push(db.prepare("UPDATE reader_messages SET delivery_status=CASE WHEN delivery_status='processing' THEN 'uncertain' ELSE 'disabled' END,lease_token=NULL,lease_until=NULL,last_error='notifications_disabled' WHERE reader_id=? AND delivery_status IN ('pending','retry','processing')").bind(String(connection.reader_id)));
   await readerBatch(db,statements);
-  let reply="Єдина бібліотека ліцею\nХудожні та наукові книги, бронювання і читацька спільнота — у вашому особистому кабінеті. Для першого входу оберіть «Активувати вперше» та введіть одноразовий код бібліотекаря. Код і PIN вводьте лише у захищеному вікні.",path="/reader/telegram";
+  let reply="Вітаємо в «Єдиній бібліотеці»!\n\nХудожні та наукові книги, бронювання і читацька спільнота — у вашому особистому кабінеті.\n\nДля першого входу оберіть «Активувати вперше» та введіть одноразовий код бібліотекаря. Код і PIN вводьте лише у захищеному вікні.",path="/reader/telegram";
   if(old)reply="Ваш Telegram уже приєднаний до кабінету вчителя або бібліотекаря. Для активного вчителя читацький профіль зв’язується з чинним кабінетом; повторна реєстрація не потрібна. Неоднозначні збіги імен перевіряє бібліотекар.";
   else if(invite){
     const hash=await sha256Text(invite[1]);
@@ -38,11 +37,11 @@ export async function processReaderTelegramMessage(db:ReaderDatabase,input:{mess
     if(valid){reply="Персональне запрошення до бібліотеки. Відкрийте кабінет і перевірте, що вказане ім’я — ваше. Приєднання відбудеться лише після вашого підтвердження.";path+="#invite="+invite[1];}
     else reply="Запрошення недійсне або вже використане. Попросіть бібліотекаря про нове персональне запрошення.";
   }else if(connection){
-    reply=command==="stop"?"Налаштування сповіщень скинуто. Актуальні строки — у «Мої видачі» читацького кабінету.":command==="disconnect"?"Telegram від’єднано, попередні читацькі сеанси завершено. Історію видач у бібліотеці збережено. Для нового приєднання увійдіть зі своїм PIN.":command==="catalog"?"Каталог художньої та наукової літератури: оберіть книгу, подайте заявку на бронювання або напишіть відгук.":"Ваш читацький кабінет: каталог, власні видачі, бронювання, відгуки, спільнота та обліковий запис.";
+    reply=command==="stop"?"Сповіщення Telegram вимкнено. Для відновлення скористайтеся повторним приєднанням у кабінеті. Актуальні строки — у «Історія читання» читацького кабінету.":command==="disconnect"?"Telegram від’єднано, попередні читацькі сеанси завершено. Історію видач у бібліотеці збережено. Для нового приєднання увійдіть зі своїм PIN.":command==="catalog"?"Каталог художньої та наукової літератури: оберіть книгу, подайте заявку на бронювання або напишіть відгук.":"Ваш читацький кабінет: каталог, власні видачі, бронювання, відгуки, спільнота та обліковий запис.";
     if(command==="books"){
-      reply="Книги на руках, строки повернення та статуси заявок — у «Мої видачі».";
+      reply="Книги на руках, строки повернення та статуси заявок — у «Історія читання».";
     }
-    if(command==="notifications")reply="Строки повернення доступні в читацькому кабінеті. Нагадування про повернення з’являються в кабінеті о 10:00 за Києвом. Надсилання в Telegram вмикається в обліковому записі. /stop вимикає сповіщення бота.";
+    if(command==="notifications")reply="Строки повернення доступні в читацькому кабінеті. Нагадування про повернення з’являються в кабінеті о 10:00 за Києвом. Після приєднання Telegram повідомлення надходять автоматично. /stop вимикає сповіщення бота.";
     if(["books","profile","catalog"].includes(command))path+="?tab="+command;
   }
   const url=new URL(path,input.siteOrigin).toString();
@@ -60,7 +59,7 @@ export function readerTelegramKeyboard(origin:string,miniAppEnabled=true){
  const button=(label:string,tab:string)=>({text:label,...(miniAppEnabled?{web_app:{url:new URL('/reader/telegram?tab='+tab,origin).toString()}}:{url:new URL('/reader?tab='+tab,origin).toString()})});
  return [
  [button('🏠 Головна','home'),button('📚 Каталог','catalog')],
- [button('📖 Мої видачі','books'),button('💬 Спільнота','community')],
+ [button('📖 Історія читання','books'),button('💬 Спільнота','community')],
  [button('🕘 Активність','activity'),button('👤 Обліковий запис','profile')],
  [button('➕ Запропонувати книгу','activity&action=propose')],
  ];

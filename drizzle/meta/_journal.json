@@ -421,6 +421,13 @@
       "when": 1789301276842,
       "tag": "0059_reader_messages_and_proposals",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "6",
+      "when": 1789331222674,
+      "tag": "0060_long_banshee",
+      "breakpoints": true
     }
   ]
 }

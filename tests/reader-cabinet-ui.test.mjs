@@ -40,7 +40,7 @@ test('account suggests canonical full name, remains editable and presents a dedi
 test('reader catalog is dense, shows public book facts, and community search suggestions identify books visually',()=>{
  assert.match(controls,/function BookPublicMeta/u);assert.match(controls,/book\.pages/u);assert.match(controls,/book\.websiteUrl/u);
  assert.match(controls,/kind==='book'\?s\.bookSuggestion/u);assert.match(controls,/Автор не вказаний/u);assert.match(controls,/<Cover book=\{row\}/u);
- assert.match(panels,/catalogCards/u);assert.match(panels,/<BookPublicMeta book=\{book\}/u);
+ assert.match(panels,/catalogCards/u);assert.match(controls,/<BookPublicMeta book=\{book\}/u);
  assert.match(css,/\.homeGreeting>img\{width:72px;height:72px/u);assert.match(css,/\.catalogCards\{gap:8px\}/u);assert.match(css,/\.suggestions \.bookSuggestion/u);
  assert.match(catalogBackend,/m\.search_text LIKE/u);assert.doesNotMatch(catalogBackend,/searchFold/u);
 });

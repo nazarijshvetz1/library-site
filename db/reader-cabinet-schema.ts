@@ -12,6 +12,7 @@ export const readerFeedPosts=sqliteTable('reader_feed_posts',{
  id:text('id').primaryKey(),readerId:text('reader_id').notNull().references(()=>libraryReaders.id,{onDelete:'restrict'}),editionId:text('edition_id').references(()=>libraryEditions.id,{onDelete:'restrict'}),body:text('body').notNull(),status:text('status').notNull().default('visible'),version:integer('version').notNull().default(1),createdAt:text('created_at').notNull(),updatedAt:text('updated_at').notNull(),
 },t=>[index('idx_reader_feed_status').on(t.status,t.createdAt),index('idx_reader_feed_owner').on(t.readerId,t.createdAt),check('reader_feed_status',sql`${t.status} in ('visible','hidden','removed')`),check('reader_feed_body',sql`length(${t.body})<=4000`)]);
 export const readerFeedComments=sqliteTable('reader_feed_comments',{
+ parentCommentId:text('parent_comment_id'),
  id:text('id').primaryKey(),postId:text('post_id').notNull().references(()=>readerFeedPosts.id,{onDelete:'restrict'}),readerId:text('reader_id').notNull().references(()=>libraryReaders.id,{onDelete:'restrict'}),body:text('body').notNull(),status:text('status').notNull().default('visible'),version:integer('version').notNull().default(1),createdAt:text('created_at').notNull(),updatedAt:text('updated_at').notNull(),
 },t=>[index('idx_reader_feed_comments').on(t.postId,t.status,t.createdAt),index('idx_reader_feed_comment_owner').on(t.readerId,t.createdAt),check('reader_feed_comment_status',sql`${t.status} in ('visible','hidden','removed')`),check('reader_feed_comment_body',sql`length(${t.body})<=2000`)]);
 
@@ -23,5 +24,5 @@ export const readerMessages=sqliteTable('reader_messages',{
  deliveryStatus:text('delivery_status').notNull().default('pending'),attempts:integer('attempts').notNull().default(0),
  nextAttemptAt:text('next_attempt_at').notNull(),leaseToken:text('lease_token'),leaseUntil:text('lease_until'),sentAt:text('sent_at'),lastError:text('last_error'),
 },t=>[uniqueIndex('idx_reader_message_dedupe').on(t.dedupeKey),index('idx_reader_message_owner').on(t.readerId,t.createdAt),index('idx_reader_message_delivery').on(t.deliveryStatus,t.nextAttemptAt),
- check('reader_message_kind',sql`${t.kind} in ('loan_digest','proposal')`),
- check('reader_message_delivery_status',sql`${t.deliveryStatus} in ('pending','processing','retry','sent','unavailable','disabled','cancelled','uncertain')`)]);
+ check('reader_message_kind',sql`${t.kind} in ('loan_digest','proposal','request','circulation','community','account')`),
+ check('reader_message_delivery_status',sql`${t.deliveryStatus} in ('pending','processing','retry','sent','unavailable','disabled','cancelled','uncertain','site_only')`)]);

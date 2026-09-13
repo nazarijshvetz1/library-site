@@ -1,10 +1,11 @@
+import {readerEvent} from './reader-events.ts';
 import {normalizeCatalogSearchText} from "./catalog-d1.ts";
 
 /** PIN proof and Telegram binding are committed together; no partial activation. */
-export async function authenticateReaderTelegramWithPin(db:ReaderDatabase,request:Request,input:{loginId:string;code:string;mode:'login'|'activate';pin?:string;pinConfirm?:string;notifyLoans:boolean},telegram:import('./telegram-mini-app-auth.ts').TelegramMiniAppIdentity){
+export async function authenticateReaderTelegramWithPin(db:ReaderDatabase,request:Request,input:{loginId:string;code:string;mode:'login'|'activate';pin?:string;pinConfirm?:string;notifyLoans?:boolean},telegram:import('./telegram-mini-app-auth.ts').TelegramMiniAppIdentity){
  const loginId=String(input.loginId||'').trim(),code=pin(input.code),nowDate=new Date(),now=nowDate.toISOString(),rate=await scopes(request,loginId),limits=[rate.ip,rate.pair,rate.reader];
  if(await blocked(db,limits,nowDate))readerFail('reader_rate_limit','Забагато спроб входу. Спробуйте пізніше.',429);
- if(!['login','activate'].includes(input.mode)||typeof input.notifyLoans!=='boolean')readerFail('reader_login_mode','Оберіть вхід або першу активацію.');
+ if(!['login','activate'].includes(input.mode))readerFail('reader_login_mode','Оберіть вхід або першу активацію.');
  const activating=input.mode==='activate',chosen=activating?pin(input.pin):code;
  if(activating&&(!chosen||chosen!==pin(input.pinConfirm)))readerFail('reader_pin','Введіть однаковий новий PIN у двох полях.');
  const credential=/^[0-9a-f]{32}$/u.test(loginId)?await credentialByLogin(db,loginId):null;
@@ -13,6 +14,7 @@ export async function authenticateReaderTelegramWithPin(db:ReaderDatabase,reques
   await failed(db,limits,credential,presented,nowDate);readerFail('invalid_reader_credentials','Перевірте обраного учня, код і спосіб входу. Для тимчасового коду оберіть «Активувати вперше».',401);
  }
  const readerId=credential.reader_id,guard=rateGuard(rate,nowDate),token=opaqueToken(),hash=await sha256Text(token),expiresAt=new Date(nowDate.getTime()+SESSION_TTL_MS).toISOString(),newHash=activating?await hmacHex(`reader-pin:${readerId}:${chosen}`):presented;
+ const oldLink=await db.prepare("SELECT c.status,p.telegram_disconnected_at FROM reader_telegram_connections c LEFT JOIN reader_profiles p ON p.reader_id=c.reader_id WHERE c.reader_id=?").bind(readerId).first();
  const statements=[
   db.prepare(`SELECT CASE WHEN EXISTS(SELECT 1 FROM library_readers r JOIN reader_credentials c ON c.reader_id=r.id WHERE r.id=? AND r.version=? AND r.access_version=? AND r.status='active' AND r.access_status='active' AND r.kind='student' AND r.linked_teacher_user_id IS NULL AND c.version=? AND c.code_hmac=? AND c.must_change_pin=? AND c.status='active' AND (c.locked_until IS NULL OR c.locked_until<=?) AND (?=0 OR c.code_expires_at>?) AND ${guard.sql}) THEN 1 ELSE json('reader_auth_changed') END`).bind(readerId,credential.reader_version,credential.access_version,credential.credential_version,presented,Number(activating),now,Number(activating),now,...guard.bindings),
   db.prepare(`SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM telegram_connections WHERE telegram_user_id=? AND status='active') AND NOT EXISTS(SELECT 1 FROM reader_telegram_connections WHERE (telegram_user_id=? AND reader_id!=?) OR (reader_id=? AND (status='blocked' OR (status='active' AND telegram_user_id!=?)))) THEN 1 ELSE json('telegram_owner_conflict') END`).bind(telegram.telegramUserId,telegram.telegramUserId,readerId,readerId,telegram.telegramUserId),
@@ -23,9 +25,10 @@ export async function authenticateReaderTelegramWithPin(db:ReaderDatabase,reques
  ];
  if(activating)statements.push(db.prepare("UPDATE reader_pin_setup_grants SET revoked_at=? WHERE reader_id=? AND consumed_at IS NULL AND revoked_at IS NULL").bind(now,readerId),db.prepare("UPDATE reader_invites SET revoked_at=? WHERE reader_id=? AND consumed_at IS NULL AND revoked_at IS NULL").bind(now,readerId));
  statements.push(db.prepare("INSERT INTO reader_profiles(reader_id,display_name,updated_at) VALUES(?,'Читач',?) ON CONFLICT(reader_id) DO NOTHING").bind(readerId,now),
- db.prepare("UPDATE reader_profiles SET notify_loans=?,notify_loans_since=CASE WHEN ?=1 THEN coalesce(notify_loans_since,?) ELSE NULL END,version=version+1,updated_at=? WHERE reader_id=?").bind(Number(input.notifyLoans),Number(input.notifyLoans),now.slice(0,10),now,readerId),
+ db.prepare("UPDATE reader_profiles SET telegram_disconnected_at=NULL,notify_loans=1,notify_loans_since=coalesce(notify_loans_since,?),version=version+1,updated_at=? WHERE reader_id=?").bind(now.slice(0,10),now,readerId),
  db.prepare("INSERT INTO reader_sessions(token_hash,reader_id,access_version,credential_version,telegram_user_id,created_at,expires_at) VALUES(?,?,?,?,?,?,?)").bind(hash,readerId,credential.access_version,credential.credential_version+Number(activating),telegram.telegramUserId,now,expiresAt),
  db.prepare("DELETE FROM reader_auth_limits WHERE scope_hash IN (?,?)").bind(rate.pair.hash,rate.reader.hash),cleanupLimits(db,nowDate));
+ if(oldLink?.status!=='active'||oldLink?.telegram_disconnected_at)statements.push(readerEvent(db,{readerId,key:'telegram-link:'+telegram.initDataHash,kind:'account',title:'Telegram приєднано',body:'Нагадування про повернення та статуси пропозицій надходитимуть автоматично.',tab:'profile'},now));
  await readerBatch(db,statements);return {token,expiresAt};
 }
 
@@ -183,6 +186,7 @@ export async function completeReaderPinSetup(db:ReaderDatabase,input:{setupToken
   db.prepare("UPDATE reader_pin_setup_grants SET revoked_at=? WHERE reader_id=? AND token_hash!=? AND consumed_at IS NULL AND revoked_at IS NULL").bind(now,readerId,hash),
   db.prepare("INSERT INTO reader_profiles(reader_id,display_name,updated_at) VALUES(?,'Читач',?) ON CONFLICT(reader_id) DO NOTHING").bind(readerId,now),
   db.prepare("INSERT INTO reader_sessions(token_hash,reader_id,access_version,credential_version,telegram_user_id,created_at,expires_at) VALUES(?,?,?,?,NULL,?,?)").bind(sessionHash,readerId,accessVersion,nextCredentialVersion,now,expiresAt),
+ readerEvent(db,{readerId,key:'pin:'+nextCredentialVersion,kind:'account',title:'PIN для входу оновлено',body:'Вхід до читацького кабінету захищено новим PIN. Якщо це були не ви, зверніться до бібліотекаря.',tab:'profile'},now),
  ]);return {token:session,expiresAt};
 }
 
