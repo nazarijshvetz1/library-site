@@ -11,6 +11,10 @@ export async function listLibraryReaders(db:ReaderDatabase,url:URL){
   const rows=await db.prepare(`SELECT r.id,${readerFullNameSql} full_name,r.member_no,r.kind,r.status,r.access_status,r.version,r.source_group_label,r.linked_teacher_user_id,
     cy.class_name,ce.class_year_id,${readerDirectoryFieldsSql},p.display_name,
     CASE WHEN r.linked_teacher_user_id IS NOT NULL THEN (SELECT status FROM telegram_connections WHERE user_id=r.linked_teacher_user_id) ELSE (SELECT status FROM reader_telegram_connections WHERE reader_id=r.id) END AS telegram_status,
+    (SELECT status FROM reader_credentials WHERE reader_id=r.id) AS credential_status,
+    (SELECT must_change_pin FROM reader_credentials WHERE reader_id=r.id) AS must_change_pin,
+    (SELECT locked_until FROM reader_credentials WHERE reader_id=r.id) AS credential_locked_until,
+    (SELECT last_login_at FROM reader_credentials WHERE reader_id=r.id) AS credential_last_login_at,
     COALESCE((SELECT state FROM reader_platform_links WHERE reader_id=r.id AND platform='librarika'),CASE WHEN r.source_member_id IS NOT NULL THEN 'linked' ELSE 'not_queued' END) AS librarika_status
     FROM library_readers r LEFT JOIN reader_profiles p ON p.reader_id=r.id LEFT JOIN reader_class_enrollments ce ON ce.reader_id=r.id AND ce.ended_at IS NULL LEFT JOIN class_years cy ON cy.id=ce.class_year_id
     WHERE (?='' OR ${readerSearchNameSql} LIKE ? ESCAPE '!' OR r.member_no LIKE ? ESCAPE '!') ORDER BY ${readerSortNameSql},r.id LIMIT 600`).bind(query,"%"+query.replace(/[!%_]/g,v=>"!"+v)+"%","%"+query.replace(/[!%_]/g,v=>"!"+v)+"%").all();return rows.results||[];

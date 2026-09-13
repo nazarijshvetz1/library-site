@@ -4,19 +4,30 @@ import {createReaderTelegramSession,logoutReader,previewReaderInvite,readerSessi
 import {getReaderProfile} from "@/lib/reader-profile-store";
 import {limitReaderAuth,readerApiError,readerJson,readerWriteBody} from "@/lib/reader-api";
 import {readerFail,type ReaderDatabase} from "@/lib/reader-core";
+import {beginReaderSignIn,completeReaderPinSetup,redeemReaderWebInviteWithPin} from "@/lib/reader-pin-auth";
 import {telegramMiniAppPublicConfiguration,validateTelegramMiniAppInitData} from "@/lib/telegram-mini-app-auth";
 import {createVisitTeacherTelegramSession,telegramTeacherSessionCookie} from "@/lib/visit-teacher-auth";
 export const dynamic="force-dynamic";
 export async function GET(request:Request){try{const db=env.DB as unknown as ReaderDatabase;const identity=await requireReaderSession(db,request);return readerJson({success:true,profile:await getReaderProfile(db,identity),telegram:telegramMiniAppPublicConfiguration()});}catch(error){return readerApiError(error);}}
 export async function POST(request:Request){try{
   const body=await readerWriteBody(request,24000),db=env.DB as unknown as ReaderDatabase;
-  await limitReaderAuth(db,request);
-  if(Object.keys(body).some(key=>!["action","token","initData","confirmation","purpose"].includes(key)))readerFail("login_fields","Некоректна форма входу.");
-  if(body.action==="preview"&&typeof body.token==="string")return readerJson({success:true,preview:await previewReaderInvite(db,body.token,String(body.purpose))});
+  if(Object.keys(body).some(key=>!["action","token","initData","confirmation","purpose","loginId","code","setupToken","pin","pinConfirm"].includes(key)))readerFail("login_fields","Некоректна форма входу.");
+  if(body.action==="preview"&&typeof body.token==="string"){await limitReaderAuth(db,request);return readerJson({success:true,preview:await previewReaderInvite(db,body.token,String(body.purpose))});}
+  if(body.action==="login"&&typeof body.loginId==="string"&&typeof body.code==="string"){
+    const login=await beginReaderSignIn(db,request,{loginId:body.loginId,code:body.code});
+    if(login.kind==="setup")return readerJson({success:true,requiresPinSetup:true,setupToken:login.setupToken,expiresAt:login.expiresAt});
+    return readerJson({success:true,expiresAt:login.expiresAt},{headers:{"Set-Cookie":readerSessionCookie(login.token)}});
+  }
+  if(body.action==="set_pin"&&typeof body.setupToken==="string"&&typeof body.pin==="string"&&typeof body.pinConfirm==="string"){
+    await limitReaderAuth(db,request);const result=await completeReaderPinSetup(db,{setupToken:body.setupToken,pin:body.pin,pinConfirm:body.pinConfirm});
+    return readerJson({success:true,expiresAt:result.expiresAt},{headers:{"Set-Cookie":readerSessionCookie(result.token)}});
+  }
   let result:{token:string;expiresAt:string};let telegram=false;
-  if(body.action==="invite"&&typeof body.token==="string"&&body.confirmation==="CONNECT_MY_READER_PROFILE")result=await redeemReaderInvite(db,body.token);
+  if(body.action==="invite"&&typeof body.token==="string"&&body.confirmation==="CONNECT_MY_READER_PROFILE"&&typeof body.pin==="string"&&typeof body.pinConfirm==="string"){
+    await limitReaderAuth(db,request);result=await redeemReaderWebInviteWithPin(db,{token:body.token,pin:body.pin,pinConfirm:body.pinConfirm});
+  }
   else if(body.action==="telegram"&&typeof body.initData==="string"){
-    telegram=true;const identity=await validateTelegramMiniAppInitData(body.initData);
+    await limitReaderAuth(db,request);telegram=true;const identity=await validateTelegramMiniAppInitData(body.initData);
     if(typeof body.token==="string"&&body.token){if(body.confirmation!=="CONNECT_MY_READER_PROFILE")readerFail("login_confirm","Підтвердьте приєднання свого читацького профілю.");result=await redeemReaderInvite(db,body.token,identity);}
     else {
       const teacher=await db.prepare("SELECT 1 ok FROM telegram_connections WHERE telegram_user_id=? AND status='active'").bind(identity.telegramUserId).first();

@@ -332,6 +332,35 @@ export const readerProfiles=sqliteTable("reader_profiles",{
  subjectPosition:text("subject_position").notNull().default(""),
 },t=>[check("reader_profile_flags",sql`${t.communityEnabled} in (0,1) and ${t.notifyLoans} in (0,1) and ${t.notifyBooks} in (0,1)`),check("reader_profile_version",sql`${t.version}>0`)]);
 
+/** Student web sign-in is separate from staff/teacher authentication and stores no plaintext code. */
+export const readerCredentials=sqliteTable("reader_credentials",{
+  readerId:text("reader_id").primaryKey().references(()=>libraryReaders.id,{onDelete:"restrict"}),
+  loginId:text("login_id").notNull().unique(),codeHmac:text("code_hmac"),
+  mustChangePin:integer("must_change_pin").notNull().default(1),status:text("status").notNull().default("disabled"),
+  version:integer("version").notNull().default(1),failedAttempts:integer("failed_attempts").notNull().default(0),
+  failureWindowStartedAt:text("failure_window_started_at"),lockedUntil:text("locked_until"),
+  codeExpiresAt:text("code_expires_at"),lastLoginAt:text("last_login_at"),
+  createdAt:text("created_at").notNull(),updatedAt:text("updated_at").notNull(),
+},t=>[
+  uniqueIndex("idx_reader_credentials_login").on(t.loginId),
+  index("idx_reader_credentials_status").on(t.status,t.updatedAt),
+  check("reader_credential_login",sql`length(${t.loginId})=32`),
+  check("reader_credential_status",sql`${t.status} in ('active','disabled')`),
+  check("reader_credential_flags",sql`${t.mustChangePin} in (0,1) and ${t.version}>0 and ${t.failedAttempts}>=0`),
+  check("reader_credential_hmac",sql`${t.codeHmac} is null or length(${t.codeHmac})=64`),
+]);
+
+/** A short-lived capability can only finish first-time PIN setup; it is never a reader session. */
+export const readerPinSetupGrants=sqliteTable("reader_pin_setup_grants",{
+  tokenHash:text("token_hash").primaryKey(),readerId:text("reader_id").notNull().references(()=>libraryReaders.id,{onDelete:"restrict"}),
+  credentialVersion:integer("credential_version").notNull(),expiresAt:text("expires_at").notNull(),
+  consumedAt:text("consumed_at"),revokedAt:text("revoked_at"),createdAt:text("created_at").notNull(),
+},t=>[
+  index("idx_reader_pin_setup_owner").on(t.readerId,t.expiresAt),
+  check("reader_pin_setup_hash",sql`length(${t.tokenHash})=64`),
+  check("reader_pin_setup_version",sql`${t.credentialVersion}>0`),
+]);
+
 export const readerInvites=sqliteTable("reader_invites",{
   tokenHash:text("token_hash").primaryKey(),readerId:text("reader_id").notNull().references(()=>libraryReaders.id,{onDelete:"restrict"}),
   accessVersion:integer("access_version").notNull(),purpose:text("purpose").notNull(),expiresAt:text("expires_at").notNull(),
@@ -341,7 +370,7 @@ export const readerInvites=sqliteTable("reader_invites",{
 
 export const readerSessions=sqliteTable("reader_sessions",{
   tokenHash:text("token_hash").primaryKey(),readerId:text("reader_id").notNull().references(()=>libraryReaders.id,{onDelete:"restrict"}),
-  accessVersion:integer("access_version").notNull(),telegramUserId:text("telegram_user_id"),
+  accessVersion:integer("access_version").notNull(),credentialVersion:integer("credential_version"),telegramUserId:text("telegram_user_id"),
   createdAt:text("created_at").notNull(),expiresAt:text("expires_at").notNull(),revokedAt:text("revoked_at"),
 },t=>[index("idx_reader_session_owner").on(t.readerId,t.expiresAt),check("reader_session_hash",sql`length(${t.tokenHash})=64`)]);
 

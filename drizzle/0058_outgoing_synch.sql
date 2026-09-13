@@ -1,0 +1,1 @@
+ALTER TABLE `reader_sessions` ADD `credential_version` integer;

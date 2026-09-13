@@ -3,6 +3,7 @@ import {authorizeLibrarianApi,isSameOriginRequest,librarianError,librarianJson} 
 import {readBoundedJson} from "@/lib/bounded-json";
 import {ReaderError,readerFail,type ReaderDatabase} from "@/lib/reader-core";
 import {issueReaderInvite} from "@/lib/reader-auth";
+import {issueReaderWebAccess} from "@/lib/reader-pin-auth";
 import {telegramMiniAppPublicConfiguration} from "@/lib/telegram-mini-app-auth";
 import * as admin from "@/lib/library-reader-admin";
 export const dynamic="force-dynamic";
@@ -16,6 +17,7 @@ export async function GET(request:Request){const auth=await authorizeLibrarianAp
 export async function POST(request:Request){const auth=await authorizeLibrarianApi();if(!auth.ok)return auth.response;const {user,access}=auth.value;if(!access.writesEnabled||!user.d1UserId)return librarianError(503,"writes_disabled","Запис тимчасово вимкнено.",false);if(!isSameOriginRequest(request))return librarianError(403,"origin","Запит має надійти з цього сайту.",true);
   try{const body=await readBoundedJson(request,400000),input=body.input;if(!input||typeof input!=="object"||Array.isArray(input))readerFail("reader_input","Некоректна форма дії.");const db=env.DB as unknown as ReaderDatabase,actor={id:user.d1UserId,email:user.email||""};let result:unknown;
     if(body.action==="save")result=await admin.saveLibraryReader(db,actor,input as Parameters<typeof admin.saveLibraryReader>[2]);
+    else if(body.action==="web_access")result=await issueReaderWebAccess(db,actor,input as Parameters<typeof issueReaderWebAccess>[2]);
     else if(body.action==="invite")result=await issueReaderInvite(db,actor,input as Parameters<typeof issueReaderInvite>[2]);
     else if(body.action==="access")result=await admin.changeReaderAccess(db,actor,input as Parameters<typeof admin.changeReaderAccess>[2]);
     else if(body.action==="teacher_link")result=await admin.linkReaderTeacher(db,actor,input as Parameters<typeof admin.linkReaderTeacher>[2]);

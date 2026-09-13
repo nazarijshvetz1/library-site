@@ -98,6 +98,10 @@ export async function literatureReaders(db: ReaderDatabase, url: URL) {
   const rows = await db.prepare(`SELECT r.id,${readerFullNameSql} full_name,r.member_no,r.kind,r.status,r.version,r.access_status,r.source_group_label,r.linked_teacher_user_id,${readerDirectoryFieldsSql},p.display_name,cy.class_name,ce.class_year_id,
 (SELECT json_group_array(json_object('id',e.id,'title',e.title,'version',e.version,'overdue',CASE WHEN substr(l.due_at,1,10)<? THEN 1 ELSE 0 END)) FROM reader_circulations l JOIN library_copies c ON c.id=l.copy_id JOIN library_editions e ON e.id=c.edition_id WHERE l.reader_id=r.id AND l.status IN ('issued','overdue') AND e.fund='literature') active_books,
     CASE WHEN r.linked_teacher_user_id IS NOT NULL THEN (SELECT status FROM telegram_connections WHERE user_id=r.linked_teacher_user_id) ELSE (SELECT status FROM reader_telegram_connections WHERE reader_id=r.id) END telegram_status,
+    (SELECT status FROM reader_credentials WHERE reader_id=r.id) credential_status,
+    (SELECT must_change_pin FROM reader_credentials WHERE reader_id=r.id) must_change_pin,
+    (SELECT locked_until FROM reader_credentials WHERE reader_id=r.id) credential_locked_until,
+    (SELECT last_login_at FROM reader_credentials WHERE reader_id=r.id) credential_last_login_at,
     (SELECT COUNT(*) FROM reader_circulations l JOIN library_copies c ON c.id=l.copy_id JOIN library_editions e ON e.id=c.edition_id WHERE l.reader_id=r.id AND l.status IN ${activeLoans} AND e.fund='literature') loan_count,
     (SELECT COUNT(*) FROM reader_circulations l JOIN library_copies c ON c.id=l.copy_id JOIN library_editions e ON e.id=c.edition_id WHERE l.reader_id=r.id AND l.status IN ${activeLoans} AND e.fund='literature' AND substr(l.due_at,1,10)<?) overdue_count
     FROM ${from} WHERE ${where} ORDER BY ${readerSortNameSql},r.id LIMIT ? OFFSET ?`).bind(literatureToday(),literatureToday(), ...bindings, limit, offset).all();
@@ -105,7 +109,11 @@ export async function literatureReaders(db: ReaderDatabase, url: URL) {
 }
 export async function literatureReader(db: ReaderDatabase, id: string) {
   const row = await db.prepare(`SELECT r.id,r.member_no,${readerFullNameSql} full_name,r.kind,r.status,r.version,r.access_status,r.linked_teacher_user_id,r.source_group_label,${readerDirectoryFieldsSql},p.email,p.display_name,ce.class_year_id,cy.class_name,
-    CASE WHEN r.linked_teacher_user_id IS NOT NULL THEN (SELECT status FROM telegram_connections WHERE user_id=r.linked_teacher_user_id) ELSE (SELECT status FROM reader_telegram_connections WHERE reader_id=r.id) END telegram_status
+    CASE WHEN r.linked_teacher_user_id IS NOT NULL THEN (SELECT status FROM telegram_connections WHERE user_id=r.linked_teacher_user_id) ELSE (SELECT status FROM reader_telegram_connections WHERE reader_id=r.id) END telegram_status,
+    (SELECT status FROM reader_credentials WHERE reader_id=r.id) credential_status,
+    (SELECT must_change_pin FROM reader_credentials WHERE reader_id=r.id) must_change_pin,
+    (SELECT locked_until FROM reader_credentials WHERE reader_id=r.id) credential_locked_until,
+    (SELECT last_login_at FROM reader_credentials WHERE reader_id=r.id) credential_last_login_at
     FROM library_readers r LEFT JOIN reader_profiles p ON p.reader_id=r.id LEFT JOIN reader_class_enrollments ce ON ce.reader_id=r.id AND ce.ended_at IS NULL LEFT JOIN class_years cy ON cy.id=ce.class_year_id WHERE r.id=?`).bind(id).first();
   if (!row) readerFail("reader_missing", "Читача не знайдено.", 404); return row;
 }

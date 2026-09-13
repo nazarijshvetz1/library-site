@@ -21,6 +21,8 @@ export async function requireReaderSession(db:ReaderDatabase,request:Request):Pr
     const hash=await sha256Text(token);
     const row=await db.prepare(`SELECT r.id,r.access_version FROM reader_sessions s JOIN library_readers r ON r.id=s.reader_id
       WHERE s.token_hash=? AND s.revoked_at IS NULL AND s.expires_at>? AND r.status='active' AND r.access_status='active' AND r.access_version=s.access_version
+        AND (s.telegram_user_id IS NOT NULL OR (s.credential_version IS NULL AND NOT EXISTS(SELECT 1 FROM reader_credentials rc WHERE rc.reader_id=r.id AND rc.status='active'))
+          OR EXISTS(SELECT 1 FROM reader_credentials rc WHERE rc.reader_id=r.id AND rc.status='active' AND rc.must_change_pin=0 AND rc.version=s.credential_version))
         AND (s.telegram_user_id IS NULL OR EXISTS(SELECT 1 FROM reader_telegram_connections c WHERE c.reader_id=r.id AND c.telegram_user_id=s.telegram_user_id AND c.status='active'))`).bind(hash,now).first();
     if(row)return scopedReader(request,{readerId:String(row.id),accessVersion:Number(row.access_version),tokenHash:hash,sessionKind:"reader"});
   }
@@ -46,13 +48,14 @@ export async function issueReaderInvite(db:ReaderDatabase,actor:LibraryActor,inp
         AND (?='web' OR NOT EXISTS(SELECT 1 FROM reader_telegram_connections c WHERE c.reader_id=library_readers.id AND c.status IN ('active','blocked')))),?,?,?, ?,
         (SELECT id FROM users WHERE id=? AND role IN ('admin','librarian') AND status='active'))`).bind(hash,input.readerId,input.expectedVersion,input.purpose,Number(reader.access_version),input.purpose,expiresAt,now,actor.id),
     db.prepare("UPDATE library_readers SET version=version+1,updated_at=? WHERE id=? AND version=?").bind(now,input.readerId,input.expectedVersion),requireChanged(db,1),
-    db.prepare("UPDATE reader_invites SET revoked_at=? WHERE reader_id=? AND token_hash!=? AND consumed_at IS NULL AND revoked_at IS NULL").bind(now,input.readerId,hash),
+    db.prepare("UPDATE reader_invites SET revoked_at=? WHERE reader_id=? AND purpose=? AND token_hash!=? AND consumed_at IS NULL AND revoked_at IS NULL").bind(now,input.readerId,input.purpose,hash),
     db.prepare("INSERT INTO audit_events(id,actor_user_id,actor_email,action,entity_type,entity_id,metadata_json,created_at) VALUES(?,?,?,'reader_invite','library_reader',?,?,?)").bind(auditId,actor.id,actor.email,input.readerId,JSON.stringify({purpose:input.purpose,expiresAt}),now),
   ]);
   return {token,purpose:input.purpose,expiresAt,readerVersion:input.expectedVersion+1};
 }
 
 export async function redeemReaderInvite(db:ReaderDatabase,token:string,telegram?:TelegramMiniAppIdentity){
+  if(!telegram)readerFail("reader_pin_required","Створіть власний PIN, щоб завершити вхід на сайт.",409);
   if(!/^[0-9a-f]{48}$/.test(token))readerFail("invite_invalid","Запрошення недійсне або вже використане.",401);
   const hash=await sha256Text(token),now=new Date().toISOString();
   const invite=await db.prepare(`SELECT i.reader_id,i.access_version FROM reader_invites i JOIN library_readers r ON r.id=i.reader_id
@@ -79,8 +82,10 @@ export async function redeemReaderInvite(db:ReaderDatabase,token:string,telegram
 
 export async function previewReaderInvite(db:ReaderDatabase,token:string,purpose:string){
   if(!/^[0-9a-f]{48}$/.test(token)||!["web","telegram"].includes(purpose))readerFail("invite_invalid","Запрошення недійсне.",401);
-  const row=await db.prepare(`SELECT r.full_name FROM reader_invites i JOIN library_readers r ON r.id=i.reader_id WHERE i.token_hash=? AND i.purpose=? AND i.expires_at>? AND i.consumed_at IS NULL AND i.revoked_at IS NULL AND i.access_version=r.access_version AND r.status='active' AND r.access_status!='blocked' AND r.linked_teacher_user_id IS NULL`).bind(await sha256Text(token),purpose,new Date().toISOString()).first();
-  if(!row)readerFail("invite_invalid","Запрошення недійсне або вже використане. Зверніться до бібліотекаря.",401);return {fullName:row.full_name};
+  const row=await db.prepare(`SELECT r.full_name,COALESCE(cy.class_name,r.source_group_label,'') class_label FROM reader_invites i JOIN library_readers r ON r.id=i.reader_id
+    LEFT JOIN reader_class_enrollments ce ON ce.reader_id=r.id AND ce.ended_at IS NULL LEFT JOIN class_years cy ON cy.id=ce.class_year_id
+    WHERE i.token_hash=? AND i.purpose=? AND i.expires_at>? AND i.consumed_at IS NULL AND i.revoked_at IS NULL AND i.access_version=r.access_version AND r.status='active' AND r.access_status!='blocked' AND r.linked_teacher_user_id IS NULL`).bind(await sha256Text(token),purpose,new Date().toISOString()).first();
+  if(!row)readerFail("invite_invalid","Запрошення недійсне або вже використане. Зверніться до бібліотекаря.",401);return {fullName:row.full_name,classLabel:String(row.class_label||"")};
 }
 
 export async function createReaderTelegramSession(db:ReaderDatabase,telegram:TelegramMiniAppIdentity){

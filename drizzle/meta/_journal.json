@@ -400,6 +400,20 @@
       "when": 1789242214367,
       "tag": "0056_tan_outlaw_kid",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1789272509747,
+      "tag": "0057_premium_moon_knight",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "6",
+      "when": 1789272583158,
+      "tag": "0058_outgoing_synch",
+      "breakpoints": true
     }
   ]
 }

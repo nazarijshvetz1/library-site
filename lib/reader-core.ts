@@ -13,6 +13,8 @@ export function readerGuard(identity:ReaderIdentity,now:string){
   const sql=identity.sessionKind==="reader"?`SELECT r.id FROM library_readers r JOIN reader_sessions s ON s.reader_id=r.id
     WHERE r.id=? AND r.status='active' AND r.access_status='active' AND r.access_version=?
       AND s.token_hash=? AND s.access_version=r.access_version AND s.expires_at>? AND s.revoked_at IS NULL
+      AND (s.telegram_user_id IS NOT NULL OR (s.credential_version IS NULL AND NOT EXISTS(SELECT 1 FROM reader_credentials rc WHERE rc.reader_id=r.id AND rc.status='active'))
+        OR EXISTS(SELECT 1 FROM reader_credentials rc WHERE rc.reader_id=r.id AND rc.status='active' AND rc.must_change_pin=0 AND rc.version=s.credential_version))
       AND (s.telegram_user_id IS NULL OR EXISTS(SELECT 1 FROM reader_telegram_connections tc WHERE tc.reader_id=r.id AND tc.telegram_user_id=s.telegram_user_id AND tc.status='active'))`
     :`SELECT r.id FROM library_readers r JOIN users u ON u.id=r.linked_teacher_user_id JOIN visit_teacher_credentials c ON c.teacher_user_id=u.id JOIN visit_teacher_sessions s ON s.teacher_user_id=u.id
       WHERE r.id=? AND r.status='active' AND r.access_status='active' AND r.access_version=? AND r.kind!='student'
