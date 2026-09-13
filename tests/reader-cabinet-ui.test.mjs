@@ -44,3 +44,20 @@ test('reader catalog is dense, shows public book facts, and community search sug
  assert.match(css,/\.homeGreeting>img\{width:72px;height:72px/u);assert.match(css,/\.catalogCards\{gap:8px\}/u);assert.match(css,/\.suggestions \.bookSuggestion/u);
  assert.match(catalogBackend,/m\.search_text LIKE/u);assert.doesNotMatch(catalogBackend,/searchFold/u);
 });
+
+test('catalog and all reader directories append pages automatically without numbered paging',()=>{
+ assert.match(controls,/function useInfiniteCabinetData/u);assert.match(controls,/function InfinitePager/u);
+ assert.match(controls,/new IntersectionObserver/u);assert.match(controls,/rootMargin:'280px 0px'/u);
+ assert.match(controls,/chunks:new Map<number,Row\[\]>/u);assert.match(controls,/byId=new Map<string,Row>/u);
+ assert.equal((panels.match(/<InfinitePager /gu)||[]).length,3);
+ assert.match(panels,/view:'catalog'/u);assert.match(panels,/view:'entities'/u);assert.match(panels,/view:'entity'/u);
+});
+
+test('mobile book suggestions stay inside the visual viewport and scroll locally',()=>{
+ assert.match(controls,/visualViewport\?\.addEventListener\('scroll',schedule\)/u);
+ assert.match(controls,/list\.current\?\.contains\(event\.target\)/u);
+ assert.doesNotMatch(controls,/scrollIntoView/u);
+ assert.match(css,/\.suggestions\{[^}]*overflow-x:hidden[^}]*touch-action:pan-y[^}]*-webkit-overflow-scrolling:touch/u);
+ assert.match(css,/\.catalogCards \.bookInfo\{display:flex;flex-direction:column;gap:0\}/u);
+ assert.match(css,/\.catalogCards \.entityLink\{min-height:36px\}/u);
+});

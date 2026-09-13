@@ -4,7 +4,7 @@ import {Building2,Camera,ChevronRight,FolderTree,LibraryBig,Search,Tags,UserRoun
 import {telephoneHref} from '@/lib/telephone';
 import {readerDate,readerFetch,type ReaderProfile} from './reader-types';
 import ReaderScanner from './reader-scanner';
-import {BookPublicMeta,BookRow,Feedback,Modal,Pager,PublicationLine,Suggest,useCabinetData,type Row,type Page} from './cabinet-controls';
+import {BookPublicMeta,BookRow,Feedback,InfinitePager,Modal,Pager,PublicationLine,Suggest,useCabinetData,useInfiniteCabinetData,type InfinitePageCache,type Row,type Page} from './cabinet-controls';
 import {DraftScope,useDraftState,useLiteratureNavigation} from '../librarian/literature/literature-navigation';
 import LiteraturePhotoEditor,{type PreparedPhoto} from '../librarian/literature/photo-editor';
 import s from './cabinet.module.css';
@@ -42,17 +42,20 @@ const browseItem=(kind:string)=>browseItems.find(item=>item.kind===kind)||browse
 
 type CatalogProps={state:Row;setState:(value:Row)=>void;epoch:number;onBook:(id:string)=>void;onPropose:()=>void;scanCode:string;onScanDone:()=>void;onBrowse:(kind:BrowseKind)=>void;onEntity:(entity:Row)=>void;onBack:()=>void;onCatalogRoot:()=>void};
 export function CatalogPanel(props:CatalogProps){
- if(props.state.entity?.id)return <EntityPanel {...props}/>;
- if(props.state.browseKind)return <EntityDirectory {...props}/>;
- return <CatalogContents {...props}/>;
+ const pageCache=useRef<InfinitePageCache>(new Map());
+ if(props.state.entity?.id)return <EntityPanel {...props} pageCache={pageCache.current}/>;
+ if(props.state.browseKind)return <EntityDirectory {...props} pageCache={pageCache.current}/>;
+ return <CatalogContents {...props} pageCache={pageCache.current}/>;
 }
+
+type CatalogViewProps=CatalogProps&{pageCache:InfinitePageCache};
 
 function BrowseButtons({onBrowse}:{onBrowse:(kind:BrowseKind)=>void}){return <section className={s.browseSection} aria-labelledby="browse-reader-catalog"><p id="browse-reader-catalog" className={s.browseLabel}>Переглянути за</p><div className={s.browseGrid}>{browseItems.map(({kind,label,Icon})=><button type="button" key={kind} onClick={()=>onBrowse(kind)}><Icon size={18}/><span>{label}</span></button>)}</div></section>;}
 
-function CatalogContents({state,setState,epoch,onBook,onPropose,scanCode,onScanDone,onBrowse,onEntity}:CatalogProps){
+function CatalogContents({state,setState,epoch,onBook,onPropose,scanCode,onScanDone,onBrowse,onEntity,pageCache}:CatalogViewProps){
  const update=(value:Row)=>{setScan(null);setScanError('');setState({...state,...value});};
- const params=new URLSearchParams({view:'catalog',q:state.q||'',sort:state.sort||'title',page:String(state.page||1),...Object.fromEntries(Object.entries(state.filters||{}).map(([key,value])=>[key,(value as Row)?.id||'']))});
- const remote=useCabinetData<Page>(API+'?'+params,epoch),[scan,setScan]=useState<Row[]|null>(null),[scanError,setScanError]=useState(''),[manual,setManual]=useState('');
+ const params=new URLSearchParams({view:'catalog',q:state.q||'',sort:state.sort||'title',...Object.fromEntries(Object.entries(state.filters||{}).map(([key,value])=>[key,(value as Row)?.id||'']))});
+ const remote=useInfiniteCabinetData(API+'?'+params,state.page||1,epoch,pageCache),[scan,setScan]=useState<Row[]|null>(null),[scanError,setScanError]=useState(''),[manual,setManual]=useState('');
  async function findCode(code:string){setScan(null);setScanError('');try{const data=await readerFetch<{result:{items:Row[]}}>(API+'?view=scan&code='+encodeURIComponent(code));if(data.result.items.length===1)onBook(data.result.items[0].id);else setScan(data.result.items);}catch(error){setScanError((error as Error).message);}}
  useEffect(()=>{if(!scanCode)return;let alive=true;readerFetch<{result:{items:Row[]}}>(API+'?view=scan&code='+encodeURIComponent(scanCode)).then(data=>{if(alive){if(data.result.items.length===1)onBook(data.result.items[0].id);else setScan(data.result.items);}}).catch(error=>{if(alive)setScanError(error.message);}).finally(onScanDone);return()=>{alive=false;};},[scanCode,onBook,onScanDone]);
  const activeFilters=(Object.entries(state.filters||{}) as [string,Row][]).filter(([,value])=>Boolean(value?.id));
@@ -63,25 +66,25 @@ function CatalogContents({state,setState,epoch,onBook,onPropose,scanCode,onScanD
   <div className={`${s.filterBar} ${s.catalogSort}`}><label className={s.sortLabel}>Сортування<select value={state.sort||'title'} onChange={event=>update({sort:event.target.value,page:1})}><option value="title">За назвою</option><option value="newest">Нові надходження</option></select></label></div>
   {!!activeFilters.length&&<div className={s.chips}>{activeFilters.map(([key,value])=><button key={key} onClick={()=>update({filters:{...state.filters,[key]:null},page:1})}>{value.name} · {value.count} ×</button>)}<button onClick={()=>update({filters:{},page:1})}>Скинути фільтри</button></div>}
   <details className={s.details}><summary>Знайти за штрих-кодом</summary><ReaderScanner className={s.secondary} label="Сканувати код" onDetected={code=>void findCode(code)}/><form className={s.actions} onSubmit={event=>{event.preventDefault();void findCode(manual);}}><label className={s.field}>Код з етикетки<input value={manual} onChange={event=>setManual(event.target.value)} maxLength={500}/></label><button className={s.secondary} disabled={!manual.trim()}>Знайти за кодом</button></form></details>
-  <Feedback state={remote}/>{scan&&<button className={s.textButton} onClick={()=>setScan(null)}>Повернутися до всього каталогу</button>}{scanError&&<p role="alert" className={s.error}>{scanError}</p>}
+  {!remote.data?.items.length&&<Feedback state={remote}/>} {scan&&<button className={s.textButton} onClick={()=>setScan(null)}>Повернутися до всього каталогу</button>}{scanError&&<p role="alert" className={s.error}>{scanError}</p>}
   <p className={s.muted}>{scan?`Знайдено за кодом: ${scan.length}`:`Знайдено ${remote.data?.total??'…'} видань`}</p>
   <div className={`${s.stack} ${s.catalogCards}`}>{(scan||remote.data?.items||[]).map(book=><BookRow key={book.id} book={book} onBook={onBook} onEntity={onEntity}><PublicationLine book={book} onEntity={onEntity}/><BookPublicMeta book={book}/><span className={s.badge}>{book.available?`Доступно: ${book.available}`:'Можна подати заявку'}</span><details className={s.details}><summary>Докладніше</summary><div className={s.chips}>{book.entities.filter((entity:Row)=>browseItems.some(item=>item.kind===entity.kind)).map((entity:Row)=><button key={entity.id+entity.role} onClick={()=>onEntity(entity)}>{entity.name}</button>)}</div></details></BookRow>)}</div>
   {remote.data&&!remote.loading&&!(scan||remote.data.items).length&&<p className={s.empty}>Книжок за цим запитом немає. Спробуй іншу назву або скинь фільтри.</p>}
-  {!scan&&<Pager data={remote.data} onPage={page=>update({page})}/>}<button className={s.secondary} style={{marginTop:20,width:'100%'}} onClick={onPropose}><Plus size={18}/>Запропонувати книгу бібліотеці</button>
+  {!scan&&<InfinitePager data={remote.data} loading={remote.loading} error={remote.error} onNext={page=>update({page})} onRetry={remote.retry}/>}<button className={s.secondary} style={{marginTop:20,width:'100%'}} onClick={onPropose}><Plus size={18}/>Запропонувати книгу бібліотеці</button>
  </>;
 }
 
-function EntityDirectory({state,setState,epoch,onEntity,onBack}:CatalogProps){
+function EntityDirectory({state,setState,epoch,onEntity,onBack,pageCache}:CatalogViewProps){
  const config=browseItem(state.browseKind),query=state.browseQuery||'',currentPage=state.browsePage||1;
- const remote=useCabinetData<Page>(API+'?'+new URLSearchParams({view:'entities',kind:config.kind,q:query,page:String(currentPage)}),epoch);
+ const remote=useInfiniteCabinetData(API+'?'+new URLSearchParams({view:'entities',kind:config.kind,q:query}),currentPage,epoch,pageCache);
  return <>
   <button type="button" className={s.sectionBack} onClick={onBack}>← Каталог</button>
   <h1>{config.label}</h1>
   <label className={`${s.field} ${s.directorySearch}`}>Знайти у довіднику<div><Search size={18}/><input type="search" value={query} onChange={event=>setState({...state,browseQuery:event.target.value,browsePage:1})} placeholder={`Пошук: ${config.label.toLocaleLowerCase('uk-UA')}`} maxLength={100}/></div></label>
-  <Feedback state={remote}/><p className={s.muted}>Знайдено {remote.data?.total??'…'}</p>
+  {!remote.data?.items.length&&<Feedback state={remote}/>}<p className={s.muted}>Знайдено {remote.data?.total??'…'}</p>
   <div className={s.directoryList}>{remote.data?.items.map(entity=><button type="button" key={entity.id} onClick={()=>onEntity(entity)}><span><strong>{entity.name}</strong><small>{entity.count} {bookCountLabel(Number(entity.count))}</small></span><ChevronRight size={18}/></button>)}</div>
   {remote.data&&!remote.data.items.length&&<p className={s.empty}>У цьому довіднику записів поки немає.</p>}
-  <Pager data={remote.data} onPage={browsePage=>setState({...state,browsePage})}/>
+  <InfinitePager data={remote.data} loading={remote.loading} error={remote.error} onNext={browsePage=>setState({...state,browsePage})} onRetry={remote.retry}/>
  </>;
 }
 
@@ -89,15 +92,15 @@ const factLabels:Record<string,string>={nickname:'Псевдонім',country:'�
 const sectionLabels:Record<string,string>={biography:'Біографія',description:'Про запис',publications:'Публікації',awards:'Відзнаки'};
 function safeWeb(value:string){try{const url=new URL(value);return ['http:','https:'].includes(url.protocol)?url.href:'';}catch{return '';}}
 function EntityFacts({metadata}:{metadata:Row}){const facts=Object.keys(factLabels).filter(key=>metadata[key]),sections=Object.keys(sectionLabels).filter(key=>metadata[key]);return <>{!!facts.length&&<dl className={s.entityFacts}>{facts.map(key=><div key={key}><dt>{factLabels[key]}</dt><dd>{key==='website'&&safeWeb(metadata[key])?<a href={safeWeb(metadata[key])} target="_blank" rel="noreferrer">{metadata[key]}</a>:key==='email'?<a href={'mailto:'+metadata[key]}>{metadata[key]}</a>:key==='phone'&&telephoneHref(metadata[key])?<a href={telephoneHref(metadata[key])!}>{metadata[key]}</a>:metadata[key]}</dd></div>)}</dl>}{sections.map(key=><section className={s.entityText} key={key}><h2>{sectionLabels[key]}</h2><p className={s.body}>{metadata[key]}</p></section>)}</>;}
-function EntityPanel({state,setState,epoch,onBook,onEntity,onBack,onCatalogRoot}:CatalogProps){
- const config=browseItem(state.entity.kind),remote=useCabinetData<Row>(API+'?'+new URLSearchParams({view:'entity',id:state.entity.id,page:String(state.entityPage||1),sort:state.entitySort||'title'}),epoch),entity=remote.data?.entity,books=remote.data?.books;
+function EntityPanel({state,setState,epoch,onBook,onEntity,onBack,onCatalogRoot,pageCache}:CatalogViewProps){
+ const config=browseItem(state.entity.kind),remote=useInfiniteCabinetData(API+'?'+new URLSearchParams({view:'entity',id:state.entity.id,sort:state.entitySort||'title'}),state.entityPage||1,epoch,pageCache,'books'),entity=remote.raw?.entity,books=remote.data;
  return <>
   <button type="button" className={s.sectionBack} onClick={onBack}>← {config.label}</button>
-  <p className={s.entityEyebrow}>{config.singular}</p><h1>{entity?.name||state.entity.name}</h1><Feedback state={remote}/>
+  <p className={s.entityEyebrow}>{config.singular}</p><h1>{entity?.name||state.entity.name}</h1>{!entity&&!books?.items.length&&<Feedback state={remote}/>}
   {entity&&<EntityFacts metadata={entity.metadata||{}}/>}
   <section className={s.relatedBooks}><div className={s.relatedHeading}><div><h2>{config.bookHeading}</h2><p className={s.muted}>{books?.total??0} {bookCountLabel(Number(books?.total||0))}</p></div><button type="button" className={s.secondary} onClick={onCatalogRoot}>Весь каталог</button></div>
    <div className={s.stack}>{books?.items?.map((book:Row)=><BookRow key={book.id} book={book} onBook={onBook} onEntity={onEntity}><PublicationLine book={book} onEntity={onEntity}/><span className={s.badge}>{book.available?`Доступно: ${book.available}`:'Можна подати заявку'}</span></BookRow>)}</div>
-   {books&&!books.items.length&&<p className={s.empty}>Пов’язаних книжок у каталозі поки немає.</p>}<Pager data={books||null} onPage={entityPage=>setState({...state,entityPage})}/>
+   {books&&!books.items.length&&<p className={s.empty}>Пов’язаних книжок у каталозі поки немає.</p>}<InfinitePager data={books||null} loading={remote.loading} error={remote.error} onNext={entityPage=>setState({...state,entityPage})} onRetry={remote.retry}/>
   </section>
  </>;
 }
