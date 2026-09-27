@@ -1,10 +1,11 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 
 const read = (name) => readFile(new URL(`../source/${name}`, import.meta.url), "utf8");
-const [html, css, brandCss, config, app, data, balances, og, logo] = await Promise.all([
+const [html, css, brandCss, systemCss, config, app, data, balances, og, logo] = await Promise.all([
   read("index.html"),
   read("styles.css"),
   read("brand.css"),
+  read("system.css"),
   read("config.js"),
   read("app.js"),
   read("catalog-data.js"),
@@ -18,6 +19,7 @@ const worker = `const files = new Map(${JSON.stringify([
   ["/index.html", [html, "text/html; charset=utf-8"]],
   ["/styles.css", [css, "text/css; charset=utf-8"]],
   ["/brand.css", [brandCss, "text/css; charset=utf-8"]],
+  ["/system.css", [systemCss, "text/css; charset=utf-8"]],
   ["/config.js", [config, "text/javascript; charset=utf-8"]],
   ["/app.js", [app, "text/javascript; charset=utf-8"]],
   ["/catalog-data.js", [data, "text/javascript; charset=utf-8"]],
@@ -36,7 +38,7 @@ function decodeBase64(value) {
 }
 
 const securityHeaders = {
-  "content-security-policy": "default-src 'self'; img-src 'self' https: data:; style-src 'self'; script-src 'self' https://telegram.org; connect-src 'self' https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+  "content-security-policy": "default-src 'self'; img-src 'self' https: data:; style-src 'self'; script-src 'self' https://telegram.org; connect-src 'self' https://e-biblioteka.nazarijshvetz1.chatgpt.site; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
   "referrer-policy": "strict-origin-when-cross-origin",
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",

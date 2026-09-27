@@ -513,3 +513,31 @@ main > .contacts-section { order: 8; }
   .dialog-cover .cover-fallback { width: 102px; height: 148px; }
   .dialog-copy { padding: 16px; }
 }
+
+/* Compact educational catalog, shared emerald / ivory / warm-gold vocabulary. */
+.hero{padding-top:20px;padding-bottom:16px;gap:18px}
+.hero h1{font-size:clamp(28px,3.1vw,44px);line-height:1.08}
+.hero-copy>p{margin:8px 0;font-size:14px}.hero-perks{margin-top:8px}.hero-feature{max-height:220px}
+.catalog-section,.visit-schedule-section,.collections-section,.contacts-section{padding-top:18px;padding-bottom:18px}
+.catalog-layout{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
+.catalog-section .filters{position:static;inset:auto;display:flex;width:100%;height:auto;max-height:none;overflow:visible;transform:none;box-shadow:none;gap:8px;padding:10px;border:1px solid #c8d8ce;border-radius:16px;background:#fffefa;color:#194b38}
+.catalog-section .filters .filter-header{position:static;padding:0;background:transparent;color:inherit}
+.filter-header small,.filter-note,.filter-toggle,.filter-close,.filter-apply{display:none!important}
+.public-filter-launchers{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px;width:100%}
+.public-filter-launchers>button{display:flex;align-items:center;gap:8px;min-width:0;min-height:46px;padding:7px 9px;border-radius:12px;border:1px solid #d2dfd3;background:#f5f8f0;color:#194b38;text-align:left}
+.public-filter-launchers>button>span{display:grid;place-items:center;flex:none;width:29px;height:29px;border-radius:9px;background:linear-gradient(135deg,#d7eae1,#f4eacb)}
+.public-filter-launchers strong{font-size:13px;line-height:1.2}.public-filter-launchers>button[aria-expanded=true]{border-color:#407b5d;background:#e7f0e3}
+.public-filter-panel{display:flex;gap:9px;flex-wrap:wrap;border-top:1px solid #dae4da;padding-top:8px;width:100%}
+.public-filter-panel[hidden]{display:none!important}.public-filter-panel>label{flex:1 1 180px}
+.catalog-section .filters .public-filter-panel select{width:100%;min-height:44px;font-size:16px;color:#194b38;background:#fff}
+.catalog-section .filters .availability-check{margin:0;padding:4px 0;gap:8px;min-height:36px}
+.catalog-section .filters .availability-check small{display:none}.catalog-section .filters .availability-check strong{font-size:12px}
+@media(max-width:820px){.hero{padding:14px 12px}.hero h1{font-size:28px}.hero-feature{display:none}.hero-search button{grid-column:auto}.hero-search{grid-template-columns:auto minmax(0,1fr) auto}.public-filter-launchers{grid-template-columns:repeat(3,minmax(0,1fr))}.public-filter-launchers>button{padding:6px;gap:5px}.public-filter-launchers strong{font-size:12px}.catalog-section .filters{margin-bottom:10px}.stats div{min-height:48px;padding:6px}.stats strong{font-size:20px}}
+@media(max-width:380px){.public-filter-launchers{grid-template-columns:repeat(2,minmax(0,1fr))}.hero-search{grid-template-columns:auto minmax(0,1fr)}.hero-search button{grid-column:1/-1}}
+
+/* Compact light filter rail: keep all labels and controls readable. */
+.catalog-section .filters label,.catalog-section .filter-header strong,.catalog-section .availability-check strong{color:#234c40}
+.catalog-section .filter-header button{color:#315f4e}
+.filters input[type="checkbox"]{accent-color:#245741}
+
+.catalog-section .filters{z-index:auto}

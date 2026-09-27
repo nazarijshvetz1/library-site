@@ -495,6 +495,60 @@ export function visitsBookingUrl(value, selection, baseUrl = "https://catalog.in
   return url.toString();
 }
 
+
+export const PUBLIC_FOREIGN_LANGUAGES=Object.freeze([
+ {id:"en",label:"Англійська мова"},{id:"de",label:"Німецька мова"},{id:"fr",label:"Французька мова"},{id:"es",label:"Іспанська мова"},{id:"pl",label:"Польська мова"},
+]);
+export function matchesForeignLanguage(item,id){
+ if(!id)return true;const language=PUBLIC_FOREIGN_LANGUAGES.find(value=>value.id===id);
+ return Boolean(language&&(item.subject===language.label||item.rubric===language.label||String(item.rubric||"").startsWith(language.label+" (")));
+}
+export function isForeignLanguageRubric(rubric) {
+ return PUBLIC_FOREIGN_LANGUAGES.some(value => rubric === value.label || String(rubric || "").startsWith(value.label + " ("));
+}
+export function publicCatalogCursor(value){
+ const cursor=typeof value==="string"?value.trim():"";
+ if(cursor.length>8192||(cursor&&!/^[A-Za-z0-9_-]+$/.test(cursor)))throw new Error("Некоректний курсор каталогу");
+ return cursor;
+}
+// Reads are anonymous; bounded retries never submit credentials or partial datasets.
+export async function fetchPublicCatalogPage(apiUrl,cursor="",{fetcher=fetch,normalize=value=>value,timeoutMs=12000}={}){
+ const url=new URL(apiUrl);url.searchParams.set("limit", "48");url.searchParams.set("sort", "title");
+ if(cursor)url.searchParams.set("cursor",publicCatalogCursor(cursor));
+ for(let attempt=0;attempt<3;attempt++){
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);
+  let response,payload,bodyRead=false;
+  try{
+   response=await fetcher(url,{headers:{Accept:"application/json"},credentials:"omit",cache:"no-store",signal:controller.signal});
+   if(response.ok){
+    payload=await response.json();
+    bodyRead=true;
+   }
+  }catch(error){
+   if(response?.ok && !controller.signal.aborted && !(error instanceof TypeError))throw error;
+   if(attempt===2)throw new Error("catalog_network");
+   response=undefined;
+  }finally{clearTimeout(timer);}
+  if(bodyRead)return normalize(payload);
+  if(response && ![408,429].includes(response.status) && response.status<500)throw new Error("catalog_http_"+response.status);
+  if(attempt===2)throw new Error("catalog_http_"+(response?.status||0));
+  await new Promise(resolve=>setTimeout(resolve,200*(attempt+1)));
+ }
+ throw new Error("catalog_unavailable");
+}
+export async function collectPublicCatalogPages(loadPage){
+ const items=[],ids=new Set(),cursors=new Set();let cursor="";
+ for(let pageNumber=0;pageNumber<100;pageNumber++){
+  const page=await loadPage(cursor);
+  for(const item of page.items){if(ids.has(item.id))throw new Error("Каталог повернув повторний CAT-ID");ids.add(item.id);items.push(item);}
+  if(!page.hasMore)return items;
+  const next=publicCatalogCursor(page.nextCursor);
+  if(!page.items.length||!next||cursors.has(next))throw new Error("Каталог повернув повторний або порожній курсор");
+  cursors.add(next);cursor=next;
+ }
+ throw new Error("Каталог перевищив безпечну кількість сторінок");
+}
+
 if (typeof window !== "undefined" && typeof document !== "undefined") {
 
 const config = window.LIBRARY_CONFIG && typeof window.LIBRARY_CONFIG === "object" ? window.LIBRARY_CONFIG : {};
@@ -502,7 +556,7 @@ const telegramLaunchHash = telegramMiniAppLaunchHash(window.location.hash);
 if (telegramLaunchHash || window.Telegram?.WebApp?.initData) initializeTelegramMiniApp(window.Telegram?.WebApp);
 const balanceData = window.BALANCE_DATA && typeof window.BALANCE_DATA === "object" ? window.BALANCE_DATA : {};
 const collator = new Intl.Collator("uk", { sensitivity: "base", numeric: true });
-const state = { search: "", grade: "", rubric: "", subject: "", type: "", available: false, collection: "", sort: "recommended", limit: 18 };
+const state = { search: "", grade: "", rubric: "", foreignLanguage:"", languageRubric:"", subject: "", type: "", available: false, collection: "", sort: "recommended", limit: 18 };
 const visitState = { weekStart: "", view: "week", schedule: null, loading: false, requestVersion: 0 };
 const emptyStock = () => ({ total: 0, available: 0, library: 0, other: 0, loaned: 0, locations: [] });
 
@@ -526,6 +580,7 @@ const detailPromises = new Map();
 const elements = {
   grid: document.querySelector("#materialGrid"), count: document.querySelector("#resultsCount"), empty: document.querySelector("#emptyState"),
   loadMore: document.querySelector("#loadMore"), search: document.querySelector("#heroSearch"), grade: document.querySelector("#gradeFilter"),
+  foreignLanguage:document.querySelector("#languageFilter"),languageRubric:document.querySelector("#languageRubricFilter"),
   rubric: document.querySelector("#rubricFilter"), subject: document.querySelector("#subjectFilter"), type: document.querySelector("#typeFilter"),
   available: document.querySelector("#availableFilter"), sort: document.querySelector("#sortSelect"), chips: document.querySelector("#activeFilters"),
   dialog: document.querySelector("#materialDialog"), dialogContent: document.querySelector("#dialogContent"), toast: document.querySelector("#toast"),
@@ -753,9 +808,10 @@ function normalizeCatalogPage(payload) {
   }
   const items = payload.items.map(normalizeMaterial).filter(Boolean);
   if (items.length !== payload.items.length) throw new Error("Отримано пошкоджену сторінку каталогу");
-  const page = payload.page && typeof payload.page === "object" ? payload.page : {};
+  if(!payload.page || typeof payload.page!=="object" || typeof payload.page.hasMore!=="boolean")throw new Error("Некоректні дані сторінки каталогу");
+  const page = payload.page;
   const hasMore = page.hasMore === true;
-  const nextCursor = cleanText(page.nextCursor, 2000);
+  const nextCursor = publicCatalogCursor(page.nextCursor);
   if (hasMore && (!items.length || !nextCursor)) throw new Error("Каталог повернув некоректний курсор");
   return { items, hasMore, nextCursor };
 }
@@ -819,7 +875,8 @@ function refreshSelect(select, values, stateKey) {
 }
 
 function updateFiltersAndStats(stats) {
-  refreshSelect(elements.rubric, materials.map((item) => item.rubric), "rubric");
+  refreshSelect(elements.rubric, materials.map((item) => item.rubric).filter(value=>!isForeignLanguageRubric(value)), "rubric");
+  refreshLanguageRubrics();
   refreshSelect(elements.subject, materials.map((item) => item.subject), "subject");
   refreshSelect(elements.type, materials.map((item) => item.type), "type");
   elements.materialStat.textContent = stats.materials.toLocaleString("uk-UA");
@@ -845,6 +902,8 @@ function filteredMaterials() {
     if (!matchesMaterialSearch(item, query)) return false;
     if (grade && !(Number(item.classFrom) <= grade && Number(item.classTo || item.classFrom) >= grade)) return false;
     if (state.rubric && item.rubric !== state.rubric) return false;
+    if(!matchesForeignLanguage(item,state.foreignLanguage))return false;
+    if(state.languageRubric&&item.rubric!==state.languageRubric)return false;
     if (state.subject && item.subject !== state.subject) return false;
     if (state.type && item.type !== state.type) return false;
     if (state.available && Number(item.availableQuantity) <= 0) return false;
@@ -883,7 +942,7 @@ function cardMarkup(item) {
 
 function renderChips() {
   const activeCollection = collectionById(state.collection);
-  const chips = [["collection", activeCollection ? activeCollection.title : ""], ["search", state.search ? `Пошук: ${state.search}` : ""], ["grade", state.grade ? `${state.grade} клас` : ""], ["rubric", state.rubric], ["subject", state.subject], ["type", state.type], ["available", state.available ? "Лише в наявності" : ""]].filter(([, label]) => label);
+  const chips = [["collection", activeCollection ? activeCollection.title : ""], ["search", state.search ? `Пошук: ${state.search}` : ""], ["grade", state.grade ? `${state.grade} клас` : ""], ["rubric", state.rubric], ["foreignLanguage",PUBLIC_FOREIGN_LANGUAGES.find(x=>x.id===state.foreignLanguage)?.label||""],["languageRubric",state.languageRubric], ["subject", state.subject], ["type", state.type], ["available", state.available ? "Лише в наявності" : ""]].filter(([, label]) => label);
   elements.chips.innerHTML = chips.map(([key, label]) => `<span class="filter-chip">${escapeHtml(label)}<button type="button" data-remove="${key}" aria-label="Прибрати фільтр ${escapeHtml(label)}">${uiIcon("x")}</button></span>`).join("");
 }
 
@@ -901,14 +960,14 @@ function render({ refreshCollections = true } = {}) {
 
 function resetLimitAndRender(options) { state.limit = 18; render(options); }
 function clearFilters() {
-  Object.assign(state, { search: "", grade: "", rubric: "", subject: "", type: "", available: false, collection: "", limit: 18 });
-  elements.search.value = ""; elements.grade.value = ""; elements.rubric.value = ""; elements.subject.value = ""; elements.type.value = ""; elements.available.checked = false; render();
+  Object.assign(state, { search: "", grade: "", rubric: "", foreignLanguage:"", languageRubric:"", subject: "", type: "", available: false, collection: "", limit: 18 });
+  elements.search.value = ""; elements.grade.value = ""; elements.rubric.value = ""; elements.foreignLanguage.value="";elements.languageRubric.value="";refreshLanguageRubrics(); elements.subject.value = ""; elements.type.value = ""; elements.available.checked = false; render();
 }
 
 function activateCollection(id) {
   if (!collectionById(id)) return;
-  Object.assign(state, { search: "", grade: "", rubric: "", subject: "", type: "", available: false, collection: id, limit: 18 });
-  elements.search.value = ""; elements.grade.value = ""; elements.rubric.value = ""; elements.subject.value = ""; elements.type.value = ""; elements.available.checked = false;
+  Object.assign(state, { search: "", grade: "", rubric: "", foreignLanguage:"", languageRubric:"", subject: "", type: "", available: false, collection: id, limit: 18 });
+  elements.search.value = ""; elements.grade.value = ""; elements.rubric.value = ""; elements.foreignLanguage.value="";elements.languageRubric.value="";refreshLanguageRubrics(); elements.subject.value = ""; elements.type.value = ""; elements.available.checked = false;
   render();
   document.querySelector("#catalog").scrollIntoView({ behavior: "smooth" });
 }
@@ -1341,38 +1400,8 @@ function updatePrimaryNavigation() {
   });
 }
 
-async function fetchCatalogPage(apiUrl, cursor = "") {
-  const url = new URL(apiUrl);
-  url.searchParams.set("limit", "48");
-  url.searchParams.set("sort", "title");
-  if (cursor) url.searchParams.set("cursor", cursor);
-  const response = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return normalizeCatalogPage(await response.json());
-}
-
-async function requestLiveCatalog(apiUrl) {
-  const items = [];
-  const ids = new Set();
-  const cursors = new Set();
-  let cursor = "";
-  for (let pageNumber = 0; pageNumber < 100; pageNumber += 1) {
-    const page = await fetchCatalogPage(apiUrl, cursor);
-    page.items.forEach((item) => {
-      if (ids.has(item.id)) throw new Error("Каталог повернув повторний CAT-ID");
-      ids.add(item.id);
-      items.push(item);
-    });
-    if (!page.hasMore) {
-      if (!items.length) throw new Error("Каталог не містить матеріалів");
-      return items;
-    }
-    if (cursors.has(page.nextCursor)) throw new Error("Каталог повернув повторний курсор");
-    cursors.add(page.nextCursor);
-    cursor = page.nextCursor;
-  }
-  throw new Error("Каталог перевищив безпечну кількість сторінок");
-}
+async function fetchCatalogPage(apiUrl,cursor=""){return fetchPublicCatalogPage(apiUrl,cursor,{normalize:normalizeCatalogPage});}
+async function requestLiveCatalog(apiUrl){return collectPublicCatalogPages(cursor=>fetchCatalogPage(apiUrl,cursor));}
 
 function formattedUpdatedAt(value) {
   const date = new Date(value);
@@ -1395,7 +1424,7 @@ async function synchronizeCatalog() {
   }).catch(() => {
     setSyncStatus("error", hasLiveCatalog
       ? "Не вдалося оновити — показано останні отримані дані"
-      : "Захищена база тимчасово недоступна — показано локальну резервну копію", true);
+      : "Не вдалося оновити каталог — показано збережену копію", true);
   }).finally(() => { syncPromise = null; });
   return syncPromise;
 }
@@ -1463,6 +1492,20 @@ elements.search.addEventListener("keydown", (event) => {
   else if (event.key === "Enter" && activeSuggestionIndex >= 0) { event.preventDefault(); chooseTitleSuggestion(visibleSuggestions[activeSuggestionIndex].id); }
   else if (event.key === "Escape") closeTitleSuggestions();
 });
+
+function refreshLanguageRubrics(){
+ refreshSelect(elements.languageRubric,materials.filter(item=>matchesForeignLanguage(item,state.foreignLanguage)).map(item=>item.rubric).filter(isForeignLanguageRubric),"languageRubric");
+}
+elements.foreignLanguage.addEventListener("change",()=>{state.foreignLanguage=elements.foreignLanguage.value;state.languageRubric="";refreshLanguageRubrics();resetLimitAndRender();});
+elements.languageRubric.addEventListener("change",()=>{state.languageRubric=elements.languageRubric.value;resetLimitAndRender();});
+let activeFilterPanel="";
+function openFilterPanel(id){
+ activeFilterPanel=id;document.querySelectorAll("[data-filter-panel]").forEach(panel=>panel.hidden=panel.dataset.filterPanel!==id);
+ document.querySelectorAll("[data-filter-launch]").forEach(button=>button.setAttribute("aria-expanded",String(button.dataset.filterLaunch===id)));
+}
+document.querySelectorAll("[data-filter-launch]").forEach(button=>button.addEventListener("click",()=>{openFilterPanel(activeFilterPanel===button.dataset.filterLaunch?"":button.dataset.filterLaunch);if(activeFilterPanel)document.querySelector('[data-filter-panel="'+activeFilterPanel+'"] select')?.focus({preventScroll:true});}));
+elements.filters.addEventListener("keydown",event=>{if(event.key==="Escape"&&activeFilterPanel){const previous=activeFilterPanel;openFilterPanel("");document.querySelector('[data-filter-launch="'+previous+'"]')?.focus({preventScroll:true});}});
+
 elements.grade.addEventListener("change", () => { state.grade = elements.grade.value; resetLimitAndRender(); });
 elements.rubric.addEventListener("change", () => { state.rubric = elements.rubric.value; resetLimitAndRender(); });
 elements.subject.addEventListener("change", () => { state.subject = elements.subject.value; resetLimitAndRender(); });
@@ -1503,6 +1546,7 @@ document.addEventListener("click", (event) => {
   if (remove) {
     const key = remove.dataset.remove; state[key] = key === "available" ? false : "";
     if (key === "search") elements.search.value = ""; else if (elements[key]) elements[key].value = "";
+    if(key==="foreignLanguage"){state.languageRubric="";elements.languageRubric.value="";refreshLanguageRubrics();}
     if (key === "available") elements.available.checked = false; resetLimitAndRender();
   }
 });

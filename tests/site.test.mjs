@@ -301,10 +301,10 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(html, /<option value="">Усі<\/option>/);
   assert.match(html, /href="\/styles\.css\?v=20260826-2"/);
   assert.match(html, /href="\/brand\.css\?v=20260831-1"/);
-  assert.match(html, /href="\/system\.css\?v=20260827-1"/);
+  assert.match(html, /href="\/system\.css\?v=20260926-compact"/);
   assert.match(brand, /\.stats\s*\{[^}]*margin-top:\s*24px;/s);
   assert.match(html, /<head>[\s\S]*?src="https:\/\/telegram\.org\/js\/telegram-web-app\.js\?63"[\s\S]*?<\/head>/u);
-  assert.match(html, /type="module" src="\/app\.js\?v=20260827-1"/);
+  assert.match(html, /type="module" src="\/app\.js\?v=20260926-compact"/);
   assert.match(html, /id="filterBackdrop" hidden/u);
   assert.match(html, /id="filterClose"[^>]+aria-label="Закрити фільтри"/u);
   assert.match(html, /id="filterApply"[^>]*>Показати результати<\/button>/u);
@@ -326,7 +326,7 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.doesNotMatch(html, /[⌕☷✓←→↗○✦×＋]/u);
   assert.doesNotMatch(app, /[⌕☷✓←→↗○✦×＋]/u);
   assert.match(html, /class="hero-decoration"/u);
-  assert.match(html, /href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/librarian"/);
+  assert.match(html, /href="https:\/\/e-biblioteka\.nazarijshvetz1\.chatgpt\.site\/librarian"/);
   assert.match(html, /rel="noopener noreferrer"/);
   assert.doesNotMatch(app, /librarianButton|Режим бібліотекаря підключимо/);
   assert.match(app, /Останні додані до каталогу/);
@@ -396,7 +396,7 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(html, /class="hero-assurances"/u);
   assert.match(html, /class="suggestion-cta"/u);
   assert.match(html, /клас, своє ім’я, назву та автора книги/u);
-  assert.match(html, /href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/suggest-book"/u);
+  assert.match(html, /href="https:\/\/e-biblioteka\.nazarijshvetz1\.chatgpt\.site\/suggest-book"/u);
   assert.match(html, /aria-labelledby="material-dialog-title" aria-describedby="material-dialog-note"/u);
   assert.match(app, /id="material-dialog-title"/u);
   assert.match(app, /id="material-dialog-note"/u);
@@ -423,9 +423,9 @@ test("ships an accessible responsive public visit schedule and protected handoff
     readFile(new URL("../source/config.js", import.meta.url), "utf8"),
   ]);
   assert.match(html, /href="#visit-schedule"[^>]*>Графік<\/a>/);
-  assert.match(html, /href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/teacher"[\s\S]*>Кабінет учителя<\/a>/);
+  assert.match(html, /href="https:\/\/e-biblioteka\.nazarijshvetz1\.chatgpt\.site\/teacher"[\s\S]*>Кабінет учителя<\/a>/);
   assert.match(html, /class="teacher-nav-link"[\s\S]*data-primary-section="teacher"[\s\S]*>Кабінет учителя<\/a>/);
-  assert.match(html, /data-primary-section="textbooks"[\s\S]*href="https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/textbooks"[\s\S]*>Е-підручники<\/a>/u);
+  assert.match(html, /data-primary-section="textbooks"[\s\S]*href="https:\/\/e-biblioteka\.nazarijshvetz1\.chatgpt\.site\/textbooks"[\s\S]*>Е-підручники<\/a>/u);
   const primaryNavigation = html.match(/data-primary-section=/gu) ?? [];
   assert.equal(primaryNavigation.length, 6);
   for (const label of ["Каталог", "Е-книги", "Кабінет", "Графік", "Як це працює", "Контакти"]) {
@@ -457,8 +457,8 @@ test("ships an accessible responsive public visit schedule and protected handoff
   assert.match(app, /elements\.visitPrevWeek\.disabled = !navigation\.canPrevious/);
   assert.match(app, /data-visit-booking="true"/);
   assert.doesNotMatch(app, /localStorage.*visit|sessionStorage.*visit|fetch\([^\n]*method:\s*"POST"/);
-  assert.match(config, /visitsApiUrl:\s*"https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/api\/visits\/public"/);
-  assert.match(config, /visitsBookingUrl:\s*"https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/teacher"/);
+  assert.match(config, /visitsApiUrl:\s*"https:\/\/e-biblioteka\.nazarijshvetz1\.chatgpt\.site\/api\/visits\/public"/);
+  assert.match(config, /visitsBookingUrl:\s*"https:\/\/e-biblioteka\.nazarijshvetz1\.chatgpt\.site\/teacher"/);
   assert.match(css, /\.site-header \.site-nav a\[data-primary-section\]\{display:flex\}/);
   const brandCss = await readFile(new URL("../source/brand.css", import.meta.url), "utf8");
   assert.match(brandCss, /@media \(max-width: 390px\)[\s\S]*content: attr\(data-mobile-label\)[\s\S]*overflow-wrap: anywhere/u);
@@ -492,9 +492,9 @@ test("ships paginated public D1 sync with a GitHub Pages fallback", async () => 
   assert.equal(configResponse.status, 200);
   assert.match(
     await configResponse.text(),
-    /catalogApiUrl:\s*"https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site\/api\/catalog-v2"/,
+    /catalogApiUrl:\s*"https:\/\/e-biblioteka\.nazarijshvetz1\.chatgpt\.site\/api\/catalog-v2"/,
   );
-  assert.match(home.headers.get("content-security-policy"), /connect-src 'self' https:\/\/yedyna-biblioteka-liceiu\.nazarijshvetz1\.chatgpt\.site/);
+  assert.match(home.headers.get("content-security-policy"), /connect-src 'self' https:\/\/e-biblioteka\.nazarijshvetz1\.chatgpt\.site/);
   assert.match(home.headers.get("content-security-policy"), /script-src 'self' https:\/\/telegram\.org/);
   assert.doesNotMatch(home.headers.get("content-security-policy"), /script\.google\.com/);
 
@@ -547,4 +547,12 @@ test("creates a project-safe GitHub Pages build", async () => {
   assert.match(html, /href="\.\/library-logo\.png"/);
   assert.match(html, /https:\/\/nazarijshvetz1\.github\.io\/library-site\/og\.png/);
   assert.doesNotMatch(html, /\{\{SITE_ORIGIN\}\}/);
+});
+
+
+test("public catalog build includes the compact stylesheet and all five filter launchers",async()=>{
+ const response=await worker.fetch(new Request("https://example.test/system.css"));
+ assert.equal(response.status,200);assert.match(response.headers.get("content-type"),/text\/css/);
+ const html=await readFile(new URL("../source/index.html",import.meta.url),"utf8");
+ for(const name of ["grade","rubric","language","subject","type"])assert.ok(html.includes('data-filter-launch="'+name+'"'));
 });
