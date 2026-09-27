@@ -599,6 +599,7 @@ img[data-cover][hidden] { display: none !important; }
 .material-dialog .dialog-cover .cover-fallback { width: 132px; height: 194px; }
 .material-dialog .dialog-copy { min-width: 0; padding: 18px 18px 16px; }
 .material-dialog .dialog-copy h2 { padding-right: 26px; font-size: 24px; }
+.material-dialog #material-dialog-title:focus { outline: none; }
 .material-dialog .dialog-id { margin-bottom: 7px; padding-right: 24px; }
 .material-dialog .dialog-meta { margin: 8px 0 6px; font-size: 13px; }
 .material-dialog .dialog-secondary-meta { margin: 0 0 10px; font-size: 12px; }
