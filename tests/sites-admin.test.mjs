@@ -85,7 +85,7 @@ test("GitHub Pages artifact contains only the public catalog", async () => {
       .map((path) => read(path)),
   );
   const artifact = publicText.join("\n");
-  const librarianPortalUrl = "https://yedyna-biblioteka-liceiu.nazarijshvetz1.chatgpt.site/librarian";
+  const librarianPortalUrl = "https://e-biblioteka.nazarijshvetz1.chatgpt.site/librarian";
   assert.match(await read("dist-pages/index.html"), new RegExp(librarianPortalUrl.replaceAll(".", "\\.")));
   assert.doesNotMatch(artifact.replaceAll(librarianPortalUrl, ""), /\/api\/librarian|\/librarian\b/);
   assert.doesNotMatch(artifact, /LIBRARIAN_ALLOWED_EMAILS|oai-authenticated-user/i);
