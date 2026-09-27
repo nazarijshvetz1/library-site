@@ -301,10 +301,10 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(html, /<option value="">Усі рубрики<\/option>/);
   assert.match(html, /href="\/styles\.css\?v=20260826-2"/);
   assert.match(html, /href="\/brand\.css\?v=20260831-1"/);
-  assert.match(html, /href="\/system\.css\?v=20260927-green"/);
+  assert.match(html, /href="\/system\.css\?v=20260927-cards"/);
   assert.match(brand, /\.stats\s*\{[^}]*margin-top:\s*24px;/s);
   assert.match(html, /<head>[\s\S]*?src="https:\/\/telegram\.org\/js\/telegram-web-app\.js\?63"[\s\S]*?<\/head>/u);
-  assert.match(html, /type="module" src="\/app\.js\?v=20260927-green"/);
+  assert.match(html, /type="module" src="\/app\.js\?v=20260927-cards"/);
   assert.match(html, /<dialog class="filters" id="filters" aria-labelledby="filtersTitle"/u);
   assert.match(html, /id="filterClose"[^>]+aria-label="Закрити фільтри"/u);
   assert.match(html, /id="filterApply"[^>]*>Показати результати<\/button>/u);
@@ -487,7 +487,7 @@ test("ships paginated public D1 sync with a GitHub Pages fallback", async () => 
   const home = await worker.fetch(new Request("https://example.test/"));
   const html = await home.text();
   assert.match(html, /Показано локальну резервну копію каталогу/);
-  assert.match(html, /<script src="\/config\.js\?v=20260927-green"><\/script>/);
+  assert.match(html, /<script src="\/config\.js\?v=20260927-cards"><\/script>/);
 
   const configResponse = await worker.fetch(new Request("https://example.test/config.js"));
   assert.equal(configResponse.status, 200);
@@ -544,7 +544,7 @@ test("public Apps Script API is read-only and excludes private sheets", async ()
 
 test("creates a project-safe GitHub Pages build", async () => {
   const html = await readFile(new URL("../dist-pages/index.html", import.meta.url), "utf8");
-  assert.match(html, /src="\.\/config\.js\?v=20260927-green"/);
+  assert.match(html, /src="\.\/config\.js\?v=20260927-cards"/);
   assert.match(html, /href="\.\/library-logo\.png"/);
   assert.match(html, /https:\/\/nazarijshvetz1\.github\.io\/library-site\/og\.png/);
   assert.doesNotMatch(html, /\{\{SITE_ORIGIN\}\}/);
@@ -558,5 +558,5 @@ test("public catalog includes five green drawer filters and versioned configurat
  for(const name of ["grade","rubric","language","subject","type"])assert.ok(html.includes('id="'+name+'Filter"'));
  assert.match(html,/id="clearFilters"[\s\S]*?#icon-reset[\s\S]*?Скинути фільтри/);
  assert.match(html,/data-reset-filters/);
- for(const name of ["config.js","app.js","system.css"])assert.ok(html.includes(name+"?v=20260927-green"));
+ for(const name of ["config.js","app.js","system.css"])assert.ok(html.includes(name+"?v=20260927-cards"));
 });

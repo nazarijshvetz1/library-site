@@ -925,10 +925,15 @@ function coverMarkup(item, large = false) {
 }
 
 function bindCoverErrors(root) {
-  root.querySelectorAll("img[data-cover]").forEach((image) => image.addEventListener("error", () => {
-    image.hidden = true;
-    if (image.nextElementSibling) image.nextElementSibling.hidden = false;
-  }, { once: true }));
+  root.querySelectorAll("img[data-cover]").forEach((image) => {
+    const showFallback = () => {
+      image.hidden = true;
+      if (image.nextElementSibling) image.nextElementSibling.hidden = false;
+    };
+    image.addEventListener("error", showFallback, { once: true });
+    // Cached failures may finish before the listener is attached.
+    if (image.complete && image.naturalWidth === 0) showFallback();
+  });
 }
 
 function cardMarkup(item) {
@@ -1056,6 +1061,7 @@ function directMaterialUrl(id) {
 }
 
 function renderMaterialDialog(item, detailState = {}) {
+  const restoreTitleFocus = document.activeElement?.id === "material-dialog-title";
   const directUrl = directMaterialUrl(item.id);
   const orderDestination = materialOrderDestination(
     config.teacherPortalUrl || config.visitsBookingUrl,
@@ -1066,7 +1072,7 @@ function renderMaterialDialog(item, detailState = {}) {
   const canOrder = Boolean(orderDestination.url) && Number(item.availableQuantity) > 0;
   const secondaryMeta = [item.publisher, item.isbn ? `ISBN ${item.isbn}` : ""].filter(Boolean);
   elements.dialogContent.innerHTML = `<div class="dialog-layout"><div class="dialog-cover">${coverMarkup(item, true)}</div><div class="dialog-copy">
-    <p class="dialog-id">${escapeHtml(item.id)} · ${escapeHtml(item.rubric)}</p><h2 id="material-dialog-title">${escapeHtml(item.title)}</h2>
+    <p class="dialog-id">${escapeHtml(item.id)} · ${escapeHtml(item.rubric)}</p><h2 id="material-dialog-title" tabindex="-1">${escapeHtml(item.title)}</h2>
     <p class="dialog-meta">${escapeHtml(item.author)}${item.year ? ` · ${escapeHtml(item.year)} рік` : ""}</p>
     ${secondaryMeta.length ? `<p class="dialog-secondary-meta">${secondaryMeta.map(escapeHtml).join(" · ")}</p>` : ""}
     <div class="dialog-tags"><span>${escapeHtml(classLabel(item))}</span><span>${escapeHtml(item.subject)}</span><span>${escapeHtml(item.type)}</span></div>
@@ -1087,6 +1093,7 @@ function renderMaterialDialog(item, detailState = {}) {
     <p class="dialog-note" id="material-dialog-note">Перегляд каталогу відкритий для всіх. Замовлення та їхня історія доступні після входу до кабінету учителя.</p>
   </div></div>`;
   bindCoverErrors(elements.dialogContent);
+  if (restoreTitleFocus) elements.dialogContent.querySelector("#material-dialog-title")?.focus({ preventScroll: true });
   return directUrl;
 }
 
@@ -1123,7 +1130,10 @@ function showMaterial(id, { updateHistory = true } = {}) {
   if (updateHistory && materialIdFromUrl(window.location.href) !== item.id) {
     window.history.pushState({ ...(window.history.state || {}), libraryMaterial: item.id }, "", directUrl);
   }
-  if (!elements.dialog.open) elements.dialog.showModal();
+  if (!elements.dialog.open) {
+    elements.dialog.showModal();
+    elements.dialogContent.querySelector("#material-dialog-title")?.focus({ preventScroll: true });
+  }
   if (!cachedDetail && hasApi) {
     loadMaterialDetail(id).then((detail) => {
       if (currentMaterialId === id && elements.dialog.open) renderMaterialDialog(detail);

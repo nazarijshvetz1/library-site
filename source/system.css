@@ -575,3 +575,61 @@ body.filters-open{overflow:hidden}
 }
 @media(max-width:380px){.hero-search{grid-template-columns:minmax(0,1fr) auto}.hero-search>.ui-icon{display:none}.stats span{font-size:9px}}
 @media(prefers-reduced-motion:reduce){.catalog-section dialog.filters[open]{animation:none}}
+
+/* Covers have exactly one visible representation, including failed images. */
+.cover-fallback[hidden],
+.suggestion-cover-fallback[hidden],
+img[data-cover][hidden] { display: none !important; }
+
+/* Compact material details; the close control keeps a 44px touch target. */
+.material-dialog .dialog-close {
+  top: 8px; right: 8px; width: 44px; height: 44px;
+  border: 0; border-radius: 8px; background: transparent; box-shadow: none;
+  outline: none;
+}
+.material-dialog .dialog-close:focus-visible {
+  box-shadow: inset 0 -2px 0 #245741;
+}
+@media(forced-colors:active) {
+  .material-dialog .dialog-close:focus-visible { outline: 2px solid ButtonText; outline-offset: 2px; }
+}
+.material-dialog .dialog-layout { grid-template-columns: 190px minmax(0,1fr); }
+.material-dialog .dialog-cover { min-height: 0; padding: 22px 16px; align-content: start; }
+.material-dialog .dialog-cover img,
+.material-dialog .dialog-cover .cover-fallback { width: 132px; height: 194px; }
+.material-dialog .dialog-copy { min-width: 0; padding: 18px 18px 16px; }
+.material-dialog .dialog-copy h2 { padding-right: 26px; font-size: 24px; }
+.material-dialog .dialog-id { margin-bottom: 7px; padding-right: 24px; }
+.material-dialog .dialog-meta { margin: 8px 0 6px; font-size: 13px; }
+.material-dialog .dialog-secondary-meta { margin: 0 0 10px; font-size: 12px; }
+.material-dialog .dialog-tags { gap: 5px; margin-bottom: 10px; }
+.material-dialog .dialog-tags span { min-height: 26px; padding: 4px 8px; }
+.material-dialog .stock-box,
+.material-dialog .material-links,
+.material-dialog .dialog-order { padding: 10px; border-radius: 12px; }
+.material-dialog .stock-summary { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px 12px; }
+.material-dialog .stock-total { gap: 5px; min-height: 30px; }
+.material-dialog .stock-total:nth-child(odd):last-child { grid-column: 1/-1; }
+.material-dialog .stock-total span { font-size: 11px; line-height: 1.3; }
+.material-dialog .stock-total strong { font-size: 25px; line-height: 1.15; }
+.material-dialog .location-list { margin: 8px 0 0; padding: 0; }
+.material-dialog .stock-location { margin-top: 5px; padding-top: 5px; min-height: 28px; }
+.material-dialog .stock-empty { margin-top: 8px; padding-top: 8px; }
+.material-dialog .material-links,
+.material-dialog .dialog-order,
+.material-dialog .dialog-actions { margin-top: 10px; }
+.material-dialog .order-material-button,
+.material-dialog .order-material-unavailable { min-height: 44px; padding: 10px; }
+.material-dialog .dialog-order p { margin: 7px 0 0; font-size: 12px; line-height: 1.4; }
+.material-dialog .dialog-actions { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; }
+.material-dialog .report-error-button { grid-column: 1/-1; }
+.material-dialog .dialog-note { margin-top: 10px; }
+@media(max-width:560px) {
+  .material-dialog .dialog-layout { grid-template-columns: minmax(0,1fr); }
+  .material-dialog .dialog-cover { padding: 14px 54px; justify-items: center; }
+  .material-dialog .dialog-cover img,
+  .material-dialog .dialog-cover .cover-fallback { width: 96px; height: 140px; }
+  .material-dialog .dialog-copy { padding: 13px 14px max(14px,env(safe-area-inset-bottom)); }
+  .material-dialog .dialog-copy h2 { padding-right: 0; font-size: 23px; }
+  .material-dialog .dialog-id { padding-right: 0; font-size: 10px; }
+}
