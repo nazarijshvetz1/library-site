@@ -585,7 +585,7 @@ const elements = {
   available: document.querySelector("#availableFilter"), sort: document.querySelector("#sortSelect"), chips: document.querySelector("#activeFilters"),
   dialog: document.querySelector("#materialDialog"), dialogContent: document.querySelector("#dialogContent"), toast: document.querySelector("#toast"),
   filters: document.querySelector("#filters"), filterToggle: document.querySelector("#filterToggle"),
-  filterClose: document.querySelector("#filterClose"), filterBackdrop: document.querySelector("#filterBackdrop"),
+  filterClose: document.querySelector("#filterClose"),
   filterApply: document.querySelector("#filterApply"),
   materialStat: document.querySelector("#materialStat"), copiesStat: document.querySelector("#copiesStat"),
   locationsStat: document.querySelector("#locationsStat"), rubricsStat: document.querySelector("#rubricsStat"),
@@ -1498,13 +1498,6 @@ function refreshLanguageRubrics(){
 }
 elements.foreignLanguage.addEventListener("change",()=>{state.foreignLanguage=elements.foreignLanguage.value;state.languageRubric="";refreshLanguageRubrics();resetLimitAndRender();});
 elements.languageRubric.addEventListener("change",()=>{state.languageRubric=elements.languageRubric.value;resetLimitAndRender();});
-let activeFilterPanel="";
-function openFilterPanel(id){
- activeFilterPanel=id;document.querySelectorAll("[data-filter-panel]").forEach(panel=>panel.hidden=panel.dataset.filterPanel!==id);
- document.querySelectorAll("[data-filter-launch]").forEach(button=>button.setAttribute("aria-expanded",String(button.dataset.filterLaunch===id)));
-}
-document.querySelectorAll("[data-filter-launch]").forEach(button=>button.addEventListener("click",()=>{openFilterPanel(activeFilterPanel===button.dataset.filterLaunch?"":button.dataset.filterLaunch);if(activeFilterPanel)document.querySelector('[data-filter-panel="'+activeFilterPanel+'"] select')?.focus({preventScroll:true});}));
-elements.filters.addEventListener("keydown",event=>{if(event.key==="Escape"&&activeFilterPanel){const previous=activeFilterPanel;openFilterPanel("");document.querySelector('[data-filter-launch="'+previous+'"]')?.focus({preventScroll:true});}});
 
 elements.grade.addEventListener("change", () => { state.grade = elements.grade.value; resetLimitAndRender(); });
 elements.rubric.addEventListener("change", () => { state.rubric = elements.rubric.value; resetLimitAndRender(); });
@@ -1515,6 +1508,7 @@ elements.sort.addEventListener("change", () => { state.sort = elements.sort.valu
 elements.loadMore.addEventListener("click", () => { state.limit += 18; render(); });
 elements.syncRetry.addEventListener("click", synchronizeCatalog);
 document.querySelector("#clearFilters").addEventListener("click", clearFilters); document.querySelector("[data-clear]").addEventListener("click", clearFilters);
+document.querySelector("[data-reset-filters]").addEventListener("click", clearFilters);
 
 document.addEventListener("click", (event) => {
   const suggestion = event.target.closest("[data-title-suggestion]"); if (suggestion) chooseTitleSuggestion(suggestion.dataset.titleSuggestion);
@@ -1559,36 +1553,42 @@ window.addEventListener("popstate", () => {
   if (linkedId) openLinkedMaterial();
   else closeMaterial({ fromHistory: true });
 });
-const mobileFilterDrawer = window.matchMedia("(max-width: 820px)");
 function setFilterDrawerOpen(open, { restoreFocus = false } = {}) {
-  const shouldOpen = Boolean(open) && mobileFilterDrawer.matches;
+  const shouldOpen = Boolean(open);
+  if (shouldOpen && !elements.filters.open) elements.filters.showModal();
+  if (!shouldOpen && elements.filters.open) elements.filters.close();
   elements.filters.classList.toggle("open", shouldOpen);
   elements.filterToggle.setAttribute("aria-expanded", String(shouldOpen));
-  elements.filterBackdrop.hidden = !shouldOpen;
+  document.body.classList.toggle("filters-open", shouldOpen);
   if (shouldOpen) {
-    elements.filters.setAttribute("role", "dialog");
-    elements.filters.setAttribute("aria-modal", "true");
     elements.filterClose.focus({ preventScroll: true });
-  } else {
-    elements.filters.removeAttribute("role");
-    elements.filters.removeAttribute("aria-modal");
-    if (restoreFocus && mobileFilterDrawer.matches) elements.filterToggle.focus({ preventScroll: true });
-  }
+  } else if (restoreFocus) elements.filterToggle.focus({ preventScroll: true });
 }
 elements.filterToggle.addEventListener("click", () => setFilterDrawerOpen(!elements.filters.classList.contains("open")));
 elements.filterClose.addEventListener("click", () => setFilterDrawerOpen(false, { restoreFocus: true }));
-elements.filterBackdrop.addEventListener("click", () => setFilterDrawerOpen(false, { restoreFocus: true }));
+elements.filters.addEventListener("click", event => {
+  if (event.target !== elements.filters) return;
+  const bounds = elements.filters.getBoundingClientRect();
+  if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)
+    setFilterDrawerOpen(false, { restoreFocus: true });
+});
+elements.filters.addEventListener("cancel", event => {
+  event.preventDefault();
+  setFilterDrawerOpen(false, { restoreFocus: true });
+});
+elements.filters.addEventListener("close", () => {
+  elements.filters.classList.remove("open");
+  elements.filterToggle.setAttribute("aria-expanded", "false");
+  document.body.classList.remove("filters-open");
+});
 elements.filterApply?.addEventListener("click", () => {
-  setFilterDrawerOpen(false);
+  setFilterDrawerOpen(false, { restoreFocus: true });
   document.querySelector(".results-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
 });
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape" || !elements.filters.classList.contains("open")) return;
   event.preventDefault();
   setFilterDrawerOpen(false, { restoreFocus: true });
-});
-mobileFilterDrawer.addEventListener("change", (event) => {
-  if (!event.matches) setFilterDrawerOpen(false);
 });
 elements.visitRetry.addEventListener("click", synchronizeVisitSchedule);
 elements.visitPrevWeek.addEventListener("click", () => selectVisitWeek(-1));

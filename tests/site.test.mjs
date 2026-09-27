@@ -298,21 +298,22 @@ test("wires teacher collections, sharing, error reporting, and mobile dialog saf
   assert.match(app, /textContent = value/u);
   assert.doesNotMatch(app, /contactsGrid\.innerHTML/u);
   assert.match(html, /id="titleSuggestions" role="listbox"/);
-  assert.match(html, /<option value="">Усі<\/option>/);
+  assert.match(html, /<option value="">Усі рубрики<\/option>/);
   assert.match(html, /href="\/styles\.css\?v=20260826-2"/);
   assert.match(html, /href="\/brand\.css\?v=20260831-1"/);
-  assert.match(html, /href="\/system\.css\?v=20260926-compact"/);
+  assert.match(html, /href="\/system\.css\?v=20260927-green"/);
   assert.match(brand, /\.stats\s*\{[^}]*margin-top:\s*24px;/s);
   assert.match(html, /<head>[\s\S]*?src="https:\/\/telegram\.org\/js\/telegram-web-app\.js\?63"[\s\S]*?<\/head>/u);
-  assert.match(html, /type="module" src="\/app\.js\?v=20260926-compact"/);
-  assert.match(html, /id="filterBackdrop" hidden/u);
+  assert.match(html, /type="module" src="\/app\.js\?v=20260927-green"/);
+  assert.match(html, /<dialog class="filters" id="filters" aria-labelledby="filtersTitle"/u);
   assert.match(html, /id="filterClose"[^>]+aria-label="Закрити фільтри"/u);
   assert.match(html, /id="filterApply"[^>]*>Показати результати<\/button>/u);
   assert.match(app, /function setFilterDrawerOpen\(open/u);
   assert.match(app, /const fallbackTitle = cleanText\(item\.title \|\| item\.subject/u);
   assert.match(app, /cover-fallback-long/u);
   assert.match(app, /event\.key !== "Escape"/u);
-  assert.match(app, /elements\.filterBackdrop\.addEventListener\("click"/u);
+  assert.match(app, /elements\.filters\.showModal\(\)/u);
+  assert.match(app, /elements\.filters\.addEventListener\("cancel"/u);
   assert.match(app, /elements\.filterToggle\.setAttribute\("aria-expanded", String\(shouldOpen\)\)/u);
   assert.match(css, /\.filter-toggle\{display:none;/u);
   assert.match(css, /@media\(max-width:820px\)\{[^}]*?(?:\{[^}]*\}[^}]*)*?\.filter-toggle\{display:inline-flex\}/u);
@@ -486,7 +487,7 @@ test("ships paginated public D1 sync with a GitHub Pages fallback", async () => 
   const home = await worker.fetch(new Request("https://example.test/"));
   const html = await home.text();
   assert.match(html, /Показано локальну резервну копію каталогу/);
-  assert.match(html, /<script src="\/config\.js"><\/script>/);
+  assert.match(html, /<script src="\/config\.js\?v=20260927-green"><\/script>/);
 
   const configResponse = await worker.fetch(new Request("https://example.test/config.js"));
   assert.equal(configResponse.status, 200);
@@ -543,16 +544,19 @@ test("public Apps Script API is read-only and excludes private sheets", async ()
 
 test("creates a project-safe GitHub Pages build", async () => {
   const html = await readFile(new URL("../dist-pages/index.html", import.meta.url), "utf8");
-  assert.match(html, /src="\.\/config\.js"/);
+  assert.match(html, /src="\.\/config\.js\?v=20260927-green"/);
   assert.match(html, /href="\.\/library-logo\.png"/);
   assert.match(html, /https:\/\/nazarijshvetz1\.github\.io\/library-site\/og\.png/);
   assert.doesNotMatch(html, /\{\{SITE_ORIGIN\}\}/);
 });
 
 
-test("public catalog build includes the compact stylesheet and all five filter launchers",async()=>{
+test("public catalog includes five green drawer filters and versioned configuration",async()=>{
  const response=await worker.fetch(new Request("https://example.test/system.css"));
  assert.equal(response.status,200);assert.match(response.headers.get("content-type"),/text\/css/);
  const html=await readFile(new URL("../source/index.html",import.meta.url),"utf8");
- for(const name of ["grade","rubric","language","subject","type"])assert.ok(html.includes('data-filter-launch="'+name+'"'));
+ for(const name of ["grade","rubric","language","subject","type"])assert.ok(html.includes('id="'+name+'Filter"'));
+ assert.match(html,/id="clearFilters"[\s\S]*?#icon-reset[\s\S]*?Скинути фільтри/);
+ assert.match(html,/data-reset-filters/);
+ for(const name of ["config.js","app.js","system.css"])assert.ok(html.includes(name+"?v=20260927-green"));
 });
